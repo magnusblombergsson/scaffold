@@ -40,11 +40,11 @@ The Author-visible, Author-editable body of knowledge about a story: characters,
 _Avoid_: Memory, knowledge base, lore, wiki
 
 **Entry**:
-One typed item in the Story Bible (e.g. Character, Place, World Rule, Theme, Plot Thread): free text plus a few optional type-specific fields.
+One typed item in the Story Bible — a Character, Place, Item, World Rule, Plot Thread, Theme, or Other — with a name, aliases, a free-text description, private notes the Assistant never sees, and a few optional type-specific fields.
 _Avoid_: Card, note, record
 
 **Voice**:
-A character's way of speaking, described in its Entry as traits (register, rhythm, vocabulary, tics) plus short examples written by the Author. The Assistant compares dialogue in the Prose against it and may propose trait descriptions, but never example lines.
+A character's way of speaking, described in its Entry as traits (register, rhythm, tics), words the character uses and never uses, and short example lines written by the Author. The Assistant compares dialogue in the Prose against it and may propose trait descriptions, but never example lines.
 _Avoid_: Tone, style (when meaning a character's speech)
 
 **Proposal**:
