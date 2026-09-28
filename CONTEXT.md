@@ -1,0 +1,69 @@
+# Writing Tools
+
+A writing environment for creative fiction: an editor with an AI Assistant alongside that advises the Author but never writes their Prose.
+
+## Language
+
+### People and roles
+
+**Author**:
+The person writing the story; the only one who writes Prose.
+_Avoid_: User, writer (when meaning the person using the tool)
+
+**Assistant**:
+The AI advisor beside the editor. It asks, comments, and suggests structure, but never produces Prose.
+_Avoid_: AI, bot, co-writer, ghostwriter
+
+### The story
+
+**Project**:
+One story (a novel or short story) with its own Manuscript and Story Bible.
+_Avoid_: Book, workspace, document
+
+**Manuscript**:
+A Project's Prose, organised as Chapters containing Scenes.
+_Avoid_: Draft, document
+
+**Chapter**:
+An ordered group of Scenes within the Manuscript.
+
+**Scene**:
+The smallest movable unit of the Manuscript; the level at which the Assistant compares Prose against its Outline.
+_Avoid_: Section, passage
+
+**Prose**:
+The story text itself — narration and dialogue — as written by the Author. The Assistant never writes, rewrites, or exemplifies Prose; it may comment on it.
+_Avoid_: Text, draft (when meaning the words themselves)
+
+**Story Bible**:
+The Author-visible, Author-editable body of knowledge about a story: characters, places, world rules, themes, plot structure. The Assistant draws on it; it is not the Assistant's conversation history.
+_Avoid_: Memory, knowledge base, lore, wiki
+
+**Entry**:
+One typed item in the Story Bible (e.g. Character, Place, World Rule, Theme, Plot Thread): free text plus a few optional type-specific fields.
+_Avoid_: Card, note, record
+
+**Proposal**:
+A change to the Story Bible suggested by the Assistant during a conversation; it takes effect only when the Author accepts it, optionally after editing it.
+_Avoid_: Suggestion (when meaning a Story Bible change), auto-save
+
+**Outline**:
+Structural description of chapters and scenes in bullet form (what happens, who, why). Not Prose; the Assistant may propose it.
+_Avoid_: Beat sheet, synopsis
+
+### Modes
+
+**Mode**:
+One of the tool's working states, each giving the Assistant a different role: Brainstorm, Interview, or Writing.
+_Avoid_: State, phase
+
+**Brainstorm**:
+Mode for free idea generation with the Assistant.
+
+**Interview**:
+Mode where the Assistant asks the Author questions to capture facts about the story's world, characters, and plot into the Story Bible.
+_Avoid_: Q&A, questionnaire
+
+**Writing**:
+Mode where the Author writes Prose in the editor and the Assistant advises on scenes and chapters — including revision of what is already written — pointing out what is missing or excessive.
+_Avoid_: Drafting mode, editor mode
