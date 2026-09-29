@@ -83,3 +83,11 @@ _Avoid_: Q&A, questionnaire
 **Writing**:
 Mode where the Author writes Prose in the editor and the Assistant advises on scenes and chapters — including revision of what is already written — pointing out what is missing or excessive.
 _Avoid_: Drafting mode, editor mode
+
+**Review**:
+An examination of one Scene or one Chapter that the Author asks for in Writing mode, answered as a short, ordered list of Findings. A Chapter Review looks only at what spans its Scenes and at the Chapter's Outline.
+_Avoid_: Analysis, critique, feedback
+
+**Finding**:
+One point in a Review: a contradiction with the Story Bible or Outline, something missing against the Outline, something excessive, a line out of a character's Voice, or an Outline point not yet covered. It points at the Author's own Prose and usually ends in a question; it never proposes replacement Prose.
+_Avoid_: Issue, error, suggestion
