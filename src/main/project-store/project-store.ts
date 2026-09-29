@@ -25,7 +25,7 @@ type Manifest = {
 
 export class ProjectError extends Error {
   constructor(
-    readonly reason: 'not-a-project' | 'already-a-project',
+    readonly reason: 'not-a-project' | 'unreadable' | 'already-a-project',
     message: string,
   ) {
     super(message);
@@ -89,7 +89,15 @@ export async function openProject(
       `${projectPath} is not a Project: it has no ${MANIFEST}`,
     );
   }
-  const manifest = JSON.parse(await deps.fs.readFile(manifestPath)) as Manifest;
+  let manifest: Manifest;
+  try {
+    manifest = JSON.parse(await deps.fs.readFile(manifestPath)) as Manifest;
+  } catch (error) {
+    throw new ProjectError(
+      'unreadable',
+      `${projectPath} can't be opened: its ${MANIFEST} is unreadable (${(error as Error).message})`,
+    );
+  }
   return new ProjectStore(projectPath, manifest, deps);
 }
 

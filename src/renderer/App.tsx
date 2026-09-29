@@ -47,7 +47,7 @@ export function App() {
   const chapter = project.tree.chapters[0];
   const scene = chapter.scenes[0];
   return (
-    <div className="workspace">
+    <div className="project-view">
       <header>
         <span className="project-name">{project.displayName}</span>
         <span className="scene-title">

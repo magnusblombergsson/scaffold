@@ -5,12 +5,7 @@ import {
   type IpcMainInvokeEvent,
   type WebContents,
 } from 'electron';
-import {
-  channel,
-  PROJECT_METHODS,
-  type OpenResult,
-  type ProjectApi,
-} from '../shared/api';
+import { channel, type OpenResult, type ProjectApi } from '../shared/api';
 import { systemClock } from './project-store/clock';
 import { nodeFileSystem } from './project-store/file-system';
 import {
@@ -41,7 +36,7 @@ const projectHandlers: Handlers = {
 };
 
 export function registerIpc(): void {
-  for (const method of PROJECT_METHODS) {
+  for (const method of Object.keys(projectHandlers) as (keyof ProjectApi)[]) {
     ipcMain.handle(
       channel.project(method),
       (event: IpcMainInvokeEvent, ...args: unknown[]) => {

@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -158,6 +158,13 @@ describe('ProjectStore', () => {
   it('refuses to open a folder without project.json', async () => {
     await expect(openProject(dir, deps())).rejects.toMatchObject({
       reason: 'not-a-project',
+    });
+  });
+
+  it('refuses to open a Project whose project.json is unreadable', async () => {
+    await writeFile(path.join(dir, 'project.json'), '{ "format": 1, ');
+    await expect(openProject(dir, deps())).rejects.toMatchObject({
+      reason: 'unreadable',
     });
   });
 

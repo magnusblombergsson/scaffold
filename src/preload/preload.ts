@@ -1,18 +1,14 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import {
-  channel,
-  PROJECT_METHODS,
-  type ProjectApi,
-  type ShellApi,
-} from '../shared/api';
+import { channel, type ProjectApi, type ShellApi } from '../shared/api';
 
-const project = Object.fromEntries(
-  PROJECT_METHODS.map((method) => [
-    method,
-    (...args: unknown[]) =>
-      ipcRenderer.invoke(channel.project(method), ...args),
-  ]),
-) as unknown as ProjectApi;
+const project: ProjectApi = {
+  tree: () => ipcRenderer.invoke(channel.project('tree')),
+  read: (ref) => ipcRenderer.invoke(channel.project('read'), ref),
+  write: (ref, value) =>
+    ipcRenderer.invoke(channel.project('write'), ref, value),
+  flush: () => ipcRenderer.invoke(channel.project('flush')),
+  hasUnsaved: () => ipcRenderer.invoke(channel.project('hasUnsaved')),
+};
 
 const flushListeners = new Set<() => void>();
 

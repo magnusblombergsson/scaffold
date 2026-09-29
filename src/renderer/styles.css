@@ -45,13 +45,13 @@ body {
   gap: 0.5rem;
 }
 
-.workspace {
+.project-view {
   display: flex;
   flex-direction: column;
   height: 100%;
 }
 
-.workspace header {
+.project-view header {
   display: flex;
   align-items: center;
   gap: 1rem;

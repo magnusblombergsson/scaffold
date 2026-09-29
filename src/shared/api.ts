@@ -34,14 +34,6 @@ export interface ShellApi {
   onFlushRequest(listener: () => void): () => void;
 }
 
-export const PROJECT_METHODS = [
-  'tree',
-  'read',
-  'write',
-  'flush',
-  'hasUnsaved',
-] as const satisfies readonly (keyof ProjectApi)[];
-
 export const channel = {
   project: (method: keyof ProjectApi) => `project:${method}`,
   createProject: 'shell:createProject',
