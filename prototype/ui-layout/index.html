@@ -1,0 +1,700 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>PROTOTYPE – UI layout</title>
+<!--
+  PROTOTYPE, throwaway. Wayfinder ticket "UI layout: editor, Assistant panel, Story Bible, Modes, Proposals" (#8).
+  Question: what should the main window look like, how does the Author move between editor, Assistant panel,
+  Story Bible and the three Modes, and how does an inline Proposal look and get accepted / edited / rejected?
+  Three structurally different variants on one page, switchable via ?variant=A|B|C (bottom bar or ← →).
+  All state in memory; reload resets. No model is called.
+-->
+<style>
+  :root {
+    --bg: #f6f4ef; --panel: #fffdf8; --line: #e2ddd2; --ink: #26231e; --mute: #7a7367; --soft: #efebe2;
+    --acc: #3d5a80; --acc-soft: #e3eaf3; --ok: #2f7d4f; --ok-soft: #e1f1e6; --bad: #a33b3b; --bad-soft: #f6e2e0;
+    --warn: #9a6b00; --warn-soft: #fbf0d2;
+    --prose: Georgia, "Iowan Old Style", "Times New Roman", serif;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; }
+  body { background: var(--bg); color: var(--ink); font: 13.5px/1.45 system-ui, "Segoe UI", sans-serif; }
+  button { font: inherit; cursor: pointer; }
+  textarea, input { font: inherit; }
+  #app { height: 100vh; }
+  .mute { color: var(--mute); }
+  .small { font-size: 12px; }
+  .tiny { font-size: 11px; }
+  .row { display: flex; align-items: center; gap: 8px; }
+  .grow { flex: 1; }
+  .scroll { overflow: auto; }
+  .btn { border: 1px solid var(--line); background: var(--panel); border-radius: 6px; padding: 3px 9px; }
+  .btn:hover { background: var(--soft); }
+  .btn.primary { background: var(--acc); color: #fff; border-color: var(--acc); }
+  .btn.ok { background: var(--ok); color: #fff; border-color: var(--ok); }
+  .btn.ghost { border-color: transparent; background: transparent; }
+  .chip { display: inline-block; border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; font-size: 11.5px; background: var(--panel); }
+  .chip.acc { background: var(--acc-soft); border-color: #c5d3e6; color: var(--acc); }
+  .chip.warn { background: var(--warn-soft); border-color: #ecd9a1; color: var(--warn); }
+  .seg { display: inline-flex; border: 1px solid var(--line); border-radius: 7px; overflow: hidden; }
+  .seg button { border: 0; background: var(--panel); padding: 4px 10px; border-right: 1px solid var(--line); }
+  .seg button:last-child { border-right: 0; }
+  .seg button.on { background: var(--acc); color: #fff; }
+  h1, h2, h3, h4 { margin: 0; font-weight: 600; }
+
+  /* binder / lists */
+  .list-h { font-size: 11px; text-transform: uppercase; letter-spacing: .06em; color: var(--mute); margin: 12px 10px 4px; }
+  .item { display: block; width: 100%; text-align: left; border: 0; background: transparent; padding: 4px 10px; border-radius: 5px; }
+  .item:hover { background: var(--soft); }
+  .item.on { background: var(--acc-soft); color: var(--acc); font-weight: 600; }
+  .item.sub { padding-left: 24px; }
+  .tabs { display: flex; border-bottom: 1px solid var(--line); }
+  .tabs button { flex: 1; border: 0; background: transparent; padding: 8px; border-bottom: 2px solid transparent; }
+  .tabs button.on { border-bottom-color: var(--acc); font-weight: 600; }
+
+  /* editor */
+  .scene { max-width: 680px; margin: 0 auto; padding: 28px 32px 120px; }
+  .crumb { color: var(--mute); font-size: 12px; }
+  .scene h2 { font-family: var(--prose); font-size: 24px; margin: 4px 0 14px; }
+  .plan { border: 1px solid var(--line); background: var(--panel); border-radius: 8px; padding: 8px 12px; margin-bottom: 18px; font-size: 12.5px; }
+  .plan summary { cursor: pointer; color: var(--mute); }
+  .plan ul { margin: 6px 0; padding-left: 18px; }
+  .prose { font-family: var(--prose); font-size: 17px; line-height: 1.7; outline: none; min-height: 200px; }
+  .prose p { margin: 0 0 .9em; }
+  .prose:empty::before { content: "Start writing…"; color: #b5ad9f; }
+  .toolbar { display: flex; gap: 4px; margin-bottom: 10px; }
+  .toolbar button { border: 1px solid var(--line); background: var(--panel); border-radius: 4px; width: 28px; height: 24px; }
+
+  /* entry */
+  .entry { max-width: 640px; margin: 0 auto; padding: 24px 28px 120px; }
+  .entry h2 { font-size: 22px; margin: 4px 0 6px; }
+  .field { border-top: 1px solid var(--line); padding: 10px 0; }
+  .field .lbl { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; color: var(--mute); display: flex; gap: 6px; align-items: center; }
+  .field .val { white-space: pre-wrap; margin-top: 3px; }
+  .field .val.empty { color: #b5ad9f; font-style: italic; }
+  .ghost { margin-top: 6px; border: 1px dashed #c5d3e6; background: var(--acc-soft); border-radius: 6px; padding: 5px 8px; font-size: 12.5px; }
+  .ghost.stale { border-color: #ecd9a1; background: var(--warn-soft); }
+  .lock { color: var(--bad); font-size: 11px; }
+
+  /* conversation */
+  .conv { display: flex; flex-direction: column; min-height: 0; height: 100%; }
+  .msgs { flex: 1; overflow: auto; padding: 12px; display: flex; flex-direction: column; gap: 10px; }
+  .msg { max-width: 100%; }
+  .msg.author { align-self: flex-end; max-width: 88%; }
+  .msg.author .bub { background: var(--acc-soft); border-radius: 12px 12px 3px 12px; padding: 7px 11px; }
+  .msg .meta { font-size: 11px; color: var(--mute); margin-top: 2px; text-align: right; }
+  .msg.assistant .bub { background: var(--panel); border: 1px solid var(--line); border-radius: 12px 12px 12px 3px; padding: 8px 11px; }
+  .msg.assistant .who { font-size: 11px; color: var(--mute); margin-bottom: 3px; }
+  .bub p { margin: 0 0 6px; } .bub p:last-child { margin-bottom: 0; }
+  .event { align-self: center; font-size: 11.5px; color: var(--mute); border: 1px dashed var(--line); border-radius: 999px; padding: 2px 10px; }
+  .saw { margin-top: 6px; font-size: 11.5px; color: var(--mute); }
+  .saw button { border: 0; background: none; color: var(--mute); padding: 0; text-decoration: underline dotted; }
+  .composer { border-top: 1px solid var(--line); padding: 8px 10px; background: var(--panel); }
+  .composer textarea { width: 100%; border: 1px solid var(--line); border-radius: 8px; padding: 7px 9px; resize: none; background: #fff; }
+  .composer .row { margin-top: 6px; flex-wrap: wrap; }
+
+  /* findings */
+  .findings { margin: 6px 0; padding: 0; list-style: none; display: flex; flex-direction: column; gap: 6px; }
+  .finding { border-left: 3px solid var(--line); padding: 3px 0 3px 9px; }
+  .finding .ft { font-size: 10.5px; text-transform: uppercase; letter-spacing: .05em; font-weight: 700; }
+  .finding blockquote { margin: 3px 0; font-family: var(--prose); font-style: italic; color: #4c463d; background: var(--soft); padding: 3px 7px; border-radius: 4px; cursor: pointer; }
+  .f-contradiction { border-color: var(--bad); } .f-contradiction .ft { color: var(--bad); }
+  .f-missing { border-color: var(--acc); } .f-missing .ft { color: var(--acc); }
+  .f-toomuch { border-color: var(--warn); } .f-toomuch .ft { color: var(--warn); }
+  .f-voice { border-color: #7a4f9e; } .f-voice .ft { color: #7a4f9e; }
+  .f-notyet { border-color: var(--mute); } .f-notyet .ft { color: var(--mute); }
+
+  /* proposals */
+  .props { display: flex; flex-direction: column; gap: 6px; margin: 8px 0; }
+  .prop { border: 1px solid #c5d3e6; border-radius: 8px; background: #fbfcfe; overflow: hidden; }
+  .prop .ph { display: flex; align-items: center; gap: 6px; padding: 5px 9px; background: var(--acc-soft); font-size: 12px; font-weight: 600; color: var(--acc); }
+  .prop .pb { padding: 7px 9px; font-size: 12.5px; }
+  .prop del { color: var(--bad); background: var(--bad-soft); text-decoration: line-through; padding: 0 3px; border-radius: 3px; white-space: pre-wrap; }
+  .prop ins { color: var(--ok); background: var(--ok-soft); text-decoration: none; padding: 0 3px; border-radius: 3px; white-space: pre-wrap; }
+  .prop .pa { display: flex; gap: 6px; padding: 0 9px 8px; }
+  .prop textarea { width: 100%; border: 1px solid var(--line); border-radius: 6px; padding: 5px 7px; min-height: 60px; }
+  .prop.stale { border-color: #ecd9a1; } .prop.stale .ph { background: var(--warn-soft); color: var(--warn); }
+  .prop-done { font-size: 12px; padding: 3px 9px; border-radius: 6px; }
+  .prop-done.accepted { background: var(--ok-soft); color: var(--ok); }
+  .prop-done.rejected { background: var(--soft); color: var(--mute); text-decoration: line-through; }
+  .kbd { font: 11px ui-monospace, monospace; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 4px; padding: 0 4px; background: #fff; }
+  /* compact proposals (variant C) */
+  .cprop { display: flex; align-items: baseline; gap: 6px; font-size: 12.5px; padding: 4px 6px; border-radius: 6px; border: 1px solid #c5d3e6; background: #fbfcfe; }
+  .cprop.stale { border-color: #ecd9a1; background: var(--warn-soft); }
+  .cprop .tgt { font-weight: 600; color: var(--acc); white-space: nowrap; }
+  .cprop .v { flex: 1; min-width: 0; }
+  .cprop .acts { display: flex; gap: 3px; }
+  .cprop .acts button { border: 1px solid var(--line); background: #fff; border-radius: 4px; padding: 0 6px; font-size: 11.5px; }
+
+  /* ---------- Variant A: three panes ---------- */
+  .A { display: grid; grid-template-columns: 240px 1fr 400px; height: 100vh; }
+  .A > aside, .A > main { min-height: 0; }
+  .A .binder { border-right: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; }
+  .A .center { overflow: auto; }
+  .A .assist { border-left: 1px solid var(--line); background: #faf8f3; display: flex; flex-direction: column; }
+  .A .ahead { padding: 8px 10px; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; background: var(--panel); }
+  .A .ahead select { border: 1px solid var(--line); border-radius: 6px; padding: 2px 4px; background: #fff; max-width: 100%; }
+  .A .projbar { padding: 10px; border-bottom: 1px solid var(--line); font-weight: 600; }
+
+  /* ---------- Variant B: mode rooms ---------- */
+  .B { display: flex; flex-direction: column; height: 100vh; }
+  .B .top { display: flex; align-items: center; gap: 16px; padding: 0 16px; height: 50px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  .B .modes { display: flex; gap: 2px; margin: 0 auto; }
+  .B .modes button { border: 0; background: transparent; padding: 14px 18px 12px; border-bottom: 3px solid transparent; font-size: 14px; }
+  .B .modes button.on { border-bottom-color: var(--acc); font-weight: 700; color: var(--acc); }
+  .B .modes .desc { display: block; font-size: 10.5px; color: var(--mute); font-weight: 400; }
+  .B .room { flex: 1; min-height: 0; display: grid; }
+  .B .room > * { min-height: 0; }
+  .B .room.writing { grid-template-columns: 220px 1fr 340px; }
+  .B .room.interview { grid-template-columns: 230px 1fr 380px; }
+  .B .room.brainstorm { grid-template-columns: 230px 1fr 340px; }
+  .B .side { background: var(--panel); border-right: 1px solid var(--line); overflow: auto; }
+  .B .side.r { border-right: 0; border-left: 1px solid var(--line); }
+  .B .mid { overflow: hidden; display: flex; flex-direction: column; }
+  .B .mid .conv { max-width: 760px; width: 100%; margin: 0 auto; }
+  .B .focuscard { padding: 14px; }
+  .B .focuscard .entry { padding: 0; }
+  .B .panelh { padding: 10px 12px; border-bottom: 1px solid var(--line); font-weight: 600; display: flex; align-items: center; gap: 6px; }
+
+  /* ---------- Variant C: quiet editor ---------- */
+  .C { height: 100vh; display: flex; }
+  .C .rail { width: 48px; background: #2b2924; display: flex; flex-direction: column; align-items: center; padding-top: 10px; gap: 6px; z-index: 5; }
+  .C .rail button { width: 36px; height: 36px; border-radius: 8px; border: 0; background: transparent; color: #cfc8ba; font-size: 16px; position: relative; }
+  .C .rail button.on, .C .rail button:hover { background: #45413a; color: #fff; }
+  .C .rail .badge { position: absolute; top: 2px; right: 2px; background: var(--acc); color: #fff; font-size: 9px; border-radius: 999px; padding: 0 4px; }
+  .C .ldrawer { width: 0; overflow: hidden; background: var(--panel); border-right: 1px solid var(--line); transition: width .15s; display: flex; }
+  .C .ldrawer.open { width: 260px; }
+  .C .ldrawer.open.wide { width: 700px; }
+  .C .ldrawer .col { width: 260px; overflow: auto; flex-shrink: 0; }
+  .C .ldrawer .detail { flex: 1; overflow: auto; border-left: 1px solid var(--line); }
+  .C .page { flex: 1; overflow: auto; position: relative; }
+  .C .page .scene { max-width: 700px; padding-top: 56px; }
+  .C .hud { position: sticky; top: 0; display: flex; gap: 8px; align-items: center; padding: 8px 16px; background: linear-gradient(var(--bg) 70%, transparent); color: var(--mute); font-size: 12px; z-index: 2; }
+  .C .rdrawer { width: 0; overflow: hidden; transition: width .15s; background: #faf8f3; border-left: 1px solid var(--line); }
+  .C .rdrawer.open { width: 420px; }
+  .C .rdrawer .inner { width: 420px; height: 100%; display: flex; flex-direction: column; }
+  .C .rhead { display: flex; gap: 6px; align-items: center; padding: 8px 10px; border-bottom: 1px solid var(--line); background: var(--panel); }
+  .C .rhead select { border: 1px solid var(--line); border-radius: 6px; padding: 2px 4px; background: #fff; }
+  .palette-bg { position: fixed; inset: 0; background: rgba(30,28,24,.25); display: flex; justify-content: center; align-items: flex-start; padding-top: 12vh; z-index: 50; }
+  .palette { width: 560px; background: var(--panel); border-radius: 10px; box-shadow: 0 20px 60px rgba(0,0,0,.25); overflow: hidden; }
+  .palette input { width: 100%; border: 0; border-bottom: 1px solid var(--line); padding: 12px 14px; font-size: 15px; outline: none; background: transparent; }
+  .palette .res { max-height: 50vh; overflow: auto; padding: 6px; }
+  .palette .res button { display: flex; width: 100%; text-align: left; border: 0; background: transparent; padding: 6px 10px; border-radius: 6px; gap: 8px; }
+  .palette .res button:hover { background: var(--acc-soft); }
+  .palette .res .grp { color: var(--mute); font-size: 11px; min-width: 90px; }
+
+  /* ---------- switcher ---------- */
+  #switch { position: fixed; bottom: 14px; left: 50%; transform: translateX(-50%); z-index: 100; display: flex; align-items: center; gap: 4px;
+            background: #111; color: #fff; border-radius: 999px; padding: 4px 6px; box-shadow: 0 6px 24px rgba(0,0,0,.35); font: 12px system-ui, sans-serif; }
+  #switch button { background: #333; color: #fff; border: 0; border-radius: 999px; width: 26px; height: 26px; }
+  #switch .lbl { padding: 0 10px; font-weight: 600; }
+  #switch .st { padding: 0 8px; color: #aaa; border-left: 1px solid #444; }
+</style>
+</head>
+<body>
+<div id="app"></div>
+<div id="switch"></div>
+<script>
+/* ======================= sample Project (in memory) ======================= */
+const TYPES = ['Character', 'Place', 'Item', 'World Rule', 'Plot Thread', 'Theme', 'Other'];
+const FIELD_LABEL = { description: 'Description', role: 'Role', voiceTraits: 'Voice · traits', voiceWords: 'Voice · says / never says', voiceExamples: 'Voice · examples', senses: 'Senses', status: 'Status', outline: 'Outline' };
+const TYPE_FIELDS = {
+  'Character': ['role', 'description', 'voiceTraits', 'voiceWords', 'voiceExamples'],
+  'Place': ['description', 'senses'],
+  'Plot Thread': ['status', 'description'],
+};
+const fieldsFor = t => TYPE_FIELDS[t] || ['description'];
+
+const entries = {
+  elin:   { id: 'elin', type: 'Character', name: 'Elin Strand', aliases: ['Elin'], vis: 'always', notes: 'Kanske ljuger hon om varför hon kom?',
+            f: { role: 'Protagonist', description: 'Trettiofem, marinbiolog. Återvänder till ön efter faderns död.', voiceTraits: '', voiceWords: '', voiceExamples: '' } },
+  gustav: { id: 'gustav', type: 'Character', name: 'Gustav Berg', aliases: ['Gustav', 'hamnkaptenen'], vis: 'when mentioned', notes: '',
+            f: { role: '', description: 'Hamnkapten. Går aldrig ut på isen sedan olyckan 1998.', voiceTraits: 'Korta meningar. Svarar med motfrågor.', voiceWords: 'Säger ”grabben” till alla. Aldrig ”tyvärr”.', voiceExamples: '– Isen bryr sig inte om vad du tror, grabben.' } },
+  sjob:   { id: 'sjob', type: 'Place', name: 'Sjöboden', aliases: ['boden'], vis: 'when mentioned', notes: '',
+            f: { description: 'Faderns gamla sjöbod vid norra udden.', senses: 'tjära, fuktigt trä, kall diesel' } },
+  komp:   { id: 'komp', type: 'Item', name: 'Kompassen', aliases: ['kompass'], vis: 'when mentioned', notes: 'Visar mot vraket – avslöjas i kap. 9.',
+            f: { description: 'Faderns mässingskompass. Visar fel.' } },
+  isen:   { id: 'isen', type: 'World Rule', name: 'Isen bär inte efter mars', aliases: [], vis: 'always', notes: '',
+            f: { description: 'Ingen på ön går ut på isen efter första mars.' } },
+  baten:  { id: 'baten', type: 'Plot Thread', name: 'Den försvunna båten', aliases: ['båten'], vis: 'always', notes: '',
+            f: { status: 'Open', description: 'Faderns båt hittades aldrig.' } },
+  skuld:  { id: 'skuld', type: 'Theme', name: 'Skuld', aliases: [], vis: 'always', notes: '',
+            f: { description: 'Vem bär ansvaret för en olycka ingen talar om?' } },
+};
+
+const chapters = [
+  { id: 'c1', title: 'Ankomsten', outline: '- Elin kommer till ön\n- Etablera ön, vintern, tystnaden', notes: '', scenes: [
+    { id: 's1', title: 'Färjan', outline: '- Elin ser ön från färjan\n- Ingen möter henne', notes: '',
+      prose: ['Färjan la till vid kajen strax efter fyra. Elin stod kvar vid relingen tills motorerna tystnat, som om ön kunde ångra sig.', 'Ingen väntade på henne. Det hade hon inte heller räknat med.'] },
+    { id: 's2', title: 'Pensionatet', outline: '- Elin checkar in\n- Hör rykten om båten', notes: '',
+      prose: ['Pensionatet var det enda huset med ljus i fönstren.'] },
+  ]},
+  { id: 'c2', title: 'Isen', outline: '- Elin närmar sig sanningen om båten\n- Gustav som hinder', notes: 'Kapitlet ska kännas kallare än ettan.', scenes: [
+    { id: 's3', title: 'Sjöboden', outline: '- Elin öppnar sjöboden första gången\n- Hittar kompassen\n- Gustav dyker upp, varnar henne\n- Elin frågar om båten – Gustav vägrar svara\n- Hon hittar faderns loggbok', notes: 'Tidpunkt: mitten av april.',
+      prose: [
+        'Sjöboden luktade tjära och något surt som hon inte kunde placera. Elin drog upp porten så långt det gick och lät ljuset falla in över golvet.',
+        'Pappas kompass låg kvar på arbetsbänken. Hon vände den i handen. Nålen pekade stadigt mot land.',
+        '– Du borde inte vara här, grabben, sa Gustav bakom henne.',
+        'Hon hade inte hört honom komma. Han stod ute på isen, tio meter från bryggan, med händerna i fickorna.',
+        '– Det är min pappas bod.',
+        '– Jag tycker verkligen att du ska fundera på om det här är en bra idé, med tanke på allt som har hänt.',
+        'Hon kände hur ilskan steg, den där gamla ilskan som hon trodde att hon lämnat på fastlandet. Hon var arg. Riktigt arg.',
+        '– Vad hände med båten, Gustav?',
+        'Han svarade inte. Han vände sig om och gick tillbaka över isen mot hamnen.',
+      ] },
+    { id: 's4', title: 'Mötet på kajen', outline: '- Elin konfronterar Gustav inför andra\n- Märta avbryter', notes: '', prose: [] },
+  ]},
+];
+const allScenes = () => chapters.flatMap(c => c.scenes.map(s => ({ ...s, ch: c })));
+const sceneById = id => allScenes().find(s => s.id === id);
+const sceneRaw = id => chapters.flatMap(c => c.scenes).find(s => s.id === id);
+
+/* Proposals: t = target. kind entry/scene/create. base = value when proposed (stale detection, ADR 0003). */
+const PROPOSALS = {
+  w1: { t: { kind: 'entry', id: 'gustav', field: 'description' }, base: 'Hamnkapten. Går aldrig ut på isen sedan olyckan 1998.',
+        proposed: 'Hamnkapten. Har inte gått ut på isen sedan olyckan 1998 – förrän vid sjöboden i kapitel 2.' },
+  i1: { t: { kind: 'entry', id: 'gustav', field: 'role' }, base: '', proposed: 'Motvillig mentor; bär på hemligheten om båten.' },
+  i2: { t: { kind: 'create', type: 'Character', name: 'Märta Berg' }, base: null, proposed: 'Gustavs syster. Äger hamnen tillsammans med honom.' },
+  i3: { t: { kind: 'entry', id: 'baten', field: 'description' }, base: 'Faderns båt hittades aldrig.', proposed: 'Faderns båt hittades aldrig. Gustav vet vad som hände och skyddar någon.' },
+  b1: { t: { kind: 'create', type: 'Plot Thread', name: 'Smugglingen' }, base: null, proposed: 'Båten sjönk aldrig – den såldes till smugglare 1998. Hamnen såg åt andra hållet.' },
+  b2: { t: { kind: 'scene', id: 's4', field: 'outline' }, base: '- Elin konfronterar Gustav inför andra\n- Märta avbryter',
+        proposed: '- Elin konfronterar Gustav inför andra\n- Hon nämner båtens registreringsnummer\n- Märta avbryter – för snabbt\n- Elin förstår att Märta vet' },
+  b3: { t: { kind: 'entry', id: 'gustav', field: 'description' }, base: 'Hamnkapten. Går aldrig ut på isen sedan olyckan 1998.',
+        proposed: 'Hamnkapten. Tog emot pengar för att se åt andra hållet 1998. Går aldrig ut på isen sedan dess.' },
+};
+const pstate = Object.fromEntries(Object.keys(PROPOSALS).map(k => [k, { status: 'pending', final: null }]));
+
+const SAW_S3 = 'Scene “Sjöboden” (Prose, Outline, Notes) · Chapter 2 Outline · Outline skeleton · Entries: Elin Strand, Gustav Berg, Sjöboden, Kompassen, Isen bär inte efter mars, Den försvunna båten, Skuld';
+
+const convs = {
+  cw1: { mode: 'writing', title: 'Sjöboden – genomgång', msgs: [
+    { r: 'author', text: 'Review Scene', focus: 's3', cmd: true },
+    { r: 'assistant', saw: SAW_S3, text: 'Fyra saker i “Sjöboden”, viktigast först:', findings: [
+      { type: 'contradiction', comment: 'Gustav står på isen. Enligt hans Entry går han aldrig ut på isen sedan 1998, och enligt ”Isen bär inte efter mars” går ingen ut efter första mars – dina Notes säger mitten av april.', quote: 'Han stod ute på isen, tio meter från bryggan', q: 'Vilket gäller – prosan eller Story Bible?' },
+      { type: 'missing', comment: 'Outlinen lovar att Elin hittar faderns loggbok. Den finns inte i scenen.', quote: 'Han vände sig om och gick tillbaka över isen mot hamnen.', q: 'Har loggboken flyttat till en senare scen, eller saknas den här?' },
+      { type: 'toomuch', comment: 'Ilskan visas och förklaras sedan två gånger till.', quote: 'Hon var arg. Riktigt arg.', q: 'Vad gör de två sista meningarna för scenen som den första inte redan gör?' },
+      { type: 'voice', comment: 'Gustavs Voice: korta meningar, svarar med motfrågor. Den här repliken är lång och resonerande.', quote: '– Jag tycker verkligen att du ska fundera på om det här är en bra idé', q: 'Är det avsiktligt – att han tappar fattningen här?' },
+    ]},
+    { r: 'author', text: 'Prosan stämmer. Han går ut på isen för första gången sedan olyckan – det är hela poängen.', focus: 's3' },
+    { r: 'assistant', saw: SAW_S3, text: 'Då bör Story Bible ändras så att den inte säger emot scenen:', props: ['w1'],
+      after: 'En följdfråga: ”Isen bär inte efter mars” – bär isen i år, i mitten av april? Eller tar Gustav en risk som hela ön skulle lägga märke till?' },
+  ]},
+  cw0: { mode: 'writing', title: 'Kapitel 1 – frågor', msgs: [
+    { r: 'author', text: 'Får läsaren veta varför Elin kommer tillbaka för tidigt?', focus: 's1' },
+    { r: 'assistant', saw: 'Scene “Färjan” (Prose, Outline) · Chapter 1 Outline · Outline skeleton · Entries: Elin Strand, Isen bär inte efter mars, Den försvunna båten, Skuld', text: 'I “Färjan” antyds bara att ingen väntar på henne. Vad vill du att läsaren ska tro att skälet är efter kapitel 1 – och ska det visa sig vara fel?' },
+  ]},
+  ci1: { mode: 'interview', title: 'Intervju: Gustav Berg', focus: { kind: 'entry', id: 'gustav' }, msgs: [
+    { r: 'event', text: 'Focus: Gustav Berg (Character)' },
+    { r: 'assistant', saw: 'Entries: Gustav Berg, Den försvunna båten, Isen bär inte efter mars · Outline skeleton', text: 'Gustav har ingen Roll ännu. Vilken funktion har han i berättelsen – hinder, mentor, något annat?' },
+    { r: 'author', text: 'Han är den som vet vad som hände med båten men skyddar någon. En motvillig mentor, typ. Han och hans syster Märta har ägt hamnen i generationer.' },
+    { r: 'assistant', saw: 'Entries: Gustav Berg, Den försvunna båten, Isen bär inte efter mars · Outline skeleton', text: 'Det här ger tre ändringar:', props: ['i1', 'i2', 'i3'],
+      after: 'Nästa fråga: vem skyddar han – och vet den personen om det?' },
+  ]},
+  cb1: { mode: 'brainstorm', title: 'Vad hände med båten?', msgs: [
+    { r: 'author', text: 'Tänk om båten aldrig sjönk utan såldes? Smuggling?' },
+    { r: 'assistant', saw: 'Outline skeleton · Entries: Den försvunna båten, Gustav Berg, Elin Strand, Isen bär inte efter mars, Skuld', text: 'Det skulle flytta skulden från isen till människorna, vilket passar temat Skuld. Några frågor innan det låses: Vem köpte? Visste Elins pappa om det, eller var han offret? Och vad betyder det för Gustav om han tog betalt?\n\nOm du vill pröva spåret:', props: ['b1', 'b2', 'b3'] },
+  ]},
+};
+
+/* ======================= UI state ======================= */
+const params = new URLSearchParams(location.search);
+const S = {
+  variant: ['A', 'B', 'C'].includes(params.get('variant')) ? params.get('variant') : 'A',
+  mode: 'writing', view: 'scene', scene: 's3', entry: 'gustav', leftTab: 'manuscript',
+  conv: { writing: 'cw1', interview: 'ci1', brainstorm: 'cb1' },
+  sawOpen: {}, focusPicker: false,
+  cLeft: null, cRight: true, palette: false, paletteQ: '',
+  bTab: 'bible',
+};
+let convSeq = 1;
+
+/* ======================= helpers ======================= */
+const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const paras = s => esc(s).split(/\n\n/).map(p => `<p>${p.replace(/\n/g, '<br>')}</p>`).join('');
+const bullets = s => s ? `<ul>${s.split('\n').map(l => `<li>${esc(l.replace(/^- /, ''))}</li>`).join('')}</ul>` : '<div class="mute">No Outline yet.</div>';
+const MODES = [['brainstorm', 'Brainstorm', 'free ideas'], ['interview', 'Interview', 'fill the Story Bible'], ['writing', 'Writing', 'write, ask, Review']];
+const modeName = m => MODES.find(x => x[0] === m)[1];
+
+function curValue(t) {
+  if (t.kind === 'entry') return entries[t.id].f[t.field] ?? '';
+  if (t.kind === 'scene') return sceneRaw(t.id).outline;
+  return null;
+}
+function isStale(id) {
+  const p = PROPOSALS[id];
+  if (p.t.kind === 'create') return Object.values(entries).some(e => e.name.toLowerCase() === p.t.name.toLowerCase());
+  return curValue(p.t) !== p.base;
+}
+function targetLabel(id) {
+  const t = PROPOSALS[id].t;
+  if (t.kind === 'create') return `New ${t.type} · ${t.name}`;
+  if (t.kind === 'scene') return `Scene “${sceneRaw(t.id).title}” › Outline`;
+  return `${entries[t.id].name} › ${FIELD_LABEL[t.field]}`;
+}
+function apply(id, value) {
+  const p = PROPOSALS[id];
+  if (p.t.kind === 'create') {
+    const nid = 'n_' + id;
+    entries[nid] = { id: nid, type: p.t.type, name: p.t.name, aliases: [], vis: 'when mentioned', notes: '', f: { description: value } };
+    if (p.t.type === 'Plot Thread') entries[nid].f.status = 'Open';
+  } else if (p.t.kind === 'scene') sceneRaw(p.t.id).outline = value;
+  else entries[p.t.id].f[p.t.field] = value;
+  pstate[id] = { status: 'accepted', final: value };
+}
+const pendingFor = (kind, id, field) => Object.keys(PROPOSALS).filter(k => {
+  const t = PROPOSALS[k].t; return ['pending', 'editing'].includes(pstate[k].status) && t.kind === kind && t.id === id && (!field || t.field === field);
+});
+const pendingCount = () => Object.values(pstate).filter(s => s.status !== 'accepted' && s.status !== 'rejected').length;
+function convTitle(id) { return convs[id].title; }
+function focusLabel(f) {
+  if (!f) return 'none';
+  if (f.kind === 'entry') return `${entries[f.id].name} (${entries[f.id].type})`;
+  if (f.kind === 'type') return `all ${f.id} Entries`;
+  if (f.kind === 'scene') return `Scene “${sceneRaw(f.id).title}”`;
+  if (f.kind === 'chapter') return `Chapter “${chapters.find(c => c.id === f.id).title}”`;
+  return 'open';
+}
+
+/* ======================= shared pieces ======================= */
+function binderManuscript() {
+  return chapters.map((c, i) => `
+    <div class="list-h">Chapter ${i + 1} · ${esc(c.title)}</div>
+    ${c.scenes.map(s => `<button class="item sub ${S.view === 'scene' && S.scene === s.id ? 'on' : ''}" data-a="scene" data-id="${s.id}">${esc(s.title)}${s.prose.length ? '' : ' <span class="tiny mute">· empty</span>'}</button>`).join('')}
+  `).join('') + `<div style="padding:10px"><button class="btn small">+ Scene</button> <button class="btn small">+ Chapter</button></div>`;
+}
+function binderBible() {
+  return TYPES.map(t => {
+    const es = Object.values(entries).filter(e => e.type === t);
+    if (!es.length) return '';
+    return `<div class="list-h">${t}</div>` + es.map(e => {
+      const n = Object.keys(PROPOSALS).filter(k => ['pending', 'editing'].includes(pstate[k].status) && PROPOSALS[k].t.id === e.id).length;
+      return `<button class="item sub ${S.view === 'entry' && S.entry === e.id ? 'on' : ''}" data-a="entry" data-id="${e.id}">${esc(e.name)}${n ? ` <span class="chip acc">${n}</span>` : ''}</button>`;
+    }).join('');
+  }).join('') + `<div style="padding:10px"><button class="btn small">+ Entry</button></div>`;
+}
+
+function sceneView() {
+  const s = sceneById(S.scene);
+  return `<div class="scene">
+    <div class="crumb">Chapter ${chapters.indexOf(s.ch) + 1} · ${esc(s.ch.title)}</div>
+    <h2>${esc(s.title)}</h2>
+    <details class="plan" ${S.variant === 'C' ? '' : 'open'}><summary>Outline &amp; Notes${pendingFor('scene', s.id).length ? ' · <span class="chip acc">1 pending Proposal</span>' : ''}</summary>
+      <div class="row" style="align-items:flex-start;gap:24px">
+        <div class="grow"><b class="tiny mute">OUTLINE</b>${bullets(s.outline)}</div>
+        <div style="width:38%"><b class="tiny mute">NOTES</b><div style="margin-top:6px">${esc(s.notes) || '<span class="mute">–</span>'}</div></div>
+      </div>
+    </details>
+    <div class="toolbar"><button title="Bold"><b>B</b></button><button title="Italic"><i>I</i></button></div>
+    <div class="prose" contenteditable="true" spellcheck="true" lang="sv" data-prose="${s.id}">${s.prose.map(p => `<p>${esc(p)}</p>`).join('')}</div>
+  </div>`;
+}
+
+function entryView(id, opts = {}) {
+  const e = entries[id];
+  const fields = fieldsFor(e.type);
+  return `<div class="entry">
+    <div class="row"><span class="chip">${e.type}</span><span class="chip" title="Assistant visibility">👁 ${e.vis}</span><span class="grow"></span>${opts.close ? `<button class="btn ghost small" data-a="${opts.close}">✕</button>` : ''}</div>
+    <h2>${esc(e.name)}</h2>
+    <div class="small mute" style="margin-bottom:8px">Aliases: ${e.aliases.length ? e.aliases.map(esc).join(', ') : '–'}</div>
+    ${fields.map(f => {
+      const v = e.f[f] ?? '';
+      const pend = pendingFor('entry', id, f);
+      return `<div class="field"><div class="lbl">${FIELD_LABEL[f]}${f === 'voiceExamples' ? ' <span class="lock">Author only – the Assistant never proposes these</span>' : ''}</div>
+        <div class="val ${v ? '' : 'empty'}">${v ? esc(v) : 'empty'}</div>
+        ${pend.map(k => `<div class="ghost ${isStale(k) ? 'stale' : ''}"><b>${isStale(k) ? 'Stale Proposal' : 'Pending Proposal'}</b> from “${esc(convTitle(convOf(k)))}”: <ins style="color:var(--ok);text-decoration:none">${esc(PROPOSALS[k].proposed)}</ins> <button class="btn small" data-a="goto-prop" data-id="${k}">Show in Conversation</button></div>`).join('')}
+      </div>`;
+    }).join('')}
+    <div class="field"><div class="lbl">Private notes <span class="lock">🔒 never sent to the Assistant</span></div><div class="val ${e.notes ? '' : 'empty'}">${esc(e.notes) || 'empty'}</div></div>
+  </div>`;
+}
+function convOf(pid) { return Object.keys(convs).find(c => convs[c].msgs.some(m => (m.props || []).includes(pid))); }
+
+function findingsView(fs) {
+  const T = { contradiction: 'Contradiction', missing: 'Missing vs Outline', toomuch: 'Too much', voice: 'Voice', notyet: 'Not yet covered' };
+  return `<ol class="findings">${fs.map(f => `<li class="finding f-${f.type}"><div class="ft">${T[f.type]}</div>
+    <div>${esc(f.comment)}</div><blockquote title="Jump to this line in the editor" data-a="jump" data-q="${esc(f.quote)}">”${esc(f.quote)}”</blockquote><div><b>${esc(f.q)}</b></div></li>`).join('')}</ol>`;
+}
+
+function propCard(id) {
+  const p = PROPOSALS[id], st = pstate[id], stale = isStale(id);
+  if (st.status === 'accepted') return `<div class="prop-done accepted">✓ Accepted · ${esc(targetLabel(id))}${st.final !== p.proposed ? ' <i>(edited)</i>' : ''}</div>`;
+  if (st.status === 'rejected') return `<div class="prop-done rejected">✕ Rejected · ${esc(targetLabel(id))}</div>`;
+  const head = `<div class="ph">${p.t.kind === 'create' ? '＋' : '✎'} ${esc(targetLabel(id))}<span class="grow"></span>${stale ? '<span class="chip warn">stale – target changed</span>' : ''}</div>`;
+  if (st.status === 'editing') return `<div class="prop" data-pid="${id}">${head}<div class="pb"><textarea data-edit="${id}">${esc(p.proposed)}</textarea></div>
+    <div class="pa"><button class="btn ok small" data-a="p-save" data-id="${id}">Accept edited</button><button class="btn small" data-a="p-cancel" data-id="${id}">Cancel</button></div></div>`;
+  let body;
+  if (p.t.kind === 'create') body = `<ins>${esc(p.proposed)}</ins>`;
+  else if (p.t.kind === 'scene') body = `<div class="row" style="align-items:flex-start"><div class="grow"><div class="tiny mute">NOW</div><del style="display:block">${esc(p.base)}</del></div><div class="grow"><div class="tiny mute">PROPOSED</div><ins style="display:block">${esc(p.proposed)}</ins></div></div>`;
+  else body = `${p.base ? `<del>${esc(p.base)}</del> → ` : '<span class="mute">(empty)</span> → '}<ins>${esc(p.proposed)}</ins>`;
+  if (stale && p.t.kind !== 'create') body += `<div class="small" style="margin-top:5px;color:var(--warn)">Now reads: “${esc(curValue(p.t))}”</div>`;
+  if (stale && p.t.kind === 'create') body += `<div class="small" style="margin-top:5px;color:var(--warn)">An Entry with this name already exists.</div>`;
+  return `<div class="prop ${stale ? 'stale' : ''}" data-pid="${id}">${head}<div class="pb">${body}</div>
+    <div class="pa"><button class="btn ok small" data-a="p-accept" data-id="${id}">${stale ? 'Accept anyway' : 'Accept'}</button><button class="btn small" data-a="p-edit" data-id="${id}">Edit…</button><button class="btn small" data-a="p-reject" data-id="${id}">Reject</button></div></div>`;
+}
+function propCompact(id) {
+  const p = PROPOSALS[id], st = pstate[id], stale = isStale(id);
+  if (st.status !== 'pending') return propCard(id);
+  const v = p.t.kind === 'create' ? `<ins style="color:var(--ok);text-decoration:none">${esc(p.proposed)}</ins>`
+    : `${p.base ? `<s class="mute">${esc(p.base.length > 40 ? p.base.slice(0, 40) + '…' : p.base)}</s> → ` : ''}<span style="color:var(--ok)">${esc(p.proposed).replace(/\n/g, ' / ')}</span>`;
+  return `<div class="cprop ${stale ? 'stale' : ''}"><span class="tgt">${p.t.kind === 'create' ? '＋' : '✎'} ${esc(targetLabel(id))}</span><span class="v">${v}${stale ? ' <span class="chip warn">stale</span>' : ''}</span>
+    <span class="acts"><button title="Accept" data-a="p-accept" data-id="${id}">✓</button><button title="Edit" data-a="p-edit" data-id="${id}">✎</button><button title="Reject" data-a="p-reject" data-id="${id}">✕</button></span></div>`;
+}
+
+function message(m, i, cid, compact) {
+  if (m.r === 'event') return `<div class="event">${esc(m.text)}</div>`;
+  if (m.r === 'author') return `<div class="msg author"><div class="bub">${m.cmd ? '<b>▶ </b>' : ''}${esc(m.text)}</div>${m.focus ? `<div class="meta">in focus: ${esc(sceneRaw(m.focus).title)}</div>` : ''}</div>`;
+  const key = cid + ':' + i;
+  const pc = compact ? propCompact : propCard;
+  return `<div class="msg assistant"><div class="who">Assistant</div><div class="bub">
+    ${paras(m.text)}
+    ${m.findings ? findingsView(m.findings) : ''}
+    ${m.props ? `<div class="props">${m.props.map(pc).join('')}</div>` : ''}
+    ${m.after ? paras(m.after) : ''}
+  </div>${m.saw ? `<div class="saw"><button data-a="saw" data-id="${key}">${S.sawOpen[key] ? '▾' : '▸'} What the Assistant saw</button>${S.sawOpen[key] ? `<div>${esc(m.saw)}</div>` : ''}</div>` : ''}</div>`;
+}
+
+function focusPicker(cid) {
+  const opts = [
+    ...Object.values(entries).map(e => ({ k: 'entry', id: e.id, l: e.name, g: 'Entry' })),
+    ...TYPES.slice(0, 6).map(t => ({ k: 'type', id: t, l: `All ${t}s`, g: 'Entry type' })),
+    ...chapters.map(c => ({ k: 'chapter', id: c.id, l: c.title, g: 'Chapter' })),
+    ...allScenes().map(s => ({ k: 'scene', id: s.id, l: s.title, g: 'Scene' })),
+    { k: 'open', id: '', l: 'Open – let the Assistant pick a gap', g: 'Open' },
+  ];
+  const groups = [...new Set(opts.map(o => o.g))];
+  return `<div class="plan" style="margin:8px"><b>Choose a focus for this Interview</b>
+    ${groups.map(g => `<div style="margin-top:6px"><span class="tiny mute">${g.toUpperCase()}</span><br>${opts.filter(o => o.g === g).map(o => `<button class="btn small" style="margin:2px" data-a="set-focus" data-conv="${cid}" data-k="${o.k}" data-id="${o.id}">${esc(o.l)}</button>`).join('')}</div>`).join('')}</div>`;
+}
+
+function composer(cid) {
+  const c = convs[cid];
+  let chips = '';
+  if (c.mode === 'writing') chips = `<button class="btn small" data-a="cmd" data-cmd="Review Scene">▶ Review Scene</button><button class="btn small" data-a="cmd" data-cmd="Review Chapter">▶ Review Chapter</button><span class="grow"></span><span class="chip acc" title="The Scene open in the editor when you send">in focus: ${esc(sceneRaw(S.scene).title)}</span><span class="tiny mute">@ adds a Scene</span>`;
+  if (c.mode === 'interview') chips = `<span class="chip acc">Focus: ${esc(focusLabel(c.focus))}</span><button class="btn small" data-a="focus-picker">Change focus</button><span class="grow"></span><button class="btn small" data-a="cmd" data-cmd="Jag vet inte.">I don't know</button>`;
+  if (c.mode === 'brainstorm') chips = `<span class="tiny mute">No Prose is sent in Brainstorm.</span>`;
+  return `<div class="composer"><textarea rows="2" data-composer placeholder="${c.mode === 'writing' ? 'Ask about this Scene…' : c.mode === 'interview' ? 'Answer…' : 'Throw an idea…'}"></textarea>
+    <div class="row">${chips}<button class="btn primary small" data-a="send" data-conv="${cid}">Send</button></div></div>`;
+}
+
+function conversation(cid, compact) {
+  const c = convs[cid];
+  const needFocus = c.mode === 'interview' && (!c.focus || S.focusPicker);
+  return `<div class="conv"><div class="msgs" data-scroll="msgs-${cid}">
+    ${c.msgs.map((m, i) => message(m, i, cid, compact)).join('') || `<div class="mute small" style="text-align:center;margin-top:20px">New ${modeName(c.mode)} Conversation</div>`}
+    ${needFocus ? focusPicker(cid) : ''}
+    <div class="tiny mute" style="text-align:center">The Assistant never writes Prose. There is no way to insert its text into the Manuscript.</div>
+  </div>${composer(cid)}</div>`;
+}
+function convSelect(mode) {
+  const ids = Object.keys(convs).filter(k => convs[k].mode === mode);
+  return `<select data-a-change="conv">${ids.map(k => `<option value="${k}" ${S.conv[mode] === k ? 'selected' : ''}>${esc(convs[k].title)}</option>`).join('')}<option value="__new">+ New ${modeName(mode)} Conversation</option></select>`;
+}
+function modeSeg() {
+  return `<div class="seg">${MODES.map(([k, l]) => `<button class="${S.mode === k ? 'on' : ''}" data-a="mode" data-id="${k}">${l}</button>`).join('')}</div>`;
+}
+
+/* ======================= Variant A: three panes ======================= */
+function VariantA() {
+  return `<div class="A">
+    <aside class="binder">
+      <div class="projbar">Vinterhamnen</div>
+      <div class="tabs"><button class="${S.leftTab === 'manuscript' ? 'on' : ''}" data-a="lefttab" data-id="manuscript">Manuscript</button><button class="${S.leftTab === 'bible' ? 'on' : ''}" data-a="lefttab" data-id="bible">Story Bible</button></div>
+      <div class="scroll grow">${S.leftTab === 'manuscript' ? binderManuscript() : binderBible()}</div>
+    </aside>
+    <main class="center">${S.view === 'entry' ? entryView(S.entry) : sceneView()}</main>
+    <aside class="assist">
+      <div class="ahead"><div class="row"><b>Assistant</b><span class="grow"></span>${modeSeg()}</div>
+        <div class="row small"><span class="mute">Conversation</span>${convSelect(S.mode)}</div></div>
+      ${conversation(S.conv[S.mode])}
+    </aside>
+  </div>`;
+}
+
+/* ======================= Variant B: mode rooms ======================= */
+function VariantB() {
+  const cid = S.conv[S.mode];
+  const top = `<div class="top"><b>Vinterhamnen</b>
+    <div class="modes">${MODES.map(([k, l, d]) => `<button class="${S.mode === k ? 'on' : ''}" data-a="mode" data-id="${k}">${l}<span class="desc">${d}</span></button>`).join('')}</div>
+    <span class="chip ${pendingCount() ? 'acc' : ''}">${pendingCount()} pending Proposals</span></div>`;
+  const convList = mode => `<div class="panelh">${modeName(mode)} Conversations</div>` +
+    Object.keys(convs).filter(k => convs[k].mode === mode).map(k => `<button class="item ${cid === k ? 'on' : ''}" data-a="pick-conv" data-id="${k}">${esc(convs[k].title)}${convs[k].focus ? `<div class="tiny mute">focus: ${esc(focusLabel(convs[k].focus))}</div>` : ''}</button>`).join('') +
+    `<div style="padding:10px"><button class="btn small" data-a="new-conv">+ New</button></div>`;
+  let room;
+  if (S.mode === 'writing') {
+    room = `<div class="room writing">
+      <aside class="side">${binderManuscript()}<div class="list-h" style="margin-top:20px">Story Bible</div><div style="padding:0 10px" class="small mute">Open from a mention or in Interview.</div>
+        ${Object.values(entries).map(e => `<button class="item sub small" data-a="entry" data-id="${e.id}">${esc(e.name)}</button>`).join('')}</aside>
+      <main class="mid" style="overflow:auto">${S.view === 'entry' ? entryView(S.entry, { close: 'back-scene' }) : sceneView()}</main>
+      <aside class="side r" style="display:flex;flex-direction:column;overflow:hidden"><div class="panelh">Assistant <span class="grow"></span>${convSelect('writing')}</div>${conversation(cid)}</aside>
+    </div>`;
+  } else if (S.mode === 'interview') {
+    const f = convs[cid].focus;
+    let right = '<div class="mute" style="padding:14px">Pick a focus to begin.</div>';
+    if (f && f.kind === 'entry') right = `<div class="focuscard">${entryView(f.id)}</div>`;
+    else if (f && f.kind === 'type') right = `<div style="padding:10px"><div class="panelh">All ${esc(f.id)} Entries</div>${Object.values(entries).filter(e => e.type === f.id).map(e => `<div class="field"><b>${esc(e.name)}</b><div class="small mute">${esc(e.f.description)}</div></div>`).join('')}</div>`;
+    else if (f && (f.kind === 'scene' || f.kind === 'chapter')) { const u = f.kind === 'scene' ? sceneRaw(f.id) : chapters.find(c => c.id === f.id); right = `<div style="padding:14px"><h3>${esc(u.title)}</h3><div class="tiny mute" style="margin-top:8px">OUTLINE</div>${bullets(u.outline)}</div>`; }
+    else if (f && f.kind === 'open') right = `<div style="padding:14px" class="mute">Open focus – the Assistant says which gap it picked.</div>`;
+    room = `<div class="room interview">
+      <aside class="side">${convList('interview')}</aside>
+      <main class="mid">${conversation(cid)}</main>
+      <aside class="side r"><div class="panelh">In focus <span class="tiny mute">– fills in live as you accept</span></div>${right}</aside>
+    </div>`;
+  } else {
+    room = `<div class="room brainstorm">
+      <aside class="side">${convList('brainstorm')}</aside>
+      <main class="mid">${conversation(cid)}</main>
+      <aside class="side r"><div class="tabs"><button class="${S.bTab === 'bible' ? 'on' : ''}" data-a="btab" data-id="bible">Story Bible</button><button class="${S.bTab === 'outline' ? 'on' : ''}" data-a="btab" data-id="outline">Outline skeleton</button></div>
+        ${S.bTab === 'bible' ? (S.view === 'entry' ? entryView(S.entry, { close: 'back-list' }) : binderBible()) :
+          chapters.map((c, i) => `<div style="padding:8px 12px"><b>${i + 1}. ${esc(c.title)}</b>${bullets(c.outline)}${c.scenes.map(s => `<div style="padding-left:12px" class="${pendingFor('scene', s.id).length ? 'ghost' : ''}"><b class="small">${esc(s.title)}</b>${bullets(s.outline)}</div>`).join('')}</div>`).join('')}</aside>
+    </div>`;
+  }
+  return `<div class="B">${top}${room}</div>`;
+}
+
+/* ======================= Variant C: quiet editor ======================= */
+function VariantC() {
+  const s = sceneById(S.scene);
+  const cid = S.conv[S.mode];
+  const pc = pendingCount();
+  const left = S.cLeft === 'manuscript' ? `<div class="col">${binderManuscript()}</div>`
+    : S.cLeft === 'bible' ? `<div class="col">${binderBible()}</div><div class="detail">${entryView(S.entry)}</div>` : '';
+  return `<div class="C">
+    <nav class="rail">
+      <button class="${S.cLeft === 'manuscript' ? 'on' : ''}" data-a="c-left" data-id="manuscript" title="Manuscript">☰</button>
+      <button class="${S.cLeft === 'bible' ? 'on' : ''}" data-a="c-left" data-id="bible" title="Story Bible">◆</button>
+      <button class="${S.cRight ? 'on' : ''}" data-a="c-right" title="Assistant">✦${pc ? `<span class="badge">${pc}</span>` : ''}</button>
+      <span class="grow"></span>
+      <button data-a="palette" title="Command palette (Ctrl+K)" style="margin-bottom:60px">⌘</button>
+    </nav>
+    <div class="ldrawer ${S.cLeft ? 'open' : ''} ${S.cLeft === 'bible' ? 'wide' : ''}">${left}</div>
+    <div class="page">
+      <div class="hud">${esc(s.ch.title)} › <b style="color:var(--ink)">${esc(s.title)}</b><span class="grow"></span><span>${modeName(S.mode)}</span><span class="kbd">Ctrl K</span></div>
+      ${sceneView()}
+    </div>
+    <aside class="rdrawer ${S.cRight ? 'open' : ''}"><div class="inner">
+      <div class="rhead"><b>✦</b><select data-a-change="mode">${MODES.map(([k, l]) => `<option value="${k}" ${S.mode === k ? 'selected' : ''}>${l}</option>`).join('')}</select>${convSelect(S.mode)}<span class="grow"></span><button class="btn ghost small" data-a="c-right">✕</button></div>
+      ${conversation(cid, true)}
+    </div></aside>
+    ${S.palette ? paletteView() : ''}
+  </div>`;
+}
+function paletteItems() {
+  return [
+    { g: 'Assistant', l: 'Review Scene', a: () => { S.mode = 'writing'; S.cRight = true; sendCmd('Review Scene'); } },
+    { g: 'Assistant', l: 'Review Chapter', a: () => { S.mode = 'writing'; S.cRight = true; sendCmd('Review Chapter'); } },
+    ...MODES.map(([k, l]) => ({ g: 'Mode', l: `Switch to ${l}`, a: () => { S.mode = k; S.cRight = true; } })),
+    ...Object.values(entries).map(e => ({ g: 'Interview', l: `Interview about ${e.name}`, a: () => { newConv('interview', { kind: 'entry', id: e.id }); S.cRight = true; } })),
+    ...allScenes().map(s => ({ g: 'Go to Scene', l: `${s.ch.title} › ${s.title}`, a: () => { S.scene = s.id; S.view = 'scene'; } })),
+    ...Object.values(entries).map(e => ({ g: 'Story Bible', l: e.name, a: () => { S.entry = e.id; S.cLeft = 'bible'; } })),
+  ];
+}
+function paletteView() {
+  const q = S.paletteQ.toLowerCase();
+  const items = paletteItems().map((x, i) => ({ ...x, i })).filter(x => (x.g + ' ' + x.l).toLowerCase().includes(q));
+  return `<div class="palette-bg" data-a="palette-close"><div class="palette" data-stop>
+    <input data-palette placeholder="Type a command, Scene or Entry…" value="${esc(S.paletteQ)}">
+    <div class="res">${items.slice(0, 14).map(x => `<button data-a="palette-run" data-id="${x.i}"><span class="grp">${x.g}</span>${esc(x.l)}</button>`).join('') || '<div class="mute" style="padding:8px">Nothing</div>'}</div></div></div>`;
+}
+
+/* ======================= actions ======================= */
+function newConv(mode, focus) {
+  const id = 'new' + convSeq++;
+  convs[id] = { mode, title: `New ${modeName(mode)} ${convSeq - 1}`, msgs: [] };
+  if (focus) setFocus(id, focus);
+  S.conv[mode] = id; S.mode = mode;
+  return id;
+}
+function setFocus(cid, f) {
+  const c = convs[cid];
+  c.focus = f;
+  c.msgs.push({ r: 'event', text: 'Focus: ' + focusLabel(f) });
+  if (c.title.startsWith('New ')) c.title = 'Intervju: ' + focusLabel(f).replace(/ \(.*\)$/, '');
+  c.msgs.push({ r: 'assistant', saw: 'Story Bible (filtered) · Outline skeleton', text: f.kind === 'open' ? '(Prototyp) Jag väljer luckan ”Märta Berg saknar Entry” eftersom hon nämns i Gustavs svar. Vem är hon för Elin?' : `(Prototyp) Första frågan om ${focusLabel(f)} skulle stå här.` });
+  S.focusPicker = false;
+}
+function sendCmd(text) {
+  const cid = S.conv[S.mode];
+  convs[cid].msgs.push({ r: 'author', text, cmd: /^Review/.test(text), focus: convs[cid].mode === 'writing' ? S.scene : null });
+  convs[cid].msgs.push({ r: 'assistant', saw: convs[cid].mode === 'writing' ? `Scene “${sceneRaw(S.scene).title}” (Prose, Outline, Notes) · Chapter Outline · Outline skeleton · visible Entries` : 'Story Bible (filtered) · Outline skeleton',
+    text: /^Review/.test(text) ? `(Prototyp – ingen modell.) Här skulle ${text} för “${sceneRaw(S.scene).title}” svara med högst ~7 Findings, som i exemplet ovan.` : '(Prototyp – ingen modell kopplad.)' });
+}
+const ACT = {
+  scene: el => { S.scene = el.dataset.id; S.view = 'scene'; if (S.variant === 'C') S.cLeft = null; },
+  entry: el => { S.entry = el.dataset.id; S.view = 'entry'; },
+  lefttab: el => { S.leftTab = el.dataset.id; },
+  mode: el => { S.mode = el.dataset.id; S.focusPicker = false; },
+  'pick-conv': el => { S.conv[S.mode] = el.dataset.id; },
+  'new-conv': () => newConv(S.mode),
+  btab: el => { S.bTab = el.dataset.id; S.view = 'scene'; },
+  'back-scene': () => { S.view = 'scene'; },
+  'back-list': () => { S.view = 'scene'; },
+  saw: el => { S.sawOpen[el.dataset.id] = !S.sawOpen[el.dataset.id]; },
+  'p-accept': el => apply(el.dataset.id, PROPOSALS[el.dataset.id].proposed),
+  'p-reject': el => { pstate[el.dataset.id] = { status: 'rejected', final: null }; },
+  'p-edit': el => { pstate[el.dataset.id].status = 'editing'; },
+  'p-cancel': el => { pstate[el.dataset.id].status = 'pending'; },
+  'p-save': el => apply(el.dataset.id, document.querySelector(`[data-edit="${el.dataset.id}"]`).value),
+  'goto-prop': el => { const c = convOf(el.dataset.id); S.mode = convs[c].mode; S.conv[S.mode] = c; if (S.variant === 'C') S.cRight = true; flash = el.dataset.id; },
+  'focus-picker': () => { S.focusPicker = !S.focusPicker; },
+  'set-focus': el => { const f = { kind: el.dataset.k, id: el.dataset.id }; setFocus(el.dataset.conv, f); },
+  cmd: el => sendCmd(el.dataset.cmd),
+  send: () => { const t = document.querySelector('[data-composer]').value.trim(); if (t) sendCmd(t); },
+  jump: el => { S.view = 'scene'; jumpQuote = el.dataset.q; },
+  'c-left': el => { S.cLeft = S.cLeft === el.dataset.id ? null : el.dataset.id; },
+  'c-right': () => { S.cRight = !S.cRight; },
+  palette: () => { S.palette = true; S.paletteQ = ''; },
+  'palette-close': (el, e) => { if (!e.target.closest('[data-stop]')) S.palette = false; else return false; },
+  'palette-run': el => { const it = paletteItems()[+el.dataset.id]; S.palette = false; it.a(); },
+};
+let flash = null, jumpQuote = null;
+
+document.addEventListener('click', e => {
+  const el = e.target.closest('[data-a]');
+  if (!el) return;
+  const fn = ACT[el.dataset.a];
+  if (fn && fn(el, e) !== false) render();
+});
+document.addEventListener('change', e => {
+  const k = e.target.dataset.aChange;
+  if (k === 'conv') { if (e.target.value === '__new') newConv(S.mode); else S.conv[S.mode] = e.target.value; render(); }
+  if (k === 'mode') { S.mode = e.target.value; render(); }
+});
+document.addEventListener('input', e => {
+  if (e.target.dataset.prose) sceneRaw(e.target.dataset.prose).prose = [...e.target.querySelectorAll('p')].map(p => p.innerText);
+  if (e.target.matches('[data-palette]')) { S.paletteQ = e.target.value; render(); const i = document.querySelector('[data-palette]'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }
+});
+document.addEventListener('keydown', e => {
+  const typing = e.target.closest('input, textarea, [contenteditable="true"]');
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k' && S.variant === 'C') { e.preventDefault(); S.palette = !S.palette; S.paletteQ = ''; render(); if (S.palette) document.querySelector('[data-palette]').focus(); return; }
+  if (e.key === 'Escape' && S.palette) { S.palette = false; render(); return; }
+  if (e.key === 'Enter' && e.target.matches('[data-palette]')) { const b = document.querySelector('.palette .res button'); if (b) b.click(); return; }
+  if (e.key === 'Enter' && !e.shiftKey && e.target.matches('[data-composer]')) { e.preventDefault(); ACT.send(); render(); return; }
+  if (typing) return;
+  if (e.key === 'ArrowLeft') cycle(-1);
+  if (e.key === 'ArrowRight') cycle(1);
+});
+
+/* ======================= render ======================= */
+const VARIANTS = { A: ['Three panes', VariantA], B: ['Mode rooms', VariantB], C: ['Quiet editor', VariantC] };
+function cycle(d) {
+  const ks = Object.keys(VARIANTS); S.variant = ks[(ks.indexOf(S.variant) + d + ks.length) % ks.length];
+  const u = new URL(location); u.searchParams.set('variant', S.variant); history.replaceState(null, '', u);
+  render();
+}
+function render() {
+  const scrolls = {}; document.querySelectorAll('[data-scroll]').forEach(n => scrolls[n.dataset.scroll] = n.scrollTop);
+  const had = new Set(Object.keys(scrolls));
+  document.getElementById('app').innerHTML = VARIANTS[S.variant][1]();
+  document.querySelectorAll('[data-scroll]').forEach(n => { n.scrollTop = had.has(n.dataset.scroll) ? scrolls[n.dataset.scroll] : n.scrollHeight; });
+  if (flash) { const n = document.querySelector(`[data-pid="${flash}"]`); if (n) { n.scrollIntoView({ block: 'center' }); n.style.outline = '3px solid var(--acc)'; } flash = null; }
+  if (jumpQuote) { const q = jumpQuote.replace(/^– ?/, '').slice(0, 30); const p = [...document.querySelectorAll('.prose p')].find(p => p.innerText.includes(q)); if (p) { p.scrollIntoView({ block: 'center' }); p.style.background = 'var(--warn-soft)'; } jumpQuote = null; }
+  const acc = Object.values(pstate).filter(s => s.status === 'accepted').length, rej = Object.values(pstate).filter(s => s.status === 'rejected').length;
+  document.getElementById('switch').innerHTML = `<button onclick="cycle(-1)">◀</button><span class="lbl">${S.variant} · ${VARIANTS[S.variant][0]}</span><button onclick="cycle(1)">▶</button>
+    <span class="st">Mode: ${modeName(S.mode)} · Proposals ${pendingCount()} pending / ${acc} accepted / ${rej} rejected</span>`;
+}
+render();
+</script>
+</body>
+</html>
