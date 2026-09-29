@@ -63,6 +63,10 @@ _Avoid_: Comments (when meaning the Author's own), annotations
 Where deleted Scenes and Entries go within a Project; they stay recoverable until the Author empties it.
 _Avoid_: Bin, archive
 
+**Conflict**:
+Two or more versions of one Scene, Outline, Notes or Entry, saved on different computers or at the same moment, kept side by side until the Author chooses one or merges them; the others go to Trash. A diverged Conversation is not a Conflict: it becomes a second Conversation.
+_Avoid_: Conflicted copy, sync error, merge conflict
+
 ### Modes
 
 **Mode**:
