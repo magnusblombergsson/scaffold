@@ -16,4 +16,4 @@ A Project folder holds one file per Scene, Entry, Outline and Notes, each named 
 - Each file also carries its id inside it, so a sync conflict copy can be matched back to its unit.
 - The manifest holds structure only. Per-unit metadata (POV, status, targets) goes in the frontmatter of `outlines/<id>.md`, so the file every open depends on changes only on add, move, rename or delete.
 - An Entry's private notes live in a separate `private/` directory that the Assistant-context loader is never given.
-- The files are the only source of truth. If scanning them gets slow (mention detection, a Project-wide Proposal list, search), a derived index may live in `userData`, keyed by Project id. It is never synced, and it can always be deleted and rebuilt from the files. The MVP has none.
+- The files are the only source of truth. If scanning them gets slow (mention detection, a Project-wide Proposal list, search), a derived index may live in a machine-local cache directory (`%LOCALAPPDATA%` on Windows, not `userData`, which roaming profiles can sync), keyed by Project id. It is never synced, and it can always be deleted and rebuilt from the files. The MVP has none.
