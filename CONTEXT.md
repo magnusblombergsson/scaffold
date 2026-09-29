@@ -77,7 +77,7 @@ _Avoid_: Chat, session, history
 Mode for free idea generation with the Assistant.
 
 **Interview**:
-Mode where the Assistant asks the Author questions to capture facts about the story's world, characters, and plot into the Story Bible.
+Mode where the Assistant asks the Author questions to capture facts about the story's world, characters, and plot into the Story Bible and Outlines. The Author chooses a focus (one Entry, one Entry type, a Chapter or Scene, or open) and may change it at any time; within it the Assistant asks about what is missing, one question at a time, and turns each answer into Proposals.
 _Avoid_: Q&A, questionnaire
 
 **Writing**:
