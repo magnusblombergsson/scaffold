@@ -70,7 +70,7 @@ One of the tool's working states, each giving the Assistant a different role: Br
 _Avoid_: State, phase
 
 **Conversation**:
-A thread of exchanges between the Author and the Assistant, started by the Author and belonging to one Mode. A Writing Conversation notes which Scene or Chapter was in focus but is not bound to it.
+A thread of exchanges between the Author and the Assistant, started by the Author and belonging to one Mode. In a Writing Conversation, the Scene in focus is the one open in the editor when a message is sent; each message notes it, and the Conversation is not bound to it. The Assistant sees only the current Conversation, never earlier ones.
 _Avoid_: Chat, session, history
 
 **Brainstorm**:
