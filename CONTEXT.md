@@ -53,7 +53,15 @@ _Avoid_: Suggestion (when meaning a Story Bible change), auto-save
 
 **Outline**:
 Structural description of chapters and scenes in bullet form (what happens, who, why). Not Prose; the Assistant may propose it.
-_Avoid_: Beat sheet, synopsis
+_Avoid_: Beat sheet, synopsis, summary
+
+**Notes**:
+The Author's working notes on a Chapter or Scene. Visible to the Assistant, unlike an Entry's private notes.
+_Avoid_: Comments (when meaning the Author's own), annotations
+
+**Trash**:
+Where deleted Scenes and Entries go within a Project; they stay recoverable until the Author empties it.
+_Avoid_: Bin, archive
 
 ### Modes
 
