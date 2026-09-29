@@ -1,6 +1,6 @@
 # Append-only Conversation logs that also hold Proposals
 
-Each Conversation is one append-only JSONL file, `conversations/<id>.jsonl`. It starts with a header line (id, Mode, title, created, schema version) followed by one event per line: Author and Assistant messages, compaction summaries, retitles, and Proposal events (proposed, edited, accepted, rejected). A pending Proposal is not stored anywhere else; the app derives it from the log. We chose this because a Proposal only makes sense next to the exchange that produced it, and because a log that is only ever appended to cannot be half-rewritten by a crash.
+Each Conversation is one append-only JSONL file, `conversations/<id>.jsonl`. It starts with a header line (id, Mode, title, created, format version; see ADR 0004) followed by one event per line: Author and Assistant messages, compaction summaries, retitles, and Proposal events (proposed, edited, accepted, rejected). A pending Proposal is not stored anywhere else; the app derives it from the log. We chose this because a Proposal only makes sense next to the exchange that produced it, and because a log that is only ever appended to cannot be half-rewritten by a crash.
 
 **Amended 2026-09-29.** We originally also claimed that append-only files survive Dropbox/OneDrive better than rewritten ones. The hands-on sync test showed this is false for OneDrive: an appended log forks into `<id>-<HOST>.jsonl` exactly like a rewritten file, with the same header line and therefore the same Conversation id. See the fork rule under Consequences.
 
