@@ -48,7 +48,7 @@ A character's way of speaking, described in its Entry as traits (register, rhyth
 _Avoid_: Tone, style (when meaning a character's speech)
 
 **Proposal**:
-A change to the Story Bible suggested by the Assistant during a conversation; it takes effect only when the Author accepts it, optionally after editing it.
+A change to the Story Bible or an Outline suggested by the Assistant during a Conversation; it takes effect only when the Author accepts it, optionally after editing it. A Proposal is stale when its target has changed since it was made. Proposals never touch Prose, Notes, or private notes.
 _Avoid_: Suggestion (when meaning a Story Bible change), auto-save
 
 **Outline**:
@@ -68,6 +68,10 @@ _Avoid_: Bin, archive
 **Mode**:
 One of the tool's working states, each giving the Assistant a different role: Brainstorm, Interview, or Writing.
 _Avoid_: State, phase
+
+**Conversation**:
+A thread of exchanges between the Author and the Assistant, started by the Author and belonging to one Mode. A Writing Conversation notes which Scene or Chapter was in focus but is not bound to it.
+_Avoid_: Chat, session, history
 
 **Brainstorm**:
 Mode for free idea generation with the Assistant.

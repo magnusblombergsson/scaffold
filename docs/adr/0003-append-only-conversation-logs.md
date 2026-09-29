@@ -1,0 +1,16 @@
+# Append-only Conversation logs that also hold Proposals
+
+Each Conversation is one append-only JSONL file, `conversations/<id>.jsonl`. It starts with a header line (id, Mode, title, created, schema version) followed by one event per line: Author and Assistant messages, compaction summaries, retitles, and Proposal events (proposed, edited, accepted, rejected). A pending Proposal is not stored anywhere else; the app derives it from the log. We chose this because append-only files survive Dropbox/OneDrive better than rewritten ones. A Proposal also only makes sense next to the exchange that produced it.
+
+## Considered Options
+
+- **One thread per Mode**: simplest, but it grows forever and mixes unrelated topics in one file that every session appends to.
+- **A `proposals/` directory, one file per Proposal**: makes a Project-wide review list trivial, but it splits one exchange across two places. The files are also rewritten or deleted on every decision. A review list can instead be an index built by scanning the logs.
+- **Storing the context sent to the model (Prose and Story Bible snapshots)**: allows exact replay, but it duplicates the Manuscript and could leak private notes into the log. Transcripts store only the ids of the Scenes and Entries in focus, and each turn rebuilds the context from the current Project.
+
+## Consequences
+
+- Conversations are not listed in `project.json`; the app lists them by scanning `conversations/`.
+- A sync conflict copy of a log is kept as a separate Conversation, not merged.
+- Deleting a Conversation moves the whole file to Trash, pending Proposals included. Single messages cannot be deleted.
+- Proposals are field-level: each field records its base value and its proposed value. An Outline Proposal records the whole Outline body instead. The base values detect stale Proposals. They also recover from a crash between writing the target and appending `accepted`: the target is written first, and on load a pending Proposal whose proposed values already equal the target's current values is treated as applied.
