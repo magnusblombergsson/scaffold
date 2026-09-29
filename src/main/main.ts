@@ -1,0 +1,46 @@
+import { app, BrowserWindow } from 'electron';
+import path from 'node:path';
+import started from 'electron-squirrel-startup';
+import { flushBeforeClose, registerIpc } from './ipc';
+
+// Handle creating/removing shortcuts on Windows when installing/uninstalling.
+if (started) {
+  app.quit();
+}
+
+const createWindow = () => {
+  const window = new BrowserWindow({
+    width: 1000,
+    height: 700,
+    title: 'Writing Tools',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+    },
+  });
+  flushBeforeClose(window);
+
+  if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
+    window.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
+  } else {
+    window.loadFile(
+      path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`),
+    );
+  }
+};
+
+app.whenReady().then(() => {
+  registerIpc();
+  createWindow();
+
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) {
+      createWindow();
+    }
+  });
+});
+
+app.on('window-all-closed', () => {
+  if (process.platform !== 'darwin') {
+    app.quit();
+  }
+});

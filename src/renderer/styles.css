@@ -1,0 +1,94 @@
+:root {
+  --bg: #fbfaf7;
+  --fg: #222;
+  --muted: #777;
+  --line: #e2dfd8;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1d1d1f;
+    --fg: #e8e6e1;
+    --muted: #999;
+    --line: #3a3a3c;
+  }
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font-family:
+    -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
+    sans-serif;
+}
+
+.start {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  height: 100%;
+  gap: 1rem;
+}
+
+.start-actions,
+.header-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.workspace {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.workspace header {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.project-name {
+  font-weight: 600;
+}
+
+.scene-title {
+  color: var(--muted);
+  flex: 1;
+}
+
+.editor {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.editor .prose {
+  max-width: 38rem;
+  margin: 0 auto;
+  padding: 3rem 1rem;
+  min-height: calc(100% - 6rem);
+  font-family: Georgia, 'Times New Roman', serif;
+  font-size: 1.15rem;
+  line-height: 1.6;
+  outline: none;
+}
+
+.editor .prose p {
+  margin: 0 0 1em;
+}
+
+[role='alert'] {
+  color: #b3261e;
+  padding: 0 1rem;
+}
