@@ -1,0 +1,45 @@
+{
+  "host": "LAPTOP-BNNV69H3",
+  "label": "snapshot-B-0",
+  "at": "2026-09-29T18:20:29.788Z",
+  "files": [
+    {
+      "rel": "conversations\\conv.jsonl",
+      "attrib": "AO",
+      "ino": "2814749768288590",
+      "size": 73,
+      "blocks": 0,
+      "mtime": "2026-09-29T17:45:24.000Z",
+      "sha": "9fefdb691f3f",
+      "head": [
+        "{\"by\":\"DESKTOP-7LMMOCE\",\"label\":\"setup\",\"at\":\"2026-09-29T17:45:24.454Z\"}"
+      ]
+    },
+    {
+      "rel": "project.json",
+      "attrib": "AO",
+      "ino": "2251799814867277",
+      "size": 82,
+      "blocks": 0,
+      "mtime": "2026-09-29T17:45:24.000Z",
+      "sha": "0eec51aac616",
+      "head": [
+        "{",
+        "  \"probe\": true,",
+        "  \"by\": \"DESKTOP-7LMMOCE\","
+      ]
+    },
+    {
+      "rel": "scenes\\scene.md",
+      "attrib": "AO",
+      "ino": "2251799814867280",
+      "size": 47,
+      "blocks": 0,
+      "mtime": "2026-09-29T17:45:24.000Z",
+      "sha": "c8490c6b5ead",
+      "head": [
+        "DESKTOP-7LMMOCE setup 2026-09-29T17:45:24.446Z"
+      ]
+    }
+  ]
+}

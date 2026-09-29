@@ -1,0 +1,19 @@
+{
+  "host": "DESKTOP-7LMMOCE",
+  "label": "save-A-stale",
+  "at": "2026-09-29T18:38:45.707Z",
+  "file": "project.json",
+  "before": {
+    "ino": "562949953900614",
+    "size": 82,
+    "blocks": 0,
+    "mtime": "2026-09-29T17:45:24.435Z"
+  },
+  "after": {
+    "ino": "562949953900651",
+    "size": 49,
+    "blocks": 0,
+    "mtime": "2026-09-29T18:38:45.695Z"
+  },
+  "renameAttempts": 1
+}

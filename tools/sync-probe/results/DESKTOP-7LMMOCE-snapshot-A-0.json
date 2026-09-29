@@ -1,0 +1,45 @@
+{
+  "host": "DESKTOP-7LMMOCE",
+  "label": "snapshot-A-0",
+  "at": "2026-09-29T18:13:55.530Z",
+  "files": [
+    {
+      "rel": "conversations\\conv.jsonl",
+      "attrib": "A",
+      "ino": "562949953900616",
+      "size": 73,
+      "blocks": 0,
+      "mtime": "2026-09-29T17:45:24.451Z",
+      "sha": "9fefdb691f3f",
+      "head": [
+        "{\"by\":\"DESKTOP-7LMMOCE\",\"label\":\"setup\",\"at\":\"2026-09-29T17:45:24.454Z\"}"
+      ]
+    },
+    {
+      "rel": "project.json",
+      "attrib": "A",
+      "ino": "562949953900614",
+      "size": 82,
+      "blocks": 0,
+      "mtime": "2026-09-29T17:45:24.435Z",
+      "sha": "0eec51aac616",
+      "head": [
+        "{",
+        "  \"probe\": true,",
+        "  \"by\": \"DESKTOP-7LMMOCE\","
+      ]
+    },
+    {
+      "rel": "scenes\\scene.md",
+      "attrib": "A",
+      "ino": "562949953900615",
+      "size": 47,
+      "blocks": 0,
+      "mtime": "2026-09-29T17:45:24.435Z",
+      "sha": "c8490c6b5ead",
+      "head": [
+        "DESKTOP-7LMMOCE setup 2026-09-29T17:45:24.446Z"
+      ]
+    }
+  ]
+}

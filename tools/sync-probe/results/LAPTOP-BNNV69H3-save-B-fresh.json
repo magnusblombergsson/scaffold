@@ -1,0 +1,19 @@
+{
+  "host": "LAPTOP-BNNV69H3",
+  "label": "save-B-fresh",
+  "at": "2026-09-29T18:39:30.131Z",
+  "file": "project.json",
+  "before": {
+    "ino": "2251799814867277",
+    "size": 82,
+    "blocks": 8,
+    "mtime": "2026-09-29T17:45:24.000Z"
+  },
+  "after": {
+    "ino": "25051272927310967",
+    "size": 49,
+    "blocks": 0,
+    "mtime": "2026-09-29T18:39:30.125Z"
+  },
+  "renameAttempts": 1
+}

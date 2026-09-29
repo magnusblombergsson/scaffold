@@ -1,0 +1,18 @@
+{
+  "host": "DESKTOP-7LMMOCE",
+  "label": "append-A-stale",
+  "at": "2026-09-29T18:38:58.053Z",
+  "file": "conversations\\conv.jsonl",
+  "before": {
+    "ino": "562949953900616",
+    "size": 73,
+    "blocks": 0,
+    "mtime": "2026-09-29T17:45:24.451Z"
+  },
+  "after": {
+    "ino": "562949953900616",
+    "size": 148,
+    "blocks": 0,
+    "mtime": "2026-09-29T18:38:58.042Z"
+  }
+}

@@ -1,0 +1,58 @@
+{
+  "host": "DESKTOP-7LMMOCE",
+  "label": "snapshot-A-2",
+  "at": "2026-09-29T18:34:49.845Z",
+  "files": [
+    {
+      "rel": "conversations\\conv.jsonl",
+      "attrib": "A",
+      "ino": "562949953900616",
+      "size": 73,
+      "blocks": 0,
+      "mtime": "2026-09-29T17:45:24.451Z",
+      "sha": "9fefdb691f3f",
+      "head": [
+        "{\"by\":\"DESKTOP-7LMMOCE\",\"label\":\"setup\",\"at\":\"2026-09-29T17:45:24.454Z\"}"
+      ]
+    },
+    {
+      "rel": "project.json",
+      "attrib": "A",
+      "ino": "562949953900614",
+      "size": 82,
+      "blocks": 0,
+      "mtime": "2026-09-29T17:45:24.435Z",
+      "sha": "0eec51aac616",
+      "head": [
+        "{",
+        "  \"probe\": true,",
+        "  \"by\": \"DESKTOP-7LMMOCE\","
+      ]
+    },
+    {
+      "rel": "scenes\\big.md",
+      "attrib": "A",
+      "ino": "3096224744296552",
+      "size": 20971562,
+      "blocks": 40968,
+      "mtime": "2026-09-29T18:31:59.849Z",
+      "sha": "d66074e6e59f",
+      "head": [
+        "DESKTOP-7LMMOCE burst-20 2026-09-29T18:31:59.817Z",
+        "lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem "
+      ]
+    },
+    {
+      "rel": "scenes\\scene.md",
+      "attrib": "A",
+      "ino": "562949953900641",
+      "size": 48,
+      "blocks": 0,
+      "mtime": "2026-09-29T18:23:56.706Z",
+      "sha": "a403d224f705",
+      "head": [
+        "DESKTOP-7LMMOCE edit-3 2026-09-29T18:23:56.705Z"
+      ]
+    }
+  ]
+}

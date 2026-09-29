@@ -1,0 +1,128 @@
+{
+  "host": "DESKTOP-7LMMOCE",
+  "label": "burst",
+  "at": "2026-09-29T18:32:00.427Z",
+  "saves": [
+    {
+      "i": 1,
+      "head": "DESKTOP-7LMMOCE burst-1 2026-09-29T18:31:48.094Z",
+      "attempts": 1,
+      "at": "2026-09-29T18:31:48.201Z"
+    },
+    {
+      "i": 2,
+      "head": "DESKTOP-7LMMOCE burst-2 2026-09-29T18:31:48.705Z",
+      "attempts": 1,
+      "at": "2026-09-29T18:31:48.806Z"
+    },
+    {
+      "i": 3,
+      "head": "DESKTOP-7LMMOCE burst-3 2026-09-29T18:31:49.315Z",
+      "attempts": 1,
+      "at": "2026-09-29T18:31:49.426Z"
+    },
+    {
+      "i": 4,
+      "head": "DESKTOP-7LMMOCE burst-4 2026-09-29T18:31:49.940Z",
+      "attempts": 1,
+      "at": "2026-09-29T18:31:50.054Z"
+    },
+    {
+      "i": 5,
+      "head": "DESKTOP-7LMMOCE burst-5 2026-09-29T18:31:50.581Z",
+      "attempts": 1,
+      "at": "2026-09-29T18:31:50.686Z"
+    },
+    {
+      "i": 6,
+      "head": "DESKTOP-7LMMOCE burst-6 2026-09-29T18:31:51.191Z",
+      "attempts": 1,
+      "at": "2026-09-29T18:31:51.293Z"
+    },
+    {
+      "i": 7,
+      "head": "DESKTOP-7LMMOCE burst-7 2026-09-29T18:31:51.803Z",
+      "attempts": 1,
+      "at": "2026-09-29T18:31:51.929Z"
+    },
+    {
+      "i": 8,
+      "head": "DESKTOP-7LMMOCE burst-8 2026-09-29T18:31:52.442Z",
+      "attempts": 1,
+      "at": "2026-09-29T18:31:52.555Z"
+    },
+    {
+      "i": 9,
+      "head": "DESKTOP-7LMMOCE burst-9 2026-09-29T18:31:53.065Z",
+      "attempts": 1,
+      "at": "2026-09-29T18:31:53.163Z"
+    },
+    {
+      "i": 10,
+      "head": "DESKTOP-7LMMOCE burst-10 2026-09-29T18:31:53.676Z",
+      "attempts": 1,
+      "at": "2026-09-29T18:31:53.778Z"
+    },
+    {
+      "i": 11,
+      "head": "DESKTOP-7LMMOCE burst-11 2026-09-29T18:31:54.299Z",
+      "attempts": 1,
+      "at": "2026-09-29T18:31:54.401Z"
+    },
+    {
+      "i": 12,
+      "head": "DESKTOP-7LMMOCE burst-12 2026-09-29T18:31:54.909Z",
+      "attempts": 1,
+      "at": "2026-09-29T18:31:55.018Z"
+    },
+    {
+      "i": 13,
+      "head": "DESKTOP-7LMMOCE burst-13 2026-09-29T18:31:55.523Z",
+      "attempts": 1,
+      "at": "2026-09-29T18:31:55.644Z"
+    },
+    {
+      "i": 14,
+      "head": "DESKTOP-7LMMOCE burst-14 2026-09-29T18:31:56.145Z",
+      "attempts": 1,
+      "at": "2026-09-29T18:31:56.240Z"
+    },
+    {
+      "i": 15,
+      "head": "DESKTOP-7LMMOCE burst-15 2026-09-29T18:31:56.752Z",
+      "attempts": 1,
+      "at": "2026-09-29T18:31:56.850Z"
+    },
+    {
+      "i": 16,
+      "head": "DESKTOP-7LMMOCE burst-16 2026-09-29T18:31:57.363Z",
+      "attempts": 1,
+      "at": "2026-09-29T18:31:57.465Z"
+    },
+    {
+      "i": 17,
+      "head": "DESKTOP-7LMMOCE burst-17 2026-09-29T18:31:57.986Z",
+      "attempts": 1,
+      "at": "2026-09-29T18:31:58.096Z"
+    },
+    {
+      "i": 18,
+      "head": "DESKTOP-7LMMOCE burst-18 2026-09-29T18:31:58.612Z",
+      "attempts": 1,
+      "at": "2026-09-29T18:31:58.723Z"
+    },
+    {
+      "i": 19,
+      "head": "DESKTOP-7LMMOCE burst-19 2026-09-29T18:31:59.224Z",
+      "attempts": 1,
+      "at": "2026-09-29T18:31:59.314Z"
+    },
+    {
+      "i": 20,
+      "head": "DESKTOP-7LMMOCE burst-20 2026-09-29T18:31:59.817Z",
+      "attempts": 1,
+      "at": "2026-09-29T18:31:59.918Z"
+    }
+  ],
+  "final": "DESKTOP-7LMMOCE burst-20 2026-09-29T18:31:59.817Z"
+}

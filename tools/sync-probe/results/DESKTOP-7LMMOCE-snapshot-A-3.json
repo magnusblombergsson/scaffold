@@ -1,0 +1,94 @@
+{
+  "host": "DESKTOP-7LMMOCE",
+  "label": "snapshot-A-3",
+  "at": "2026-09-29T18:43:12.611Z",
+  "files": [
+    {
+      "rel": "conversations\\conv-DESKTOP-7LMMOCE.jsonl",
+      "attrib": "A",
+      "ino": "562949953900616",
+      "size": 148,
+      "blocks": 0,
+      "mtime": "2026-09-29T18:38:58.042Z",
+      "sha": "68e803303919",
+      "head": [
+        "{\"by\":\"DESKTOP-7LMMOCE\",\"label\":\"setup\",\"at\":\"2026-09-29T17:45:24.454Z\"}",
+        "{\"by\":\"DESKTOP-7LMMOCE\",\"label\":\"A-stale\",\"at\":\"2026-09-29T18:38:58.039Z\"}"
+      ]
+    },
+    {
+      "rel": "conversations\\conv.jsonl",
+      "attrib": "AO",
+      "ino": "844424930611310",
+      "size": 148,
+      "blocks": 0,
+      "mtime": "2026-09-29T18:39:43.000Z",
+      "sha": "dc475b54a804",
+      "head": [
+        "{\"by\":\"DESKTOP-7LMMOCE\",\"label\":\"setup\",\"at\":\"2026-09-29T17:45:24.454Z\"}",
+        "{\"by\":\"LAPTOP-BNNV69H3\",\"label\":\"B-fresh\",\"at\":\"2026-09-29T18:39:43.862Z\"}"
+      ]
+    },
+    {
+      "rel": "project-DESKTOP-7LMMOCE.json",
+      "attrib": "A",
+      "ino": "562949953900651",
+      "size": 49,
+      "blocks": 0,
+      "mtime": "2026-09-29T18:38:45.695Z",
+      "sha": "7f0062bb3597",
+      "head": [
+        "DESKTOP-7LMMOCE A-stale 2026-09-29T18:38:45.694Z"
+      ]
+    },
+    {
+      "rel": "project.json",
+      "attrib": "AO",
+      "ino": "844424930611309",
+      "size": 49,
+      "blocks": 0,
+      "mtime": "2026-09-29T18:39:30.000Z",
+      "sha": "de5db7441fa4",
+      "head": [
+        "LAPTOP-BNNV69H3 B-fresh 2026-09-29T18:39:30.124Z"
+      ]
+    },
+    {
+      "rel": "scenes\\big.md",
+      "attrib": "A",
+      "ino": "3096224744296552",
+      "size": 20971562,
+      "blocks": 40968,
+      "mtime": "2026-09-29T18:31:59.849Z",
+      "sha": "d66074e6e59f",
+      "head": [
+        "DESKTOP-7LMMOCE burst-20 2026-09-29T18:31:59.817Z",
+        "lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem ipsum lorem "
+      ]
+    },
+    {
+      "rel": "scenes\\scene-DESKTOP-7LMMOCE.md",
+      "attrib": "A",
+      "ino": "1970324836976382",
+      "size": 49,
+      "blocks": 0,
+      "mtime": "2026-09-29T18:38:29.922Z",
+      "sha": "495779c6fec2",
+      "head": [
+        "DESKTOP-7LMMOCE A-stale 2026-09-29T18:38:29.921Z"
+      ]
+    },
+    {
+      "rel": "scenes\\scene.md",
+      "attrib": "AO",
+      "ino": "562949953900655",
+      "size": 49,
+      "blocks": 0,
+      "mtime": "2026-09-29T18:39:18.000Z",
+      "sha": "586f9328ba87",
+      "head": [
+        "LAPTOP-BNNV69H3 B-fresh 2026-09-29T18:39:18.192Z"
+      ]
+    }
+  ]
+}

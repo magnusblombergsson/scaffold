@@ -5,14 +5,18 @@ Checklist for [Hands-on test: sync clients vs rename-over saves and conflicts](h
 - **A** is this PC (`DESKTOP-7LMMOCE`).
 - **B** is the other PC. It needs Node 20+ and the same OneDrive account.
 
-`P` is the probe folder, `%OneDrive%\sync-probe`. Every command writes a report to `P\_reports\`, and the reports sync back to A. Wait for the OneDrive tray icon to show "up to date" wherever a step says **settle**.
+`P` is the `sync-probe` folder in the **personal** OneDrive. Its path differs per machine: `$env:OneDrive` may point at a work account, and `$env:OneDriveConsumer` is the personal one when both are signed in. Every command writes a report to `P\_reports\`, and the reports sync back to A. Wait for the OneDrive tray icon to show "up to date" wherever a step says **settle**.
 
-Run every command from a terminal opened in `P`: `cd /d "%OneDrive%\sync-probe"`, then `node _tool\sync-probe.mjs ...` (shortened to `probe ...` below). The run takes about 30 minutes.
+On each machine, open PowerShell, `cd` into `P`, and paste this line once. It defines the `probe` command used below. Every command runs from `P`. The run takes about 30 minutes.
+
+```powershell
+function probe { node .\_tool\sync-probe.mjs @args }
+```
 
 ## 0. Setup (A)
 
-1. `node <repo>\tools\sync-probe\sync-probe.mjs setup "%OneDrive%\sync-probe"`
-2. `probe snapshot . A-0`, then **settle**.
+1. `node <repo>\tools\sync-probe\sync-probe.mjs setup <P>` (already done on A).
+2. `probe snapshot . A-0` (already done on A), then **settle**.
 3. On B, wait until `P` has appeared, then run `probe snapshot . B-0`. This shows whether new files arrive on B as online-only placeholders.
 
 ## 1. Is a rename-over save an edit? (A saves, B watches)

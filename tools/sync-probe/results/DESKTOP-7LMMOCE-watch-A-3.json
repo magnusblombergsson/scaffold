@@ -1,0 +1,122 @@
+{
+  "host": "DESKTOP-7LMMOCE",
+  "label": "watch-A-3",
+  "at": "2026-09-29T18:43:05.727Z",
+  "events": [
+    {
+      "at": "2026-09-29T18:40:49.109Z",
+      "type": "change",
+      "name": "project.json"
+    },
+    {
+      "at": "2026-09-29T18:40:49.130Z",
+      "type": "rename",
+      "name": "project.json"
+    },
+    {
+      "at": "2026-09-29T18:40:49.131Z",
+      "type": "rename",
+      "name": "project-DESKTOP-7LMMOCE.json"
+    },
+    {
+      "at": "2026-09-29T18:40:49.134Z",
+      "type": "change",
+      "name": "project-DESKTOP-7LMMOCE.json"
+    },
+    {
+      "at": "2026-09-29T18:40:49.138Z",
+      "type": "change",
+      "name": "project.json"
+    },
+    {
+      "at": "2026-09-29T18:40:49.140Z",
+      "type": "change",
+      "name": "project.json"
+    },
+    {
+      "at": "2026-09-29T18:40:49.251Z",
+      "type": "rename",
+      "name": "conversations\\conv.jsonl"
+    },
+    {
+      "at": "2026-09-29T18:40:49.254Z",
+      "type": "rename",
+      "name": "conversations\\conv-DESKTOP-7LMMOCE.jsonl"
+    },
+    {
+      "at": "2026-09-29T18:40:49.256Z",
+      "type": "change",
+      "name": "conversations"
+    },
+    {
+      "at": "2026-09-29T18:40:49.258Z",
+      "type": "change",
+      "name": "conversations\\conv-DESKTOP-7LMMOCE.jsonl"
+    },
+    {
+      "at": "2026-09-29T18:40:49.260Z",
+      "type": "change",
+      "name": "conversations\\conv-DESKTOP-7LMMOCE.jsonl"
+    },
+    {
+      "at": "2026-09-29T18:40:49.261Z",
+      "type": "change",
+      "name": "conversations\\conv.jsonl"
+    },
+    {
+      "at": "2026-09-29T18:40:49.262Z",
+      "type": "change",
+      "name": "conversations\\conv.jsonl"
+    },
+    {
+      "at": "2026-09-29T18:40:49.309Z",
+      "type": "change",
+      "name": "scenes\\scene.md"
+    },
+    {
+      "at": "2026-09-29T18:40:49.397Z",
+      "type": "rename",
+      "name": "scenes\\scene.md"
+    },
+    {
+      "at": "2026-09-29T18:40:49.398Z",
+      "type": "rename",
+      "name": "scenes\\scene-DESKTOP-7LMMOCE.md"
+    },
+    {
+      "at": "2026-09-29T18:40:49.401Z",
+      "type": "change",
+      "name": "scenes"
+    },
+    {
+      "at": "2026-09-29T18:40:49.403Z",
+      "type": "change",
+      "name": "scenes\\scene-DESKTOP-7LMMOCE.md"
+    },
+    {
+      "at": "2026-09-29T18:40:49.406Z",
+      "type": "change",
+      "name": "scenes\\scene.md"
+    },
+    {
+      "at": "2026-09-29T18:40:49.408Z",
+      "type": "change",
+      "name": "scenes\\scene.md"
+    },
+    {
+      "at": "2026-09-29T18:41:32.254Z",
+      "type": "change",
+      "name": "project-DESKTOP-7LMMOCE.json"
+    },
+    {
+      "at": "2026-09-29T18:41:32.522Z",
+      "type": "change",
+      "name": "conversations\\conv-DESKTOP-7LMMOCE.jsonl"
+    },
+    {
+      "at": "2026-09-29T18:41:32.649Z",
+      "type": "change",
+      "name": "scenes\\scene-DESKTOP-7LMMOCE.md"
+    }
+  ]
+}
