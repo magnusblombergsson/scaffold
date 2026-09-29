@@ -8,6 +8,7 @@ A Project folder holds one file per Scene, Entry, Outline and Notes, each named 
 - **Order in filename prefixes (Manuskript)**: a reorder renames every following file.
 - **One file for the whole Project (bibisco)**: every edit conflicts with every other edit, and a crash can zero the whole novel.
 - **Nested `chapters/<id>/` folders**: moving a Scene becomes a cross-folder file move.
+- **A database (SQLite) in the Project folder**: gives queries and integrity, but it is one binary file that sync clients can only replace whole. That is the bibisco failure again, and the Project stops being readable or diffable outside the app.
 
 ## Consequences
 
@@ -15,3 +16,4 @@ A Project folder holds one file per Scene, Entry, Outline and Notes, each named 
 - Each file also carries its id inside it, so a sync conflict copy can be matched back to its unit.
 - The manifest holds structure only. Per-unit metadata (POV, status, targets) goes in the frontmatter of `outlines/<id>.md`, so the file every open depends on changes only on add, move, rename or delete.
 - An Entry's private notes live in a separate `private/` directory that the Assistant-context loader is never given.
+- The files are the only source of truth. If scanning them gets slow (mention detection, a Project-wide Proposal list, search), a derived index may live in `userData`, keyed by Project id. It is never synced, and it can always be deleted and rebuilt from the files. The MVP has none.
