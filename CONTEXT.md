@@ -48,7 +48,7 @@ A character's way of speaking, described in its Entry as traits (register, rhyth
 _Avoid_: Tone, style (when meaning a character's speech)
 
 **Proposal**:
-A change to the Story Bible or an Outline suggested by the Assistant during a Conversation; it takes effect only when the Author accepts it, optionally after editing it. A Proposal is stale when its target has changed since it was made. Proposals never touch Prose, Notes, or private notes.
+A change to the Story Bible or an Outline suggested by the Assistant during a Conversation; it takes effect only when the Author accepts it, optionally after editing it. A Proposal is stale when its target has changed since it was made. An accepted Proposal can be undone while its target still holds the accepted values; it then becomes pending again. Proposals never touch Prose, Notes, or private notes.
 _Avoid_: Suggestion (when meaning a Story Bible change), auto-save
 
 **Outline**:
@@ -62,6 +62,10 @@ _Avoid_: Comments (when meaning the Author's own), annotations
 **Trash**:
 Where deleted Scenes and Entries go within a Project; they stay recoverable until the Author empties it.
 _Avoid_: Bin, archive
+
+**Export**:
+A copy of the whole Manuscript's Prose written outside the Project for others to read: Chapter titles as headings, Scenes separated by a break, nothing else from the Project (no Scene titles, Outlines, Notes, Story Bible or Conversations).
+_Avoid_: Compile, publish, backup
 
 **Conflict**:
 Two or more versions of one Scene, Outline, Notes or Entry, saved on different computers or at the same moment, kept side by side until the Author chooses one or merges them; the others go to Trash. A diverged Conversation is not a Conflict: it becomes a second Conversation.
