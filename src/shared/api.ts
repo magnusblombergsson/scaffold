@@ -1,4 +1,9 @@
-import type { ProjectTree, UnitRef, UnitValue } from './project-types';
+import type {
+  ProjectTree,
+  ProseLanguage,
+  UnitRef,
+  UnitValue,
+} from './project-types';
 
 // The preload exposes these two objects on `window`. Main registers a handler
 // per method, and both sides are checked against these interfaces.
@@ -12,7 +17,11 @@ export interface ProjectApi {
   hasUnsaved(): Promise<boolean>;
 }
 
-export type OpenedProject = { displayName: string; tree: ProjectTree };
+export type OpenedProject = {
+  displayName: string;
+  language: ProseLanguage;
+  tree: ProjectTree;
+};
 
 /** Null when the Author cancelled the dialog. */
 export type OpenResult =

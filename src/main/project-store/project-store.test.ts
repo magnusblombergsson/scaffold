@@ -194,4 +194,33 @@ describe('ProjectStore', () => {
     });
     expect(manifest).not.toHaveProperty('title');
   });
+
+  it('reports the language of the Prose from project.json', async () => {
+    const swedish = path.join(dir, 'Min roman');
+    await (await createProject(swedish, deps(), { language: 'sv-SE' })).close();
+    expect((await openProject(swedish, deps())).language).toBe('sv-SE');
+
+    const english = path.join(dir, 'My Novel');
+    await (await createProject(english, deps())).close();
+    expect((await openProject(english, deps())).language).toBe('en-US');
+  });
+
+  it('reads an unknown language as English and any Swedish one as Swedish', async () => {
+    const projectPath = path.join(dir, 'My Novel');
+    await (await createProject(projectPath, deps())).close();
+    const manifestPath = path.join(projectPath, 'project.json');
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+
+    await writeFile(
+      manifestPath,
+      JSON.stringify({ ...manifest, language: 'sv' }),
+    );
+    expect((await openProject(projectPath, deps())).language).toBe('sv-SE');
+
+    await writeFile(
+      manifestPath,
+      JSON.stringify({ ...manifest, language: 'de-DE' }),
+    );
+    expect((await openProject(projectPath, deps())).language).toBe('en-US');
+  });
 });

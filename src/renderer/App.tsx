@@ -56,7 +56,11 @@ export function App() {
         <span className="header-actions">{startButtons}</span>
       </header>
       {error && <p role="alert">{error}</p>}
-      <SceneEditor key={scene.id} sceneId={scene.id} />
+      <SceneEditor
+        key={scene.id}
+        sceneId={scene.id}
+        language={project.language}
+      />
     </div>
   );
 }

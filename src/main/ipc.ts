@@ -88,9 +88,16 @@ async function replaceStore(
   }
   await stores.get(sender.id)?.close();
   stores.set(sender.id, store);
+  // On macOS the OS chooses the spellchecker language.
+  if (process.platform !== 'darwin')
+    sender.session.setSpellCheckerLanguages([store.language]);
   return {
     ok: true,
-    project: { displayName: store.displayName, tree: store.tree() },
+    project: {
+      displayName: store.displayName,
+      language: store.language,
+      tree: store.tree(),
+    },
   };
 }
 

@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
-import type {
-  ProjectTree,
-  SceneValue,
-  UnitRef,
-  UnitValue,
+import {
+  proseLanguage,
+  type ProjectTree,
+  type ProseLanguage,
+  type SceneValue,
+  type UnitRef,
+  type UnitValue,
 } from '../../shared/project-types';
 import type { Clock } from './clock';
 import type { FileSystem } from './file-system';
@@ -117,6 +119,11 @@ export class ProjectStore {
 
   get displayName(): string {
     return path.basename(this.path);
+  }
+
+  /** The language the Prose is spellchecked and typeset in. */
+  get language(): ProseLanguage {
+    return proseLanguage(this.manifest.language);
   }
 
   tree(): ProjectTree {

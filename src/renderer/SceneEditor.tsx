@@ -1,16 +1,19 @@
-import Document from '@tiptap/extension-document';
-import Paragraph from '@tiptap/extension-paragraph';
-import Text from '@tiptap/extension-text';
-import { UndoRedo } from '@tiptap/extensions';
 import { EditorContent, useEditor } from '@tiptap/react';
 import { useEffect, useRef, useState } from 'react';
-import type { SceneRef } from '../shared/project-types';
+import type { ProseLanguage, SceneRef } from '../shared/project-types';
 import { createAutosave } from './autosave';
 import { registerPendingEdits } from './pending-edits';
+import { proseExtensions } from './prose-editor';
 import { docToMarkdown, markdownToDoc } from './prose-markdown';
 
 /** Loads a Scene's Prose, then hands it to the editor. */
-export function SceneEditor({ sceneId }: { sceneId: string }) {
+export function SceneEditor({
+  sceneId,
+  language,
+}: {
+  sceneId: string;
+  language: ProseLanguage;
+}) {
   const [markdown, setMarkdown] = useState<string | null>(null);
 
   useEffect(() => {
@@ -24,14 +27,22 @@ export function SceneEditor({ sceneId }: { sceneId: string }) {
   }, [sceneId]);
 
   if (markdown === null) return <div className="editor loading" />;
-  return <ProseEditor sceneId={sceneId} initialMarkdown={markdown} />;
+  return (
+    <ProseEditor
+      sceneId={sceneId}
+      language={language}
+      initialMarkdown={markdown}
+    />
+  );
 }
 
 function ProseEditor({
   sceneId,
+  language,
   initialMarkdown,
 }: {
   sceneId: string;
+  language: ProseLanguage;
   initialMarkdown: string;
 }) {
   const ref: SceneRef = { kind: 'scene', id: sceneId };
@@ -42,11 +53,16 @@ function ProseEditor({
   ).current;
 
   const editor = useEditor({
-    extensions: [Document, Paragraph, Text, UndoRedo],
+    extensions: proseExtensions(language),
     content: markdownToDoc(initialMarkdown),
     autofocus: 'end',
     editorProps: {
-      attributes: { class: 'prose', 'aria-label': 'Prose', spellcheck: 'true' },
+      attributes: {
+        class: 'prose',
+        'aria-label': 'Prose',
+        spellcheck: 'true',
+        lang: language,
+      },
     },
     onUpdate: ({ editor }) => autosave.change(docToMarkdown(editor.getJSON())),
   });

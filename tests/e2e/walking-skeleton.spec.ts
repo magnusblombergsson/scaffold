@@ -1,50 +1,11 @@
-import {
-  _electron as electron,
-  expect,
-  test,
-  type ElectronApplication,
-} from '@playwright/test';
-import { mkdtemp, rm } from 'node:fs/promises';
-import { tmpdir } from 'node:os';
+import { expect, test } from '@playwright/test';
 import path from 'node:path';
+import { answerDialogs, launch, useTempDir } from './app';
 
-const root = path.resolve(__dirname, '../..');
-
-let dir: string;
-test.beforeEach(async () => {
-  dir = await mkdtemp(path.join(tmpdir(), 'writing-tools-e2e-'));
-});
-test.afterEach(async () => {
-  await rm(dir, { recursive: true, force: true });
-});
-
-function launch() {
-  // Terminals inside VS Code set ELECTRON_RUN_AS_NODE, which would start
-  // Electron as plain Node.
-  const { ELECTRON_RUN_AS_NODE: _, ...env } = process.env;
-  return electron.launch({
-    args: [root],
-    cwd: root,
-    env: env as Record<string, string>,
-  });
-}
-
-/** Native dialogs can't be driven, so answer them from main. */
-async function answerDialogs(app: ElectronApplication, projectPath: string) {
-  await app.evaluate(({ dialog }, projectPath) => {
-    dialog.showSaveDialog = async () => ({
-      canceled: false,
-      filePath: projectPath,
-    });
-    dialog.showOpenDialog = async () => ({
-      canceled: false,
-      filePaths: [projectPath],
-    });
-  }, projectPath);
-}
+const tempDir = useTempDir();
 
 test('the Author creates a Project, writes a Scene, and finds it after a restart', async () => {
-  const projectPath = path.join(dir, 'My Novel');
+  const projectPath = path.join(tempDir(), 'My Novel');
 
   const first = await launch();
   await answerDialogs(first, projectPath);
