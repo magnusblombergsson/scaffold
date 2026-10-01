@@ -28,11 +28,20 @@ type Handlers = {
 };
 
 const projectHandlers: Handlers = {
-  tree: async (store) => store.tree(),
+  manuscript: async (store) => store.manuscript(),
   read: (store, ref) => store.read(ref),
   write: (store, ref, value) => store.write(ref, value),
   flush: (store) => store.flush(),
   hasUnsaved: async (store) => store.hasUnsaved(),
+  createChapter: (store, index, title) => store.createChapter(index, title),
+  createScene: (store, chapterId, index, title) =>
+    store.createScene(chapterId, index, title),
+  renameChapter: (store, chapterId, title) =>
+    store.renameChapter(chapterId, title),
+  renameScene: (store, sceneId, title) => store.renameScene(sceneId, title),
+  moveChapter: (store, chapterId, index) => store.moveChapter(chapterId, index),
+  moveScene: (store, sceneId, chapterId, index) =>
+    store.moveScene(sceneId, chapterId, index),
 };
 
 export function registerIpc(): void {
@@ -96,7 +105,7 @@ async function replaceStore(
     project: {
       displayName: store.displayName,
       language: store.language,
-      tree: store.tree(),
+      manuscript: store.manuscript(),
     },
   };
 }

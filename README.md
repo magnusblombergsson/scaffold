@@ -2,7 +2,7 @@
 
 A desktop writing app for creative fiction. The Author writes Prose in an editor, and an AI Assistant beside it asks questions, comments, and proposes changes to the Story Bible and Outlines. The Assistant never writes the Prose itself.
 
-**Status:** early development. The walking skeleton is in place: you can create or open a Project and write one Scene, which autosaves. The rest of the MVP is planned as tickets under [Spec: Writing Tools MVP (#30)](https://github.com/magnusblombergsson/writing-tools/issues/30).
+**Status:** early development. You can create or open a Project, organise its Chapters and Scenes in the binder, and write Scenes, which autosave. The rest of the MVP is planned as tickets under [Spec: Writing Tools MVP (#30)](https://github.com/magnusblombergsson/writing-tools/issues/30).
 
 ## Getting started
 

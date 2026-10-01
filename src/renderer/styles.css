@@ -92,3 +92,166 @@ body {
   color: #b3261e;
   padding: 0 1rem;
 }
+
+.project-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.left-pane {
+  width: 16rem;
+  flex-shrink: 0;
+  overflow-y: auto;
+  border-right: 1px solid var(--line);
+  font-size: 0.9rem;
+}
+
+.tabs {
+  display: flex;
+  border-bottom: 1px solid var(--line);
+}
+
+.tabs [role='tab'] {
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  padding: 0.5rem 0.75rem;
+  border-bottom: 2px solid transparent;
+}
+
+.tabs [role='tab'][aria-selected='true'] {
+  border-bottom-color: var(--fg);
+}
+
+.binder {
+  padding: 0.5rem 0;
+}
+
+.binder ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.binder h2 {
+  font-size: inherit;
+  margin: 0;
+}
+
+.binder-chapter-head,
+.binder-scene {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0 0.5rem;
+}
+
+.binder-chapter-head {
+  font-weight: 600;
+  margin-top: 0.5rem;
+}
+
+.binder-scene {
+  padding-left: 1.25rem;
+}
+
+.binder-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: left;
+  padding: 0.2rem 0.25rem;
+}
+
+button.binder-title {
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+button.binder-title[aria-current='true'] {
+  background: var(--line);
+}
+
+.binder-missing {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.binder-rename {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+}
+
+.binder-add {
+  margin: 0.75rem 0.5rem 0;
+}
+
+.binder-unplaced {
+  margin-top: 1rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--line);
+}
+
+.binder-unplaced h2 {
+  color: var(--muted);
+  padding: 0 0.5rem;
+}
+
+.menu {
+  position: relative;
+}
+
+.menu-button {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font: inherit;
+}
+
+.menu-items {
+  position: absolute;
+  right: 0;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  min-width: 11rem;
+  padding: 0.25rem;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 15%);
+}
+
+.menu-items [role='menuitem'] {
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  font-weight: normal;
+  text-align: left;
+  padding: 0.3rem 0.5rem;
+  border-radius: 4px;
+}
+
+.menu-items [role='menuitem']:hover:not(:disabled) {
+  background: var(--line);
+}
+
+.editor.empty,
+.editor.missing {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--muted);
+  padding: 2rem;
+}

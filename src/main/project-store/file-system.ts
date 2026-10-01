@@ -1,4 +1,12 @@
-import { mkdir, open, readFile, rename, stat, unlink } from 'node:fs/promises';
+import {
+  mkdir,
+  open,
+  readdir,
+  readFile,
+  rename,
+  stat,
+  unlink,
+} from 'node:fs/promises';
 
 // The port through which ProjectStore touches the disk. Tests wrap it to
 // inject faults.
@@ -10,6 +18,8 @@ export interface FileSystem {
   mkdir(path: string): Promise<void>;
   exists(path: string): Promise<boolean>;
   unlink(path: string): Promise<void>;
+  /** The names of the files in a directory; none if it doesn't exist. */
+  readdir(path: string): Promise<string[]>;
 }
 
 export const nodeFileSystem: FileSystem = {
@@ -37,4 +47,15 @@ export const nodeFileSystem: FileSystem = {
     }
   },
   unlink: (path) => unlink(path),
+  async readdir(path) {
+    try {
+      const entries = await readdir(path, { withFileTypes: true });
+      return entries
+        .filter((entry) => entry.isFile())
+        .map((entry) => entry.name);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw error;
+    }
+  },
 };

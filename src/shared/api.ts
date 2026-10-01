@@ -1,5 +1,5 @@
 import type {
-  ProjectTree,
+  Manuscript,
   ProseLanguage,
   UnitRef,
   UnitValue,
@@ -8,19 +8,39 @@ import type {
 // The preload exposes these two objects on `window`. Main registers a handler
 // per method, and both sides are checked against these interfaces.
 
+/** A structure operation that made a Chapter or Scene: its id, and the result. */
+export type Created = { id: string; manuscript: Manuscript };
+
 /** Mirrors the main-process ProjectStore of this window's Project. */
 export interface ProjectApi {
-  tree(): Promise<ProjectTree>;
+  manuscript(): Promise<Manuscript>;
   read(ref: UnitRef): Promise<UnitValue>;
   write(ref: UnitRef, value: UnitValue): Promise<void>;
   flush(): Promise<void>;
   hasUnsaved(): Promise<boolean>;
+
+  // Structure operations change only project.json (and write the file of a
+  // new Scene), and resolve with the Manuscript once it is on disk.
+  createChapter(index: number, title?: string): Promise<Created>;
+  createScene(
+    chapterId: string,
+    index: number,
+    title?: string,
+  ): Promise<Created>;
+  renameChapter(chapterId: string, title: string): Promise<Manuscript>;
+  renameScene(sceneId: string, title: string): Promise<Manuscript>;
+  moveChapter(chapterId: string, index: number): Promise<Manuscript>;
+  moveScene(
+    sceneId: string,
+    chapterId: string,
+    index: number,
+  ): Promise<Manuscript>;
 }
 
 export type OpenedProject = {
   displayName: string;
   language: ProseLanguage;
-  tree: ProjectTree;
+  manuscript: Manuscript;
 };
 
 /** Null when the Author cancelled the dialog. */

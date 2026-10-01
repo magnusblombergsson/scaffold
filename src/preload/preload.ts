@@ -2,12 +2,24 @@ import { contextBridge, ipcRenderer } from 'electron';
 import { channel, type ProjectApi, type ShellApi } from '../shared/api';
 
 const project: ProjectApi = {
-  tree: () => ipcRenderer.invoke(channel.project('tree')),
+  manuscript: () => ipcRenderer.invoke(channel.project('manuscript')),
   read: (ref) => ipcRenderer.invoke(channel.project('read'), ref),
   write: (ref, value) =>
     ipcRenderer.invoke(channel.project('write'), ref, value),
   flush: () => ipcRenderer.invoke(channel.project('flush')),
   hasUnsaved: () => ipcRenderer.invoke(channel.project('hasUnsaved')),
+  createChapter: (index, title) =>
+    ipcRenderer.invoke(channel.project('createChapter'), index, title),
+  createScene: (chapterId, index, title) =>
+    ipcRenderer.invoke(channel.project('createScene'), chapterId, index, title),
+  renameChapter: (chapterId, title) =>
+    ipcRenderer.invoke(channel.project('renameChapter'), chapterId, title),
+  renameScene: (sceneId, title) =>
+    ipcRenderer.invoke(channel.project('renameScene'), sceneId, title),
+  moveChapter: (chapterId, index) =>
+    ipcRenderer.invoke(channel.project('moveChapter'), chapterId, index),
+  moveScene: (sceneId, chapterId, index) =>
+    ipcRenderer.invoke(channel.project('moveScene'), sceneId, chapterId, index),
 };
 
 const flushListeners = new Set<() => void>();
