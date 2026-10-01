@@ -31,6 +31,18 @@ An ordered group of Scenes within the Manuscript.
 The smallest movable unit of the Manuscript; the level at which the Assistant compares Prose against its Outline.
 _Avoid_: Section, passage
 
+**Binder**:
+The view of the Manuscript's Chapters and Scenes in order, where the Author opens, arranges and titles them.
+_Avoid_: Outline (that is the structural description), tree, navigator, sidebar
+
+**Unplaced Scene**:
+A Scene that exists in the Project but has no place in the Manuscript's order and isn't in Trash, such as one written on another computer or left by an interrupted change. It stays after the Chapters until the Author places it.
+_Avoid_: Orphan, stray, lost Scene
+
+**Missing**:
+Said of a Scene that the Manuscript lists but whose Prose isn't on this computer, usually because it hasn't synced yet. A Missing Scene is shown but can't be written, and is never replaced by an empty one.
+_Avoid_: Deleted, broken, lost
+
 **Prose**:
 The story text itself — narration and dialogue — as written by the Author. The Assistant never writes, rewrites, or exemplifies Prose; it may comment on it.
 _Avoid_: Text, draft (when meaning the words themselves)
