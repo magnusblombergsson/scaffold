@@ -84,8 +84,8 @@ export type ConflictsChanged = {
 
 /**
  * The Entries in the Story Bible changed, as when one was created, renamed,
- * deleted or restored, here or on another computer: `entries` is all of them
- * now.
+ * given aliases, retyped, deleted or restored, here or on another computer:
+ * `entries` is all of them now.
  */
 export type EntriesChanged = {
   type: 'entriesChanged';
@@ -154,6 +154,11 @@ export interface ProjectApi {
   trashEntry(entryId: string): Promise<Changed>;
   /** Sets when the Assistant sees an Entry, as a step that `undo` reverts. */
   setEntryVisibility(entryId: string, visibility: Visibility): Promise<Changed>;
+  /**
+   * Changes an Entry's type, as a step that `undo` reverts; the fields that
+   * don't fit the new type are written at the end of its description.
+   */
+  setEntryType(entryId: string, type: EntryType): Promise<Changed>;
   /** Puts a Trash item back where it was, as near as the Manuscript allows. */
   restore(id: string): Promise<Changed>;
   /** Reverts `step` if it is still the latest structure operation. */

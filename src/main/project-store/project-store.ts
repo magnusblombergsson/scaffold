@@ -44,8 +44,14 @@ import type {
   UnitSaveStatus,
 } from '../../shared/api';
 import { newerFormatMessage, upgradedMessage } from '../../shared/format-gate';
+import {
+  changeEntryType,
+  emptyFields,
+  revertEntryType,
+} from '../../shared/entry';
 import { unitName } from '../../shared/unit-name';
 import type { Clock } from './clock';
+import { entryFieldsFrontmatter, readEntryFields } from './entry-fields-file';
 import type { FileSystem, Fingerprint } from './file-system';
 import { safeWrite, writeFailureReason } from './safe-write';
 import { formatUnitFile, parseUnitFile, type UnitFile } from './unit-file';
@@ -587,9 +593,10 @@ function entrySummary({
   id,
   type,
   name,
+  aliases,
   visibility,
 }: EntryValue): EntrySummary {
-  return { id, type, name, visibility };
+  return { id, type, name, aliases: [...aliases], visibility };
 }
 
 function trashedEntry(value: EntryValue, info: TrashedEntryInfo): TrashedEntry {
@@ -1448,6 +1455,7 @@ export class ProjectStore {
       aliases: [],
       visibility: DEFAULT_VISIBILITY,
       description: '',
+      fields: emptyFields(type),
     };
     const changed = await this.step(async () => {
       await this.deps.fs.mkdir(path.join(this.path, UNIT_DIRS.entry));
@@ -1478,28 +1486,52 @@ export class ProjectStore {
     visibility: Visibility,
   ): Promise<Changed> {
     return this.step(async () => {
-      const previous = await this.writeVisibility(entryId, visibility);
+      const { before } = await this.changeEntry(entryId, (value) => ({
+        ...value,
+        visibility,
+      }));
       return async () => {
-        await this.writeVisibility(entryId, previous);
+        await this.changeEntry(entryId, (value) => ({
+          ...value,
+          visibility: before.visibility,
+        }));
       };
     });
   }
 
   /**
-   * Writes an Entry's visibility, keeping what else was written to it, and
-   * waits until it is saved or has failed to be. Resolves with the visibility
-   * it had.
+   * Changes an Entry's type, writing the fields that don't fit it at the end
+   * of its description. Undo brings back its type and fields, and takes out
+   * that text if it is still at the end.
    */
-  private async writeVisibility(
+  setEntryType(entryId: string, type: EntryType): Promise<Changed> {
+    return this.step(async () => {
+      const { before, after } = await this.changeEntry(entryId, (value) =>
+        changeEntryType(value, type),
+      );
+      return async () => {
+        await this.changeEntry(entryId, (value) =>
+          revertEntryType(value, before, after),
+        );
+      };
+    });
+  }
+
+  /**
+   * Writes `change` of an Entry's latest value, keeping what else was written
+   * to it, and waits until it is saved or has failed to be.
+   */
+  private async changeEntry(
     entryId: string,
-    visibility: Visibility,
-  ): Promise<Visibility> {
+    change: (value: EntryValue) => EntryValue,
+  ): Promise<{ before: EntryValue; after: EntryValue }> {
     const ref = entryRef(entryId);
-    const value = await this.read(ref);
-    await this.write(ref, { ...value, visibility });
+    const before = await this.read(ref);
+    const after = change(structuredClone(before));
+    await this.write(ref, after);
     const key = unitKey(ref);
     while (this.writing.has(key)) await this.writing.get(key);
-    return value.visibility;
+    return { before, after };
   }
 
   private async moveEntryToTrash(entryId: string): Promise<void> {
@@ -2761,7 +2793,8 @@ function unitFile(
  * `bible/<id>.md`: the Entry's fields in frontmatter, its description as the
  * body. A type or visibility this app doesn't know, as a newer app may
  * write, reads as its default and is kept while the value is still that
- * default (the tolerant reader).
+ * default (the tolerant reader); so are type-specific fields this app
+ * doesn't know.
  */
 function entryFile(value: EntryValue, previous: UnknownKeys = {}): string {
   const {
@@ -2772,18 +2805,23 @@ function entryFile(value: EntryValue, previous: UnknownKeys = {}): string {
     ...unknown
   } = previous;
   const { id, name, aliases, description } = value;
-  const type =
-    value.type === 'other' && !ENTRY_TYPES.includes(previousType as EntryType)
-      ? (previousType ?? value.type)
-      : value.type;
+  const keepsType =
+    value.type === 'other' && !ENTRY_TYPES.includes(previousType as EntryType);
+  const type = keepsType ? (previousType ?? value.type) : value.type;
   const visibility =
     value.visibility === DEFAULT_VISIBILITY &&
     !VISIBILITIES.includes(previousVisibility as Visibility)
       ? (previousVisibility ?? value.visibility)
       : value.visibility;
   const { id: _, format, ...rest } = frontmatterOf(id, unknown);
+  const fields = entryFieldsFrontmatter(
+    value.type,
+    value.fields,
+    keepsType ? value.type : previousType,
+    rest,
+  );
   return formatUnitFile({
-    frontmatter: { id, format, type, name, aliases, visibility, ...rest },
+    frontmatter: { id, format, type, name, aliases, visibility, ...fields },
     body: description,
   });
 }
@@ -2802,11 +2840,12 @@ function unitValue(ref: UnitRef, file: UnitFile): UnitValue {
 /** An Entry from its file; a field that is missing or not understood reads as its default. */
 function entryValue(id: string, { frontmatter, body }: UnitFile): EntryValue {
   const { type, name, aliases, visibility } = frontmatter;
+  const entryType = ENTRY_TYPES.includes(type as EntryType)
+    ? (type as EntryType)
+    : 'other';
   return {
     id,
-    type: ENTRY_TYPES.includes(type as EntryType)
-      ? (type as EntryType)
-      : 'other',
+    type: entryType,
     name: typeof name === 'string' ? name : '',
     aliases: Array.isArray(aliases)
       ? aliases.filter((alias) => typeof alias === 'string')
@@ -2815,6 +2854,7 @@ function entryValue(id: string, { frontmatter, body }: UnitFile): EntryValue {
       ? (visibility as Visibility)
       : DEFAULT_VISIBILITY,
     description: body,
+    fields: readEntryFields(entryType, frontmatter),
   };
 }
 

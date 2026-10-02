@@ -41,6 +41,8 @@ const project: ProjectApi = {
       entryId,
       visibility,
     ),
+  setEntryType: (entryId, type) =>
+    ipcRenderer.invoke(channel.project('setEntryType'), entryId, type),
   restore: (id) => ipcRenderer.invoke(channel.project('restore'), id),
   undo: (step) => ipcRenderer.invoke(channel.project('undo'), step),
   listTrash: () => ipcRenderer.invoke(channel.project('listTrash')),

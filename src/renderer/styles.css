@@ -697,7 +697,7 @@ h2.binder-title > button[aria-current='true'],
   margin: 0.25rem 0 0;
 }
 
-.entry-visibility {
+.entry-choice {
   border: none;
   display: flex;
   flex-wrap: wrap;
@@ -706,7 +706,8 @@ h2.binder-title > button[aria-current='true'],
   padding: 0;
 }
 
-.entry-visibility legend {
+.entry-choice legend,
+.entry-field-group h3 {
   font-size: 0.75rem;
   font-weight: 600;
   text-transform: uppercase;
@@ -714,6 +715,36 @@ h2.binder-title > button[aria-current='true'],
   color: var(--muted);
   margin-bottom: 0.25rem;
   padding: 0;
+}
+
+.entry-type select {
+  margin-left: 0.5rem;
+}
+
+.entry-collisions {
+  list-style: none;
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid rgb(176 120 0 / 50%);
+  border-radius: 6px;
+  background: rgb(176 120 0 / 10%);
+  font-size: 0.85rem;
+}
+
+.entry-field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.entry-field-group h4 {
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.plain-text.short {
+  min-height: 1.5em;
 }
 
 .private-notes {
@@ -731,4 +762,8 @@ h2.binder-title > button[aria-current='true'],
 .conflict-entry-name {
   font-weight: 600;
   margin: 0;
+}
+
+.entry-field-group h3 {
+  margin-top: 0;
 }

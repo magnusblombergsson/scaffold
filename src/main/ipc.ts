@@ -45,6 +45,7 @@ const projectHandlers: Handlers = {
   trashEntry: (store, entryId) => store.trashEntry(entryId),
   setEntryVisibility: (store, entryId, visibility) =>
     store.setEntryVisibility(entryId, visibility),
+  setEntryType: (store, entryId, type) => store.setEntryType(entryId, type),
   restore: (store, id) => store.restore(id),
   undo: (store, step) => store.undo(step),
   listTrash: async (store) => store.listTrash(),

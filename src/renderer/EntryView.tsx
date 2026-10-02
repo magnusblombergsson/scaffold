@@ -1,13 +1,24 @@
 import { useEffect, useRef, useState } from 'react';
+import { entryCollisions } from '../shared/entry';
 import {
   ENTRY_TYPE_LABELS,
+  ENTRY_TYPES,
+  ROLES,
+  THREAD_STATUSES,
   unitKey,
   VISIBILITIES,
+  type EntryFields,
+  type EntrySummary,
+  type EntryType,
   type EntryValue,
   type PrivateValue,
   type ProseLanguage,
+  type Role,
+  type Senses,
+  type ThreadStatus,
   type UnitValue,
   type Visibility,
+  type Voice,
 } from '../shared/project-types';
 import {
   docToText,
@@ -15,6 +26,7 @@ import {
   singleLineExtensions,
   textToDoc,
 } from './plain-text-editor';
+import { entryTitle } from './StoryBible';
 import { UnitEditor } from './UnitEditor';
 
 export const VISIBILITY_LABELS: Record<Visibility, string> = {
@@ -23,8 +35,19 @@ export const VISIBILITY_LABELS: Record<Visibility, string> = {
   never: 'Never',
 };
 
-/** One alias per line; blank lines and surrounding spaces don't count. */
-export function textToAliases(text: string): string[] {
+const ROLE_LABELS: Record<Role, string> = {
+  protagonist: 'Protagonist',
+  supporting: 'Supporting',
+  mentioned: 'Mentioned only',
+};
+
+const STATUS_LABELS: Record<ThreadStatus, string> = {
+  open: 'Open',
+  resolved: 'Resolved',
+};
+
+/** One item per line; blank lines and surrounding spaces don't count. */
+export function textToLines(text: string): string[] {
   return text
     .split('\n')
     .map((line) => line.trim())
@@ -36,29 +59,87 @@ const aliasesOf = (value: UnitValue) =>
   (value as EntryValue).aliases.join('\n');
 const descriptionOf = (value: UnitValue) => (value as EntryValue).description;
 
+/** A text field of an Entry's type, and its text in a value of the Entry. */
+type TypeField<K extends string> = {
+  key: K;
+  label: string;
+  hint?: string;
+  text(value: UnitValue): string;
+};
+
+const voiceText =
+  (key: keyof Voice) =>
+  (value: UnitValue): string => {
+    const part = (value as EntryValue).fields.voice?.[key] ?? '';
+    return Array.isArray(part) ? part.join('\n') : part;
+  };
+/** A Character's Voice: its traits as free text, the rest one per line. */
+const VOICE_FIELDS: TypeField<keyof Voice>[] = [
+  {
+    key: 'traits',
+    label: 'Traits',
+    hint: 'Register, rhythm, tics',
+    text: voiceText('traits'),
+  },
+  { key: 'says', label: 'Says', hint: 'One per line', text: voiceText('says') },
+  {
+    key: 'neverSays',
+    label: 'Never says',
+    hint: 'One per line',
+    text: voiceText('neverSays'),
+  },
+  {
+    key: 'examples',
+    label: 'Example lines',
+    hint: 'One per line; only you write these',
+    text: voiceText('examples'),
+  },
+];
+
+const senseText =
+  (key: keyof Senses) =>
+  (value: UnitValue): string =>
+    (value as EntryValue).fields.senses?.[key] ?? '';
+const SENSE_FIELDS: TypeField<keyof Senses>[] = [
+  { key: 'smells', label: 'Smells', text: senseText('smells') },
+  { key: 'sight', label: 'Sight', text: senseText('sight') },
+  { key: 'sound', label: 'Sound', text: senseText('sound') },
+  { key: 'touch', label: 'Touch', text: senseText('touch') },
+  { key: 'atmosphere', label: 'Atmosphere', text: senseText('atmosphere') },
+];
+
 type Loaded = { entry: EntryValue; privateNotes: PrivateValue };
 
 /**
- * An Entry in the centre: its name, aliases, visibility and description,
- * and its private notes, which the Assistant never sees. Each field keeps
- * its own undo history; the Entry and its private notes autosave on their
- * own. Visibility is a step the Author can undo from its toast; it comes in
- * as main has it, since undo changes it from outside this view.
+ * An Entry in the centre: its type, name, aliases, visibility, description
+ * and its type's fields, and its private notes, which the Assistant never
+ * sees. Each text field keeps its own undo history; the Entry and its
+ * private notes autosave on their own. Type and visibility are steps the
+ * Author can undo from their toast; they come in as main has them, since
+ * undo changes them from outside this view, and a type change shows the
+ * Entry anew. A name or alias another Entry also goes by is allowed, with a
+ * warning once it is saved.
  */
 export function EntryView({
-  entryId,
-  visibility,
+  entry: summary,
+  entries,
   language,
+  onType,
   onVisibility,
 }: {
-  entryId: string;
-  visibility: Visibility;
+  entry: EntrySummary;
+  /** Every Entry in the Story Bible, to warn of names they share. */
+  entries: EntrySummary[];
   language: ProseLanguage;
+  onType(type: EntryType): void;
   onVisibility(visibility: Visibility): void;
 }) {
+  const { id: entryId, visibility } = summary;
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   /** The Entry as last written or reloaded; each field's save changes its own part. */
   const value = useRef<EntryValue | null>(null);
+  /** A Character's Role and a Plot Thread's Status, as last saved or reloaded. */
+  const [choices, setChoices] = useState<EntryFields>({});
   const entryKey = unitKey({ kind: 'entry', id: entryId });
 
   useEffect(() => {
@@ -70,6 +151,7 @@ export function EntryView({
       if (!current) return;
       value.current = entry;
       setLoaded({ entry, privateNotes });
+      setChoices(entry.fields);
     });
     const unsubscribe = window.project.subscribe((event) => {
       // Changed on another computer: a save from here keeps the other fields.
@@ -79,6 +161,7 @@ export function EntryView({
         event.ref.id === entryId
       ) {
         value.current = event.value as EntryValue;
+        setChoices(value.current.fields);
       }
     });
     return () => {
@@ -97,6 +180,18 @@ export function EntryView({
     void window.project.write({ kind: 'entry', id: entryId }, value.current);
   }
 
+  function saveFields(change: (fields: EntryFields) => EntryFields) {
+    if (!value.current) return;
+    save({ fields: change(value.current.fields) });
+  }
+
+  function choose(change: EntryFields) {
+    setChoices((choices) => ({ ...choices, ...change }));
+    saveFields((fields) => ({ ...fields, ...change }));
+  }
+
+  const collisions = entryCollisions(summary, entries);
+
   if (!loaded) return <main className="centre loading" />;
   const { entry, privateNotes } = loaded;
   const attributes = (label: string, className = 'plain-text') => ({
@@ -108,7 +203,20 @@ export function EntryView({
 
   return (
     <main className="centre entry-view">
-      <p className="entry-type">{ENTRY_TYPE_LABELS[entry.type]}</p>
+      <label className="entry-type">
+        Type
+        <select
+          aria-label="Type"
+          value={summary.type}
+          onChange={(event) => onType(event.target.value as EntryType)}
+        >
+          {ENTRY_TYPES.map((type) => (
+            <option key={type} value={type}>
+              {ENTRY_TYPE_LABELS[type]}
+            </option>
+          ))}
+        </select>
+      </label>
       <UnitEditor
         unitKey={`${entryKey}:name`}
         field={{ unitKey: entryKey, text: nameOf }}
@@ -128,12 +236,22 @@ export function EntryView({
           extensions={plainTextExtensions({ bullets: false })}
           toDoc={textToDoc}
           toText={docToText}
-          save={(text) => save({ aliases: textToAliases(text) })}
+          save={(text) => save({ aliases: textToLines(text) })}
           attributes={attributes('Aliases')}
         />
         <p className="field-hint">One per line</p>
       </section>
-      <fieldset className="entry-visibility">
+      {collisions.length > 0 && (
+        <ul className="entry-collisions" role="status">
+          {collisions.map(({ name, entry: other }) => (
+            <li key={`${name}:${other.id}`}>
+              <span aria-hidden="true">⚠</span> “{name}” is also a name of the{' '}
+              {ENTRY_TYPE_LABELS[other.type]} “{entryTitle(other)}”
+            </li>
+          ))}
+        </ul>
+      )}
+      <fieldset className="entry-choice">
         <legend>Assistant sees this Entry</legend>
         {VISIBILITIES.map((option) => (
           <label key={option}>
@@ -160,6 +278,92 @@ export function EntryView({
           attributes={attributes('Description')}
         />
       </section>
+      {entry.type === 'character' && (
+        <>
+          <fieldset className="entry-choice">
+            <legend>Role</legend>
+            {ROLES.map((role) => (
+              <label key={role}>
+                <input
+                  type="radio"
+                  name={`role-${entryId}`}
+                  checked={choices.role === role}
+                  onChange={() => choose({ role })}
+                />
+                {ROLE_LABELS[role]}
+              </label>
+            ))}
+          </fieldset>
+          <section className="entry-field-group" aria-label="Voice">
+            <h3>Voice</h3>
+            {VOICE_FIELDS.map(({ key, label, hint, text }) => (
+              <section className="plain-text-field" key={key}>
+                <h4>{label}</h4>
+                <UnitEditor
+                  unitKey={`${entryKey}:voice.${key}`}
+                  field={{ unitKey: entryKey, text }}
+                  text={text(entry)}
+                  extensions={plainTextExtensions({ bullets: false })}
+                  toDoc={textToDoc}
+                  toText={docToText}
+                  save={(typed) =>
+                    saveFields((fields) => ({
+                      ...fields,
+                      voice: {
+                        ...fields.voice!,
+                        [key]: key === 'traits' ? typed : textToLines(typed),
+                      },
+                    }))
+                  }
+                  attributes={attributes(label, 'plain-text short')}
+                />
+                {hint && <p className="field-hint">{hint}</p>}
+              </section>
+            ))}
+          </section>
+        </>
+      )}
+      {entry.type === 'place' && (
+        <section className="entry-field-group" aria-label="Senses">
+          <h3>Senses</h3>
+          {SENSE_FIELDS.map(({ key, label, text }) => (
+            <section className="plain-text-field" key={key}>
+              <h4>{label}</h4>
+              <UnitEditor
+                unitKey={`${entryKey}:senses.${key}`}
+                field={{ unitKey: entryKey, text }}
+                text={text(entry)}
+                extensions={plainTextExtensions({ bullets: false })}
+                toDoc={textToDoc}
+                toText={docToText}
+                save={(typed) =>
+                  saveFields((fields) => ({
+                    ...fields,
+                    senses: { ...fields.senses!, [key]: typed },
+                  }))
+                }
+                attributes={attributes(label, 'plain-text short')}
+              />
+            </section>
+          ))}
+        </section>
+      )}
+      {entry.type === 'plot-thread' && (
+        <fieldset className="entry-choice">
+          <legend>Status</legend>
+          {THREAD_STATUSES.map((status) => (
+            <label key={status}>
+              <input
+                type="radio"
+                name={`status-${entryId}`}
+                checked={choices.status === status}
+                onChange={() => choose({ status })}
+              />
+              {STATUS_LABELS[status]}
+            </label>
+          ))}
+        </fieldset>
+      )}
       <section className="plain-text-field private-notes">
         <h3>Private notes</h3>
         <p className="private-notes-warning">

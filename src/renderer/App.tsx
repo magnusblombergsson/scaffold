@@ -14,6 +14,7 @@ import type {
   Tip,
 } from '../shared/api';
 import {
+  ENTRY_TYPE_LABELS,
   PROJECT_OUTLINE,
   unitKey,
   type EntrySummary,
@@ -462,10 +463,17 @@ function ProjectView({
           ) : selected?.kind === 'entry' ? (
             openEntry ? (
               <EntryView
-                key={openEntry.id}
-                entryId={openEntry.id}
-                visibility={openEntry.visibility}
+                // A type change rewrites its description and fields: read them anew.
+                key={`${openEntry.id}:${openEntry.type}`}
+                entry={openEntry}
+                entries={entries}
                 language={project.language}
+                onType={(type) =>
+                  change(
+                    () => window.project.setEntryType(openEntry.id, type),
+                    `Type changed to ${ENTRY_TYPE_LABELS[type]}`,
+                  )
+                }
                 onVisibility={(visibility) =>
                   change(
                     () =>

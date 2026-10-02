@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ProjectEvent } from '../../shared/api';
+import type { EntryFields, EntryType } from '../../shared/project-types';
 import { createProject, openProject } from './project-store';
 import { nodeFileSystem } from './file-system';
 import { instantClock } from './clock';
@@ -39,12 +40,22 @@ describe('Story Bible Entries', () => {
       aliases: [],
       visibility: 'mentioned',
       description: '',
+      fields: {
+        role: null,
+        voice: { traits: '', says: [], neverSays: [], examples: [] },
+      },
     });
     expect(await readdir(path.join(projectPath, 'bible'))).toEqual([
       `${id}.md`,
     ]);
     expect(store.listEntries()).toEqual([
-      { id, type: 'character', name: 'Anna', visibility: 'mentioned' },
+      {
+        id,
+        type: 'character',
+        name: 'Anna',
+        aliases: [],
+        visibility: 'mentioned',
+      },
     ]);
   });
 
@@ -59,6 +70,9 @@ describe('Story Bible Entries', () => {
       aliases: ['Hamnen', 'the docks'],
       visibility: 'always',
       description: 'Where the boats come in.',
+      fields: {
+        senses: { smells: '', sight: '', sound: '', touch: '', atmosphere: '' },
+      },
     });
     await store.write(privateNotes(id), { id, body: 'Based on Gävle.' });
     await store.close();
@@ -88,12 +102,99 @@ describe('Story Bible Entries', () => {
 
     const reopened = await openProject(projectPath, deps());
     expect(reopened.listEntries()).toEqual([
-      { id, type: 'place', name: 'The Harbour', visibility: 'always' },
+      {
+        id,
+        type: 'place',
+        name: 'The Harbour',
+        aliases: ['Hamnen', 'the docks'],
+        visibility: 'always',
+      },
     ]);
     expect(await reopened.read(privateNotes(id))).toEqual({
       id,
       body: 'Based on Gävle.',
     });
+  });
+
+  it('starts each type with its own fields empty, and a Plot Thread open', async () => {
+    const { store } = await newProject();
+    const fieldsOf = async (type: EntryType) =>
+      (await store.read(entry((await store.createEntry(type, 'X')).id))).fields;
+
+    expect(await fieldsOf('character')).toEqual({
+      role: null,
+      voice: { traits: '', says: [], neverSays: [], examples: [] },
+    });
+    expect(await fieldsOf('place')).toEqual({
+      senses: { smells: '', sight: '', sound: '', touch: '', atmosphere: '' },
+    });
+    expect(await fieldsOf('plot-thread')).toEqual({ status: 'open' });
+    for (const type of ['item', 'world-rule', 'theme', 'other'] as const) {
+      expect(await fieldsOf(type)).toEqual({});
+    }
+    await store.close();
+  });
+
+  it('stores type-specific fields in frontmatter, leaving out those without a value', async () => {
+    const { projectPath, store } = await newProject();
+    const anna = (await store.createEntry('character', 'Anna')).id;
+    const harbour = (await store.createEntry('place', 'Harbour')).id;
+    const fields: Record<string, EntryFields> = {
+      [anna]: {
+        role: 'protagonist',
+        voice: {
+          traits: 'clipped, dry',
+          says: ['aye'],
+          neverSays: [],
+          examples: ['Aye, and the tide with it.'],
+        },
+      },
+      [harbour]: {
+        senses: {
+          smells: 'tar and salt',
+          sight: '',
+          sound: '',
+          touch: '',
+          atmosphere: 'waiting',
+        },
+      },
+    };
+    for (const id of [anna, harbour]) {
+      const value = await store.read(entry(id));
+      await store.write(entry(id), { ...value, fields: fields[id] });
+    }
+    await store.close();
+
+    const fileOf = (id: string) =>
+      readFile(path.join(projectPath, 'bible', `${id}.md`), 'utf8');
+    expect(await fileOf(anna)).toContain(
+      [
+        'visibility: mentioned',
+        'role: protagonist',
+        'voice:',
+        '  traits: clipped, dry',
+        '  says:',
+        '    - aye',
+        '  examples:',
+        '    - Aye, and the tide with it.',
+        '---',
+      ].join('\n'),
+    );
+    expect(await fileOf(harbour)).toContain(
+      [
+        'visibility: mentioned',
+        'senses:',
+        '  smells: tar and salt',
+        '  atmosphere: waiting',
+        '---',
+      ].join('\n'),
+    );
+    const reopened = await openProject(projectPath, deps());
+    for (const id of [anna, harbour]) {
+      expect((await reopened.read(entry(id))).fields).toEqual(
+        (await store.read(entry(id))).fields,
+      );
+    }
   });
 
   it('reads empty private notes for an Entry that has none yet', async () => {
@@ -299,6 +400,125 @@ describe('Undo of an Entry change', () => {
   });
 });
 
+describe('Changing an Entry’s type', () => {
+  async function withAnna() {
+    const { projectPath, store } = await newProject();
+    const { id } = await store.createEntry('character', 'Anna');
+    const value = await store.read(entry(id));
+    await store.write(entry(id), {
+      ...value,
+      description: 'A ferry pilot.',
+      fields: {
+        role: 'supporting',
+        voice: { traits: 'dry', says: [], neverSays: [], examples: [] },
+      },
+    });
+    return { projectPath, store, id };
+  }
+
+  it('appends the fields that don’t fit the new type to the description, and drops them from the file', async () => {
+    const { projectPath, store, id } = await withAnna();
+
+    await store.setEntryType(id, 'place');
+
+    expect(await store.read(entry(id))).toMatchObject({
+      type: 'place',
+      description: 'A ferry pilot.\n\nRole: supporting\nVoice traits: dry',
+      fields: {
+        senses: { smells: '', sight: '', sound: '', touch: '', atmosphere: '' },
+      },
+    });
+    expect(store.listEntries()[0].type).toBe('place');
+    const file = await readFile(
+      path.join(projectPath, 'bible', `${id}.md`),
+      'utf8',
+    );
+    expect(file).toContain('type: place\n');
+    expect(file).not.toContain('role:');
+    expect(file).not.toContain('voice:');
+    await store.close();
+  });
+
+  it('reverts as a step: the fields come back and the appended text goes, keeping what was written since', async () => {
+    const { store, id } = await withAnna();
+    const { step } = await store.setEntryType(id, 'plot-thread');
+    const changed = await store.read(entry(id));
+    await store.write(entry(id), {
+      ...changed,
+      name: 'Anna Berg',
+      description: `Now: ${changed.description}`,
+      fields: { status: 'resolved' },
+    });
+
+    await store.undo(step);
+
+    expect(await store.read(entry(id))).toMatchObject({
+      type: 'character',
+      name: 'Anna Berg',
+      description: 'Now: A ferry pilot.\n\nStatus: resolved',
+      fields: {
+        role: 'supporting',
+        voice: { traits: 'dry', says: [], neverSays: [], examples: [] },
+      },
+    });
+    await store.close();
+  });
+
+  it('keeps in the file what it could not write into the description, as a newer app’s values', async () => {
+    const { projectPath, store } = await newProject();
+    const { id } = await store.createEntry('character', 'Anna');
+    await store.close();
+    const file = path.join(projectPath, 'bible', `${id}.md`);
+    await writeFile(
+      file,
+      (await readFile(file, 'utf8')).replace(
+        'visibility: mentioned\n',
+        'visibility: mentioned\nrole: villain\nvoice:\n  traits: dry\n  accent: northern\n',
+      ),
+    );
+
+    const reopened = await openProject(projectPath, deps());
+    await reopened.setEntryType(id, 'item');
+    await reopened.close();
+
+    const text = await readFile(file, 'utf8');
+    expect(text).toContain('role: villain\nvoice:\n  accent: northern\n');
+    expect(text).toMatch(/\nVoice traits: dry$/);
+  });
+
+  it('writes a Plot Thread’s Status out only once it is resolved', async () => {
+    const { store } = await newProject();
+    const { id } = await store.createEntry('plot-thread', 'The wreck');
+    await store.setEntryType(id, 'theme');
+
+    expect((await store.read(entry(id))).description).toBe('');
+    await store.close();
+  });
+
+  it('keeps a field it does not know for the type, as a newer app may add, when it rewrites an Entry', async () => {
+    const { projectPath, store } = await newProject();
+    const { id } = await store.createEntry('theme', 'Grief');
+    await store.close();
+    const file = path.join(projectPath, 'bible', `${id}.md`);
+    await writeFile(
+      file,
+      (await readFile(file, 'utf8')).replace(
+        'visibility: mentioned\n',
+        'visibility: mentioned\nstatus: open\nvoice:\n  traits: low\n',
+      ),
+    );
+
+    const reopened = await openProject(projectPath, deps());
+    const value = await reopened.read(entry(id));
+    expect(value.fields).toEqual({});
+    await reopened.write(entry(id), { ...value, description: 'Loss.' });
+    await reopened.close();
+
+    const text = await readFile(file, 'utf8');
+    expect(text).toContain('status: open\nvoice:\n  traits: low\n');
+  });
+});
+
 describe('Entries on another computer', () => {
   it('lists an Entry created, renamed or deleted on another computer once it arrives', async () => {
     const { projectPath, store: there } = await newProject();
@@ -318,15 +538,18 @@ describe('Entries on another computer', () => {
 
     await there.trashEntry(id);
     await here.checkForChanges();
+    const summary = (name: string) => ({
+      id,
+      type: 'character',
+      name,
+      aliases: [],
+      visibility: 'mentioned',
+    });
     expect(here.listEntries()).toEqual([]);
     expect(here.listTrash().map((item) => item.id)).toEqual([id]);
     expect(
       events.filter((e) => e.type === 'entriesChanged').map((e) => e.entries),
-    ).toEqual([
-      [{ id, type: 'character', name: 'Anna', visibility: 'mentioned' }],
-      [{ id, type: 'character', name: 'Anna Berg', visibility: 'mentioned' }],
-      [],
-    ]);
+    ).toEqual([[summary('Anna')], [summary('Anna Berg')], []]);
     await here.close();
     await there.close();
   });

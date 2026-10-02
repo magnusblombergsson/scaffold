@@ -54,6 +54,49 @@ export const VISIBILITIES: readonly Visibility[] = [
 ];
 export const DEFAULT_VISIBILITY: Visibility = 'mentioned';
 
+/** A Character's part in the story; `null` until the Author says. */
+export type Role = 'protagonist' | 'supporting' | 'mentioned';
+export const ROLES: readonly Role[] = [
+  'protagonist',
+  'supporting',
+  'mentioned',
+];
+
+/**
+ * A Character's Voice: traits (register, rhythm, tics), words they say and
+ * never say, and example lines, which only the Author writes.
+ */
+export type Voice = {
+  traits: string;
+  says: string[];
+  neverSays: string[];
+  examples: string[];
+};
+
+/** What a Place is like to each sense, and its atmosphere. */
+export type Senses = {
+  smells: string;
+  sight: string;
+  sound: string;
+  touch: string;
+  atmosphere: string;
+};
+
+/** Whether a Plot Thread is still open. */
+export type ThreadStatus = 'open' | 'resolved';
+export const THREAD_STATUSES: readonly ThreadStatus[] = ['open', 'resolved'];
+
+/**
+ * An Entry's type-specific fields: a Character has `role` and `voice`, a
+ * Place `senses` and a Plot Thread `status`; the other types have none.
+ */
+export type EntryFields = {
+  role?: Role | null;
+  voice?: Voice;
+  senses?: Senses;
+  status?: ThreadStatus;
+};
+
 export type SceneValue = { id: string; markdown: string };
 /**
  * An Outline's bullets as plain text, and its unit's metadata (such as POV,
@@ -74,6 +117,7 @@ export type EntryValue = {
   aliases: string[];
   visibility: Visibility;
   description: string;
+  fields: EntryFields;
 };
 export type PrivateValue = { id: string; body: string };
 export type UnitValue =
@@ -109,6 +153,7 @@ export type EntrySummary = {
   id: string;
   type: EntryType;
   name: string;
+  aliases: string[];
   visibility: Visibility;
 };
 
