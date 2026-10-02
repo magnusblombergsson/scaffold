@@ -1,0 +1,401 @@
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  screen,
+  type WebContents,
+} from 'electron';
+import path from 'node:path';
+import type {
+  OpenedProject,
+  OpenResult,
+  ProjectView,
+  RecentProject,
+} from '../shared/api';
+import { channel } from '../shared/api';
+import {
+  loadAppSettings,
+  samePath,
+  type AppSettings,
+  type WindowBounds,
+} from './app-settings/app-settings';
+import { systemClock } from './project-store/clock';
+import { nodeFileSystem } from './project-store/file-system';
+import {
+  createProject,
+  openProject,
+  ProjectError,
+  projectLookup,
+  type ProjectStore,
+} from './project-store/project-store';
+
+// The app shell: its windows, the Project each one shows, and the settings
+// that remember them on this computer.
+
+const deps = { fs: nodeFileSystem, clock: systemClock };
+
+let settings: AppSettings;
+
+/** The open Project of each window, keyed by its webContents id. */
+const stores = new Map<number, ProjectStore>();
+
+let quitting = false;
+
+export function storeOf(contents: WebContents): ProjectStore | undefined {
+  return stores.get(contents.id);
+}
+
+/** Loads the settings, then reopens the Projects open at quit, each in its window. */
+export async function startShell(): Promise<void> {
+  settings = await loadAppSettings(
+    path.join(app.getPath('userData'), 'settings.json'),
+    { ...deps, projects: projectLookup(deps.fs) },
+  );
+
+  // A quit waits until every window's Project is closed, its edits on disk,
+  // then asks again. Those Projects stay listed to reopen at startup.
+  app.on('before-quit', (event) => {
+    quitting = true;
+    if (stores.size === 0) return;
+    event.preventDefault();
+    void Promise.all(
+      BrowserWindow.getAllWindows().map((window) => closeProject(window)),
+    ).then(() => app.quit());
+  });
+  // Every window is closed by now. A quit asked for again after will-quit is
+  // held up doesn't go through, so exit once the settings are on disk.
+  app.on('will-quit', (event) => {
+    event.preventDefault();
+    void settings.flush().finally(() => app.exit());
+  });
+  // Another launch of the app brings this one to the front instead.
+  app.on('second-instance', () => {
+    const window = BrowserWindow.getAllWindows()[0];
+    if (window) bringToFront(window);
+  });
+  app.on('activate', () => {
+    if (BrowserWindow.getAllWindows().length === 0) createWindow(null);
+  });
+
+  for (const projectPath of settings.openAtQuit()) {
+    if (windowShowing(projectPath)) continue;
+    try {
+      createWindow(await openProject(projectPath, deps));
+    } catch (error) {
+      // Not found or unreadable: the start screen's recent list shows it.
+      console.error(`Can't reopen ${projectPath}:`, error);
+    }
+  }
+  if (stores.size === 0) createWindow(null);
+  rememberOpenProjects();
+}
+
+/** A window showing `store`, or the start screen when it is null. */
+function createWindow(store: ProjectStore | null): BrowserWindow {
+  const window = new BrowserWindow({
+    width: 1000,
+    height: 700,
+    ...(store && onScreen(settings.project(store.id).windowBounds)),
+    title: 'Writing Tools',
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.cjs'),
+    },
+  });
+  if (store) attach(window.webContents, store);
+  const rememberBounds = () => {
+    const shown = stores.get(window.webContents.id);
+    if (shown) {
+      settings.updateProject(shown.id, {
+        windowBounds: window.getNormalBounds(),
+      });
+    }
+  };
+  window.on('resize', rememberBounds);
+  window.on('move', rememberBounds);
+  flushBeforeClose(window);
+
+  if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
+    window.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
+  } else {
+    window.loadFile(
+      path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`),
+    );
+  }
+  return window;
+}
+
+/** Keeps the position only if some of the window would be on a screen. */
+function onScreen(bounds: WindowBounds | undefined): Partial<WindowBounds> {
+  if (!bounds) return {};
+  const visible = screen
+    .getAllDisplays()
+    .some(
+      ({ workArea: area }) =>
+        bounds.x < area.x + area.width &&
+        bounds.x + bounds.width > area.x &&
+        bounds.y < area.y + area.height &&
+        bounds.y + bounds.height > area.y,
+    );
+  return visible ? bounds : { width: bounds.width, height: bounds.height };
+}
+
+function bringToFront(window: BrowserWindow): void {
+  if (window.isMinimized()) window.restore();
+  window.focus();
+}
+
+function windowShowing(projectPath: string): BrowserWindow | undefined {
+  for (const [contentsId, store] of stores) {
+    if (samePath(store.path, projectPath)) {
+      return BrowserWindow.getAllWindows().find(
+        (window) => window.webContents.id === contentsId,
+      );
+    }
+  }
+}
+
+/** Makes `store` the Project of the window with these contents. */
+function attach(contents: WebContents, store: ProjectStore): void {
+  stores.set(contents.id, store);
+  settings.recordOpened({
+    path: store.path,
+    id: store.id,
+    displayName: store.displayName,
+  });
+  rememberOpenProjects();
+  // On macOS the OS chooses the spellchecker language.
+  if (process.platform !== 'darwin')
+    contents.session.setSpellCheckerLanguages([store.language]);
+}
+
+function rememberOpenProjects(): void {
+  settings.setOpenAtQuit([...stores.values()].map((store) => store.path));
+}
+
+function openedProject(store: ProjectStore): OpenedProject {
+  const { lastSceneId, panelWidths } = settings.project(store.id);
+  return {
+    displayName: store.displayName,
+    language: store.language,
+    manuscript: store.manuscript(),
+    view: { lastSceneId, panelWidths },
+  };
+}
+
+/**
+ * Shows a Project the Author opened from `sender`: in that window when it
+ * shows the start screen, else in a new one.
+ */
+function showOpened(sender: WebContents, store: ProjectStore): OpenResult {
+  if (stores.has(sender.id)) {
+    createWindow(store);
+    return null;
+  }
+  attach(sender, store);
+  return { ok: true, project: openedProject(store) };
+}
+
+/** An open that failed, told to the Author in the window that asked. */
+function openFailure(projectPath: string, error: unknown): OpenResult {
+  if (error instanceof ProjectError)
+    return { ok: false, message: error.message };
+  return {
+    ok: false,
+    message: `${path.basename(projectPath)} can't be opened: ${(error as Error).message}`,
+  };
+}
+
+async function openPath(
+  sender: WebContents,
+  projectPath: string,
+): Promise<OpenResult> {
+  const showing = windowShowing(projectPath);
+  if (showing) {
+    bringToFront(showing);
+    return null;
+  }
+  let store: ProjectStore;
+  try {
+    store = await openProject(projectPath, deps);
+    await separateIfCopied(sender, store);
+  } catch (error) {
+    return openFailure(projectPath, error);
+  }
+  return showOpened(sender, store);
+}
+
+/**
+ * Asks about a folder that holds the same Project as another recent path:
+ * Yes gives it a new id; No is remembered, since the path then joins the
+ * recent list with that id.
+ */
+async function separateIfCopied(
+  sender: WebContents,
+  store: ProjectStore,
+): Promise<void> {
+  const original = await settings.originalOf(store.path, store.id);
+  if (!original) return;
+  const options = {
+    type: 'question' as const,
+    buttons: ['Yes', 'No'],
+    defaultId: 0,
+    cancelId: 1,
+    message: 'Treat it as a separate Project?',
+    detail: `${store.displayName} holds the same Project as ${original}, so it is probably a copy of that folder. A separate Project keeps its own settings on this computer.`,
+  };
+  const { response } = await dialog.showMessageBox(windowOf(sender), options);
+  if (response === 0) await store.assignNewId();
+}
+
+function recentProjects(): Promise<RecentProject[]> {
+  return settings.recentWithStatus().then((recent) =>
+    recent.map(({ path, displayName, lastOpened, found }) => ({
+      path,
+      displayName,
+      lastOpened,
+      found,
+    })),
+  );
+}
+
+export function registerShellIpc(): void {
+  ipcMain.handle(channel.currentProject, (event) => {
+    const store = stores.get(event.sender.id);
+    return store ? openedProject(store) : null;
+  });
+
+  ipcMain.handle(channel.createProject, async (event) => {
+    const { canceled, filePath } = await dialog.showSaveDialog(
+      windowOf(event.sender),
+      {
+        title: 'Create Project',
+        buttonLabel: 'Create',
+        nameFieldLabel: 'Project name',
+        properties: ['createDirectory', 'showOverwriteConfirmation'],
+      },
+    );
+    if (canceled || !filePath) return null;
+    try {
+      return showOpened(event.sender, await createProject(filePath, deps));
+    } catch (error) {
+      return openFailure(filePath, error);
+    }
+  });
+
+  ipcMain.handle(channel.openProject, async (event) => {
+    const chosen = await chooseFolder(event.sender, 'Open Project');
+    return chosen && openPath(event.sender, chosen);
+  });
+
+  ipcMain.handle(channel.openRecent, (event, projectPath: string) =>
+    openPath(event.sender, projectPath),
+  );
+
+  ipcMain.handle(channel.locateProject, async (event, oldPath: string) => {
+    const chosen = await chooseFolder(event.sender, 'Locate Project');
+    if (!chosen) return null;
+    const result = await openPath(event.sender, chosen);
+    // Null here means it opened in another window, or was open already.
+    if (result?.ok !== false && !samePath(chosen, oldPath)) {
+      settings.remove(oldPath);
+    }
+    return result;
+  });
+
+  ipcMain.handle(channel.recentProjects, () => recentProjects());
+
+  ipcMain.handle(channel.removeRecent, (_event, projectPath: string) => {
+    settings.remove(projectPath);
+    return recentProjects();
+  });
+
+  ipcMain.on(channel.saveView, (event, view: ProjectView) => {
+    const store = stores.get(event.sender.id);
+    if (store) settings.updateProject(store.id, view);
+  });
+}
+
+/** The window of an IPC sender; dialogs are attached to it. */
+function windowOf(sender: WebContents): BrowserWindow {
+  const window = BrowserWindow.fromWebContents(sender);
+  if (!window) throw new Error('The window that asked has closed');
+  return window;
+}
+
+async function chooseFolder(
+  sender: WebContents,
+  title: string,
+): Promise<string | null> {
+  const { canceled, filePaths } = await dialog.showOpenDialog(
+    windowOf(sender),
+    {
+      title,
+      properties: ['openDirectory'],
+    },
+  );
+  return canceled || filePaths.length === 0 ? null : filePaths[0];
+}
+
+/** The Projects being closed, by window, so each is closed once. */
+const closing = new Map<number, Promise<void>>();
+
+/**
+ * Asks the window's renderer to hand over pending edits, waits until they are
+ * on disk, then closes its Project.
+ */
+function closeProject(window: BrowserWindow): Promise<void> {
+  const contents = window.webContents;
+  const id = contents.id;
+  if (!stores.has(id)) return Promise.resolve();
+  let closed = closing.get(id);
+  if (!closed) {
+    closed = (async () => {
+      await requestRendererFlush(contents);
+      await stores.get(id)?.close();
+      stores.delete(id);
+      closing.delete(id);
+    })();
+    closing.set(id, closed);
+  }
+  return closed;
+}
+
+/**
+ * A window closes once its Project is closed. A Project whose window the
+ * Author closes stops being reopened at startup, unless it was the last
+ * window.
+ */
+function flushBeforeClose(window: BrowserWindow): void {
+  window.on('close', (event) => {
+    if (!stores.has(window.webContents.id)) return;
+    event.preventDefault();
+    void closeProject(window).then(() => {
+      // Counted now, not when the close began: of windows closed together,
+      // the one closed last is kept.
+      if (!quitting && BrowserWindow.getAllWindows().length > 1) {
+        rememberOpenProjects();
+      }
+      window.close();
+    });
+  });
+}
+
+const RENDERER_FLUSH_TIMEOUT_MS = 3000;
+
+function requestRendererFlush(contents: WebContents): Promise<void> {
+  return new Promise((resolve) => {
+    const done = (event: Electron.IpcMainEvent) => {
+      if (event.sender.id !== contents.id) return;
+      finish();
+    };
+    const timeout = setTimeout(finish, RENDERER_FLUSH_TIMEOUT_MS);
+    function finish() {
+      clearTimeout(timeout);
+      ipcMain.off(channel.flushed, done);
+      resolve();
+    }
+    ipcMain.on(channel.flushed, done);
+    contents.send(channel.flushRequest);
+  });
+}

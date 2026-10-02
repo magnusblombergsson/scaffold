@@ -35,8 +35,14 @@ ipcRenderer.on(channel.flushRequest, () => {
 });
 
 const shell: ShellApi = {
+  currentProject: () => ipcRenderer.invoke(channel.currentProject),
   createProject: () => ipcRenderer.invoke(channel.createProject),
   openProject: () => ipcRenderer.invoke(channel.openProject),
+  openRecent: (path) => ipcRenderer.invoke(channel.openRecent, path),
+  locateProject: (path) => ipcRenderer.invoke(channel.locateProject, path),
+  recentProjects: () => ipcRenderer.invoke(channel.recentProjects),
+  removeRecent: (path) => ipcRenderer.invoke(channel.removeRecent, path),
+  saveView: (view) => ipcRenderer.send(channel.saveView, view),
   onFlushRequest(listener) {
     flushListeners.add(listener);
     return () => {

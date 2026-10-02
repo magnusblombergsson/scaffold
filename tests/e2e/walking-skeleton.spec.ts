@@ -4,10 +4,10 @@ import { answerDialogs, launch, useTempDir } from './app';
 
 const tempDir = useTempDir();
 
-test('the Author creates a Project, writes a Scene, and finds it after a restart', async () => {
+test('the Author creates a Project, writes a Scene, and finds it open again after a restart', async () => {
   const projectPath = path.join(tempDir(), 'My Novel');
 
-  const first = await launch();
+  const first = await launch(tempDir());
   await answerDialogs(first, projectPath);
   const page = await first.firstWindow();
   await page.getByRole('button', { name: 'New Project…' }).click();
@@ -20,10 +20,8 @@ test('the Author creates a Project, writes a Scene, and finds it after a restart
   // Quit at once, before the 1 s autosave: closing must flush the edits.
   await first.close();
 
-  const second = await launch();
-  await answerDialogs(second, projectPath);
+  const second = await launch(tempDir());
   const reopened = await second.firstWindow();
-  await reopened.getByRole('button', { name: 'Open Project…' }).click();
 
   await expect(reopened.getByText('My Novel')).toBeVisible();
   await expect(reopened.getByLabel('Prose').locator('p')).toHaveText([

@@ -24,7 +24,7 @@ async function menu(page: Page, of: string, item: string) {
 test('the Author builds the Manuscript in the binder, and only project.json records it', async () => {
   const projectPath = path.join(tempDir(), 'My Novel');
 
-  const first = await launch();
+  const first = await launch(tempDir());
   await answerDialogs(first, projectPath);
   const page = await first.firstWindow();
   await page.getByRole('button', { name: 'New Project…' }).click();
@@ -102,10 +102,8 @@ test('the Author builds the Manuscript in the binder, and only project.json reco
     ['Chapter 1', []],
   ]);
 
-  const second = await launch();
-  await answerDialogs(second, projectPath);
+  const second = await launch(tempDir());
   const reopened = await second.firstWindow();
-  await reopened.getByRole('button', { name: 'Open Project…' }).click();
   await expect(binderTitles(reopened)).toHaveText(expected);
   await scene(reopened, 'Arrival').click();
   await expect(reopened.getByLabel('Prose')).toHaveText('The train arrived.');
@@ -114,7 +112,7 @@ test('the Author builds the Manuscript in the binder, and only project.json reco
 
 test('a stray Scene file shows as Unplaced, and a missing one is shown but never recreated', async () => {
   const projectPath = path.join(tempDir(), 'My Novel');
-  const first = await launch();
+  const first = await launch(tempDir());
   await answerDialogs(first, projectPath);
   const page = await first.firstWindow();
   await page.getByRole('button', { name: 'New Project…' }).click();
@@ -129,10 +127,8 @@ test('a stray Scene file shows as Unplaced, and a missing one is shown but never
     `---\nid: ${stray}\nformat: 1\n---\nWritten on the laptop.`,
   );
 
-  const second = await launch();
-  await answerDialogs(second, projectPath);
+  const second = await launch(tempDir());
   const reopened = await second.firstWindow();
-  await reopened.getByRole('button', { name: 'Open Project…' }).click();
 
   await expect(
     scene(reopened, 'Scene 1 Missing, possibly not synced yet'),

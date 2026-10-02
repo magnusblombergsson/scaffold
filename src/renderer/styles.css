@@ -39,6 +39,64 @@ body {
   gap: 1rem;
 }
 
+.recent {
+  width: min(32rem, 100% - 2rem);
+}
+
+.recent h2 {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--muted);
+  margin: 1rem 0 0.25rem;
+}
+
+.recent ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border-top: 1px solid var(--line);
+}
+
+.recent li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.recent-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0.5rem;
+  text-align: left;
+}
+
+button.recent-open {
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+button.recent-open:hover {
+  background: var(--line);
+}
+
+.recent-path {
+  color: var(--muted);
+  font-size: 0.8rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.recent-gone .recent-name {
+  color: var(--muted);
+}
+
 .start-actions,
 .header-actions {
   display: flex;
@@ -100,11 +158,27 @@ body {
 }
 
 .left-pane {
-  width: 16rem;
   flex-shrink: 0;
   overflow-y: auto;
-  border-right: 1px solid var(--line);
   font-size: 0.9rem;
+}
+
+.panel-resizer {
+  flex-shrink: 0;
+  width: 5px;
+  margin-left: -2px;
+  border-left: 2px solid transparent;
+  border-right: 2px solid transparent;
+  background: var(--line);
+  background-clip: content-box;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.panel-resizer:hover,
+.panel-resizer:focus-visible {
+  background-color: var(--muted);
+  outline: none;
 }
 
 .tabs {

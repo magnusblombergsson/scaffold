@@ -231,6 +231,24 @@ describe('ProjectStore', () => {
     );
     expect((await openProject(projectPath, deps())).language).toBe('en-US');
   });
+
+  it('takes a new id when a copied folder becomes a separate Project, keeping the rest', async () => {
+    const original = path.join(dir, 'My Novel');
+    await (await createProject(original, deps())).close();
+    const copy = path.join(dir, 'Copy of My Novel');
+    await cp(original, copy, { recursive: true });
+
+    const store = await openProject(copy, deps());
+    const tree = store.tree();
+    const oldId = store.id;
+    await store.assignNewId();
+
+    expect(store.id).not.toBe(oldId);
+    const reopened = await openProject(copy, deps());
+    expect(reopened.id).toBe(store.id);
+    expect(reopened.tree()).toEqual(tree);
+    expect((await openProject(original, deps())).id).toBe(oldId);
+  });
 });
 
 describe('Manuscript structure', () => {

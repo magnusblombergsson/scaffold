@@ -1,46 +1,28 @@
-import { app, BrowserWindow } from 'electron';
-import path from 'node:path';
+import { app } from 'electron';
 import started from 'electron-squirrel-startup';
-import { flushBeforeClose, registerIpc } from './ipc';
+import { registerProjectIpc } from './ipc';
+import { registerShellIpc, startShell } from './shell';
 
-// Handle creating/removing shortcuts on Windows when installing/uninstalling.
-if (started) {
-  app.quit();
+// End-to-end tests give each run its own settings and single-instance lock.
+if (process.env.WRITING_TOOLS_USER_DATA) {
+  app.setPath('userData', process.env.WRITING_TOOLS_USER_DATA);
 }
 
-const createWindow = () => {
-  const window = new BrowserWindow({
-    width: 1000,
-    height: 700,
-    title: 'Writing Tools',
-    webPreferences: {
-      preload: path.join(__dirname, 'preload.cjs'),
-    },
+// `started`: creating/removing shortcuts on Windows when installing or
+// uninstalling. Without the lock another instance is running, and it is
+// brought to the front instead.
+if (started || !app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  app.whenReady().then(async () => {
+    registerProjectIpc();
+    registerShellIpc();
+    await startShell();
   });
-  flushBeforeClose(window);
 
-  if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
-    window.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
-  } else {
-    window.loadFile(
-      path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`),
-    );
-  }
-};
-
-app.whenReady().then(() => {
-  registerIpc();
-  createWindow();
-
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      createWindow();
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') {
+      app.quit();
     }
   });
-});
-
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
-    app.quit();
-  }
-});
+}

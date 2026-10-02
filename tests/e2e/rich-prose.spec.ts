@@ -16,7 +16,7 @@ async function sceneMarkdown(projectPath: string): Promise<string> {
 test('italic, bold, typographic quotes and pasted Prose survive a restart', async () => {
   const projectPath = path.join(tempDir(), 'My Novel');
 
-  const first = await launch();
+  const first = await launch(tempDir());
   await answerDialogs(first, projectPath);
   const page = await first.firstWindow();
   await page.getByRole('button', { name: 'New Project…' }).click();
@@ -49,10 +49,8 @@ test('italic, bold, typographic quotes and pasted Prose survive a restart', asyn
     '“She *never* said **that**,” — or so.\n\nHeading\n\nUnder linked *kept*',
   );
 
-  const second = await launch();
-  await answerDialogs(second, projectPath);
+  const second = await launch(tempDir());
   const reopened = await second.firstWindow();
-  await reopened.getByRole('button', { name: 'Open Project…' }).click();
   const prose = reopened.getByLabel('Prose');
   await expect(prose.locator('p')).toHaveText([
     '“She never said that,” — or so.',
@@ -67,7 +65,7 @@ test('italic, bold, typographic quotes and pasted Prose survive a restart', asyn
 test('a Swedish Project is spellchecked and typeset in Swedish', async () => {
   const projectPath = path.join(tempDir(), 'Min roman');
 
-  const first = await launch();
+  const first = await launch(tempDir());
   await answerDialogs(first, projectPath);
   const page = await first.firstWindow();
   await page.getByRole('button', { name: 'New Project…' }).click();
@@ -81,10 +79,8 @@ test('a Swedish Project is spellchecked and typeset in Swedish', async () => {
     JSON.stringify({ ...manifest, language: 'sv-SE' }, null, 2),
   );
 
-  const second = await launch();
-  await answerDialogs(second, projectPath);
+  const second = await launch(tempDir());
   const reopened = await second.firstWindow();
-  await reopened.getByRole('button', { name: 'Open Project…' }).click();
   const prose = reopened.getByLabel('Prose');
   await expect(prose).toBeFocused();
 

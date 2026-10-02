@@ -116,6 +116,31 @@ export async function openProject(
   return store;
 }
 
+/** What other modules may ask about a folder without opening it. */
+export type ProjectLookup = {
+  /** Whether the folder is a Project: it contains `project.json`. */
+  isProject(projectPath: string): Promise<boolean>;
+  /** The Project id it holds; null when it isn't a Project or can't be read. */
+  idAt(projectPath: string): Promise<string | null>;
+};
+
+export function projectLookup(fs: FileSystem): ProjectLookup {
+  return {
+    isProject: (projectPath) => fs.exists(path.join(projectPath, MANIFEST)),
+    async idAt(projectPath) {
+      try {
+        const manifest: unknown = JSON.parse(
+          await fs.readFile(path.join(projectPath, MANIFEST)),
+        );
+        const id = (manifest as Partial<Manifest> | null)?.id;
+        return typeof id === 'string' ? id : null;
+      } catch {
+        return null;
+      }
+    },
+  };
+}
+
 /** Removes temp files left by a write that crashed before its rename. */
 async function sweepTempFiles(projectPath: string, fs: FileSystem) {
   for (const dir of [projectPath, path.join(projectPath, 'scenes')]) {
@@ -188,6 +213,18 @@ export class ProjectStore {
 
   get displayName(): string {
     return path.basename(this.path);
+  }
+
+  /** The Project's identity, which a copied folder shares until it takes a new one. */
+  get id(): string {
+    return this.manifest.id;
+  }
+
+  /** Makes a copied folder a separate Project: writes a new id to `project.json`. */
+  assignNewId(): Promise<void> {
+    return this.enqueueStructure(() =>
+      this.writeManifest({ ...this.manifest, id: randomUUID() }),
+    );
   }
 
   /** The language the Prose is spellchecked and typeset in. */
@@ -306,17 +343,21 @@ export class ProjectStore {
   private restructure(
     change: (tree: ProjectTree) => void | Promise<void>,
   ): Promise<void> {
-    const run = this.structureQueue.then(async () => {
+    return this.enqueueStructure(async () => {
       const tree = this.tree();
       await change(tree);
-      await this.writeManifest(tree);
+      await this.writeManifest({ ...this.manifest, tree });
     });
+  }
+
+  /** Runs `operation` once every structure operation before it is done. */
+  private enqueueStructure(operation: () => Promise<void>): Promise<void> {
+    const run = this.structureQueue.then(operation);
     this.structureQueue = run.catch(() => {});
     return run;
   }
 
-  private async writeManifest(tree: ProjectTree): Promise<void> {
-    const manifest = { ...this.manifest, tree };
+  private async writeManifest(manifest: Manifest): Promise<void> {
     await safeWrite(
       this.deps.fs,
       this.deps.clock,
@@ -324,7 +365,7 @@ export class ProjectStore {
       `${JSON.stringify(manifest, null, 2)}\n`,
     );
     this.manifest = manifest;
-    const placed = new Set(sceneIds(tree));
+    const placed = new Set(sceneIds(manifest.tree));
     this.unplaced = this.unplaced.filter((scene) => !placed.has(scene.id));
   }
 

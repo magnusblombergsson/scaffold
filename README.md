@@ -2,7 +2,7 @@
 
 A desktop writing app for creative fiction. The Author writes Prose in an editor, and an AI Assistant beside it asks questions, comments, and proposes changes to the Story Bible and Outlines. The Assistant never writes the Prose itself.
 
-**Status:** early development. You can create or open a Project, organise its Chapters and Scenes in the binder, and write Scenes, which autosave. The rest of the MVP is planned as tickets under [Spec: Writing Tools MVP (#30)](https://github.com/magnusblombergsson/writing-tools/issues/30).
+**Status:** early development. You can create or open a Project, organise its Chapters and Scenes in the binder, and write Scenes, which autosave. Each Project opens in its own window, and the app reopens the Projects you had open when you quit it. The rest of the MVP is planned as tickets under [Spec: Writing Tools MVP (#30)](https://github.com/magnusblombergsson/writing-tools/issues/30).
 
 ## Getting started
 
@@ -33,13 +33,13 @@ npm start
 
 An Electron app written in TypeScript, with React in the renderer and a TipTap editor (see [ADR 0001](docs/adr/0001-electron-and-tiptap.md)).
 
-- **`src/main/`**: the main process. All file access happens here, in `project-store/`, which reads and writes the Project folder. `ipc.ts` connects the store to the window.
+- **`src/main/`**: the main process. All file access happens here. `project-store/` reads and writes the Project folder. `app-settings/` keeps this computer's settings and recent Projects in `userData/settings.json`. `shell.ts` manages the windows, the Project each one shows, and the start-up reopen. `ipc.ts` connects the store of each window to its renderer.
 - **`src/preload/`**: exposes typed `window.project` and `window.shell` objects to the renderer.
-- **`src/renderer/`**: the React UI. It never sees file paths or file formats. The editor hands the rest of the app restricted Markdown only.
+- **`src/renderer/`**: the React UI. It never sees file formats, and sees paths only as the recent list shows them. The editor hands the rest of the app restricted Markdown only.
 - **`src/shared/`**: types and the IPC interface, used by all three.
 - **`tests/e2e/`**: end-to-end tests that drive the built app.
 
-A Project is a plain folder, usually kept in OneDrive or Dropbox: `project.json` holds the Chapter and Scene structure, and there is one Markdown file per Scene, named by its id (see [ADR 0002](docs/adr/0002-manifest-ordered-id-named-files.md)). Every write goes to a temp file first, which is then renamed over the target, so a crash never leaves a half-written file.
+A Project is a plain folder, usually kept in OneDrive or Dropbox: `project.json` holds the Chapter and Scene structure, and there is one Markdown file per Scene, named by its id (see [ADR 0002](docs/adr/0002-manifest-ordered-id-named-files.md)). Every write goes to a temp file first, which is then renamed over the target, so a crash never leaves a half-written file. Nothing about a single computer goes in the Project folder; that lives in `settings.json`. End-to-end tests point the app at their own settings folder with `WRITING_TOOLS_USER_DATA`.
 
 ## Further reading
 

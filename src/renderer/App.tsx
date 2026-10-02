@@ -6,17 +6,23 @@ import type {
   ManuscriptScene,
 } from '../shared/project-types';
 import { Binder } from './Binder';
+import { PanelResizer } from './PanelResizer';
 import { flushPendingEdits } from './pending-edits';
 import { SceneEditor } from './SceneEditor';
+import { StartScreen } from './StartScreen';
 
 export function App() {
-  const [project, setProject] = useState<OpenedProject | null>(null);
+  /** Undefined until main says what this window shows. */
+  const [project, setProject] = useState<OpenedProject | null>();
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => window.shell.onFlushRequest(flushPendingEdits), []);
+  useEffect(() => {
+    void window.shell.currentProject().then(setProject);
+  }, []);
 
   async function open(action: () => Promise<OpenResult>) {
-    // The current Project's edits must reach main before it is replaced.
+    // Edits must reach main before a Project opens elsewhere and takes focus.
     flushPendingEdits();
     const result = await action();
     if (!result) return;
@@ -39,14 +45,9 @@ export function App() {
     </>
   );
 
+  if (project === undefined) return null;
   if (!project) {
-    return (
-      <main className="start">
-        <h1>Writing Tools</h1>
-        <div className="start-actions">{startButtons}</div>
-        {error && <p role="alert">{error}</p>}
-      </main>
-    );
+    return <StartScreen actions={startButtons} error={error} onOpen={open} />;
   }
 
   return (
@@ -58,6 +59,8 @@ export function App() {
     />
   );
 }
+
+const DEFAULT_BINDER_WIDTH = 256;
 
 function ProjectView({
   project,
@@ -71,10 +74,19 @@ function ProjectView({
   headerActions: ReactNode;
 }) {
   const [manuscript, setManuscript] = useState(project.manuscript);
-  const [openSceneId, setOpenSceneId] = useState(
-    () => allScenes(project.manuscript)[0]?.scene.id ?? null,
-  );
+  const [openSceneId, setOpenSceneId] = useState(() => {
+    const scenes = allScenes(project.manuscript);
+    const last = scenes.find((s) => s.scene.id === project.view.lastSceneId);
+    return (last ?? scenes[0])?.scene.id ?? null;
+  });
   const open = allScenes(manuscript).find((s) => s.scene.id === openSceneId);
+  const [binderWidth, setBinderWidth] = useState(
+    project.view.panelWidths?.binder ?? DEFAULT_BINDER_WIDTH,
+  );
+
+  useEffect(() => {
+    if (openSceneId) window.shell.saveView({ lastSceneId: openSceneId });
+  }, [openSceneId]);
 
   async function change(operation: () => Promise<Manuscript | Created>) {
     try {
@@ -98,7 +110,7 @@ function ProjectView({
       </header>
       {error && <p role="alert">{error}</p>}
       <div className="project-body">
-        <aside className="left-pane">
+        <aside className="left-pane" style={{ width: binderWidth }}>
           <div role="tablist" className="tabs">
             <button role="tab" aria-selected="true" id="manuscript-tab">
               Manuscript
@@ -113,6 +125,16 @@ function ProjectView({
             />
           </div>
         </aside>
+        <PanelResizer
+          label="Binder width"
+          width={binderWidth}
+          min={160}
+          max={600}
+          onResize={setBinderWidth}
+          onResized={(width) =>
+            window.shell.saveView({ panelWidths: { binder: width } })
+          }
+        />
         {!open ? (
           <div className="editor empty">No Scene open</div>
         ) : open.scene.missing ? (
