@@ -1,6 +1,7 @@
 import type { TrashItem } from '../shared/project-types';
+import { versionLabel } from './conflict-labels';
 
-/** The Trash tab: deleted Scenes and Chapters, latest first. */
+/** The Trash tab: deleted Scenes and Chapters, and set-aside versions, latest first. */
 export function TrashView({
   items,
   onRestore,
@@ -19,11 +20,11 @@ export function TrashView({
         {items.map((item) => (
           <li key={item.id} className="trash-item">
             <span className="trash-title">
-              {item.title}
+              {trashTitle(item)}
               <span className="trash-detail">{detail(item)}</span>
             </span>
             <button
-              aria-label={`Restore ${item.title}`}
+              aria-label={`Restore ${trashTitle(item)}`}
               onClick={() => onRestore(item)}
             >
               Restore
@@ -38,7 +39,13 @@ export function TrashView({
   );
 }
 
+/** How a Trash item is named, as in its row and the toast that restores it. */
+export function trashTitle(item: TrashItem): string {
+  return item.kind === 'version' ? `Version of ${item.title}` : item.title;
+}
+
 function detail(item: TrashItem): string {
+  if (item.kind === 'version') return versionLabel(item);
   if (item.kind === 'chapter') {
     const n = item.scenes.length;
     return `Chapter · ${n} ${n === 1 ? 'Scene' : 'Scenes'}`;

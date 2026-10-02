@@ -195,6 +195,7 @@ function openedProject(store: ProjectStore): OpenedProject {
     manuscript: store.manuscript(),
     view: { lastSceneId, cursor, panelWidths, outlineNotesOpen },
     sessions: store.sessionNotice(),
+    dropped: store.takeDropped(),
   };
 }
 

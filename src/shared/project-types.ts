@@ -30,6 +30,11 @@ export type OutlineValue = {
 export type NotesValue = { id: string; body: string };
 export type UnitValue = SceneValue | OutlineValue | NotesValue;
 
+/** The text a unit holds: a Scene's Prose, or an Outline's or Notes' body. */
+export function unitText(value: UnitValue): string {
+  return 'markdown' in value ? value.markdown : value.body;
+}
+
 /** The value a unit of `ref`'s kind holds. */
 export type ValueOf<R extends UnitRef> = R extends SceneRef
   ? SceneValue
@@ -58,11 +63,21 @@ export type ManuscriptChapter = {
 export type ManuscriptScene = SceneNode & { missing?: true };
 
 /**
- * A deleted Scene or Chapter, recoverable until Trash is emptied. A Scene
- * names the Chapter it was deleted from, if it had one; a Chapter lists the
- * Scenes deleted with it.
+ * A deleted Scene or Chapter, or a version of a unit set aside when its
+ * Conflict was resolved, recoverable until Trash is emptied. A Scene names the
+ * Chapter it was deleted from, if it had one; a Chapter lists the Scenes
+ * deleted with it. A version's `title` names its unit, as in “Opening” or the
+ * Outline of “Opening”; restoring it brings the Conflict back.
  */
 export type TrashItem =
+  | {
+      kind: 'version';
+      id: string;
+      title: string;
+      trashedAt: number;
+      host?: string;
+      savedAt: number;
+    }
   | {
       kind: 'scene';
       id: string;

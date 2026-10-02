@@ -34,6 +34,11 @@ const project: ProjectApi = {
   undo: (step) => ipcRenderer.invoke(channel.project('undo'), step),
   listTrash: () => ipcRenderer.invoke(channel.project('listTrash')),
   emptyTrash: () => ipcRenderer.invoke(channel.project('emptyTrash')),
+  listConflicts: () => ipcRenderer.invoke(channel.project('listConflicts')),
+  readConflictVersion: (ref, versionId) =>
+    ipcRenderer.invoke(channel.project('readConflictVersion'), ref, versionId),
+  resolveConflict: (ref, kept) =>
+    ipcRenderer.invoke(channel.project('resolveConflict'), ref, kept),
   subscribe(listener) {
     const forward = (_event: unknown, event: ProjectEvent) => listener(event);
     ipcRenderer.on(channel.projectEvent, forward);

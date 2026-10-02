@@ -43,6 +43,10 @@ const projectHandlers: Handlers = {
   restore: (store, id) => store.restore(id),
   undo: (store, step) => store.undo(step),
   listTrash: async (store) => store.listTrash(),
+  listConflicts: async (store) => store.listConflicts(),
+  readConflictVersion: (store, ref, versionId) =>
+    store.readConflictVersion(ref, versionId),
+  resolveConflict: (store, ref, kept) => store.resolveConflict(ref, kept),
 };
 
 /** Connects each window's `project` calls to the store of its Project. */

@@ -17,6 +17,10 @@ export function unitName(ref: UnitRef, manuscript: Manuscript): string {
   return title ? `the Notes on “${title}”` : 'some Notes';
 }
 
+export function capitalized(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
+}
+
 function titleOf(id: string, manuscript: Manuscript): string | undefined {
   for (const chapter of manuscript.chapters) {
     if (chapter.id === id) return chapter.title;

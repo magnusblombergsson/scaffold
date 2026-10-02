@@ -5,17 +5,27 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import type { Changed, OpenedProject, OpenResult, Tip } from '../shared/api';
+import type {
+  Changed,
+  Conflict,
+  Dropped,
+  OpenedProject,
+  OpenResult,
+  Tip,
+} from '../shared/api';
 import {
   PROJECT_OUTLINE,
+  unitKey,
   type Manuscript,
   type ManuscriptChapter,
   type ManuscriptScene,
   type TrashItem,
   type UnitRef,
+  type UnitValue,
 } from '../shared/project-types';
-import { unitName } from '../shared/unit-name';
+import { capitalized, unitName } from '../shared/unit-name';
 import { Binder, type Selection } from './Binder';
+import { ConflictList, ConflictResolver } from './Conflicts';
 import { Notices } from './Notices';
 import { OutlineNotes } from './OutlineNotes';
 import { PanelResizer } from './PanelResizer';
@@ -23,7 +33,7 @@ import { flushPendingEdits } from './pending-edits';
 import { SaveFailureBanner, SaveIndicator, useSaveStatus } from './SaveStatus';
 import { SceneEditor } from './SceneEditor';
 import { StartScreen } from './StartScreen';
-import { TrashView } from './TrashView';
+import { trashTitle, TrashView } from './TrashView';
 import { Toast } from './Toast';
 import { forgetUnitEditors } from './unit-editors';
 
@@ -127,11 +137,13 @@ function ProjectView({
 
   function select(selection: Selection) {
     setJump(undefined);
+    setResolving(null);
     setSelected(selection);
   }
 
   function continueAt(sceneId: string, cursor?: number) {
     setTab('manuscript');
+    setResolving(null);
     setSelected({ kind: 'scene', id: sceneId });
     setJump(cursor === undefined ? undefined : { sceneId, cursor });
   }
@@ -164,7 +176,9 @@ function ProjectView({
     window.shell.saveView({ outlineNotesOpen: !outlineNotesOpen });
   }
 
-  const [tab, setTab] = useState<'manuscript' | 'trash'>('manuscript');
+  const [tab, setTab] = useState<'manuscript' | 'conflicts' | 'trash'>(
+    'manuscript',
+  );
   const [trash, setTrash] = useState<TrashItem[]>([]);
   /** The latest structure change, while it can still be undone. */
   const [latest, setLatest] = useState<{ message: string; step: number }>();
@@ -178,6 +192,17 @@ function ProjectView({
     void refreshTrash();
   }, [refreshTrash]);
 
+  const [conflicts, setConflicts] = useState<Conflict[]>([]);
+  /** The unit whose Conflict the centre shows, instead of the selection. */
+  const [resolving, setResolving] = useState<UnitRef | null>(null);
+  const resolvingConflict =
+    resolving && conflicts.find((c) => unitKey(c.ref) === unitKey(resolving));
+  const conflicted = new Set(conflicts.map((c) => c.ref.id));
+  useEffect(() => {
+    void window.project.listConflicts().then(setConflicts);
+  }, []);
+  const [dropped, setDropped] = useState<Dropped[]>(project.dropped);
+
   /** The latest unit another computer changed; `count` starts its toast's time over. */
   const [reloaded, setReloaded] = useState<{ ref: UnitRef; count: number }>();
   const reloads = useRef(0);
@@ -187,11 +212,15 @@ function ProjectView({
       window.project.subscribe((event) => {
         if (event.type === 'structureChanged') {
           setManuscript(event.manuscript);
+          const lost = event.dropped;
+          if (lost) setDropped((dropped) => [...dropped, ...lost]);
           // Main can no longer undo it.
           setLatest(undefined);
           void refreshTrash();
         } else if (event.type === 'unitReloaded') {
           setReloaded({ ref: event.ref, count: ++reloads.current });
+        } else if (event.type === 'conflictsChanged') {
+          setConflicts(event.conflicts);
         }
       }),
     [refreshTrash],
@@ -224,6 +253,21 @@ function ProjectView({
     await refreshTrash();
   }
 
+  /** Keeps one version of a unit in Conflict, then opens the unit. */
+  async function resolve(ref: UnitRef, kept: UnitValue) {
+    flushPendingEdits();
+    try {
+      await window.project.resolveConflict(ref, kept);
+      onError(null);
+    } catch (error) {
+      onError(`Can't resolve the Conflict: ${(error as Error).message}`);
+      return;
+    }
+    await refreshTrash();
+    setTab('manuscript');
+    select(selectionOf(ref, manuscript));
+  }
+
   async function emptyTrash() {
     if (await window.project.emptyTrash()) {
       // Nothing before it can be undone.
@@ -237,11 +281,15 @@ function ProjectView({
       <header>
         <span className="project-name">{project.displayName}</span>
         <span className="scene-title">
-          {open
-            ? [open.chapter?.title ?? 'Unplaced', open.scene.title].join(' · ')
-            : openChapter
-              ? openChapter.title
-              : selected?.kind === 'project' && 'Project Outline'}
+          {resolvingConflict
+            ? 'Conflict'
+            : open
+              ? [open.chapter?.title ?? 'Unplaced', open.scene.title].join(
+                  ' · ',
+                )
+              : openChapter
+                ? openChapter.title
+                : selected?.kind === 'project' && 'Project Outline'}
         </span>
         <SaveIndicator {...saveStatus} />
         <span className="header-actions">{headerActions}</span>
@@ -254,6 +302,10 @@ function ProjectView({
         sessions={project.sessions}
         manuscript={manuscript}
         tips={tips}
+        dropped={dropped}
+        onDismissDropped={(notice) =>
+          setDropped(dropped.filter((d) => d !== notice))
+        }
         onContinue={continueAt}
         onDismissTip={(tip) => {
           window.shell.dismissTip(tip);
@@ -272,6 +324,19 @@ function ProjectView({
             >
               Manuscript
             </button>
+            {(conflicts.length > 0 || tab === 'conflicts') && (
+              <button
+                role="tab"
+                aria-selected={tab === 'conflicts'}
+                id="conflicts-tab"
+                onClick={() => setTab('conflicts')}
+              >
+                Conflicts
+                {conflicts.length > 0 && (
+                  <span className="badge">{conflicts.length}</span>
+                )}
+              </button>
+            )}
             <button
               role="tab"
               aria-selected={tab === 'trash'}
@@ -287,7 +352,18 @@ function ProjectView({
                 manuscript={manuscript}
                 selected={selected}
                 onSelect={select}
+                conflicted={conflicted}
                 onChange={change}
+              />
+            ) : tab === 'conflicts' ? (
+              <ConflictList
+                conflicts={conflicts}
+                manuscript={manuscript}
+                open={resolvingConflict ? resolving : null}
+                onOpen={(ref) => {
+                  flushPendingEdits();
+                  setResolving(ref);
+                }}
               />
             ) : (
               <TrashView
@@ -295,7 +371,9 @@ function ProjectView({
                 onRestore={(item) =>
                   change(
                     () => window.project.restore(item.id),
-                    `Restored “${item.title}”`,
+                    item.kind === 'version'
+                      ? `Restored ${trashTitle(item)}`
+                      : `Restored “${item.title}”`,
                   )
                 }
                 onEmpty={emptyTrash}
@@ -315,7 +393,14 @@ function ProjectView({
         />
         {/* A new key per unit: leaving one unmounts its editors, which
             flushes their pending edits. */}
-        {selected?.kind === 'project' ? (
+        {resolvingConflict ? (
+          <ConflictResolver
+            key={unitKey(resolvingConflict.ref)}
+            conflict={resolvingConflict}
+            manuscript={manuscript}
+            onResolve={(kept) => resolve(resolvingConflict.ref, kept)}
+          />
+        ) : selected?.kind === 'project' ? (
           <main className="centre" key={PROJECT_OUTLINE}>
             <h2 className="centre-title">Project Outline</h2>
             <OutlineNotes
@@ -406,6 +491,10 @@ function allScenes(
   ];
 }
 
-function capitalized(text: string): string {
-  return text.charAt(0).toUpperCase() + text.slice(1);
+/** What to open once a unit's Conflict is resolved: the unit it belongs to. */
+function selectionOf(ref: UnitRef, manuscript: Manuscript): Selection {
+  if (ref.id === PROJECT_OUTLINE) return { kind: 'project' };
+  return manuscript.chapters.some((c) => c.id === ref.id)
+    ? { kind: 'chapter', id: ref.id }
+    : { kind: 'scene', id: ref.id };
 }

@@ -1,7 +1,7 @@
 import { Editor, type Extensions, type JSONContent } from '@tiptap/core';
 import { EditorContent } from '@tiptap/react';
 import { useEffect, useState } from 'react';
-import { unitKey as keyOf, type UnitValue } from '../shared/project-types';
+import { unitKey as keyOf, unitText } from '../shared/project-types';
 import { createAutosave } from './autosave';
 import { registerPendingEdits } from './pending-edits';
 import { reloadUnitEditor, unitEditor } from './unit-editors';
@@ -85,7 +85,7 @@ export function UnitEditor({
           return;
         }
         if (!autosave.pending()) {
-          reloadUnitEditor(editor, toDoc(textOf(event.value)));
+          reloadUnitEditor(editor, toDoc(unitText(event.value)));
         }
       }),
     [editor, autosave, unitKey, toDoc],
@@ -106,9 +106,4 @@ export function UnitEditor({
   }, [editor, created, autofocus, focusAt]);
 
   return <EditorContent editor={editor} className={className} />;
-}
-
-/** The text a unit's editor shows. */
-function textOf(value: UnitValue): string {
-  return 'markdown' in value ? value.markdown : value.body;
 }

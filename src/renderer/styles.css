@@ -537,3 +537,96 @@ h2.binder-title > button[aria-current='true'],
   font-weight: 600;
   cursor: pointer;
 }
+
+.badge {
+  display: inline-block;
+  min-width: 1.2em;
+  margin-left: 0.35rem;
+  padding: 0 0.3rem;
+  border-radius: 999px;
+  background: #b26a00;
+  color: #fff;
+  font-size: 0.75em;
+  text-align: center;
+}
+
+.binder-conflict {
+  color: #b26a00;
+  font-size: 0.85em;
+  font-weight: normal;
+}
+
+.conflicts {
+  padding: 0.5rem 0;
+}
+
+.conflicts-intro,
+.conflicts-empty {
+  color: var(--muted);
+  padding: 0 0.5rem;
+  margin: 0 0 0.5rem;
+}
+
+.conflicts ol {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.conflict-item {
+  display: block;
+  width: calc(100% - 1rem);
+  margin: 0 0.5rem;
+  padding: 0.25rem;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+}
+
+.conflict-item[aria-current='true'] {
+  background: var(--line);
+}
+
+.conflict-versions {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  gap: 1rem;
+  padding: 1rem;
+  overflow-x: auto;
+}
+
+.conflict-version {
+  flex: 1 0 14rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.conflict-version h3 {
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+.conflict-text {
+  flex: 1;
+  min-height: 8rem;
+  margin: 0;
+  padding: 0.5rem;
+  overflow: auto;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  white-space: pre-wrap;
+  resize: none;
+}
+
+.conflict-version button {
+  align-self: flex-start;
+}

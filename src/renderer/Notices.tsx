@@ -1,24 +1,30 @@
 import { useState } from 'react';
-import type { SessionNotice, Tip } from '../shared/api';
+import type { Dropped, SessionNotice, Tip } from '../shared/api';
 import type { Manuscript } from '../shared/project-types';
+import { droppedMessage } from './conflict-labels';
 
 /**
  * What the Author should know as the Project opens: other computers it is
- * also open on, where they left off on another computer, and tips. Each can
- * be dismissed; none stops the Author from working.
+ * also open on, where they left off on another computer, what the Manuscript
+ * lost when two computers rearranged it, and tips. Each can be dismissed;
+ * none stops the Author from working.
  */
 export function Notices({
   sessions,
   manuscript,
   tips,
+  dropped,
   onContinue,
   onDismissTip,
+  onDismissDropped,
 }: {
   sessions: SessionNotice;
   manuscript: Manuscript;
   tips: Tip[];
+  dropped: Dropped[];
   onContinue(sceneId: string, cursor?: number): void;
   onDismissTip(tip: Tip): void;
+  onDismissDropped(dropped: Dropped): void;
 }) {
   const [alsoOpenShown, setAlsoOpenShown] = useState(true);
   const [continueShown, setContinueShown] = useState(true);
@@ -57,6 +63,12 @@ export function Notices({
         <button onClick={() => setContinueShown(false)}>Dismiss</button>
       </div>
     ),
+    ...dropped.map((notice, i) => (
+      <div className="notice" key={`dropped-${i}`}>
+        <p>{droppedMessage(notice)}</p>
+        <button onClick={() => onDismissDropped(notice)}>Dismiss</button>
+      </div>
+    )),
     tips.includes('keep-on-device') && (
       <div className="notice" key="keep-on-device">
         <p>

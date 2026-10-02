@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
@@ -24,12 +24,16 @@ import {
 } from '../../shared/project-types';
 import type {
   Changed,
+  Conflict,
+  ConflictVersion,
   Created,
+  Dropped,
   ProjectEvent,
   ProjectView,
   SessionNotice,
   UnitSaveStatus,
 } from '../../shared/api';
+import { unitName } from '../../shared/unit-name';
 import type { Clock } from './clock';
 import type { FileSystem, Fingerprint } from './file-system';
 import { safeWrite, writeFailureReason } from './safe-write';
@@ -140,6 +144,14 @@ export async function openProject(
     );
   }
   await sweepTempFiles(projectPath, deps.fs);
+  const unrecognised = new Set<string>();
+  const resolved = await resolveManifestCopies(
+    projectPath,
+    manifest,
+    deps,
+    unrecognised,
+  );
+  manifest = resolved.manifest;
   const units = await scanUnits(projectPath, manifest.tree, deps.fs, {
     repair: true,
   });
@@ -149,9 +161,13 @@ export async function openProject(
     deps.clock.now(),
     (sceneId) => units.files.has(sceneId),
   );
-  const store = new ProjectStore(projectPath, manifest, deps, units, sessions);
+  const store = new ProjectStore(projectPath, manifest, deps, units, sessions, {
+    dropped: resolved.dropped,
+    unrecognised,
+  });
   // Every Manuscript has at least one Chapter.
   if (manifest.tree.chapters.length === 0) await store.createChapter(0);
+  await store.findConflicts();
   return store;
 }
 
@@ -180,6 +196,111 @@ export function projectLookup(fs: FileSystem): ProjectLookup {
   };
 }
 
+/**
+ * Settles versions of `project.json` that two computers saved, which a sync
+ * client leaves beside it as `<name>.json` files carrying the Project's id.
+ * Without asking: the one with the higher `format` is kept, or the original
+ * if they are equal, and the other goes to Trash. Scenes only the other
+ * placed are then Unplaced; what it had that is lost is returned, to tell the
+ * Author once. A copy of a format newer than this app reads is left for a
+ * newer app; a file with no Project id is logged and left alone.
+ */
+async function resolveManifestCopies(
+  projectPath: string,
+  original: Manifest,
+  { fs, clock }: StoreDeps,
+  unrecognised: Set<string>,
+): Promise<{ manifest: Manifest; dropped: Dropped[] }> {
+  const manifestPath = path.join(projectPath, MANIFEST);
+  const names = (await fs.readdir(projectPath))
+    .filter((name) => name !== MANIFEST && name.endsWith('.json'))
+    .sort();
+  if (names.length === 0) return { manifest: original, dropped: [] };
+  const hosts = await markerHosts(projectPath, fs);
+  let manifest = original;
+  const dropped: Dropped[] = [];
+  for (const name of names) {
+    const file = path.join(projectPath, name);
+    const copy = await readJson<Partial<Manifest>>(fs, file);
+    if (
+      copy?.id !== manifest.id ||
+      !Array.isArray(copy.tree?.chapters) ||
+      typeof copy.format !== 'number'
+    ) {
+      logOnce(unrecognised, `${name} is left alone: it isn't this Project's`);
+      continue;
+    }
+    if (copy.format > FORMAT) continue;
+    const copyWins = copy.format > manifest.format;
+    const [winner, loser] = copyWins
+      ? [copy as Manifest, manifest]
+      : [manifest, copy as Manifest];
+    // The loser first, so that a crash loses neither.
+    await fs.mkdir(trashDir(projectPath));
+    const trashName = await freeName(
+      fs,
+      trashDir(projectPath),
+      copyWins ? 'project-replaced' : name.replace(/\.json$/, ''),
+      '.json',
+    );
+    await safeWrite(
+      fs,
+      clock,
+      path.join(trashDir(projectPath), trashName),
+      await fs.readFile(copyWins ? manifestPath : file),
+    );
+    if (copyWins) {
+      await safeWrite(
+        fs,
+        clock,
+        manifestPath,
+        `${JSON.stringify(winner, null, 2)}\n`,
+      );
+    }
+    await fs.unlink(file);
+    manifest = winner;
+
+    const lost = await lostWith(projectPath, fs, loser.tree, winner.tree);
+    if (lost.chapters.length > 0 || lost.scenes.length > 0) {
+      dropped.push({ ...(!copyWins && hostOfCopy(name, hosts)), ...lost });
+    }
+  }
+  return { manifest, dropped };
+}
+
+/**
+ * What `loser` had that `winner` hasn't: Chapters not in Trash, and Scenes
+ * it placed whose files are here, so are Unplaced now.
+ */
+async function lostWith(
+  projectPath: string,
+  fs: FileSystem,
+  loser: ProjectTree,
+  winner: ProjectTree,
+): Promise<Omit<Dropped, 'host'>> {
+  const chapterIds = new Set(winner.chapters.map((c) => c.id));
+  const placed = new Set(sceneIds(winner));
+  const chapters: string[] = [];
+  const scenes: string[] = [];
+  for (const chapter of loser.chapters) {
+    if (
+      !chapterIds.has(chapter.id) &&
+      !(await fs.exists(chapterTrashPath(projectPath, chapter.id)))
+    ) {
+      chapters.push(chapter.title);
+    }
+    for (const scene of chapter.scenes) {
+      if (
+        !placed.has(scene.id) &&
+        (await fs.exists(scenePath(projectPath, scene.id)))
+      ) {
+        scenes.push(scene.title);
+      }
+    }
+  }
+  return { chapters, scenes };
+}
+
 /** Removes temp files left by a write that crashed before its rename. */
 async function sweepTempFiles(projectPath: string, fs: FileSystem) {
   const dirs = ['scenes', 'outlines', 'notes', 'trash', SESSIONS].map((d) =>
@@ -194,6 +315,8 @@ async function sweepTempFiles(projectPath: string, fs: FileSystem) {
 
 const UUID = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 const ID_FILE = new RegExp(`^(${UUID})\\.md$`);
+const ID = new RegExp(`^${UUID}$`);
+const VERSION_FILE = new RegExp(`^(${UUID})\\.version\\.md$`);
 const CHAPTER_FILE = new RegExp(`^(${UUID})\\.json$`);
 
 const UNPLACED_TITLE = 'Untitled Scene';
@@ -218,7 +341,25 @@ type TrashedChapter = {
   scenes: SceneNode[];
 };
 
-type Trashed = TrashedScene | TrashedChapter;
+/** A version of a unit set aside when its Conflict was resolved; `id` is its own. */
+type TrashedVersion = {
+  kind: 'version';
+  id: string;
+  ref: UnitRef;
+  trashedAt: number;
+  host?: string;
+  savedAt: number;
+};
+
+type Trashed = TrashedScene | TrashedChapter | TrashedVersion;
+
+/**
+ * What `trash/<id>.version.md` records beside the version's own frontmatter
+ * and body: which unit it is a version of, and from which computer and when.
+ */
+type TrashedVersionInfo = Omit<TrashedVersion, 'kind' | 'id' | 'trashedAt'> & {
+  at: number;
+};
 
 /**
  * What `trash/<id>.md` records beside the Prose. `withChapter` marks a Scene
@@ -277,10 +418,18 @@ async function scanUnits(
   const chapterIds = new Set(tree.chapters.map((c) => c.id));
   const chapters = new Map<string, TrashedChapter>();
   const scenes: TrashedScene[] = [];
+  const versions: TrashedVersion[] = [];
   const withChapter = new Map<string, string>();
 
   for (const name of await fs.readdir(trashDir(projectPath))) {
     const file = path.join(trashDir(projectPath), name);
+    const versionId = VERSION_FILE.exec(name)?.[1];
+    if (versionId) {
+      const { frontmatter } = parseUnitFile(await fs.readFile(file));
+      const info = frontmatter.trashedVersion as TrashedVersionInfo | undefined;
+      if (info) versions.push(trashedVersion(versionId, info));
+      continue;
+    }
     const chapterId = CHAPTER_FILE.exec(name)?.[1];
     if (chapterId) {
       if (chapterIds.has(chapterId)) {
@@ -312,6 +461,7 @@ async function scanUnits(
   }
 
   const trash = new Map<string, Trashed>(chapters);
+  for (const version of versions) trash.set(version.id, version);
   for (const scene of scenes) {
     // A Scene deleted with its Chapter is restored with it, unless the
     // Chapter's record isn't here, such as when it hasn't synced yet.
@@ -328,6 +478,17 @@ function trashedScene(id: string, info: TrashedSceneInfo): TrashedScene {
     title: info.title,
     trashedAt: info.at,
     ...(info.chapter && { chapter: info.chapter, index: info.index }),
+  };
+}
+
+function trashedVersion(id: string, info: TrashedVersionInfo): TrashedVersion {
+  return {
+    kind: 'version',
+    id,
+    ref: { kind: info.ref.kind, id: info.ref.id } as UnitRef,
+    trashedAt: info.at,
+    ...(info.host && { host: info.host }),
+    savedAt: info.savedAt,
   };
 }
 
@@ -390,7 +551,12 @@ function hostOf(deps: StoreDeps): string {
 
 /** A marker's file name: the host, with what a file name can't hold replaced. */
 function markerName(host: string): string {
-  return `${host.replace(/[^\w.-]/g, '_')}.json`;
+  return `${hostStem(host)}.json`;
+}
+
+/** A host as part of a file name, with what a file name can't hold replaced. */
+function hostStem(host: string): string {
+  return host.replace(/[^\w.-]/g, '_');
 }
 
 /** Every marker that can be read, by file name; one that can't is skipped. */
@@ -415,6 +581,15 @@ async function readSessionMarkers(
     }
   }
   return markers;
+}
+
+/** The computers whose session markers are in the Project. */
+async function markerHosts(
+  projectPath: string,
+  fs: FileSystem,
+): Promise<string[]> {
+  const markers = await readSessionMarkers(projectPath, fs);
+  return [...markers.values()].map((marker) => marker.host);
 }
 
 /**
@@ -464,7 +639,32 @@ type Loaded = {
   ref: UnitRef;
   /** Null when it had no file. */
   fingerprint: Fingerprint | null;
+  /** Of the file's text; null when it had no file. */
+  hash: string | null;
   value: UnitValue;
+  /** Whether this computer wrote the file, rather than read it. */
+  savedHere?: true;
+};
+
+/** The `versionId` of the version at a unit's own path. */
+const ORIGINAL = 'original';
+
+/**
+ * A version of a unit beside its file. `versionId` is made from its file
+ * name, which the renderer never sees.
+ */
+type ConflictCopy = {
+  name: string;
+  versionId: string;
+  savedAt: number;
+  host?: string;
+};
+
+type ConflictEntry = {
+  ref: UnitRef;
+  /** The unit's own file; null when only copies are there. */
+  original: { savedAt: number; host?: string } | null;
+  copies: ConflictCopy[];
 };
 
 /** How long a unit that failed to save waits before the next try, by failures in a row. */
@@ -502,6 +702,14 @@ export class ProjectStore {
   private manifestFingerprint: Fingerprint | null = null;
   /** Whether a check for changes on disk is waiting for a burst of events to end. */
   private checkScheduled = false;
+  /** Units whose Conflict is being resolved; their writes wait. */
+  private readonly resolving = new Set<string>();
+  /** The units in Conflict, by key. */
+  private conflicts = new Map<string, ConflictEntry>();
+  /** Files with no id that names a unit or the Project, already logged. */
+  private readonly unrecognised: Set<string>;
+  /** What versions of `project.json` that met as the Project opened lost, until told. */
+  private dropped: Dropped[];
 
   private readonly host: string;
   private readonly sessions: Sessions;
@@ -519,7 +727,13 @@ export class ProjectStore {
     private readonly deps: StoreDeps,
     units: Units,
     sessions: Sessions,
+    opened: { dropped: Dropped[]; unrecognised: Set<string> } = {
+      dropped: [],
+      unrecognised: new Set(),
+    },
   ) {
+    this.dropped = opened.dropped;
+    this.unrecognised = opened.unrecognised;
     this.files = units.files;
     this.trash = units.trash;
     this.host = hostOf(deps);
@@ -532,6 +746,16 @@ export class ProjectStore {
       ...view
     } = sessions.own ?? {};
     this.view = view;
+  }
+
+  /**
+   * What versions of `project.json` from two computers lost as the Project
+   * opened; it is told once, so the next call returns none.
+   */
+  takeDropped(): Dropped[] {
+    const dropped = this.dropped;
+    this.dropped = [];
+    return dropped;
   }
 
   /** What the session markers said when the Project opened. */
@@ -638,6 +862,7 @@ export class ProjectStore {
       try {
         await this.checkStructure();
         await this.checkUnits();
+        await this.findConflicts();
       } catch (error) {
         console.error(`Can't check ${this.path} for changes:`, error);
       }
@@ -658,6 +883,17 @@ export class ProjectStore {
       manifest = read;
       this.manifestFingerprint = fingerprint;
     }
+    const resolved = await resolveManifestCopies(
+      this.path,
+      manifest,
+      this.deps,
+      this.unrecognised,
+    );
+    if (resolved.manifest !== manifest) {
+      manifest = resolved.manifest;
+      this.manifestFingerprint = await this.deps.fs.stat(file);
+    }
+    const { dropped } = resolved;
     const units = await scanUnits(this.path, manifest.tree, this.deps.fs, {
       repair: false,
     });
@@ -672,13 +908,19 @@ export class ProjectStore {
     for (const [id, item] of units.trash) this.trash.set(id, item);
     const manuscript = this.manuscript();
     if (
-      JSON.stringify([this.manifest, manuscript, this.listTrash()]) === before
+      JSON.stringify([this.manifest, manuscript, this.listTrash()]) ===
+        before &&
+      dropped.length === 0
     ) {
       return;
     }
     // Its undo was made for a tree that is gone.
     this.latest = null;
-    this.emit({ type: 'structureChanged', manuscript });
+    this.emit({
+      type: 'structureChanged',
+      manuscript,
+      ...(dropped.length > 0 && { dropped }),
+    });
   }
 
   private async checkUnits(): Promise<void> {
@@ -696,16 +938,141 @@ export class ProjectStore {
       if (!fingerprint || sameFingerprint(fingerprint, known.fingerprint)) {
         continue;
       }
-      const value = unitValue(
-        known.ref,
-        parseUnitFile(await this.deps.fs.readFile(file)),
-      );
+      const text = await this.deps.fs.readFile(file);
+      const value = unitValue(known.ref, parseUnitFile(text));
       // Written to since: what to keep is decided when it is saved.
       if (this.isDirty(key)) continue;
-      this.loaded.set(key, { ref: known.ref, fingerprint, value });
+      this.loaded.set(key, {
+        ref: known.ref,
+        fingerprint,
+        hash: hashOf(text),
+        value,
+      });
       if (!isDeepStrictEqual(value, known.value)) {
         this.emit({ type: 'unitReloaded', ref: known.ref, value });
       }
+    }
+  }
+
+  /**
+   * Finds the versions of units saved beside their own file, as a sync
+   * client leaves them when two computers saved one unit: any file in a unit
+   * directory not named `<id>.md`. It is matched to its unit by the id inside
+   * it, never by its name. One with no id that names a unit is logged and
+   * left alone, and so is a copy of a unit that isn't here, until it is.
+   */
+  async findConflicts(): Promise<void> {
+    // Read only to label a copy: most checks find none.
+    let hosts: string[] | undefined;
+    const knownHosts = async () =>
+      (hosts ??= [this.host, ...(await markerHosts(this.path, this.deps.fs))]);
+    const found = new Map<string, ConflictEntry>();
+    for (const kind of ['scene', 'outline', 'notes'] as const) {
+      const dir = path.join(this.path, UNIT_DIRS[kind]);
+      for (const name of await this.deps.fs.readdir(dir)) {
+        if (isOwnFile(kind, name) || name.endsWith('.tmp')) continue;
+        const file = path.join(dir, name);
+        const id = await embeddedId(this.deps.fs, file);
+        const ref = { kind, id: id ?? '' };
+        if (!id || !(ID.test(id) || isProjectOutline(ref))) {
+          logOnce(
+            this.unrecognised,
+            `${path.join(UNIT_DIRS[kind], name)} is left alone: it has no id that names a unit`,
+          );
+          continue;
+        }
+        if (!this.isAvailable(ref)) continue;
+        const fingerprint = await this.deps.fs.stat(file);
+        if (!fingerprint) continue;
+        const key = unitKey(ref);
+        const entry = found.get(key) ?? { ref, original: null, copies: [] };
+        entry.copies.push({
+          name,
+          versionId: hashOf(name).slice(0, 16),
+          savedAt: fingerprint.mtimeMs,
+          ...hostOfCopy(name, await knownHosts()),
+        });
+        found.set(key, entry);
+      }
+    }
+    for (const [key, entry] of found) {
+      entry.copies.sort(
+        (a, b) => a.savedAt - b.savedAt || a.name.localeCompare(b.name),
+      );
+      entry.original = await this.originalVersion(key, entry.ref);
+    }
+    this.setConflicts(found);
+  }
+
+  /** When a unit's own file was saved, and whether by this computer. */
+  private async originalVersion(
+    key: string,
+    ref: UnitRef,
+  ): Promise<ConflictEntry['original']> {
+    const fingerprint = await this.deps.fs.stat(unitPath(this.path, ref));
+    if (!fingerprint) return null;
+    const loaded = this.loaded.get(key);
+    const here =
+      loaded?.savedHere && sameFingerprint(loaded.fingerprint, fingerprint);
+    return { savedAt: fingerprint.mtimeMs, ...(here && { host: this.host }) };
+  }
+
+  /** Replaces the units in Conflict, and says so if that changes them. */
+  private setConflicts(conflicts: Map<string, ConflictEntry>): void {
+    const before = JSON.stringify(this.listConflicts());
+    this.conflicts = conflicts;
+    const now = this.listConflicts();
+    if (JSON.stringify(now) !== before) {
+      this.emit({ type: 'conflictsChanged', conflicts: now });
+    }
+  }
+
+  /** Each unit in Conflict, with its versions: the original first, then the oldest. */
+  listConflicts(): Conflict[] {
+    return [...this.conflicts.values()].map(({ ref, original, copies }) => {
+      const versions: ConflictVersion[] = copies.map((copy) => ({
+        versionId: copy.versionId,
+        original: false,
+        ...(copy.host && { host: copy.host }),
+        savedAt: copy.savedAt,
+      }));
+      if (original) {
+        versions.unshift({
+          versionId: ORIGINAL,
+          original: true,
+          ...(original.host && { host: original.host }),
+          savedAt: original.savedAt,
+        });
+      }
+      return { ref: { ...ref }, versions };
+    });
+  }
+
+  /** One version of a unit in Conflict, by the id `listConflicts` gives it. */
+  async readConflictVersion<R extends UnitRef>(
+    ref: R,
+    versionId: string,
+  ): Promise<ValueOf<R>> {
+    if (versionId === ORIGINAL) return this.read(ref);
+    const copy = this.conflictCopy(ref, versionId);
+    const text = await this.deps.fs.readFile(copyPath(this.path, ref, copy));
+    return unitValue(ref, parseUnitFile(text)) as ValueOf<R>;
+  }
+
+  private conflictCopy(ref: UnitRef, versionId: string): ConflictCopy {
+    const copy = this.conflicts
+      .get(unitKey(ref))
+      ?.copies.find((c) => c.versionId === versionId);
+    if (!copy) throw new Error(`No version ${versionId} of ${unitKey(ref)}`);
+    return copy;
+  }
+
+  private isAvailable(ref: UnitRef): boolean {
+    try {
+      this.refuseUnavailable(ref);
+      return true;
+    } catch {
+      return false;
     }
   }
 
@@ -760,24 +1127,35 @@ export class ProjectStore {
 
   /** Latest first. */
   listTrash(): TrashItem[] {
+    const manuscript = this.manuscript();
     return [...this.trash.values()]
       .sort((a, b) => b.trashedAt - a.trashedAt)
-      .map((item) =>
-        item.kind === 'chapter'
-          ? {
-              kind: 'chapter',
-              id: item.id,
-              title: item.title,
-              trashedAt: item.trashedAt,
-              scenes: item.scenes.map((s) => ({ ...s })),
-            }
-          : {
-              kind: 'scene',
-              id: item.id,
-              title: item.title,
-              trashedAt: item.trashedAt,
-              ...(item.chapter && { chapterTitle: item.chapter.title }),
-            },
+      .map(
+        (item): TrashItem =>
+          item.kind === 'version'
+            ? {
+                kind: 'version',
+                id: item.id,
+                title: unitName(item.ref, manuscript),
+                trashedAt: item.trashedAt,
+                ...(item.host && { host: item.host }),
+                savedAt: item.savedAt,
+              }
+            : item.kind === 'chapter'
+              ? {
+                  kind: 'chapter',
+                  id: item.id,
+                  title: item.title,
+                  trashedAt: item.trashedAt,
+                  scenes: item.scenes.map((s) => ({ ...s })),
+                }
+              : {
+                  kind: 'scene',
+                  id: item.id,
+                  title: item.title,
+                  trashedAt: item.trashedAt,
+                  ...(item.chapter && { chapterTitle: item.chapter.title }),
+                },
       );
   }
 
@@ -902,13 +1280,183 @@ export class ProjectStore {
    */
   restore(id: string): Promise<Changed> {
     return this.step(async () => {
-      const kind = this.trash.get(id)?.kind;
+      const item = this.trash.get(id);
+      if (item?.kind === 'version') {
+        const name = await this.restoreVersion(item);
+        return () => this.trashCopy(item.ref, name, item.host);
+      }
+      const kind = item?.kind;
       await this.restoreFromTrash(id);
       return () =>
         kind === 'chapter'
           ? this.moveChapterToTrash(id)
           : this.moveSceneToTrash(id);
     });
+  }
+
+  /**
+   * Ends a Conflict: `kept`, one of its versions or a merge the Author
+   * edited, goes to the unit's own file, and every other version to Trash.
+   * The original's version goes first, so a crash never loses it.
+   */
+  resolveConflict<R extends UnitRef>(ref: R, kept: ValueOf<R>): Promise<void> {
+    const key = unitKey(ref);
+    // The Author's text not yet saved is one of the versions. What is
+    // written from now on is newer than `kept`: it waits, then goes over it.
+    const superseded = this.unsaved.get(key);
+    this.resolving.add(key);
+    return this.enqueueStructure(async () => {
+      try {
+        this.refuseUnavailable(ref);
+        await this.findConflicts();
+        const entry = this.conflicts.get(key);
+        if (!entry) throw new Error(`${key} is in no Conflict`);
+        while (this.writing.has(key)) await this.writing.get(key);
+        const pending = this.unsaved.get(key);
+        const taken = pending && pending === superseded ? pending : undefined;
+        const loaded = await this.keepVersion(entry, kept, taken);
+        if (taken) this.settle(key);
+        else this.failures.delete(key);
+        this.loaded.set(key, loaded);
+      } finally {
+        this.resolving.delete(key);
+      }
+      if (this.unsaved.has(key)) {
+        this.report({ type: 'unitSaveStatus', ref, state: 'saving' });
+        this.startWriting(key);
+      }
+      await this.findConflicts();
+    });
+  }
+
+  /**
+   * Writes `kept` to a unit's own file, after every other version to Trash:
+   * the Author's unsaved text, what is in the file, which may have come from
+   * another computer since, and then each copy beside it.
+   */
+  private async keepVersion(
+    { ref, original, copies }: ConflictEntry,
+    kept: UnitValue,
+    pending: Pending | undefined,
+  ): Promise<Loaded> {
+    const file = unitPath(this.path, ref);
+    const differs = (text: string, from: UnitValue[] = []) => {
+      const value = unitValue(ref, parseUnitFile(text));
+      return [kept, ...from].every((v) => !isDeepStrictEqual(value, v));
+    };
+    if (pending && !isDeepStrictEqual(pending.value, kept)) {
+      await this.writeTrashedVersion(ref, unitFile(ref, pending.value), {
+        host: this.host,
+        savedAt: this.deps.clock.now(),
+      });
+    }
+    const onDisk = await this.deps.fs.stat(file);
+    if (onDisk) {
+      const text = await this.deps.fs.readFile(file);
+      if (differs(text, pending ? [pending.value] : [])) {
+        const known = this.loaded.get(unitKey(ref));
+        const unchanged =
+          original && sameFingerprint(onDisk, known?.fingerprint ?? null);
+        await this.writeTrashedVersion(ref, text, {
+          ...(unchanged && original.host && { host: original.host }),
+          savedAt: onDisk.mtimeMs,
+        });
+      }
+    }
+    const keptText = unitFile(ref, kept);
+    await safeWrite(this.deps.fs, this.deps.clock, file, keptText);
+    const loaded: Loaded = {
+      ref,
+      fingerprint: await this.deps.fs.stat(file),
+      hash: hashOf(keptText),
+      value: structuredClone(kept),
+      savedHere: true,
+    };
+
+    for (const copy of copies) {
+      const text = await this.deps.fs.readFile(copyPath(this.path, ref, copy));
+      if (differs(text)) await this.writeTrashedVersion(ref, text, copy);
+      await this.deps.fs.unlink(copyPath(this.path, ref, copy));
+    }
+    return loaded;
+  }
+
+  /** Writes a version of a unit to Trash, as `trash/<id>.version.md`. */
+  private async writeTrashedVersion(
+    ref: UnitRef,
+    text: string,
+    from: { host?: string; savedAt: number },
+  ): Promise<void> {
+    const id = randomUUID();
+    const info: TrashedVersionInfo = {
+      at: this.deps.clock.now(),
+      ref: { kind: ref.kind, id: ref.id },
+      ...(from.host && { host: from.host }),
+      savedAt: from.savedAt,
+    };
+    const { frontmatter, body } = parseUnitFile(text);
+    await this.deps.fs.mkdir(trashDir(this.path));
+    await safeWrite(
+      this.deps.fs,
+      this.deps.clock,
+      versionTrashPath(this.path, id),
+      formatUnitFile({
+        frontmatter: { ...frontmatter, trashedVersion: info },
+        body,
+      }),
+    );
+    this.trash.set(id, trashedVersion(id, info));
+  }
+
+  /**
+   * Puts a version back beside its unit's file, named after the computer it
+   * came from when known, so that it is in Conflict again; never beside a
+   * unit that is Missing or in Trash. Resolves with its file name.
+   */
+  private async restoreVersion(item: TrashedVersion): Promise<string> {
+    // Beside a unit that isn't here, it would be in no Conflict.
+    this.refuseUnavailable(item.ref);
+    const trashed = versionTrashPath(this.path, item.id);
+    const { frontmatter, body } = parseUnitFile(
+      await this.deps.fs.readFile(trashed),
+    );
+    const { trashedVersion: _, ...own } = frontmatter;
+    const dir = path.dirname(unitPath(this.path, item.ref));
+    const label = item.host ? hostStem(item.host) : 'version';
+    const name = await freeName(
+      this.deps.fs,
+      dir,
+      `${item.ref.id}-${label}`,
+      '.md',
+    );
+    await this.deps.fs.mkdir(dir);
+    await safeWrite(
+      this.deps.fs,
+      this.deps.clock,
+      path.join(dir, name),
+      formatUnitFile({ frontmatter: own, body }),
+    );
+    this.trash.delete(item.id);
+    await this.deps.fs.unlink(trashed);
+    await this.findConflicts();
+    return name;
+  }
+
+  /** Moves a version beside a unit's file to Trash. */
+  private async trashCopy(
+    ref: UnitRef,
+    name: string,
+    host: string | undefined,
+  ): Promise<void> {
+    const file = copyPath(this.path, ref, { name });
+    const fingerprint = await this.deps.fs.stat(file);
+    if (!fingerprint) return;
+    await this.writeTrashedVersion(ref, await this.deps.fs.readFile(file), {
+      host,
+      savedAt: fingerprint.mtimeMs,
+    });
+    await this.deps.fs.unlink(file);
+    await this.findConflicts();
   }
 
   /** Reverts `step` if it is still the latest structure operation. */
@@ -1119,6 +1667,10 @@ export class ProjectStore {
   private async restoreFromTrash(id: string): Promise<void> {
     const item = this.trash.get(id);
     if (!item) throw new Error(`Nothing in Trash has id ${id}`);
+    if (item.kind === 'version') {
+      await this.restoreVersion(item);
+      return;
+    }
     const tree = this.tree();
     const placed = new Set(sceneIds(tree));
     const live = (sceneId: string) =>
@@ -1275,7 +1827,12 @@ export class ProjectStore {
     const value = unitValue(ref, parseUnitFile(text));
     const key = unitKey(ref);
     if (!this.isDirty(key)) {
-      this.loaded.set(key, { ref, fingerprint, value: structuredClone(value) });
+      this.loaded.set(key, {
+        ref,
+        fingerprint,
+        hash: fingerprint && hashOf(text),
+        value: structuredClone(value),
+      });
     }
     return value as ValueOf<R>;
   }
@@ -1342,7 +1899,7 @@ export class ProjectStore {
   }
 
   private startWriting(key: string): void {
-    if (this.writing.has(key)) return;
+    if (this.writing.has(key) || this.resolving.has(key)) return;
     this.writing.set(
       key,
       this.drain(key).finally(() => {
@@ -1355,24 +1912,40 @@ export class ProjectStore {
   }
 
   private async drain(key: string): Promise<void> {
+    /** Whether a version from disk went beside the unit's file. */
+    let setAside = false;
+    try {
+      await this.drainWrites(key, () => {
+        setAside = true;
+      });
+    } finally {
+      // Its versions, or when its own file was saved, changed.
+      if (setAside || this.conflicts.has(key)) await this.refreshConflicts();
+    }
+  }
+
+  private async drainWrites(
+    key: string,
+    onSetAside: () => void,
+  ): Promise<void> {
     for (;;) {
       const pending = this.unsaved.get(key);
-      if (!pending) return;
+      // A unit being resolved takes its next write once that is done.
+      if (!pending || this.resolving.has(key)) return;
       try {
         const file = unitPath(this.path, pending.ref);
         if (pending.ref.kind !== 'scene') {
           await this.deps.fs.mkdir(path.dirname(file));
         }
-        await safeWrite(
-          this.deps.fs,
-          this.deps.clock,
-          file,
-          unitFile(pending.ref, pending.value),
-        );
+        if (await this.setAsideChangeOnDisk(pending, file)) onSetAside();
+        const text = unitFile(pending.ref, pending.value);
+        await safeWrite(this.deps.fs, this.deps.clock, file, text);
         this.loaded.set(key, {
           ref: pending.ref,
           fingerprint: await this.deps.fs.stat(file),
+          hash: hashOf(text),
           value: pending.value,
+          savedHere: true,
         });
       } catch (error) {
         // The unit stays unsaved in memory, and is tried again later.
@@ -1395,6 +1968,62 @@ export class ProjectStore {
         ref: pending.ref,
         state: done ? 'saved' : 'saving',
       });
+    }
+  }
+
+  /**
+   * The pre-save check: a file whose time, size or content changed on disk
+   * since this store read or wrote it, as when another computer saved it, is never overwritten. Its
+   * version goes beside it as a conflict copy, and the Author's text here
+   * then goes to the unit's own file, with nothing to interrupt them. The
+   * same text rewritten is no change. True if it set a version aside.
+   */
+  private async setAsideChangeOnDisk(
+    { ref, value }: Pending,
+    file: string,
+  ): Promise<boolean> {
+    const known = this.loaded.get(unitKey(ref));
+    if (!known) return false;
+    const fingerprint = await this.deps.fs.stat(file);
+    if (!fingerprint) return false;
+    const text = await this.deps.fs.readFile(file);
+    if (
+      sameFingerprint(fingerprint, known.fingerprint) &&
+      hashOf(text) === known.hash
+    ) {
+      return false;
+    }
+    const onDisk = parseUnitFile(text);
+    const theirs = unitValue(ref, onDisk);
+    if (
+      isDeepStrictEqual(theirs, known.value) ||
+      isDeepStrictEqual(theirs, value)
+    ) {
+      return false;
+    }
+    const dir = path.dirname(file);
+    const name = await freeName(this.deps.fs, dir, `${ref.id}-conflict`, '.md');
+    await safeWrite(
+      this.deps.fs,
+      this.deps.clock,
+      path.join(dir, name),
+      // The copy is matched to its unit by the id inside it.
+      onDisk.frontmatter.id === ref.id
+        ? text
+        : formatUnitFile({
+            ...onDisk,
+            frontmatter: { ...onDisk.frontmatter, id: ref.id },
+          }),
+    );
+    return true;
+  }
+
+  /** Finds the units in Conflict again; failing to only leaves the list as it was. */
+  private async refreshConflicts(): Promise<void> {
+    try {
+      await this.findConflicts();
+    } catch (error) {
+      console.error(`Can't look for Conflicts in ${this.path}:`, error);
     }
   }
 
@@ -1434,6 +2063,58 @@ export class ProjectStore {
   private emit(event: ProjectEvent): void {
     for (const listener of this.listeners) listener(structuredClone(event));
   }
+}
+
+/** `<stem><ext>`, or with `-2`, `-3`… added, whichever isn't taken in `dir`. */
+async function freeName(
+  fs: FileSystem,
+  dir: string,
+  stem: string,
+  ext: string,
+): Promise<string> {
+  for (let n = 1; ; n++) {
+    const name = `${stem}${n === 1 ? '' : `-${n}`}${ext}`;
+    if (!(await fs.exists(path.join(dir, name)))) return name;
+  }
+}
+
+function hashOf(text: string): string {
+  return createHash('sha256').update(text).digest('hex');
+}
+
+/** Logs a file left alone, once while the Project is open. */
+function logOnce(logged: Set<string>, message: string): void {
+  if (logged.has(message)) return;
+  logged.add(message);
+  console.error(message);
+}
+
+/** The id a unit file carries in its frontmatter, if any. */
+async function embeddedId(
+  fs: FileSystem,
+  file: string,
+): Promise<string | undefined> {
+  try {
+    const { id } = parseUnitFile(await fs.readFile(file)).frontmatter;
+    return typeof id === 'string' ? id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The computer a conflict copy came from, when its name ends with one that
+ * has opened the Project, as in the `<id>-HOST.md` a sync client makes. Only
+ * a label: a copy is matched to its unit by the id inside it.
+ */
+function hostOfCopy(name: string, hosts: string[]): { host?: string } {
+  const stem = name.replace(/\.[^.]*$/, '').toLowerCase();
+  const host = [...hosts]
+    .sort((a, b) => b.length - a.length)
+    .find((h) =>
+      [h, hostStem(h)].some((form) => stem.endsWith(`-${form.toLowerCase()}`)),
+    );
+  return host ? { host } : {};
 }
 
 function sameFingerprint(
@@ -1513,12 +2194,36 @@ function unitPath(projectPath: string, ref: UnitRef): string {
   return path.join(projectPath, UNIT_DIRS[ref.kind], `${ref.id}.md`);
 }
 
+function copyPath(
+  projectPath: string,
+  ref: UnitRef,
+  copy: { name: string },
+): string {
+  return path.join(projectPath, UNIT_DIRS[ref.kind], copy.name);
+}
+
+/** Whether `name` is a unit's own file in its kind's directory, not a copy. */
+function isOwnFile(kind: UnitRef['kind'], name: string): boolean {
+  return (
+    ID_FILE.test(name) ||
+    (kind === 'outline' && name === `${PROJECT_OUTLINE}.md`)
+  );
+}
+
+function isProjectOutline(ref: UnitRef): boolean {
+  return ref.kind === 'outline' && ref.id === PROJECT_OUTLINE;
+}
+
 function trashDir(projectPath: string): string {
   return path.join(projectPath, 'trash');
 }
 
 function sceneTrashPath(projectPath: string, id: string): string {
   return path.join(trashDir(projectPath), `${id}.md`);
+}
+
+function versionTrashPath(projectPath: string, id: string): string {
+  return path.join(trashDir(projectPath), `${id}.version.md`);
 }
 
 function chapterTrashPath(projectPath: string, id: string): string {

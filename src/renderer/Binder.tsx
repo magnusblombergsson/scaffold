@@ -1,10 +1,11 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react';
 import type { Changed, Created } from '../shared/api';
-import type {
-  Manuscript,
-  ManuscriptChapter,
-  ManuscriptScene,
-  SceneNode,
+import {
+  PROJECT_OUTLINE,
+  type Manuscript,
+  type ManuscriptChapter,
+  type ManuscriptScene,
+  type SceneNode,
 } from '../shared/project-types';
 
 /** What the centre shows: a Scene, a Chapter's Outline and Notes, or the Project Outline. */
@@ -16,6 +17,8 @@ type Props = {
   manuscript: Manuscript;
   selected: Selection | null;
   onSelect(selection: Selection): void;
+  /** The Chapters and Scenes, or `PROJECT_OUTLINE`, with a unit in Conflict. */
+  conflicted: ReadonlySet<string>;
   /**
    * Runs a structure operation and shows the Manuscript it resolves with;
    * `message` says what it did, beside Undo.
@@ -30,7 +33,13 @@ const SCENE = 'application/x-writing-tools-scene';
 const CHAPTER = 'application/x-writing-tools-chapter';
 
 /** The Manuscript tab: Chapters and their Scenes, then any Unplaced Scenes. */
-export function Binder({ manuscript, selected, onSelect, onChange }: Props) {
+export function Binder({
+  manuscript,
+  selected,
+  onSelect,
+  conflicted,
+  onChange,
+}: Props) {
   const [renaming, setRenaming] = useState<Renaming>(null);
   const project = window.project;
   const { chapters } = manuscript;
@@ -256,6 +265,7 @@ export function Binder({ manuscript, selected, onSelect, onChange }: Props) {
                 Missing, possibly not synced yet
               </span>
             )}
+            <ConflictMarker shown={conflicted.has(scene.id)} />
           </button>
         )}
         <Menu
@@ -274,6 +284,7 @@ export function Binder({ manuscript, selected, onSelect, onChange }: Props) {
         onClick={() => onSelect({ kind: 'project' })}
       >
         Project Outline
+        <ConflictMarker shown={conflicted.has(PROJECT_OUTLINE)} />
       </button>
       <ol className="binder-chapters">
         {chapters.map((chapter, index) => (
@@ -329,6 +340,7 @@ export function Binder({ manuscript, selected, onSelect, onChange }: Props) {
                     onDoubleClick={() => setRenaming(chapter.id)}
                   >
                     {chapter.title}
+                    <ConflictMarker shown={conflicted.has(chapter.id)} />
                   </button>
                 </h2>
               )}
@@ -365,6 +377,11 @@ export function Binder({ manuscript, selected, onSelect, onChange }: Props) {
       )}
     </nav>
   );
+}
+
+/** Marks a unit in Conflict; it stays editable. */
+function ConflictMarker({ shown }: { shown: boolean }) {
+  return shown ? <span className="binder-conflict"> Conflict</span> : null;
 }
 
 function inLowerHalf(event: DragEvent<HTMLElement>): boolean {

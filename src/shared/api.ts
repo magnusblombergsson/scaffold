@@ -47,10 +47,44 @@ export type UnitReloaded = {
 export type StructureChanged = {
   type: 'structureChanged';
   manuscript: Manuscript;
+  /** Set once, when versions of `project.json` from two computers met. */
+  dropped?: Dropped[];
+};
+
+/**
+ * What two versions of `project.json` saved on different computers lost when
+ * one was kept: the Chapters only the other had, and the Scenes only it
+ * placed, which are Unplaced now. `host` is where it came from, if known.
+ */
+export type Dropped = { host?: string; chapters: string[]; scenes: string[] };
+
+/**
+ * One version of a unit in Conflict. The `original` is the one the app works
+ * with until the Author chooses; `host` is the computer that saved it, when
+ * known, and `savedAt` when it was saved.
+ */
+export type ConflictVersion = {
+  versionId: string;
+  original: boolean;
+  host?: string;
+  savedAt: number;
+};
+
+/** A unit saved on different computers, or at the same moment: its versions, the original first. */
+export type Conflict = { ref: UnitRef; versions: ConflictVersion[] };
+
+/** The units in Conflict changed: `conflicts` is all of them now. */
+export type ConflictsChanged = {
+  type: 'conflictsChanged';
+  conflicts: Conflict[];
 };
 
 /** What main tells a window about its Project as it happens. */
-export type ProjectEvent = UnitSaveStatus | UnitReloaded | StructureChanged;
+export type ProjectEvent =
+  | UnitSaveStatus
+  | UnitReloaded
+  | StructureChanged
+  | ConflictsChanged;
 
 /** Mirrors the main-process ProjectStore of this window's Project. */
 export interface ProjectApi {
@@ -96,6 +130,18 @@ export interface ProjectApi {
 
   /** Latest first. */
   listTrash(): Promise<TrashItem[]>;
+
+  /** Each unit in Conflict, with its versions, the original first. */
+  listConflicts(): Promise<Conflict[]>;
+  readConflictVersion<R extends UnitRef>(
+    ref: R,
+    versionId: string,
+  ): Promise<ValueOf<R>>;
+  /**
+   * Keeps `kept`, one of the versions or a merge, as the unit's value; the
+   * other versions go to Trash.
+   */
+  resolveConflict<R extends UnitRef>(ref: R, kept: ValueOf<R>): Promise<void>;
   /** Asks the Author to confirm, then deletes Trash for good; false if not. */
   emptyTrash(): Promise<boolean>;
 }
@@ -132,6 +178,8 @@ export type OpenedProject = {
   manuscript: Manuscript;
   view: ProjectView;
   sessions: SessionNotice;
+  /** What versions of `project.json` that met as it opened lost; told once. */
+  dropped: Dropped[];
 };
 
 /**
