@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ProseLanguage } from '../shared/project-types';
+import { MentionHighlight } from './mention-highlight';
 import { proseExtensions } from './prose-editor';
 import { docToMarkdown, markdownToDoc } from './prose-markdown';
 import { UnitEditor } from './UnitEditor';
@@ -36,7 +37,7 @@ export function SceneEditor({
     <UnitEditor
       unitKey={`scene:${sceneId}`}
       text={markdown}
-      extensions={proseExtensions(language)}
+      extensions={[...proseExtensions(language), MentionHighlight]}
       toDoc={markdownToDoc}
       toText={docToMarkdown}
       save={(markdown) =>

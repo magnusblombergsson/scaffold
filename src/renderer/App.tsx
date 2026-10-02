@@ -33,6 +33,13 @@ import { EntryView, VISIBILITY_LABELS } from './EntryView';
 import { Notices } from './Notices';
 import { OutlineNotes } from './OutlineNotes';
 import { PanelResizer } from './PanelResizer';
+import {
+  onMentionClick,
+  setMentionEntries,
+  setMentionHighlighting,
+  type MentionClick,
+} from './mention-highlight';
+import { MentionPeek } from './MentionPeek';
 import { flushPendingEdits } from './pending-edits';
 import { ReadOnlyContext } from './read-only';
 import { SaveFailureBanner, SaveIndicator, useSaveStatus } from './SaveStatus';
@@ -144,6 +151,7 @@ function ProjectView({
   function select(selection: Selection) {
     setJump(undefined);
     setResolving(null);
+    setPeek(null);
     setSelected(selection);
   }
 
@@ -189,6 +197,20 @@ function ProjectView({
   useEffect(() => {
     void window.project.listEntries().then(setEntries);
   }, []);
+  useEffect(() => setMentionEntries(entries), [entries]);
+  const [highlight, setHighlight] = useState(true);
+  useEffect(() => {
+    void window.shell.highlightMentions().then(setHighlight);
+    return window.shell.onHighlightMentions(setHighlight);
+  }, []);
+  /** The highlight the Author clicked, whose Entries the peek shows. */
+  const [peek, setPeek] = useState<MentionClick | null>(null);
+  const closePeek = useCallback(() => setPeek(null), []);
+  useEffect(() => onMentionClick(setPeek), []);
+  useEffect(() => {
+    setMentionHighlighting(highlight);
+    if (!highlight) setPeek(null);
+  }, [highlight]);
   const openEntry =
     selected?.kind === 'entry'
       ? entries.find((e) => e.id === selected.id)
@@ -403,6 +425,11 @@ function ProjectView({
                   openId={openEntry?.id ?? null}
                   onOpen={(id) => select({ kind: 'entry', id })}
                   onChange={change}
+                  highlight={highlight}
+                  onHighlight={(on) => {
+                    setHighlight(on);
+                    window.shell.setHighlightMentions(on);
+                  }}
                 />
               ) : tab === 'conflicts' ? (
                 <ConflictList
@@ -536,6 +563,16 @@ function ProjectView({
             </main>
           )}
         </div>
+        {peek && (
+          <MentionPeek
+            peek={peek}
+            onOpen={(id) => {
+              setTab('bible');
+              select({ kind: 'entry', id });
+            }}
+            onClose={closePeek}
+          />
+        )}
         <div className="toasts">
           {reloaded && (
             <Toast

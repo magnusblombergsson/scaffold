@@ -352,6 +352,15 @@ export function registerShellIpc(): void {
     return (await store.hasOnlineOnlyFiles()) ? ['keep-on-device'] : [];
   });
 
+  ipcMain.handle(channel.highlightMentions, () => settings.highlightMentions());
+
+  ipcMain.on(channel.setHighlightMentions, (_event, on: boolean) => {
+    settings.setHighlightMentions(on);
+    for (const window of BrowserWindow.getAllWindows()) {
+      window.webContents.send(channel.highlightMentionsChanged, on);
+    }
+  });
+
   ipcMain.on(channel.dismissTip, (event, tip: Tip) => {
     const store = stores.get(event.sender.id);
     if (!store) return;

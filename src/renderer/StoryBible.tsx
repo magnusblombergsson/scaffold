@@ -22,12 +22,17 @@ export function entryTitle(entry: { name: string }): string {
   return entry.name.trim() || 'Untitled';
 }
 
-/** The Story Bible tab: the Entries, grouped by type. */
+/**
+ * The Story Bible tab: the Entries, grouped by type, and whether their names
+ * are highlighted where the Prose, Outlines and Notes mention them.
+ */
 export function StoryBible({
   entries,
   openId,
   onOpen,
   onChange,
+  highlight,
+  onHighlight,
 }: {
   entries: EntrySummary[];
   /** The Entry the centre shows, if any. */
@@ -35,6 +40,8 @@ export function StoryBible({
   onOpen(id: string): void;
   /** Runs a change the Author can undo; `message` says what it did, beside Undo. */
   onChange(operation: () => Promise<Changed>, message: string): Promise<void>;
+  highlight: boolean;
+  onHighlight(on: boolean): void;
 }) {
   async function create(type: EntryType) {
     let created: Created | undefined;
@@ -61,6 +68,14 @@ export function StoryBible({
           New Entry…
         </Menu>
       </div>
+      <label className="story-bible-highlight">
+        <input
+          type="checkbox"
+          checked={highlight}
+          onChange={(event) => onHighlight(event.target.checked)}
+        />
+        Highlight Entry names
+      </label>
       {entries.length === 0 && (
         <p className="story-bible-empty">No Entries yet</p>
       )}

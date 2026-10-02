@@ -37,7 +37,10 @@ export type ProjectSettings = {
 
 type SettingsFile = {
   version: number;
-  global: { openAtQuit?: string[] } & Record<string, unknown>;
+  global: { openAtQuit?: string[]; highlightMentions?: boolean } & Record<
+    string,
+    unknown
+  >;
   projects: Record<string, ProjectSettings & Record<string, unknown>>;
   recent: RecentRecord[];
 };
@@ -97,6 +100,9 @@ function parseSettings(text: string): SettingsFile | null {
   if (!isJsonObject(raw)) return null;
   const global = isJsonObject(raw.global) ? { ...raw.global } : {};
   if (!isStringArray(global.openAtQuit)) delete global.openAtQuit;
+  if (typeof global.highlightMentions !== 'boolean') {
+    delete global.highlightMentions;
+  }
   const projects: SettingsFile['projects'] = {};
   if (isJsonObject(raw.projects)) {
     for (const [id, value] of Object.entries(raw.projects)) {
@@ -277,6 +283,16 @@ export class AppSettings {
 
   setOpenAtQuit(paths: string[]): void {
     this.data.global.openAtQuit = [...paths];
+    this.changed();
+  }
+
+  /** Whether Entry names are highlighted where they are mentioned; on by default. */
+  highlightMentions(): boolean {
+    return this.data.global.highlightMentions ?? true;
+  }
+
+  setHighlightMentions(on: boolean): void {
+    this.data.global.highlightMentions = on;
     this.changed();
   }
 

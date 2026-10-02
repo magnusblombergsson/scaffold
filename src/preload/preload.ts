@@ -84,6 +84,16 @@ const shell: ShellApi = {
   saveView: (view) => ipcRenderer.send(channel.saveView, view),
   tips: () => ipcRenderer.invoke(channel.tips),
   dismissTip: (tip) => ipcRenderer.send(channel.dismissTip, tip),
+  highlightMentions: () => ipcRenderer.invoke(channel.highlightMentions),
+  setHighlightMentions: (on) =>
+    ipcRenderer.send(channel.setHighlightMentions, on),
+  onHighlightMentions(listener) {
+    const forward = (_event: unknown, on: boolean) => listener(on);
+    ipcRenderer.on(channel.highlightMentionsChanged, forward);
+    return () => {
+      ipcRenderer.off(channel.highlightMentionsChanged, forward);
+    };
+  },
   onFlushRequest(listener) {
     flushListeners.add(listener);
     return () => {

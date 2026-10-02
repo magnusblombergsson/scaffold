@@ -4,6 +4,7 @@ import type {
   OutlineValue,
   ProseLanguage,
 } from '../shared/project-types';
+import { MentionHighlight } from './mention-highlight';
 import { docToText, plainTextExtensions, textToDoc } from './plain-text-editor';
 import { UnitEditor } from './UnitEditor';
 
@@ -109,7 +110,7 @@ function PlainTextField({
       <UnitEditor
         unitKey={unitKey}
         text={text}
-        extensions={plainTextExtensions({ bullets })}
+        extensions={[...plainTextExtensions({ bullets }), MentionHighlight]}
         toDoc={textToDoc}
         toText={docToText}
         save={save}

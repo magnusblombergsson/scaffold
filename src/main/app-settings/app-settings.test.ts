@@ -87,6 +87,16 @@ describe('saving', () => {
     return { clock, fs, sleepers, writes: () => writes };
   }
 
+  it('highlights mentions until the Author turns it off, and remembers that', async () => {
+    const settings = await load();
+    expect(settings.highlightMentions()).toBe(true);
+
+    settings.setHighlightMentions(false);
+    await settings.flush();
+
+    expect((await load()).highlightMentions()).toBe(false);
+  });
+
   it('writes once, about 500 ms after a burst of changes', async () => {
     const time = heldTime();
     const settings = await loadAppSettings(file, { ...deps(), ...time });
@@ -215,7 +225,7 @@ describe('a bad or newer settings file', () => {
       file,
       JSON.stringify({
         version: 1,
-        global: { openAtQuit: 'C:/A' },
+        global: { openAtQuit: 'C:/A', highlightMentions: 'no' },
         projects: {
           a: {
             lastSceneId: 7,
@@ -233,6 +243,7 @@ describe('a bad or newer settings file', () => {
 
     expect(settings.recent()).toEqual([valid]);
     expect(settings.openAtQuit()).toEqual([]);
+    expect(settings.highlightMentions()).toBe(true);
     expect(settings.project('a')).toEqual({ panelWidths: { binder: 300 } });
     expect(settings.project('b')).toEqual({});
     expect(settings.project('c')).toEqual({ outlineNotesOpen: false });

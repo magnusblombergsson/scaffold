@@ -272,6 +272,15 @@ export interface ShellApi {
   tips(): Promise<Tip[]>;
   /** Never shows the tip again for this window's Project on this computer. */
   dismissTip(tip: Tip): void;
+  /** Whether Entry names and aliases are highlighted where mentioned, on this computer. */
+  highlightMentions(): Promise<boolean>;
+  /** Turns the highlighting on or off, in every window. */
+  setHighlightMentions(on: boolean): void;
+  /**
+   * Calls `listener` when the highlighting is turned on or off, from any
+   * window. Returns an unsubscribe function.
+   */
+  onHighlightMentions(listener: (on: boolean) => void): () => void;
   /**
    * Main asks the window to hand over pending edits before it closes. The
    * listener must push them with `project.write` before returning. Returns an
@@ -292,6 +301,9 @@ export const channel = {
   saveView: 'shell:saveView',
   tips: 'shell:tips',
   dismissTip: 'shell:dismissTip',
+  highlightMentions: 'shell:highlightMentions',
+  setHighlightMentions: 'shell:setHighlightMentions',
+  highlightMentionsChanged: 'shell:highlightMentionsChanged',
   flushRequest: 'shell:flushRequest',
   flushed: 'shell:flushed',
   projectEvent: 'project:event',

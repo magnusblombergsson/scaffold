@@ -767,3 +767,101 @@ h2.binder-title > button[aria-current='true'],
 .entry-field-group h3 {
   margin-top: 0;
 }
+
+.story-bible-highlight {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  padding: 0 0.5rem;
+}
+
+/* A mention of an Entry, in the Prose, an Outline or Notes. */
+.mention {
+  text-decoration: underline dotted var(--muted);
+  text-decoration-thickness: 1px;
+  text-underline-offset: 0.2em;
+  cursor: pointer;
+}
+
+.mention-peek {
+  position: fixed;
+  z-index: 2;
+  box-sizing: border-box;
+  max-height: 60vh;
+  overflow-y: auto;
+  padding: 0.75rem;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 15%);
+  font-size: 0.9rem;
+}
+
+.mention-peek-entry + .mention-peek-entry {
+  border-top: 1px solid var(--line);
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+}
+
+.mention-peek-entry header {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+}
+
+.mention-peek-type {
+  grid-column: 1;
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.mention-peek-entry h2 {
+  grid-column: 1;
+  font-size: 1.05rem;
+  margin: 0;
+}
+
+.mention-peek-open {
+  grid-column: 2;
+  grid-row: 1 / span 2;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  color: var(--fg);
+  cursor: pointer;
+  font: inherit;
+  padding: 0.1rem 0.45rem;
+}
+
+.mention-peek-aliases {
+  color: var(--muted);
+  margin: 0.25rem 0 0;
+}
+
+.mention-peek-description {
+  white-space: pre-wrap;
+  margin: 0.5rem 0 0;
+}
+
+.mention-peek-entry dl {
+  margin: 0.5rem 0 0;
+}
+
+.mention-peek-entry dl div {
+  display: grid;
+  grid-template-columns: 7.5rem 1fr;
+  gap: 0.5rem;
+}
+
+.mention-peek-entry dt {
+  color: var(--muted);
+}
+
+.mention-peek-entry dd {
+  margin: 0;
+  white-space: pre-wrap;
+}
