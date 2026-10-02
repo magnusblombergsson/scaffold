@@ -460,11 +460,14 @@ function warnUnsaved(window: BrowserWindow): void {
   const store = stores.get(window.webContents.id);
   if (!store || window.isDestroyed()) return;
   const manuscript = store.manuscript();
+  const entries = store.listEntries();
   const failures = store
     .saveStatuses()
     .flatMap((status) =>
       status.state === 'failed'
-        ? [`Can't save ${unitName(status.ref, manuscript)}: ${status.reason}.`]
+        ? [
+            `Can't save ${unitName(status.ref, manuscript, entries)}: ${status.reason}.`,
+          ]
         : [],
     );
   void dialog.showMessageBox(window, {

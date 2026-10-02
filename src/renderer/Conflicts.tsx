@@ -3,6 +3,7 @@ import type { Conflict } from '../shared/api';
 import {
   unitKey,
   unitText,
+  type EntrySummary,
   type Manuscript,
   type UnitRef,
   type UnitValue,
@@ -14,11 +15,13 @@ import { versionLabel } from './conflict-labels';
 export function ConflictList({
   conflicts,
   manuscript,
+  entries,
   open,
   onOpen,
 }: {
   conflicts: Conflict[];
   manuscript: Manuscript;
+  entries: EntrySummary[];
   open: UnitRef | null;
   onOpen(ref: UnitRef): void;
 }) {
@@ -41,7 +44,7 @@ export function ConflictList({
               }
               onClick={() => onOpen(ref)}
             >
-              {capitalized(unitName(ref, manuscript))}
+              {capitalized(unitName(ref, manuscript, entries))}
               <span className="trash-detail">{versions.length} versions</span>
             </button>
           </li>
@@ -58,10 +61,12 @@ export function ConflictList({
 export function ConflictResolver({
   conflict,
   manuscript,
+  entries,
   onResolve,
 }: {
   conflict: Conflict;
   manuscript: Manuscript;
+  entries: EntrySummary[];
   onResolve(kept: UnitValue): void;
 }) {
   const { ref, versions } = conflict;
@@ -92,7 +97,7 @@ export function ConflictResolver({
   return (
     <main className="centre conflict-resolver">
       <h2 className="centre-title">
-        Conflict: {capitalized(unitName(ref, manuscript))}
+        Conflict: {capitalized(unitName(ref, manuscript, entries))}
       </h2>
       {values && (
         <div className="conflict-versions">
@@ -105,6 +110,9 @@ export function ConflictResolver({
                 aria-label={label}
               >
                 <h3>{label}</h3>
+                {'name' in values[i] && (
+                  <p className="conflict-entry-name">{values[i].name}</p>
+                )}
                 <pre className="conflict-text">{unitText(values[i])}</pre>
                 <button onClick={() => onResolve(values[i])}>
                   Keep this version
@@ -130,9 +138,9 @@ export function ConflictResolver({
   );
 }
 
-/** `value` with its text replaced; an Outline keeps its metadata. */
+/** `value` with its text replaced; an Outline or Entry keeps the rest. */
 function withText(value: UnitValue, text: string): UnitValue {
-  return 'markdown' in value
-    ? { ...value, markdown: text }
-    : { ...value, body: text };
+  if ('markdown' in value) return { ...value, markdown: text };
+  if ('description' in value) return { ...value, description: text };
+  return { ...value, body: text };
 }

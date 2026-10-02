@@ -30,6 +30,17 @@ const project: ProjectApi = {
     ipcRenderer.invoke(channel.project('trashScene'), sceneId),
   trashChapter: (chapterId) =>
     ipcRenderer.invoke(channel.project('trashChapter'), chapterId),
+  listEntries: () => ipcRenderer.invoke(channel.project('listEntries')),
+  createEntry: (type, name) =>
+    ipcRenderer.invoke(channel.project('createEntry'), type, name),
+  trashEntry: (entryId) =>
+    ipcRenderer.invoke(channel.project('trashEntry'), entryId),
+  setEntryVisibility: (entryId, visibility) =>
+    ipcRenderer.invoke(
+      channel.project('setEntryVisibility'),
+      entryId,
+      visibility,
+    ),
   restore: (id) => ipcRenderer.invoke(channel.project('restore'), id),
   undo: (step) => ipcRenderer.invoke(channel.project('undo'), step),
   listTrash: () => ipcRenderer.invoke(channel.project('listTrash')),

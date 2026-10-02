@@ -3,6 +3,7 @@ import Document from '@tiptap/extension-document';
 import Paragraph from '@tiptap/extension-paragraph';
 import Text from '@tiptap/extension-text';
 import { UndoRedo } from '@tiptap/extensions';
+import { Plugin } from '@tiptap/pm/state';
 
 /**
  * An editor for Outlines and Notes: plain text, one paragraph per line, with
@@ -16,6 +17,32 @@ export function plainTextExtensions({
 }): Extensions {
   return [Document, Paragraph, Text, UndoRedo, ...(bullets ? [Bullets] : [])];
 }
+
+/**
+ * An editor for one line of plain text, such as an Entry's name: Enter adds
+ * no line, and pasted lines are joined by spaces.
+ */
+export function singleLineExtensions(): Extensions {
+  return [OneLine, Paragraph, Text, UndoRedo];
+}
+
+const OneLine = Document.extend({
+  content: 'paragraph',
+
+  addKeyboardShortcuts() {
+    return { Enter: () => true };
+  },
+
+  addProseMirrorPlugins() {
+    return [
+      new Plugin({
+        props: {
+          transformPastedText: (text) => text.replace(/\s*\r?\n\s*/g, ' '),
+        },
+      }),
+    ];
+  },
+});
 
 export function textToDoc(text: string): JSONContent {
   return {

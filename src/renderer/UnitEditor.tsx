@@ -1,7 +1,11 @@
 import { Editor, type Extensions, type JSONContent } from '@tiptap/core';
 import { EditorContent } from '@tiptap/react';
 import { useContext, useEffect, useState } from 'react';
-import { unitKey as keyOf, unitText } from '../shared/project-types';
+import {
+  unitKey as keyOf,
+  unitText,
+  type UnitValue,
+} from '../shared/project-types';
 import { createAutosave } from './autosave';
 import { registerPendingEdits } from './pending-edits';
 import { ReadOnlyContext } from './read-only';
@@ -12,6 +16,11 @@ type Props = {
   unitKey: string;
   /** The unit's saved text, as main holds it. */
   text: string;
+  /**
+   * For an editor of one field of a unit, such as an Entry's name: the key
+   * of the unit it belongs to, and the field's text in a value of it.
+   */
+  field?: { unitKey: string; text(value: UnitValue): string };
   extensions: Extensions;
   toDoc(text: string): JSONContent;
   toText(doc: JSONContent): string;
@@ -36,6 +45,7 @@ type Props = {
 export function UnitEditor({
   unitKey,
   text,
+  field,
   extensions,
   toDoc,
   toText,
@@ -86,17 +96,19 @@ export function UnitEditor({
     };
   }, [editor, autosave, toText]);
 
+  const reloadKey = field?.unitKey ?? unitKey;
+  const textOf = field?.text ?? unitText;
   useEffect(
     () =>
       window.project.subscribe((event) => {
-        if (event.type !== 'unitReloaded' || keyOf(event.ref) !== unitKey) {
+        if (event.type !== 'unitReloaded' || keyOf(event.ref) !== reloadKey) {
           return;
         }
         if (!autosave.pending()) {
-          reloadUnitEditor(editor, toDoc(unitText(event.value)));
+          reloadUnitEditor(editor, toDoc(textOf(event.value)));
         }
       }),
-    [editor, autosave, unitKey, toDoc],
+    [editor, autosave, reloadKey, textOf, toDoc],
   );
 
   useEffect(() => {

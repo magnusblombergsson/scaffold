@@ -16,6 +16,7 @@ import type {
 import {
   PROJECT_OUTLINE,
   unitKey,
+  type EntrySummary,
   type Manuscript,
   type ManuscriptChapter,
   type ManuscriptScene,
@@ -27,6 +28,7 @@ import { upgradedMessage } from '../shared/format-gate';
 import { capitalized, unitName } from '../shared/unit-name';
 import { Binder, type Selection } from './Binder';
 import { ConflictList, ConflictResolver } from './Conflicts';
+import { EntryView, VISIBILITY_LABELS } from './EntryView';
 import { Notices } from './Notices';
 import { OutlineNotes } from './OutlineNotes';
 import { PanelResizer } from './PanelResizer';
@@ -35,6 +37,7 @@ import { ReadOnlyContext } from './read-only';
 import { SaveFailureBanner, SaveIndicator, useSaveStatus } from './SaveStatus';
 import { SceneEditor } from './SceneEditor';
 import { StartScreen } from './StartScreen';
+import { entryTitle, StoryBible } from './StoryBible';
 import { trashTitle, TrashView } from './TrashView';
 import { Toast } from './Toast';
 import { forgetUnitEditors } from './unit-editors';
@@ -178,9 +181,17 @@ function ProjectView({
     window.shell.saveView({ outlineNotesOpen: !outlineNotesOpen });
   }
 
-  const [tab, setTab] = useState<'manuscript' | 'conflicts' | 'trash'>(
-    'manuscript',
-  );
+  const [tab, setTab] = useState<
+    'manuscript' | 'bible' | 'conflicts' | 'trash'
+  >('manuscript');
+  const [entries, setEntries] = useState<EntrySummary[]>([]);
+  useEffect(() => {
+    void window.project.listEntries().then(setEntries);
+  }, []);
+  const openEntry =
+    selected?.kind === 'entry'
+      ? entries.find((e) => e.id === selected.id)
+      : undefined;
   const [trash, setTrash] = useState<TrashItem[]>([]);
   /** The latest structure change, while it can still be undone. */
   const [latest, setLatest] = useState<{ message: string; step: number }>();
@@ -225,6 +236,8 @@ function ProjectView({
           setReloaded({ ref: event.ref, count: ++reloads.current });
         } else if (event.type === 'conflictsChanged') {
           setConflicts(event.conflicts);
+        } else if (event.type === 'entriesChanged') {
+          setEntries(event.entries);
         } else if (event.type === 'readOnly') {
           // Main still takes edits for a moment: these are the last.
           flushPendingEdits();
@@ -246,7 +259,7 @@ function ProjectView({
       setLatest({ message, step: result.step });
       onError(null);
     } catch (error) {
-      onError(`Can't change the Manuscript: ${(error as Error).message}`);
+      onError(`Can't make that change: ${(error as Error).message}`);
     }
     await refreshTrash();
   }
@@ -274,8 +287,9 @@ function ProjectView({
       return;
     }
     await refreshTrash();
-    setTab('manuscript');
-    select(selectionOf(ref, manuscript));
+    const selection = selectionOf(ref, manuscript);
+    setTab(selection.kind === 'entry' ? 'bible' : 'manuscript');
+    select(selection);
   }
 
   async function emptyTrash() {
@@ -300,7 +314,9 @@ function ProjectView({
                   )
                 : openChapter
                   ? openChapter.title
-                  : selected?.kind === 'project' && 'Project Outline'}
+                  : openEntry
+                    ? entryTitle(openEntry)
+                    : selected?.kind === 'project' && 'Project Outline'}
           </span>
           <SaveIndicator {...saveStatus} />
           <span className="header-actions">{headerActions}</span>
@@ -313,6 +329,7 @@ function ProjectView({
         <SaveFailureBanner
           statuses={saveStatus.statuses}
           manuscript={manuscript}
+          entries={entries}
         />
         <Notices
           sessions={project.sessions}
@@ -339,6 +356,14 @@ function ProjectView({
                 onClick={() => setTab('manuscript')}
               >
                 Manuscript
+              </button>
+              <button
+                role="tab"
+                aria-selected={tab === 'bible'}
+                id="bible-tab"
+                onClick={() => setTab('bible')}
+              >
+                Story Bible
               </button>
               {(conflicts.length > 0 || tab === 'conflicts') && (
                 <button
@@ -371,10 +396,18 @@ function ProjectView({
                   conflicted={conflicted}
                   onChange={change}
                 />
+              ) : tab === 'bible' ? (
+                <StoryBible
+                  entries={entries}
+                  openId={openEntry?.id ?? null}
+                  onOpen={(id) => select({ kind: 'entry', id })}
+                  onChange={change}
+                />
               ) : tab === 'conflicts' ? (
                 <ConflictList
                   conflicts={conflicts}
                   manuscript={manuscript}
+                  entries={entries}
                   open={resolvingConflict ? resolving : null}
                   onOpen={(ref) => {
                     flushPendingEdits();
@@ -414,6 +447,7 @@ function ProjectView({
               key={unitKey(resolvingConflict.ref)}
               conflict={resolvingConflict}
               manuscript={manuscript}
+              entries={entries}
               onResolve={(kept) => resolve(resolvingConflict.ref, kept)}
             />
           ) : selected?.kind === 'project' ? (
@@ -425,6 +459,27 @@ function ProjectView({
                 withNotes={false}
               />
             </main>
+          ) : selected?.kind === 'entry' ? (
+            openEntry ? (
+              <EntryView
+                key={openEntry.id}
+                entryId={openEntry.id}
+                visibility={openEntry.visibility}
+                language={project.language}
+                onVisibility={(visibility) =>
+                  change(
+                    () =>
+                      window.project.setEntryVisibility(
+                        openEntry.id,
+                        visibility,
+                      ),
+                    `Visibility set to ${VISIBILITY_LABELS[visibility]}`,
+                  )
+                }
+              />
+            ) : (
+              <div className="editor empty">No Entry open</div>
+            )
           ) : openChapter ? (
             <main className="centre" key={openChapter.id}>
               <h2 className="centre-title">{openChapter.title}</h2>
@@ -477,7 +532,7 @@ function ProjectView({
           {reloaded && (
             <Toast
               key={`reloaded-${reloaded.count}`}
-              message={`${capitalized(unitName(reloaded.ref, manuscript))} updated from another computer`}
+              message={`${capitalized(unitName(reloaded.ref, manuscript, entries))} updated from another computer`}
               ms={RELOADED_TOAST_MS}
               onClose={closeReloaded}
             />
@@ -510,6 +565,9 @@ function allScenes(
 
 /** What to open once a unit's Conflict is resolved: the unit it belongs to. */
 function selectionOf(ref: UnitRef, manuscript: Manuscript): Selection {
+  if (ref.kind === 'entry' || ref.kind === 'private') {
+    return { kind: 'entry', id: ref.id };
+  }
   if (ref.id === PROJECT_OUTLINE) return { kind: 'project' };
   return manuscript.chapters.some((c) => c.id === ref.id)
     ? { kind: 'chapter', id: ref.id }

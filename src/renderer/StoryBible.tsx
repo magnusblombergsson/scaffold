@@ -1,0 +1,108 @@
+import type { Changed, Created } from '../shared/api';
+import {
+  ENTRY_TYPE_LABELS,
+  ENTRY_TYPES,
+  type EntrySummary,
+  type EntryType,
+} from '../shared/project-types';
+import { Menu } from './Binder';
+
+const GROUP_TITLES: Record<EntryType, string> = {
+  character: 'Characters',
+  place: 'Places',
+  item: 'Items',
+  'world-rule': 'World Rules',
+  'plot-thread': 'Plot Threads',
+  theme: 'Themes',
+  other: 'Other',
+};
+
+/** How an Entry is named in lists; one whose name was cleared still needs a label. */
+export function entryTitle(entry: { name: string }): string {
+  return entry.name.trim() || 'Untitled';
+}
+
+/** The Story Bible tab: the Entries, grouped by type. */
+export function StoryBible({
+  entries,
+  openId,
+  onOpen,
+  onChange,
+}: {
+  entries: EntrySummary[];
+  /** The Entry the centre shows, if any. */
+  openId: string | null;
+  onOpen(id: string): void;
+  /** Runs a change the Author can undo; `message` says what it did, beside Undo. */
+  onChange(operation: () => Promise<Changed>, message: string): Promise<void>;
+}) {
+  async function create(type: EntryType) {
+    let created: Created | undefined;
+    await onChange(async () => {
+      created = await window.project.createEntry(
+        type,
+        `New ${ENTRY_TYPE_LABELS[type]}`,
+      );
+      return created;
+    }, `${ENTRY_TYPE_LABELS[type]} created`);
+    if (created) onOpen(created.id);
+  }
+
+  return (
+    <nav className="story-bible" aria-label="Story Bible">
+      <div className="story-bible-new">
+        <Menu
+          label="New Entry"
+          items={ENTRY_TYPES.map((type) => ({
+            label: ENTRY_TYPE_LABELS[type],
+            run: () => create(type),
+          }))}
+        >
+          New Entry…
+        </Menu>
+      </div>
+      {entries.length === 0 && (
+        <p className="story-bible-empty">No Entries yet</p>
+      )}
+      {ENTRY_TYPES.map((type) => {
+        const group = entries.filter((e) => e.type === type);
+        if (group.length === 0) return null;
+        return (
+          <section
+            key={type}
+            className="story-bible-group"
+            aria-label={GROUP_TITLES[type]}
+          >
+            <h2>{GROUP_TITLES[type]}</h2>
+            <ol>
+              {group.map((entry) => (
+                <li key={entry.id} className="binder-scene">
+                  <button
+                    className="binder-title"
+                    aria-current={entry.id === openId ? 'true' : undefined}
+                    onClick={() => onOpen(entry.id)}
+                  >
+                    {entryTitle(entry)}
+                  </button>
+                  <Menu
+                    label={`Entry actions: ${entryTitle(entry)}`}
+                    items={[
+                      {
+                        label: 'Move to Trash',
+                        run: () =>
+                          onChange(
+                            () => window.project.trashEntry(entry.id),
+                            `“${entryTitle(entry)}” moved to Trash`,
+                          ),
+                      },
+                    ]}
+                  />
+                </li>
+              ))}
+            </ol>
+          </section>
+        );
+      })}
+    </nav>
+  );
+}

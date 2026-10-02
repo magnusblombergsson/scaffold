@@ -1,7 +1,7 @@
-import type { TrashItem } from '../shared/project-types';
+import { ENTRY_TYPE_LABELS, type TrashItem } from '../shared/project-types';
 import { versionLabel } from './conflict-labels';
 
-/** The Trash tab: deleted Scenes and Chapters, and set-aside versions, latest first. */
+/** The Trash tab: deleted Scenes, Chapters and Entries, and set-aside versions, latest first. */
 export function TrashView({
   items,
   onRestore,
@@ -46,6 +46,7 @@ export function trashTitle(item: TrashItem): string {
 
 function detail(item: TrashItem): string {
   if (item.kind === 'version') return versionLabel(item);
+  if (item.kind === 'entry') return ENTRY_TYPE_LABELS[item.type];
   if (item.kind === 'chapter') {
     const n = item.scenes.length;
     return `Chapter · ${n} ${n === 1 ? 'Scene' : 'Scenes'}`;

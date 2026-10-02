@@ -1,10 +1,13 @@
 import type {
+  EntrySummary,
+  EntryType,
   Manuscript,
   ProseLanguage,
   TrashItem,
   UnitRef,
   UnitValue,
   ValueOf,
+  Visibility,
 } from './project-types';
 
 // The preload exposes these two objects on `window`. Main registers a handler
@@ -16,7 +19,7 @@ import type {
  */
 export type Changed = { manuscript: Manuscript; step: number };
 
-/** A structure operation that made a Chapter or Scene: its id, and the result. */
+/** A structure operation that made a Chapter, Scene or Entry: its id, and the result. */
 export type Created = Changed & { id: string };
 
 /**
@@ -79,6 +82,16 @@ export type ConflictsChanged = {
   conflicts: Conflict[];
 };
 
+/**
+ * The Entries in the Story Bible changed, as when one was created, renamed,
+ * deleted or restored, here or on another computer: `entries` is all of them
+ * now.
+ */
+export type EntriesChanged = {
+  type: 'entriesChanged';
+  entries: EntrySummary[];
+};
+
 /** A newer app upgraded the Project; `host` is the computer it did so on, when known. */
 export type Upgrade = { host?: string };
 
@@ -94,6 +107,7 @@ export type ProjectEvent =
   | UnitReloaded
   | StructureChanged
   | ConflictsChanged
+  | EntriesChanged
   | ReadOnly;
 
 /** Mirrors the main-process ProjectStore of this window's Project. */
@@ -133,6 +147,13 @@ export interface ProjectApi {
   trashScene(sceneId: string): Promise<Changed>;
   /** Moves a Chapter and its Scenes to Trash; never the last Chapter. */
   trashChapter(chapterId: string): Promise<Changed>;
+  /** The Entries in the Story Bible, by type, then by name. */
+  listEntries(): Promise<EntrySummary[]>;
+  createEntry(type: EntryType, name: string): Promise<Created>;
+  /** Moves an Entry to Trash; its private notes stay until Trash is emptied. */
+  trashEntry(entryId: string): Promise<Changed>;
+  /** Sets when the Assistant sees an Entry, as a step that `undo` reverts. */
+  setEntryVisibility(entryId: string, visibility: Visibility): Promise<Changed>;
   /** Puts a Trash item back where it was, as near as the Manuscript allows. */
   restore(id: string): Promise<Changed>;
   /** Reverts `step` if it is still the latest structure operation. */

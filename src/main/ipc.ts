@@ -40,6 +40,11 @@ const projectHandlers: Handlers = {
     store.moveScene(sceneId, chapterId, index),
   trashScene: (store, sceneId) => store.trashScene(sceneId),
   trashChapter: (store, chapterId) => store.trashChapter(chapterId),
+  listEntries: async (store) => store.listEntries(),
+  createEntry: (store, type, name) => store.createEntry(type, name),
+  trashEntry: (store, entryId) => store.trashEntry(entryId),
+  setEntryVisibility: (store, entryId, visibility) =>
+    store.setEntryVisibility(entryId, visibility),
   restore: (store, id) => store.restore(id),
   undo: (store, step) => store.undo(step),
   listTrash: async (store) => store.listTrash(),

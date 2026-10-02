@@ -1,13 +1,23 @@
 import {
   PROJECT_OUTLINE,
+  type EntrySummary,
   type Manuscript,
   type UnitRef,
 } from './project-types';
 
 /** How the Author is told which unit something is about, as in "Can't save …". */
-export function unitName(ref: UnitRef, manuscript: Manuscript): string {
+export function unitName(
+  ref: UnitRef,
+  manuscript: Manuscript,
+  entries: EntrySummary[] = [],
+): string {
   if (ref.kind === 'outline' && ref.id === PROJECT_OUTLINE) {
     return 'the Project Outline';
+  }
+  if (ref.kind === 'entry' || ref.kind === 'private') {
+    const name = entries.find((e) => e.id === ref.id)?.name;
+    if (ref.kind === 'entry') return name ? `“${name}”` : 'an Entry';
+    return name ? `the private notes on “${name}”` : 'some private notes';
   }
   const title = titleOf(ref.id, manuscript);
   if (ref.kind === 'scene') return title ? `“${title}”` : 'a Scene';

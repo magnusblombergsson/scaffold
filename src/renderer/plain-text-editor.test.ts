@@ -1,7 +1,12 @@
 // @vitest-environment happy-dom
 import { Editor } from '@tiptap/core';
 import { afterEach, describe, expect, it } from 'vitest';
-import { docToText, plainTextExtensions, textToDoc } from './plain-text-editor';
+import {
+  docToText,
+  plainTextExtensions,
+  singleLineExtensions,
+  textToDoc,
+} from './plain-text-editor';
 
 let editor: Editor | undefined;
 afterEach(() => editor?.destroy());
@@ -86,5 +91,29 @@ describe('bullets in an Outline', () => {
     const notes = open('- A list in Notes');
     press(notes, 'Enter');
     expect(textOf(notes)).toBe('- A list in Notes\n');
+  });
+});
+
+describe('a single-line field, as an Entry name', () => {
+  function openLine(text = ''): Editor {
+    editor = new Editor({
+      extensions: singleLineExtensions(),
+      content: textToDoc(text),
+    });
+    editor.commands.focus('end');
+    return editor;
+  }
+
+  it('takes no new line on Enter', () => {
+    const editor = openLine('Anna');
+    press(editor, 'Enter');
+    type(editor, ' Berg');
+    expect(textOf(editor)).toBe('Anna Berg');
+  });
+
+  it('joins pasted lines into one', () => {
+    const editor = openLine();
+    editor.view.pasteText('Anna\nBerg');
+    expect(textOf(editor)).toBe('Anna Berg');
   });
 });

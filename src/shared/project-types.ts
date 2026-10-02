@@ -9,12 +9,50 @@ export type SceneRef = { kind: 'scene'; id: string };
 export type OutlineRef = { kind: 'outline'; id: string };
 /** The Author's Notes on a Chapter or Scene. */
 export type NotesRef = { kind: 'notes'; id: string };
-export type UnitRef = SceneRef | OutlineRef | NotesRef;
+/** A Story Bible Entry: its name, aliases, description and visibility. */
+export type EntryRef = { kind: 'entry'; id: string };
+/** An Entry's private notes, which the Assistant never sees. */
+export type PrivateRef = { kind: 'private'; id: string };
+export type UnitRef = SceneRef | OutlineRef | NotesRef | EntryRef | PrivateRef;
 
 /** A unit's key in maps, such as `scene:<id>`. */
 export function unitKey(ref: UnitRef): string {
   return `${ref.kind}:${ref.id}`;
 }
+
+/** The seven fixed Entry types, in the order the Story Bible lists them. */
+export const ENTRY_TYPES = [
+  'character',
+  'place',
+  'item',
+  'world-rule',
+  'plot-thread',
+  'theme',
+  'other',
+] as const;
+export type EntryType = (typeof ENTRY_TYPES)[number];
+
+export const ENTRY_TYPE_LABELS: Record<EntryType, string> = {
+  character: 'Character',
+  place: 'Place',
+  item: 'Item',
+  'world-rule': 'World Rule',
+  'plot-thread': 'Plot Thread',
+  theme: 'Theme',
+  other: 'Other',
+};
+
+/**
+ * When the Assistant sees an Entry: `always`, `mentioned` when its name or
+ * an alias is mentioned, or `never`.
+ */
+export type Visibility = 'always' | 'mentioned' | 'never';
+export const VISIBILITIES: readonly Visibility[] = [
+  'always',
+  'mentioned',
+  'never',
+];
+export const DEFAULT_VISIBILITY: Visibility = 'mentioned';
 
 export type SceneValue = { id: string; markdown: string };
 /**
@@ -28,11 +66,31 @@ export type OutlineValue = {
   meta: Record<string, unknown>;
 };
 export type NotesValue = { id: string; body: string };
-export type UnitValue = SceneValue | OutlineValue | NotesValue;
+/** An Entry; its `description` is what the Assistant reads. */
+export type EntryValue = {
+  id: string;
+  type: EntryType;
+  name: string;
+  aliases: string[];
+  visibility: Visibility;
+  description: string;
+};
+export type PrivateValue = { id: string; body: string };
+export type UnitValue =
+  | SceneValue
+  | OutlineValue
+  | NotesValue
+  | EntryValue
+  | PrivateValue;
 
-/** The text a unit holds: a Scene's Prose, or an Outline's or Notes' body. */
+/**
+ * The text a unit holds: a Scene's Prose, an Entry's description, or the
+ * body of an Outline, Notes or private notes.
+ */
 export function unitText(value: UnitValue): string {
-  return 'markdown' in value ? value.markdown : value.body;
+  if ('markdown' in value) return value.markdown;
+  if ('description' in value) return value.description;
+  return value.body;
 }
 
 /** The value a unit of `ref`'s kind holds. */
@@ -40,7 +98,19 @@ export type ValueOf<R extends UnitRef> = R extends SceneRef
   ? SceneValue
   : R extends OutlineRef
     ? OutlineValue
-    : NotesValue;
+    : R extends EntryRef
+      ? EntryValue
+      : R extends PrivateRef
+        ? PrivateValue
+        : NotesValue;
+
+/** An Entry as the Story Bible tab lists it. */
+export type EntrySummary = {
+  id: string;
+  type: EntryType;
+  name: string;
+  visibility: Visibility;
+};
 
 export type SceneNode = { id: string; title: string };
 export type ChapterNode = { id: string; title: string; scenes: SceneNode[] };
@@ -91,6 +161,13 @@ export type TrashItem =
       title: string;
       trashedAt: number;
       scenes: SceneNode[];
+    }
+  | {
+      kind: 'entry';
+      id: string;
+      title: string;
+      trashedAt: number;
+      type: EntryType;
     };
 
 /** The languages Prose is spellchecked and typeset in. */

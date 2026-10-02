@@ -3,15 +3,23 @@ import { hostname } from 'node:os';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import {
+  DEFAULT_VISIBILITY,
+  ENTRY_TYPES,
   PROJECT_OUTLINE,
   proseLanguage,
   unitKey,
+  VISIBILITIES,
   type ChapterNode,
+  type EntryRef,
+  type EntrySummary,
+  type EntryType,
+  type EntryValue,
   type Manuscript,
   type NotesRef,
   type NotesValue,
   type OutlineRef,
   type OutlineValue,
+  type PrivateValue,
   type ProjectTree,
   type ProseLanguage,
   type SceneNode,
@@ -21,6 +29,7 @@ import {
   type UnitRef,
   type UnitValue,
   type ValueOf,
+  type Visibility,
 } from '../../shared/project-types';
 import type {
   Changed,
@@ -69,6 +78,7 @@ export class ProjectError extends Error {
       | 'trashed'
       | 'last-chapter'
       | 'in-manuscript'
+      | 'in-story-bible'
       | 'in-trash'
       | 'not-latest'
       | 'unsaved'
@@ -126,7 +136,7 @@ export async function createProject(
     projectPath,
     manifest,
     deps,
-    { files: new Set([sceneId]), trash: new Map() },
+    { files: new Set([sceneId]), entries: new Map(), trash: new Map() },
     { notice: { alsoOpen: [] }, own: null },
   );
 }
@@ -343,7 +353,7 @@ async function lostWith(
 
 /** Removes temp files left by a write that crashed before its rename. */
 async function sweepTempFiles(projectPath: string, fs: FileSystem) {
-  const dirs = ['scenes', 'outlines', 'notes', 'trash', SESSIONS].map((d) =>
+  const dirs = [...Object.values(UNIT_DIRS), 'trash', SESSIONS].map((d) =>
     path.join(projectPath, d),
   );
   for (const dir of [projectPath, ...dirs]) {
@@ -358,6 +368,7 @@ const ID_FILE = new RegExp(`^(${UUID})\\.md$`);
 const ID = new RegExp(`^${UUID}$`);
 const VERSION_FILE = new RegExp(`^(${UUID})\\.version\\.md$`);
 const CHAPTER_FILE = new RegExp(`^(${UUID})\\.json$`);
+const ENTRY_TRASH_FILE = new RegExp(`^(${UUID})\\.entry\\.md$`);
 
 const UNPLACED_TITLE = 'Untitled Scene';
 
@@ -395,7 +406,19 @@ type TrashedVersion = {
   savedAt: number;
 };
 
-type Trashed = TrashedScene | TrashedChapter | TrashedVersion;
+/** An Entry in Trash; its private notes stay in `private/` until Trash is emptied. */
+type TrashedEntry = {
+  kind: 'entry';
+  id: string;
+  name: string;
+  type: EntryType;
+  trashedAt: number;
+};
+
+type Trashed = TrashedScene | TrashedChapter | TrashedVersion | TrashedEntry;
+
+/** What `trash/<id>.entry.md` records beside the Entry's own frontmatter and description. */
+type TrashedEntryInfo = { at: number };
 
 /**
  * What `trash/<id>.version.md` records beside the version's own frontmatter
@@ -432,6 +455,8 @@ type ChapterFile = {
 type Units = {
   /** Ids of the Scenes whose file is in `scenes/`. */
   files: Set<string>;
+  /** The Entries whose file is in `bible/`, by id. */
+  entries: Map<string, EntrySummary>;
   trash: Map<string, Trashed>;
 };
 
@@ -448,6 +473,11 @@ type Units = {
  *   another computer wrote to it before the delete synced. Then it stays, as
  *   an Unplaced Scene.
  *
+ * An Entry has no place in the tree: one in `bible/` is in the Story Bible.
+ * A Trash copy of it, left by a delete or restore that a crash cut off or
+ * that is still arriving from another computer, is neither listed nor
+ * deleted.
+ *
  * Only `<id>` names count; anything else is left alone.
  */
 async function scanUnits(
@@ -461,6 +491,8 @@ async function scanUnits(
       .map((name) => ID_FILE.exec(name)?.[1])
       .filter((id) => id !== undefined),
   );
+  const entries = await scanEntries(projectPath, fs);
+  const trashedEntries: TrashedEntry[] = [];
   const placed = new Set(sceneIds(tree));
   const chapterIds = new Set(tree.chapters.map((c) => c.id));
   const chapters = new Map<string, TrashedChapter>();
@@ -475,6 +507,18 @@ async function scanUnits(
       const { frontmatter } = parseUnitFile(await fs.readFile(file));
       const info = frontmatter.trashedVersion as TrashedVersionInfo | undefined;
       if (info) versions.push(trashedVersion(versionId, info));
+      continue;
+    }
+    const entryId = ENTRY_TRASH_FILE.exec(name)?.[1];
+    if (entryId) {
+      if (entries.has(entryId)) continue;
+      const trashed = parseUnitFile(await fs.readFile(file));
+      const info = trashed.frontmatter.trashedEntry as
+        | TrashedEntryInfo
+        | undefined;
+      if (info) {
+        trashedEntries.push(trashedEntry(entryValue(entryId, trashed), info));
+      }
       continue;
     }
     const chapterId = CHAPTER_FILE.exec(name)?.[1];
@@ -509,13 +553,53 @@ async function scanUnits(
 
   const trash = new Map<string, Trashed>(chapters);
   for (const version of versions) trash.set(version.id, version);
+  for (const item of trashedEntries) trash.set(item.id, item);
   for (const scene of scenes) {
     // A Scene deleted with its Chapter is restored with it, unless the
     // Chapter's record isn't here, such as when it hasn't synced yet.
     const chapterId = withChapter.get(scene.id);
     if (!chapterId || !chapters.has(chapterId)) trash.set(scene.id, scene);
   }
-  return { files, trash };
+  return { files, entries, trash };
+}
+
+/** The Entries in `bible/`, by id; a file that can't be read is skipped. */
+async function scanEntries(
+  projectPath: string,
+  fs: FileSystem,
+): Promise<Map<string, EntrySummary>> {
+  const entries = new Map<string, EntrySummary>();
+  const dir = path.join(projectPath, UNIT_DIRS.entry);
+  for (const name of await fs.readdir(dir)) {
+    const id = ID_FILE.exec(name)?.[1];
+    if (!id) continue;
+    try {
+      const file = parseUnitFile(await fs.readFile(path.join(dir, name)));
+      entries.set(id, entrySummary(entryValue(id, file)));
+    } catch (error) {
+      console.error(`Can't read the Entry ${id}:`, error);
+    }
+  }
+  return entries;
+}
+
+function entrySummary({
+  id,
+  type,
+  name,
+  visibility,
+}: EntryValue): EntrySummary {
+  return { id, type, name, visibility };
+}
+
+function trashedEntry(value: EntryValue, info: TrashedEntryInfo): TrashedEntry {
+  return {
+    kind: 'entry',
+    id: value.id,
+    name: value.name,
+    type: value.type,
+    trashedAt: info.at,
+  };
 }
 
 function trashedScene(id: string, info: TrashedSceneInfo): TrashedScene {
@@ -743,8 +827,10 @@ export class ProjectStore {
   private readonly listeners = new Set<(event: ProjectEvent) => void>();
 
   private readonly files: Set<string>;
+  /** The Entries in the Story Bible, with the values accepted for them by `write`. */
+  private readonly entries: Map<string, EntrySummary>;
   private readonly trash: Map<string, Trashed>;
-  /** Scenes on their way to Trash, which take no more writes. */
+  /** Scenes and Entries on their way to Trash, which take no more writes. */
   private readonly closing = new Set<string>();
   /** The structure operation running last; the next one waits for it. */
   private structureQueue: Promise<unknown> = Promise.resolve();
@@ -799,6 +885,7 @@ export class ProjectStore {
     this.dropped = opened.dropped;
     this.unrecognised = opened.unrecognised;
     this.files = units.files;
+    this.entries = units.entries;
     this.trash = units.trash;
     this.host = hostOf(deps);
     this.sessions = sessions;
@@ -983,6 +1070,16 @@ export class ProjectStore {
     replaceAll(this.files, units.files);
     this.trash.clear();
     for (const [id, item] of units.trash) this.trash.set(id, item);
+    // An Entry's value accepted here and not yet saved is newer.
+    for (const { ref, value } of this.unsaved.values()) {
+      if (ref.kind === 'entry') {
+        units.entries.set(ref.id, entrySummary(value as EntryValue));
+      }
+    }
+    this.setEntries(() => {
+      this.entries.clear();
+      for (const [id, entry] of units.entries) this.entries.set(id, entry);
+    });
     const manuscript = this.manuscript();
     if (
       JSON.stringify([this.manifest, manuscript, this.listTrash()]) ===
@@ -1128,7 +1225,7 @@ export class ProjectStore {
     const knownHosts = async () =>
       (hosts ??= [this.host, ...(await markerHosts(this.path, this.deps.fs))]);
     const found = new Map<string, ConflictEntry>();
-    for (const kind of ['scene', 'outline', 'notes'] as const) {
+    for (const kind of Object.keys(UNIT_DIRS) as UnitRef['kind'][]) {
       const dir = path.join(this.path, UNIT_DIRS[kind]);
       for (const name of await this.deps.fs.readdir(dir)) {
         if (isOwnFile(kind, name) || name.endsWith('.tmp')) continue;
@@ -1289,6 +1386,7 @@ export class ProjectStore {
   /** Latest first. */
   listTrash(): TrashItem[] {
     const manuscript = this.manuscript();
+    const entries = this.listEntries();
     return [...this.trash.values()]
       .sort((a, b) => b.trashedAt - a.trashedAt)
       .map(
@@ -1297,27 +1395,183 @@ export class ProjectStore {
             ? {
                 kind: 'version',
                 id: item.id,
-                title: unitName(item.ref, manuscript),
+                title: unitName(item.ref, manuscript, entries),
                 trashedAt: item.trashedAt,
                 ...(item.host && { host: item.host }),
                 savedAt: item.savedAt,
               }
-            : item.kind === 'chapter'
+            : item.kind === 'entry'
               ? {
-                  kind: 'chapter',
+                  kind: 'entry',
                   id: item.id,
-                  title: item.title,
+                  title: item.name,
                   trashedAt: item.trashedAt,
-                  scenes: item.scenes.map((s) => ({ ...s })),
+                  type: item.type,
                 }
-              : {
-                  kind: 'scene',
-                  id: item.id,
-                  title: item.title,
-                  trashedAt: item.trashedAt,
-                  ...(item.chapter && { chapterTitle: item.chapter.title }),
-                },
+              : item.kind === 'chapter'
+                ? {
+                    kind: 'chapter',
+                    id: item.id,
+                    title: item.title,
+                    trashedAt: item.trashedAt,
+                    scenes: item.scenes.map((s) => ({ ...s })),
+                  }
+                : {
+                    kind: 'scene',
+                    id: item.id,
+                    title: item.title,
+                    trashedAt: item.trashedAt,
+                    ...(item.chapter && { chapterTitle: item.chapter.title }),
+                  },
       );
+  }
+
+  /** The Entries in the Story Bible, by type in the order of `ENTRY_TYPES`, then by name. */
+  listEntries(): EntrySummary[] {
+    return [...this.entries.values()]
+      .sort(
+        (a, b) =>
+          ENTRY_TYPES.indexOf(a.type) - ENTRY_TYPES.indexOf(b.type) ||
+          a.name.localeCompare(b.name) ||
+          a.id.localeCompare(b.id),
+      )
+      .map((entry) => ({ ...entry }));
+  }
+
+  /** Creates an Entry of `type` with an empty description, seen when mentioned. */
+  async createEntry(type: EntryType, name: string): Promise<Created> {
+    const id = randomUUID();
+    const value: EntryValue = {
+      id,
+      type,
+      name,
+      aliases: [],
+      visibility: DEFAULT_VISIBILITY,
+      description: '',
+    };
+    const changed = await this.step(async () => {
+      await this.deps.fs.mkdir(path.join(this.path, UNIT_DIRS.entry));
+      await safeWrite(
+        this.deps.fs,
+        this.deps.clock,
+        unitPath(this.path, entryRef(id)),
+        entryFile(value),
+      );
+      this.setEntries(() => this.entries.set(id, entrySummary(value)));
+      // It may have a description by the time the Author undoes it.
+      return () => this.moveEntryToTrash(id);
+    });
+    return { id, ...changed };
+  }
+
+  /** Moves an Entry to Trash; its private notes stay where they are until Trash is emptied. */
+  trashEntry(entryId: string): Promise<Changed> {
+    return this.step(async () => {
+      await this.moveEntryToTrash(entryId);
+      return () => this.restoreFromTrash(entryId);
+    });
+  }
+
+  /** Sets when the Assistant sees an Entry; undo sets it back. */
+  setEntryVisibility(
+    entryId: string,
+    visibility: Visibility,
+  ): Promise<Changed> {
+    return this.step(async () => {
+      const previous = await this.writeVisibility(entryId, visibility);
+      return async () => {
+        await this.writeVisibility(entryId, previous);
+      };
+    });
+  }
+
+  /**
+   * Writes an Entry's visibility, keeping what else was written to it, and
+   * waits until it is saved or has failed to be. Resolves with the visibility
+   * it had.
+   */
+  private async writeVisibility(
+    entryId: string,
+    visibility: Visibility,
+  ): Promise<Visibility> {
+    const ref = entryRef(entryId);
+    const value = await this.read(ref);
+    await this.write(ref, { ...value, visibility });
+    const key = unitKey(ref);
+    while (this.writing.has(key)) await this.writing.get(key);
+    return value.visibility;
+  }
+
+  private async moveEntryToTrash(entryId: string): Promise<void> {
+    const ref = entryRef(entryId);
+    this.refuseUnavailable(ref);
+    const key = unitKey(ref);
+    this.closing.add(entryId);
+    try {
+      // Its latest value, once every write accepted for it has run.
+      while (this.writing.has(key)) await this.writing.get(key);
+      const file = parseUnitFile(
+        await this.deps.fs.readFile(unitPath(this.path, ref)),
+      );
+      const latest =
+        (this.unsaved.get(key)?.value as EntryValue | undefined) ??
+        entryValue(entryId, file);
+      const info: TrashedEntryInfo = { at: this.deps.clock.now() };
+      const { frontmatter: own, body } = parseUnitFile(
+        entryFile(latest, file.frontmatter),
+      );
+      await this.deps.fs.mkdir(trashDir(this.path));
+      await safeWrite(
+        this.deps.fs,
+        this.deps.clock,
+        entryTrashPath(this.path, entryId),
+        formatUnitFile({ frontmatter: { ...own, trashedEntry: info }, body }),
+      );
+      this.trash.set(entryId, trashedEntry(latest, info));
+      // Its description is in Trash now.
+      this.settle(key);
+      this.setEntries(() => this.entries.delete(entryId));
+      await this.deps.fs.unlink(unitPath(this.path, ref));
+    } finally {
+      this.closing.delete(entryId);
+    }
+  }
+
+  /** Puts an Entry back in the Story Bible: its file first, then its Trash copy goes. */
+  private async restoreEntry(item: TrashedEntry): Promise<void> {
+    if (this.entries.has(item.id)) {
+      throw new ProjectError(
+        'in-story-bible',
+        `${item.name} is already in the Story Bible`,
+      );
+    }
+    const trashed = entryTrashPath(this.path, item.id);
+    const { frontmatter, body } = parseUnitFile(
+      await this.deps.fs.readFile(trashed),
+    );
+    const { trashedEntry: _, ...own } = frontmatter;
+    const file = { frontmatter: own, body };
+    await this.deps.fs.mkdir(path.join(this.path, UNIT_DIRS.entry));
+    await safeWrite(
+      this.deps.fs,
+      this.deps.clock,
+      unitPath(this.path, entryRef(item.id)),
+      formatUnitFile(file),
+    );
+    this.trash.delete(item.id);
+    const entry = entrySummary(entryValue(item.id, file));
+    this.setEntries(() => this.entries.set(item.id, entry));
+    await this.deps.fs.unlink(trashed);
+  }
+
+  /** Changes the Entries, and says so if that changes the list. */
+  private setEntries(change: () => void): void {
+    const before = JSON.stringify(this.listEntries());
+    change();
+    const entries = this.listEntries();
+    if (JSON.stringify(entries) !== before) {
+      this.emit({ type: 'entriesChanged', entries });
+    }
   }
 
   /** Creates an empty Scene at `index` in a Chapter. */
@@ -1451,7 +1705,9 @@ export class ProjectStore {
       return () =>
         kind === 'chapter'
           ? this.moveChapterToTrash(id)
-          : this.moveSceneToTrash(id);
+          : kind === 'entry'
+            ? this.moveEntryToTrash(id)
+            : this.moveSceneToTrash(id);
     });
   }
 
@@ -1654,6 +1910,11 @@ export class ProjectStore {
       for (const name of names) {
         const id = (ID_FILE.exec(name) ?? CHAPTER_FILE.exec(name))?.[1];
         if (id && !this.isLive(id)) await this.deleteOutlineAndNotes(id);
+        // So do an Entry's private notes.
+        const entryId = ENTRY_TRASH_FILE.exec(name)?.[1];
+        if (entryId && !this.entries.has(entryId)) {
+          await this.deleteUnitFile({ kind: 'private', id: entryId });
+        }
       }
       for (const name of names) {
         await this.deps.fs.unlink(path.join(dir, name));
@@ -1674,12 +1935,17 @@ export class ProjectStore {
 
   private async deleteOutlineAndNotes(id: string): Promise<void> {
     for (const ref of [outlineRef(id), notesRef(id)]) {
-      const key = unitKey(ref);
-      while (this.writing.has(key)) await this.writing.get(key);
-      this.settle(key);
-      const file = unitPath(this.path, ref);
-      if (await this.deps.fs.exists(file)) await this.deps.fs.unlink(file);
+      await this.deleteUnitFile(ref);
     }
+  }
+
+  /** Deletes a unit's file for good, once the writes accepted for it have run. */
+  private async deleteUnitFile(ref: UnitRef): Promise<void> {
+    const key = unitKey(ref);
+    while (this.writing.has(key)) await this.writing.get(key);
+    this.settle(key);
+    const file = unitPath(this.path, ref);
+    if (await this.deps.fs.exists(file)) await this.deps.fs.unlink(file);
   }
 
   /** Runs a structure operation that the Author can undo while it's latest. */
@@ -1840,6 +2106,10 @@ export class ProjectStore {
       await this.restoreVersion(item);
       return;
     }
+    if (item.kind === 'entry') {
+      await this.restoreEntry(item);
+      return;
+    }
     const tree = this.tree();
     const placed = new Set(sceneIds(tree));
     const live = (sceneId: string) =>
@@ -1970,11 +2240,19 @@ export class ProjectStore {
   }
 
   /**
-   * Refuses a Missing Scene, and one in Trash or on its way there. An Outline
-   * or Notes needs its Chapter or Scene in the Manuscript or Unplaced; only
-   * the Project Outline has none.
+   * Refuses a Missing Scene, and a Scene or Entry in Trash or on its way
+   * there. An Outline or Notes needs its Chapter or Scene in the Manuscript
+   * or Unplaced; only the Project Outline has none. Private notes need their
+   * Entry in the Story Bible.
    */
   private refuseUnavailable(ref: UnitRef): void {
+    if (ref.kind === 'entry' || ref.kind === 'private') {
+      if (this.entries.has(ref.id) && !this.closing.has(ref.id)) return;
+      if (this.entries.has(ref.id) || this.trash.has(ref.id)) {
+        throw new ProjectError('trashed', `Entry ${ref.id} is in Trash`);
+      }
+      throw new Error(`No Entry ${ref.id}`);
+    }
     if (ref.kind === 'scene') {
       this.refuseMissing(ref);
       if (!this.files.has(ref.id) || this.closing.has(ref.id)) {
@@ -2007,9 +2285,10 @@ export class ProjectStore {
     const file = unitPath(this.path, ref);
     // Taken first: a change while reading then shows on the next check.
     const fingerprint = await this.deps.fs.stat(file);
-    // An Outline or Notes has no file until the Author first writes it.
+    // An Outline, Notes or private notes has no file until the Author first
+    // writes it.
     const text =
-      ref.kind === 'scene' || fingerprint
+      ref.kind === 'scene' || ref.kind === 'entry' || fingerprint
         ? await this.deps.fs.readFile(file)
         : '';
     const value = unitValue(ref, parseUnitFile(text));
@@ -2037,6 +2316,10 @@ export class ProjectStore {
     this.refuseUnavailable(ref);
     const key = unitKey(ref);
     this.unsaved.set(key, { ref, value: structuredClone(value) });
+    if (ref.kind === 'entry') {
+      const entry = entrySummary({ ...(value as EntryValue), id: ref.id });
+      this.setEntries(() => this.entries.set(ref.id, entry));
+    }
     // A failed unit stays failed until it is saved, and its next try waits
     // for the backoff, which picks up this value.
     if (this.failures.has(key)) return;
@@ -2385,7 +2668,13 @@ function scenePath(projectPath: string, id: string): string {
   return path.join(projectPath, 'scenes', `${id}.md`);
 }
 
-const UNIT_DIRS = { scene: 'scenes', outline: 'outlines', notes: 'notes' };
+const UNIT_DIRS = {
+  scene: 'scenes',
+  outline: 'outlines',
+  notes: 'notes',
+  entry: 'bible',
+  private: 'private',
+};
 
 function unitPath(projectPath: string, ref: UnitRef): string {
   return path.join(projectPath, UNIT_DIRS[ref.kind], `${ref.id}.md`);
@@ -2427,6 +2716,10 @@ function chapterTrashPath(projectPath: string, id: string): string {
   return path.join(trashDir(projectPath), `${id}.json`);
 }
 
+function entryTrashPath(projectPath: string, id: string): string {
+  return path.join(trashDir(projectPath), `${id}.entry.md`);
+}
+
 function isChapterFile(name: string): boolean {
   return CHAPTER_FILE.test(name);
 }
@@ -2450,7 +2743,7 @@ function sceneFile(value: SceneValue, previous?: UnknownKeys): string {
 
 /**
  * An Outline's metadata is the rest of its frontmatter, so it already holds
- * what this app doesn't know; a Scene's or Notes' is kept from `previous`.
+ * what this app doesn't know; any other unit's is kept from `previous`.
  */
 function unitFile(
   ref: UnitRef,
@@ -2458,14 +2751,73 @@ function unitFile(
   previous?: UnknownKeys,
 ): string {
   if (ref.kind === 'scene') return sceneFile(value as SceneValue, previous);
-  const { id, body } = value as OutlineValue | NotesValue;
+  if (ref.kind === 'entry') return entryFile(value as EntryValue, previous);
+  const { id, body } = value as OutlineValue | NotesValue | PrivateValue;
   const kept = ref.kind === 'outline' ? (value as OutlineValue).meta : previous;
   return formatUnitFile({ frontmatter: frontmatterOf(id, kept), body });
 }
 
-function unitValue(ref: UnitRef, { frontmatter, body }: UnitFile): UnitValue {
+/**
+ * `bible/<id>.md`: the Entry's fields in frontmatter, its description as the
+ * body. A type or visibility this app doesn't know, as a newer app may
+ * write, reads as its default and is kept while the value is still that
+ * default (the tolerant reader).
+ */
+function entryFile(value: EntryValue, previous: UnknownKeys = {}): string {
+  const {
+    type: previousType,
+    name: _name,
+    aliases: _aliases,
+    visibility: previousVisibility,
+    ...unknown
+  } = previous;
+  const { id, name, aliases, description } = value;
+  const type =
+    value.type === 'other' && !ENTRY_TYPES.includes(previousType as EntryType)
+      ? (previousType ?? value.type)
+      : value.type;
+  const visibility =
+    value.visibility === DEFAULT_VISIBILITY &&
+    !VISIBILITIES.includes(previousVisibility as Visibility)
+      ? (previousVisibility ?? value.visibility)
+      : value.visibility;
+  const { id: _, format, ...rest } = frontmatterOf(id, unknown);
+  return formatUnitFile({
+    frontmatter: { id, format, type, name, aliases, visibility, ...rest },
+    body: description,
+  });
+}
+
+function unitValue(ref: UnitRef, file: UnitFile): UnitValue {
+  const { frontmatter, body } = file;
   if (ref.kind === 'scene') return { id: ref.id, markdown: body };
-  if (ref.kind === 'notes') return { id: ref.id, body };
+  if (ref.kind === 'entry') return entryValue(ref.id, file);
+  if (ref.kind === 'notes' || ref.kind === 'private') {
+    return { id: ref.id, body };
+  }
   const { id: _id, format: _format, ...meta } = frontmatter;
   return { id: ref.id, body, meta };
+}
+
+/** An Entry from its file; a field that is missing or not understood reads as its default. */
+function entryValue(id: string, { frontmatter, body }: UnitFile): EntryValue {
+  const { type, name, aliases, visibility } = frontmatter;
+  return {
+    id,
+    type: ENTRY_TYPES.includes(type as EntryType)
+      ? (type as EntryType)
+      : 'other',
+    name: typeof name === 'string' ? name : '',
+    aliases: Array.isArray(aliases)
+      ? aliases.filter((alias) => typeof alias === 'string')
+      : [],
+    visibility: VISIBILITIES.includes(visibility as Visibility)
+      ? (visibility as Visibility)
+      : DEFAULT_VISIBILITY,
+    description: body,
+  };
+}
+
+function entryRef(id: string): EntryRef {
+  return { kind: 'entry', id };
 }

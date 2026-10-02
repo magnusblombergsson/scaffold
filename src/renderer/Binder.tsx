@@ -1,4 +1,10 @@
-import { useEffect, useRef, useState, type DragEvent } from 'react';
+import {
+  useEffect,
+  useRef,
+  useState,
+  type DragEvent,
+  type ReactNode,
+} from 'react';
 import type { Changed, Created } from '../shared/api';
 import {
   PROJECT_OUTLINE,
@@ -8,9 +14,12 @@ import {
   type SceneNode,
 } from '../shared/project-types';
 
-/** What the centre shows: a Scene, a Chapter's Outline and Notes, or the Project Outline. */
+/**
+ * What the centre shows: a Scene, a Chapter's Outline and Notes, the Project
+ * Outline, or an Entry.
+ */
 export type Selection =
-  | { kind: 'scene' | 'chapter'; id: string }
+  | { kind: 'scene' | 'chapter' | 'entry'; id: string }
   | { kind: 'project' };
 
 type Props = {
@@ -421,9 +430,18 @@ function TitleInput({
   );
 }
 
-type MenuItem = { label: string; run(): unknown; disabled?: boolean };
+export type MenuItem = { label: string; run(): unknown; disabled?: boolean };
 
-function Menu({ label, items }: { label: string; items: MenuItem[] }) {
+/** A button that opens `items`; it shows `children`, or ⋯ when there are none. */
+export function Menu({
+  label,
+  items,
+  children,
+}: {
+  label: string;
+  items: MenuItem[];
+  children?: ReactNode;
+}) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
 
@@ -445,7 +463,7 @@ function Menu({ label, items }: { label: string; items: MenuItem[] }) {
         aria-expanded={open}
         onClick={() => setOpen(!open)}
       >
-        ⋯
+        {children ?? '⋯'}
       </button>
       {open && (
         <div

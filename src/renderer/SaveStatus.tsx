@@ -1,5 +1,9 @@
 import { useEffect, useState } from 'react';
-import { unitKey, type Manuscript } from '../shared/project-types';
+import {
+  unitKey,
+  type EntrySummary,
+  type Manuscript,
+} from '../shared/project-types';
 import { unitName } from '../shared/unit-name';
 import { flushPendingEdits } from './pending-edits';
 import {
@@ -94,9 +98,11 @@ export function SaveIndicator({
 export function SaveFailureBanner({
   statuses,
   manuscript,
+  entries,
 }: {
   statuses: SaveStatuses;
   manuscript: Manuscript;
+  entries: EntrySummary[];
 }) {
   const failures = saveFailures(statuses);
   if (failures.length === 0) return null;
@@ -104,7 +110,7 @@ export function SaveFailureBanner({
     <div className="save-failures" role="alert">
       {failures.map(({ ref, reason }) => (
         <p key={unitKey(ref)}>
-          Can't save <em>{unitName(ref, manuscript)}</em>: {reason}.
+          Can't save <em>{unitName(ref, manuscript, entries)}</em>: {reason}.
         </p>
       ))}
       <p className="save-failures-detail">
