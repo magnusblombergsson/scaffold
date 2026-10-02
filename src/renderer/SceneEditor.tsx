@@ -1,10 +1,8 @@
-import { EditorContent, useEditor } from '@tiptap/react';
-import { useEffect, useRef, useState } from 'react';
-import type { ProseLanguage, SceneRef } from '../shared/project-types';
-import { createAutosave } from './autosave';
-import { registerPendingEdits } from './pending-edits';
+import { useEffect, useState } from 'react';
+import type { ProseLanguage } from '../shared/project-types';
 import { proseExtensions } from './prose-editor';
 import { docToMarkdown, markdownToDoc } from './prose-markdown';
+import { UnitEditor } from './UnitEditor';
 
 /** Loads a Scene's Prose, then hands it to the editor. */
 export function SceneEditor({
@@ -28,56 +26,26 @@ export function SceneEditor({
 
   if (markdown === null) return <div className="editor loading" />;
   return (
-    <ProseEditor
-      sceneId={sceneId}
-      language={language}
-      initialMarkdown={markdown}
-    />
-  );
-}
-
-function ProseEditor({
-  sceneId,
-  language,
-  initialMarkdown,
-}: {
-  sceneId: string;
-  language: ProseLanguage;
-  initialMarkdown: string;
-}) {
-  const ref: SceneRef = { kind: 'scene', id: sceneId };
-  const autosave = useRef(
-    createAutosave((markdown: string) => {
-      void window.project.write(ref, { id: sceneId, markdown });
-    }),
-  ).current;
-
-  const editor = useEditor({
-    extensions: proseExtensions(language),
-    content: markdownToDoc(initialMarkdown),
-    autofocus: 'end',
-    editorProps: {
-      attributes: {
+    <UnitEditor
+      unitKey={`scene:${sceneId}`}
+      text={markdown}
+      extensions={proseExtensions(language)}
+      toDoc={markdownToDoc}
+      toText={docToMarkdown}
+      save={(markdown) =>
+        void window.project.write(
+          { kind: 'scene', id: sceneId },
+          { id: sceneId, markdown },
+        )
+      }
+      attributes={{
         class: 'prose',
         'aria-label': 'Prose',
         spellcheck: 'true',
         lang: language,
-      },
-    },
-    onUpdate: ({ editor }) => autosave.change(docToMarkdown(editor.getJSON())),
-  });
-
-  useEffect(() => {
-    const flush = () => autosave.flush();
-    window.addEventListener('blur', flush);
-    const unregister = registerPendingEdits(flush);
-    return () => {
-      window.removeEventListener('blur', flush);
-      unregister();
-      autosave.flush();
-      autosave.dispose();
-    };
-  }, [autosave]);
-
-  return <EditorContent editor={editor} className="editor" />;
+      }}
+      autofocus
+      className="editor"
+    />
+  );
 }

@@ -174,12 +174,14 @@ function rememberOpenProjects(): void {
 }
 
 function openedProject(store: ProjectStore): OpenedProject {
-  const { lastSceneId, panelWidths } = settings.project(store.id);
+  const { lastSceneId, panelWidths, outlineNotesOpen } = settings.project(
+    store.id,
+  );
   return {
     displayName: store.displayName,
     language: store.language,
     manuscript: store.manuscript(),
-    view: { lastSceneId, panelWidths },
+    view: { lastSceneId, panelWidths, outlineNotesOpen },
   };
 }
 

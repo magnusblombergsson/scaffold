@@ -1,18 +1,21 @@
 import { useCallback, useEffect, useState, type ReactNode } from 'react';
 import type { Changed, OpenedProject, OpenResult } from '../shared/api';
-import type {
-  Manuscript,
-  ManuscriptChapter,
-  ManuscriptScene,
-  TrashItem,
+import {
+  PROJECT_OUTLINE,
+  type Manuscript,
+  type ManuscriptChapter,
+  type ManuscriptScene,
+  type TrashItem,
 } from '../shared/project-types';
-import { Binder } from './Binder';
+import { Binder, type Selection } from './Binder';
+import { OutlineNotes } from './OutlineNotes';
 import { PanelResizer } from './PanelResizer';
 import { flushPendingEdits } from './pending-edits';
 import { SceneEditor } from './SceneEditor';
 import { StartScreen } from './StartScreen';
 import { TrashView } from './TrashView';
 import { UndoToast } from './UndoToast';
+import { forgetUnitEditors } from './unit-editors';
 
 export function App() {
   /** Undefined until main says what this window shows. */
@@ -77,19 +80,34 @@ function ProjectView({
   headerActions: ReactNode;
 }) {
   const [manuscript, setManuscript] = useState(project.manuscript);
-  const [openSceneId, setOpenSceneId] = useState(() => {
+  const [selected, setSelected] = useState<Selection | null>(() => {
     const scenes = allScenes(project.manuscript);
     const last = scenes.find((s) => s.scene.id === project.view.lastSceneId);
-    return (last ?? scenes[0])?.scene.id ?? null;
+    const scene = (last ?? scenes[0])?.scene;
+    return scene ? { kind: 'scene', id: scene.id } : null;
   });
+  const openSceneId = selected?.kind === 'scene' ? selected.id : null;
   const open = allScenes(manuscript).find((s) => s.scene.id === openSceneId);
+  const openChapter =
+    selected?.kind === 'chapter'
+      ? manuscript.chapters.find((c) => c.id === selected.id)
+      : undefined;
   const [binderWidth, setBinderWidth] = useState(
     project.view.panelWidths?.binder ?? DEFAULT_BINDER_WIDTH,
+  );
+  const [outlineNotesOpen, setOutlineNotesOpen] = useState(
+    project.view.outlineNotesOpen ?? true,
   );
 
   useEffect(() => {
     if (openSceneId) window.shell.saveView({ lastSceneId: openSceneId });
   }, [openSceneId]);
+  useEffect(() => forgetUnitEditors, []);
+
+  function toggleOutlineNotes() {
+    setOutlineNotesOpen(!outlineNotesOpen);
+    window.shell.saveView({ outlineNotesOpen: !outlineNotesOpen });
+  }
 
   const [tab, setTab] = useState<'manuscript' | 'trash'>('manuscript');
   const [trash, setTrash] = useState<TrashItem[]>([]);
@@ -145,8 +163,11 @@ function ProjectView({
       <header>
         <span className="project-name">{project.displayName}</span>
         <span className="scene-title">
-          {open &&
-            [open.chapter?.title ?? 'Unplaced', open.scene.title].join(' · ')}
+          {open
+            ? [open.chapter?.title ?? 'Unplaced', open.scene.title].join(' · ')
+            : openChapter
+              ? openChapter.title
+              : selected?.kind === 'project' && 'Project Outline'}
         </span>
         <span className="header-actions">{headerActions}</span>
       </header>
@@ -175,8 +196,8 @@ function ProjectView({
             {tab === 'manuscript' ? (
               <Binder
                 manuscript={manuscript}
-                openSceneId={openSceneId}
-                onOpenScene={setOpenSceneId}
+                selected={selected}
+                onSelect={setSelected}
                 onChange={change}
               />
             ) : (
@@ -203,7 +224,27 @@ function ProjectView({
             window.shell.saveView({ panelWidths: { binder: width } })
           }
         />
-        {!open ? (
+        {/* A new key per unit: leaving one unmounts its editors, which
+            flushes their pending edits. */}
+        {selected?.kind === 'project' ? (
+          <main className="centre" key={PROJECT_OUTLINE}>
+            <h2 className="centre-title">Project Outline</h2>
+            <OutlineNotes
+              unitId={PROJECT_OUTLINE}
+              language={project.language}
+              withNotes={false}
+            />
+          </main>
+        ) : openChapter ? (
+          <main className="centre" key={openChapter.id}>
+            <h2 className="centre-title">{openChapter.title}</h2>
+            <OutlineNotes
+              unitId={openChapter.id}
+              language={project.language}
+              withNotes
+            />
+          </main>
+        ) : !open ? (
           <div className="editor empty">No Scene open</div>
         ) : open.scene.missing ? (
           <div className="editor missing" role="status">
@@ -213,13 +254,26 @@ function ProjectView({
             </p>
           </div>
         ) : (
-          // A new key per Scene: leaving one unmounts its editor, which
-          // flushes its pending edits.
-          <SceneEditor
-            key={open.scene.id}
-            sceneId={open.scene.id}
-            language={project.language}
-          />
+          <main className="centre" key={open.scene.id}>
+            <section className="outline-notes" aria-label="Outline & Notes">
+              <button
+                className="outline-notes-toggle"
+                aria-expanded={outlineNotesOpen}
+                onClick={toggleOutlineNotes}
+              >
+                <span aria-hidden="true">{outlineNotesOpen ? '▾' : '▸'}</span>{' '}
+                Outline & Notes
+              </button>
+              {outlineNotesOpen && (
+                <OutlineNotes
+                  unitId={open.scene.id}
+                  language={project.language}
+                  withNotes
+                />
+              )}
+            </section>
+            <SceneEditor sceneId={open.scene.id} language={project.language} />
+          </main>
         )}
       </div>
       {latest && (

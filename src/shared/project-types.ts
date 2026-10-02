@@ -1,11 +1,36 @@
 // Types shared by main, preload and renderer. The renderer never sees paths or
 // file formats, only these values.
 
+/** The id of the Project Outline, of the whole story, beside the ids of Chapters and Scenes. */
+export const PROJECT_OUTLINE = 'project';
+
 export type SceneRef = { kind: 'scene'; id: string };
-export type UnitRef = SceneRef;
+/** The Outline of a Chapter or Scene, or with the id `PROJECT_OUTLINE`, of the Project. */
+export type OutlineRef = { kind: 'outline'; id: string };
+/** The Author's Notes on a Chapter or Scene. */
+export type NotesRef = { kind: 'notes'; id: string };
+export type UnitRef = SceneRef | OutlineRef | NotesRef;
 
 export type SceneValue = { id: string; markdown: string };
-export type UnitValue = SceneValue;
+/**
+ * An Outline's bullets as plain text, and its unit's metadata (such as POV,
+ * status and targets), kept as frontmatter, including keys this app doesn't
+ * know.
+ */
+export type OutlineValue = {
+  id: string;
+  body: string;
+  meta: Record<string, unknown>;
+};
+export type NotesValue = { id: string; body: string };
+export type UnitValue = SceneValue | OutlineValue | NotesValue;
+
+/** The value a unit of `ref`'s kind holds. */
+export type ValueOf<R extends UnitRef> = R extends SceneRef
+  ? SceneValue
+  : R extends OutlineRef
+    ? OutlineValue
+    : NotesValue;
 
 export type SceneNode = { id: string; title: string };
 export type ChapterNode = { id: string; title: string; scenes: SceneNode[] };

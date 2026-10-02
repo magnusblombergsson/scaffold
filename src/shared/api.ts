@@ -3,7 +3,7 @@ import type {
   ProseLanguage,
   TrashItem,
   UnitRef,
-  UnitValue,
+  ValueOf,
 } from './project-types';
 
 // The preload exposes these two objects on `window`. Main registers a handler
@@ -21,8 +21,8 @@ export type Created = Changed & { id: string };
 /** Mirrors the main-process ProjectStore of this window's Project. */
 export interface ProjectApi {
   manuscript(): Promise<Manuscript>;
-  read(ref: UnitRef): Promise<UnitValue>;
-  write(ref: UnitRef, value: UnitValue): Promise<void>;
+  read<R extends UnitRef>(ref: R): Promise<ValueOf<R>>;
+  write<R extends UnitRef>(ref: R, value: ValueOf<R>): Promise<void>;
   flush(): Promise<void>;
   hasUnsaved(): Promise<boolean>;
 
@@ -60,8 +60,15 @@ export interface ProjectApi {
 /** Widths in CSS pixels of the panels the Author can resize. */
 export type PanelWidths = { binder?: number };
 
-/** How the Author left a Project's window on this computer. */
-export type ProjectView = { lastSceneId?: string; panelWidths?: PanelWidths };
+/**
+ * How the Author left a Project's window on this computer; `outlineNotesOpen`
+ * says whether the Outline & Notes box above the Prose is open.
+ */
+export type ProjectView = {
+  lastSceneId?: string;
+  panelWidths?: PanelWidths;
+  outlineNotesOpen?: boolean;
+};
 
 export type OpenedProject = {
   displayName: string;

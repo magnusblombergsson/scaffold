@@ -29,6 +29,7 @@ export type ProjectSettings = {
   windowBounds?: WindowBounds;
   panelWidths?: PanelWidths;
   lastSceneId?: string;
+  outlineNotesOpen?: boolean;
 };
 
 type SettingsFile = {
@@ -122,6 +123,9 @@ function parseProjectSettings(raw: JsonObject): ProjectSettings & JsonObject {
     delete settings.panelWidths;
   }
   if (typeof settings.lastSceneId !== 'string') delete settings.lastSceneId;
+  if (typeof settings.outlineNotesOpen !== 'boolean') {
+    delete settings.outlineNotesOpen;
+  }
   return settings;
 }
 

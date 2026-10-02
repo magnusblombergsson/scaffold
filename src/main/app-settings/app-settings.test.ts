@@ -220,7 +220,9 @@ describe('a bad or newer settings file', () => {
             lastSceneId: 7,
             windowBounds: { x: 1, y: 2, width: 'wide', height: 4 },
             panelWidths: { binder: 300 },
+            outlineNotesOpen: 'yes',
           },
+          c: { outlineNotesOpen: false },
           b: 'nonsense',
         },
         recent: [valid, { path: 'C:/B' }, null],
@@ -232,6 +234,7 @@ describe('a bad or newer settings file', () => {
     expect(settings.openAtQuit()).toEqual([]);
     expect(settings.project('a')).toEqual({ panelWidths: { binder: 300 } });
     expect(settings.project('b')).toEqual({});
+    expect(settings.project('c')).toEqual({ outlineNotesOpen: false });
   });
 
   it('reads a newer version leniently and never overwrites it', async () => {

@@ -1,5 +1,6 @@
 import {
   cp,
+  mkdir,
   mkdtemp,
   readdir,
   readFile,
@@ -10,7 +11,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createProject, openProject, type ProjectStore } from './project-store';
-import type { Manuscript } from '../../shared/project-types';
+import { PROJECT_OUTLINE, type Manuscript } from '../../shared/project-types';
 import type { Changed } from '../../shared/api';
 import { nodeFileSystem, type FileSystem } from './file-system';
 import { instantClock } from './clock';
@@ -734,6 +735,205 @@ describe('Trash', () => {
     expect(await reopened.read(sceneRef(a))).toEqual({
       id: a,
       markdown: 'Written on the laptop.',
+    });
+  });
+});
+
+describe('Outlines and Notes', () => {
+  /** Chapter 1 holds Scene a. */
+  async function newProject() {
+    const projectPath = path.join(dir, 'My Novel');
+    const store = await createProject(projectPath, deps());
+    const one = store.manuscript().chapters[0].id;
+    const a = store.manuscript().chapters[0].scenes[0].id;
+    return { projectPath, store, one, a };
+  }
+
+  const outline = (id: string) => ({ kind: 'outline', id }) as const;
+  const notes = (id: string) => ({ kind: 'notes', id }) as const;
+
+  it('reads an empty Outline and empty Notes for a unit that has none yet', async () => {
+    const { store, one, a } = await newProject();
+
+    for (const id of [one, a, PROJECT_OUTLINE]) {
+      expect(await store.read(outline(id))).toEqual({ id, body: '', meta: {} });
+    }
+    for (const id of [one, a]) {
+      expect(await store.read(notes(id))).toEqual({ id, body: '' });
+    }
+  });
+
+  it('stores Outlines as outlines/<id>.md, with per-unit metadata in frontmatter', async () => {
+    const { projectPath, store, one, a } = await newProject();
+
+    await store.write(outline(a), {
+      id: a,
+      body: '- Anna finds the letter\n- She hides it',
+      meta: { pov: 'Anna', status: 'draft' },
+    });
+    await store.write(outline(one), { id: one, body: '- Arrival', meta: {} });
+    await store.close();
+
+    expect(
+      await readFile(path.join(projectPath, 'outlines', `${a}.md`), 'utf8'),
+    ).toBe(
+      `---\nid: ${a}\nformat: 1\npov: Anna\nstatus: draft\n---\n` +
+        '- Anna finds the letter\n- She hides it',
+    );
+    const reopened = await openProject(projectPath, deps());
+    expect(await reopened.read(outline(a))).toEqual({
+      id: a,
+      body: '- Anna finds the letter\n- She hides it',
+      meta: { pov: 'Anna', status: 'draft' },
+    });
+    expect(await reopened.read(outline(one))).toEqual({
+      id: one,
+      body: '- Arrival',
+      meta: {},
+    });
+  });
+
+  it('stores the Project Outline as outlines/project.md', async () => {
+    const { projectPath, store } = await newProject();
+
+    await store.write(outline(PROJECT_OUTLINE), {
+      id: PROJECT_OUTLINE,
+      body: '- Beginning\n- End',
+      meta: {},
+    });
+    await store.close();
+
+    expect(
+      await readFile(path.join(projectPath, 'outlines', 'project.md'), 'utf8'),
+    ).toBe('---\nid: project\nformat: 1\n---\n- Beginning\n- End');
+  });
+
+  it('stores Notes as notes/<id>.md', async () => {
+    const { projectPath, store, one, a } = await newProject();
+
+    await store.write(notes(a), { id: a, body: 'Check the weather.' });
+    await store.write(notes(one), { id: one, body: 'Too slow?' });
+    await store.close();
+
+    expect(
+      await readFile(path.join(projectPath, 'notes', `${a}.md`), 'utf8'),
+    ).toBe(`---\nid: ${a}\nformat: 1\n---\nCheck the weather.`);
+    const reopened = await openProject(projectPath, deps());
+    expect(await reopened.read(notes(one))).toEqual({
+      id: one,
+      body: 'Too slow?',
+    });
+  });
+
+  it('saves each unit on its own, and reads a written value before it is on disk', async () => {
+    const { projectPath, a } = await newProject();
+    const gate = heldRenames();
+    const store = await openProject(projectPath, { ...deps(), fs: gate.fs });
+
+    await store.write(sceneRef(a), { id: a, markdown: 'Prose.' });
+    await store.write(outline(a), { id: a, body: '- Point', meta: {} });
+    await store.write(notes(a), { id: a, body: 'A note.' });
+    expect(await store.read(outline(a))).toEqual({
+      id: a,
+      body: '- Point',
+      meta: {},
+    });
+    expect(store.hasUnsaved()).toBe(true);
+    gate.release();
+    await store.flush();
+
+    const reopened = await openProject(projectPath, deps());
+    expect(await reopened.read(sceneRef(a))).toEqual({
+      id: a,
+      markdown: 'Prose.',
+    });
+    expect(await reopened.read(notes(a))).toEqual({ id: a, body: 'A note.' });
+    expect(await reopened.read(outline(a))).toEqual({
+      id: a,
+      body: '- Point',
+      meta: {},
+    });
+  });
+
+  it('keeps frontmatter it does not know when it rewrites an Outline', async () => {
+    const { projectPath, store, a } = await newProject();
+    await store.close();
+    await mkdir(path.join(projectPath, 'outlines'));
+    await writeFile(
+      path.join(projectPath, 'outlines', `${a}.md`),
+      `---\nid: ${a}\nformat: 1\ntarget: 2000\nfromNewerApp: true\n---\n- Old`,
+    );
+
+    const reopened = await openProject(projectPath, deps());
+    const value = await reopened.read(outline(a));
+    await reopened.write(outline(a), { ...value, body: '- New' });
+    await reopened.close();
+
+    expect(
+      await readFile(path.join(projectPath, 'outlines', `${a}.md`), 'utf8'),
+    ).toBe(
+      `---\nid: ${a}\nformat: 1\ntarget: 2000\nfromNewerApp: true\n---\n- New`,
+    );
+  });
+
+  it('has no Prose for a Chapter, no Notes for the Project, and nothing for an unknown unit', async () => {
+    const { store, one } = await newProject();
+    const unknown = '5d4c3b2a-1f0e-4d9c-8b7a-6f5e4d3c2b1a';
+
+    await expect(store.read(sceneRef(one))).rejects.toThrow();
+    await expect(store.read(notes(PROJECT_OUTLINE))).rejects.toThrow();
+    await expect(store.read(outline(unknown))).rejects.toThrow();
+    await expect(
+      store.write(notes(unknown), { id: unknown, body: 'x' }),
+    ).rejects.toThrow();
+  });
+
+  it('keeps the Outline and Notes of a deleted Scene or Chapter until Trash is emptied', async () => {
+    const { projectPath, store, one, a } = await newProject();
+    const two = (await store.createChapter(1, 'Two')).id;
+    const b = (await store.createScene(two, 0, 'B')).id;
+    for (const id of [a, b, two]) {
+      await store.write(outline(id), { id, body: `- ${id}`, meta: {} });
+      await store.write(notes(id), { id, body: `Notes of ${id}` });
+    }
+    await store.trashScene(a);
+    await store.trashChapter(two);
+
+    for (const id of [a, b, two]) {
+      await expect(store.read(outline(id))).rejects.toMatchObject({
+        reason: 'trashed',
+      });
+      await expect(
+        store.write(notes(id), { id, body: 'Too late.' }),
+      ).rejects.toMatchObject({ reason: 'trashed' });
+    }
+
+    await store.restore(a);
+    await store.restore(two);
+    for (const id of [a, b, two]) {
+      expect(await store.read(outline(id))).toEqual({
+        id,
+        body: `- ${id}`,
+        meta: {},
+      });
+      expect(await store.read(notes(id))).toEqual({
+        id,
+        body: `Notes of ${id}`,
+      });
+    }
+
+    await store.trashScene(a);
+    await store.trashChapter(two);
+    await store.emptyTrash();
+    const files = await listFiles(projectPath);
+    for (const id of [a, b, two]) {
+      expect(files).not.toContain(path.join('outlines', `${id}.md`));
+      expect(files).not.toContain(path.join('notes', `${id}.md`));
+    }
+    expect(await store.read(outline(one))).toEqual({
+      id: one,
+      body: '',
+      meta: {},
     });
   });
 });

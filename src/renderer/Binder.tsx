@@ -7,10 +7,15 @@ import type {
   SceneNode,
 } from '../shared/project-types';
 
+/** What the centre shows: a Scene, a Chapter's Outline and Notes, or the Project Outline. */
+export type Selection =
+  | { kind: 'scene' | 'chapter'; id: string }
+  | { kind: 'project' };
+
 type Props = {
   manuscript: Manuscript;
-  openSceneId: string | null;
-  onOpenScene(sceneId: string): void;
+  selected: Selection | null;
+  onSelect(selection: Selection): void;
   /**
    * Runs a structure operation and shows the Manuscript it resolves with;
    * `message` says what it did, beside Undo.
@@ -25,15 +30,15 @@ const SCENE = 'application/x-writing-tools-scene';
 const CHAPTER = 'application/x-writing-tools-chapter';
 
 /** The Manuscript tab: Chapters and their Scenes, then any Unplaced Scenes. */
-export function Binder({
-  manuscript,
-  openSceneId,
-  onOpenScene,
-  onChange,
-}: Props) {
+export function Binder({ manuscript, selected, onSelect, onChange }: Props) {
   const [renaming, setRenaming] = useState<Renaming>(null);
   const project = window.project;
   const { chapters } = manuscript;
+  const isSelected = (kind: Selection['kind'], id?: string) =>
+    selected?.kind === kind && (!id || ('id' in selected && selected.id === id))
+      ? 'true'
+      : undefined;
+  const onOpenScene = (id: string) => onSelect({ kind: 'scene', id });
 
   async function create(
     operation: () => Promise<Created>,
@@ -240,7 +245,7 @@ export function Binder({
         ) : (
           <button
             className="binder-title"
-            aria-current={scene.id === openSceneId ? 'true' : undefined}
+            aria-current={isSelected('scene', scene.id)}
             onClick={() => onOpenScene(scene.id)}
             onDoubleClick={() => chapter && setRenaming(scene.id)}
           >
@@ -263,6 +268,13 @@ export function Binder({
 
   return (
     <nav className="binder" aria-label="Manuscript">
+      <button
+        className="binder-project"
+        aria-current={isSelected('project')}
+        onClick={() => onSelect({ kind: 'project' })}
+      >
+        Project Outline
+      </button>
       <ol className="binder-chapters">
         {chapters.map((chapter, index) => (
           <li
@@ -308,11 +320,16 @@ export function Binder({
                   }
                 />
               ) : (
-                <h2
-                  className="binder-title"
-                  onDoubleClick={() => setRenaming(chapter.id)}
-                >
-                  {chapter.title}
+                <h2 className="binder-title">
+                  <button
+                    aria-current={isSelected('chapter', chapter.id)}
+                    onClick={() =>
+                      onSelect({ kind: 'chapter', id: chapter.id })
+                    }
+                    onDoubleClick={() => setRenaming(chapter.id)}
+                  >
+                    {chapter.title}
+                  </button>
                 </h2>
               )}
               <Menu

@@ -1,9 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import {
+  PROJECT_OUTLINE,
   proseLanguage,
   type ChapterNode,
   type Manuscript,
+  type NotesRef,
+  type NotesValue,
+  type OutlineRef,
+  type OutlineValue,
   type ProjectTree,
   type ProseLanguage,
   type SceneNode,
@@ -12,12 +17,13 @@ import {
   type TrashItem,
   type UnitRef,
   type UnitValue,
+  type ValueOf,
 } from '../../shared/project-types';
 import type { Changed, Created } from '../../shared/api';
 import type { Clock } from './clock';
 import type { FileSystem } from './file-system';
 import { safeWrite } from './safe-write';
-import { formatUnitFile, parseUnitFile } from './unit-file';
+import { formatUnitFile, parseUnitFile, type UnitFile } from './unit-file';
 
 export const FORMAT = 1;
 const MANIFEST = 'project.json';
@@ -153,7 +159,9 @@ export function projectLookup(fs: FileSystem): ProjectLookup {
 
 /** Removes temp files left by a write that crashed before its rename. */
 async function sweepTempFiles(projectPath: string, fs: FileSystem) {
-  const dirs = ['scenes', 'trash'].map((d) => path.join(projectPath, d));
+  const dirs = ['scenes', 'outlines', 'notes', 'trash'].map((d) =>
+    path.join(projectPath, d),
+  );
   for (const dir of [projectPath, ...dirs]) {
     for (const name of await fs.readdir(dir)) {
       if (name.endsWith('.tmp')) await fs.unlink(path.join(dir, name));
@@ -570,11 +578,37 @@ export class ProjectStore {
       const names = (await this.deps.fs.readdir(dir)).sort(
         (a, b) => Number(isChapterFile(b)) - Number(isChapterFile(a)),
       );
+      // Outlines and Notes stay in place while their unit is in Trash, and go
+      // first: a crash then leaves the unit restorable, without them.
+      for (const name of names) {
+        const id = (ID_FILE.exec(name) ?? CHAPTER_FILE.exec(name))?.[1];
+        if (id && !this.isLive(id)) await this.deleteOutlineAndNotes(id);
+      }
       for (const name of names) {
         await this.deps.fs.unlink(path.join(dir, name));
       }
       this.trash.clear();
     });
+  }
+
+  /** Whether a Chapter or Scene of this id is in the Manuscript or Unplaced. */
+  private isLive(id: string): boolean {
+    const tree = this.manifest.tree;
+    return (
+      this.files.has(id) ||
+      sceneIds(tree).includes(id) ||
+      tree.chapters.some((c) => c.id === id)
+    );
+  }
+
+  private async deleteOutlineAndNotes(id: string): Promise<void> {
+    for (const ref of [outlineRef(id), notesRef(id)]) {
+      const key = unitKey(ref);
+      while (this.writing.has(key)) await this.writing.get(key);
+      this.unsaved.delete(key);
+      const file = unitPath(this.path, ref);
+      if (await this.deps.fs.exists(file)) await this.deps.fs.unlink(file);
+    }
   }
 
   /** Runs a structure operation that the Author can undo while it's latest. */
@@ -700,7 +734,7 @@ export class ProjectStore {
     const key = unitKey(sceneRef(id));
     while (this.writing.has(key)) await this.writing.get(key);
     const pending = this.unsaved.get(key);
-    if (pending) return pending.value.markdown;
+    if (pending) return (pending.value as SceneValue).markdown;
     const text = await this.deps.fs.readFile(scenePath(this.path, id));
     return parseUnitFile(text).body;
   }
@@ -833,28 +867,55 @@ export class ProjectStore {
     }
   }
 
-  /** Refuses a Missing unit, and one in Trash or on its way there. */
+  /**
+   * Refuses a Missing Scene, and one in Trash or on its way there. An Outline
+   * or Notes needs its Chapter or Scene in the Manuscript or Unplaced; only
+   * the Project Outline has none.
+   */
   private refuseUnavailable(ref: UnitRef): void {
-    this.refuseMissing(ref);
-    if (!this.files.has(ref.id) || this.closing.has(ref.id)) {
-      throw new ProjectError('trashed', `Scene ${ref.id} is in Trash`);
+    if (ref.kind === 'scene') {
+      this.refuseMissing(ref);
+      if (!this.files.has(ref.id) || this.closing.has(ref.id)) {
+        throw new ProjectError('trashed', `Scene ${ref.id} is in Trash`);
+      }
+      return;
     }
+    if (ref.kind === 'outline' && ref.id === PROJECT_OUTLINE) return;
+    if (this.isLive(ref.id)) return;
+    if (this.inTrash(ref.id)) {
+      throw new ProjectError('trashed', `${ref.id} is in Trash`);
+    }
+    throw new Error(`No Chapter or Scene ${ref.id}`);
+  }
+
+  /** Whether a Chapter or Scene is in Trash, on its own or with its Chapter. */
+  private inTrash(id: string): boolean {
+    return [...this.trash.values()].some(
+      (item) =>
+        item.id === id ||
+        (item.kind === 'chapter' && item.scenes.some((s) => s.id === id)),
+    );
   }
 
   /** Reads a unit; a value accepted by `write` is seen before it is on disk. */
-  async read(ref: UnitRef): Promise<UnitValue> {
+  async read<R extends UnitRef>(ref: R): Promise<ValueOf<R>> {
     this.refuseUnavailable(ref);
     const pending = this.unsaved.get(unitKey(ref));
-    if (pending) return structuredClone(pending.value);
-    const text = await this.deps.fs.readFile(scenePath(this.path, ref.id));
-    return { id: ref.id, markdown: parseUnitFile(text).body };
+    if (pending) return structuredClone(pending.value) as ValueOf<R>;
+    const file = unitPath(this.path, ref);
+    // An Outline or Notes has no file until the Author first writes it.
+    const text =
+      ref.kind === 'scene' || (await this.deps.fs.exists(file))
+        ? await this.deps.fs.readFile(file)
+        : '';
+    return unitValue(ref, parseUnitFile(text)) as ValueOf<R>;
   }
 
   /**
    * Resolves once main has accepted the value, not when it is on disk.
    * Rejects for a Missing unit, which is never recreated, and a trashed one.
    */
-  async write(ref: UnitRef, value: UnitValue): Promise<void> {
+  async write<R extends UnitRef>(ref: R, value: ValueOf<R>): Promise<void> {
     this.refuseUnavailable(ref);
     const key = unitKey(ref);
     this.unsaved.set(key, { ref, value: structuredClone(value) });
@@ -886,11 +947,15 @@ export class ProjectStore {
       const pending = this.unsaved.get(key);
       if (!pending) return;
       try {
+        const file = unitPath(this.path, pending.ref);
+        if (pending.ref.kind !== 'scene') {
+          await this.deps.fs.mkdir(path.dirname(file));
+        }
         await safeWrite(
           this.deps.fs,
           this.deps.clock,
-          scenePath(this.path, pending.ref.id),
-          sceneFile(pending.value),
+          file,
+          unitFile(pending.ref, pending.value),
         );
       } catch (error) {
         // The unit stays unsaved; the next write retries it. Reporting the
@@ -937,12 +1002,26 @@ function sceneRef(id: string): SceneRef {
   return { kind: 'scene', id };
 }
 
+function outlineRef(id: string): OutlineRef {
+  return { kind: 'outline', id };
+}
+
+function notesRef(id: string): NotesRef {
+  return { kind: 'notes', id };
+}
+
 function unitKey(ref: UnitRef): string {
   return `${ref.kind}:${ref.id}`;
 }
 
 function scenePath(projectPath: string, id: string): string {
   return path.join(projectPath, 'scenes', `${id}.md`);
+}
+
+const UNIT_DIRS = { scene: 'scenes', outline: 'outlines', notes: 'notes' };
+
+function unitPath(projectPath: string, ref: UnitRef): string {
+  return path.join(projectPath, UNIT_DIRS[ref.kind], `${ref.id}.md`);
 }
 
 function trashDir(projectPath: string): string {
@@ -966,4 +1045,19 @@ function sceneFile(value: SceneValue): string {
     frontmatter: { id: value.id, format: FORMAT },
     body: value.markdown,
   });
+}
+
+/** An Outline's metadata is the rest of its frontmatter. */
+function unitFile(ref: UnitRef, value: UnitValue): string {
+  if (ref.kind === 'scene') return sceneFile(value as SceneValue);
+  const { id, body } = value as OutlineValue | NotesValue;
+  const meta = ref.kind === 'outline' ? (value as OutlineValue).meta : {};
+  return formatUnitFile({ frontmatter: { id, format: FORMAT, ...meta }, body });
+}
+
+function unitValue(ref: UnitRef, { frontmatter, body }: UnitFile): UnitValue {
+  if (ref.kind === 'scene') return { id: ref.id, markdown: body };
+  if (ref.kind === 'notes') return { id: ref.id, body };
+  const { id: _id, format: _format, ...meta } = frontmatter;
+  return { id: ref.id, body, meta };
 }

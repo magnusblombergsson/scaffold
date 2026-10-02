@@ -2,7 +2,7 @@
 
 A desktop writing app for creative fiction. The Author writes Prose in an editor, and an AI Assistant beside it asks questions, comments, and proposes changes to the Story Bible and Outlines. The Assistant never writes the Prose itself.
 
-**Status:** early development. You can create or open a Project, organise its Chapters and Scenes in the binder, undo the latest change from its toast, delete Scenes and Chapters to Trash and restore them, and write Scenes, which autosave. Each Project opens in its own window, and the app reopens the Projects you had open when you quit it. The rest of the MVP is planned as tickets under [Spec: Writing Tools MVP (#30)](https://github.com/magnusblombergsson/writing-tools/issues/30).
+**Status:** early development. You can create or open a Project, organise its Chapters and Scenes in the binder, undo the latest change from its toast, delete Scenes and Chapters to Trash and restore them, and write Scenes, which autosave. Each Scene and Chapter has an Outline and Notes, and the Project has an Outline of its own; undo in each one keeps its own history for the session. Each Project opens in its own window, and the app reopens the Projects you had open when you quit it. The rest of the MVP is planned as tickets under [Spec: Writing Tools MVP (#30)](https://github.com/magnusblombergsson/writing-tools/issues/30).
 
 ## Getting started
 
@@ -39,7 +39,7 @@ An Electron app written in TypeScript, with React in the renderer and a TipTap e
 - **`src/shared/`**: types and the IPC interface, used by all three.
 - **`tests/e2e/`**: end-to-end tests that drive the built app.
 
-A Project is a plain folder, usually kept in OneDrive or Dropbox: `project.json` holds the Chapter and Scene structure, and there is one Markdown file per Scene, named by its id; deleted Scenes and Chapters wait in `trash/` until it is emptied (see [ADR 0002](docs/adr/0002-manifest-ordered-id-named-files.md)). Every write goes to a temp file first, which is then renamed over the target, so a crash never leaves a half-written file. Nothing about a single computer goes in the Project folder; that lives in `settings.json`. End-to-end tests point the app at their own settings folder with `WRITING_TOOLS_USER_DATA`.
+A Project is a plain folder, usually kept in OneDrive or Dropbox: `project.json` holds the Chapter and Scene structure, and there is one Markdown file per Scene, named by its id, with Outlines in `outlines/` and Notes in `notes/`; deleted Scenes and Chapters wait in `trash/` until it is emptied (see [ADR 0002](docs/adr/0002-manifest-ordered-id-named-files.md)). Every write goes to a temp file first, which is then renamed over the target, so a crash never leaves a half-written file. Nothing about a single computer goes in the Project folder; that lives in `settings.json`. End-to-end tests point the app at their own settings folder with `WRITING_TOOLS_USER_DATA`.
 
 ## Further reading
 
