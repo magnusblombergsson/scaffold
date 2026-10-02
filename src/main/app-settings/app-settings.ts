@@ -4,6 +4,7 @@ import type { FileSystem } from '../project-store/file-system';
 import type { ProjectLookup } from '../project-store/project-store';
 import { safeWrite } from '../project-store/safe-write';
 import type { PanelWidths, Tip } from '../../shared/api';
+import { DEFAULT_MODEL, isModelId, type ModelId } from '../../shared/models';
 
 export const SETTINGS_VERSION = 1;
 const RECENT_LIMIT = 20;
@@ -37,10 +38,14 @@ export type ProjectSettings = {
 
 type SettingsFile = {
   version: number;
-  global: { openAtQuit?: string[]; highlightMentions?: boolean } & Record<
-    string,
-    unknown
-  >;
+  global: {
+    openAtQuit?: string[];
+    highlightMentions?: boolean;
+    /** Any string: one this app doesn't offer reads as the default. */
+    model?: string;
+    /** Set once the Author has added a key or skipped the welcome. */
+    welcomed?: boolean;
+  } & Record<string, unknown>;
   projects: Record<string, ProjectSettings & Record<string, unknown>>;
   recent: RecentRecord[];
 };
@@ -103,6 +108,7 @@ function parseSettings(text: string): SettingsFile | null {
   if (typeof global.highlightMentions !== 'boolean') {
     delete global.highlightMentions;
   }
+  if (typeof global.welcomed !== 'boolean') delete global.welcomed;
   const projects: SettingsFile['projects'] = {};
   if (isJsonObject(raw.projects)) {
     for (const [id, value] of Object.entries(raw.projects)) {
@@ -293,6 +299,28 @@ export class AppSettings {
 
   setHighlightMentions(on: boolean): void {
     this.data.global.highlightMentions = on;
+    this.changed();
+  }
+
+  /** The Claude model for the next call, in every Project. */
+  model(): ModelId {
+    const model = this.data.global.model;
+    return isModelId(model) ? model : DEFAULT_MODEL;
+  }
+
+  setModel(model: ModelId): void {
+    this.data.global.model = model;
+    this.changed();
+  }
+
+  /** Whether the Author has been welcomed on this computer. */
+  welcomed(): boolean {
+    return this.data.global.welcomed ?? false;
+  }
+
+  setWelcomed(): void {
+    if (this.welcomed()) return;
+    this.data.global.welcomed = true;
     this.changed();
   }
 

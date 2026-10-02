@@ -1,7 +1,7 @@
 import { app } from 'electron';
 import started from 'electron-squirrel-startup';
 import { registerProjectIpc } from './ipc';
-import { registerShellIpc, startShell } from './shell';
+import { registerSettingsIpc, registerShellIpc, startShell } from './shell';
 
 // End-to-end tests give each run its own settings and single-instance lock.
 if (process.env.WRITING_TOOLS_USER_DATA) {
@@ -17,6 +17,7 @@ if (started || !app.requestSingleInstanceLock()) {
   app.whenReady().then(async () => {
     registerProjectIpc();
     registerShellIpc();
+    registerSettingsIpc();
     await startShell();
   });
 

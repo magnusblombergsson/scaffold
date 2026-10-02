@@ -9,8 +9,9 @@ import type {
   ValueOf,
   Visibility,
 } from './project-types';
+import type { ModelId } from './models';
 
-// The preload exposes these two objects on `window`. Main registers a handler
+// The preload exposes these three objects on `window`. Main registers a handler
 // per method, and both sides are checked against these interfaces.
 
 /**
@@ -245,6 +246,64 @@ export type RecentProject = {
 };
 
 /**
+ * What Anthropic said of a key when it was checked: `unreachable` when it
+ * couldn't be asked, as when offline.
+ */
+export type KeyCheck = 'ok' | 'invalid' | 'no-credit' | 'unreachable';
+
+/**
+ * How the API key is kept: `encrypted` on disk, `unencrypted` on disk because
+ * the Author said so, or in memory `untilQuit`.
+ */
+export type KeyKeeping = 'encrypted' | 'unencrypted' | 'untilQuit';
+
+/**
+ * The Author's Anthropic API key as a window may know it, which is never the
+ * key itself: `masked` shows only its start and end, as `sk-ant-…abcd`.
+ */
+export type KeyStatus = {
+  masked: string | null;
+  kept: KeyKeeping | null;
+  /** Whether this computer can encrypt a key it keeps, which Linux can't without a keyring. */
+  canEncrypt: boolean;
+};
+
+/**
+ * Whether to save a key unencrypted where it can't be encrypted; ignored where
+ * it can.
+ */
+export type KeyOptions = { unencrypted: boolean };
+
+/** A key the Author entered: what checking it said, and the key kept now. */
+export type KeyResult = { check: KeyCheck; status: KeyStatus };
+
+/** Settings that hold on this computer for every Project. */
+export interface SettingsApi {
+  /**
+   * Whether to welcome the Author, as on the first launch; false once they
+   * have added a key or skipped.
+   */
+  showWelcome(): Promise<boolean>;
+  dismissWelcome(): void;
+  keyStatus(): Promise<KeyStatus>;
+  /**
+   * Checks the key with Anthropic and keeps it unless it is invalid; the
+   * next call to Claude uses it. Without encryption it is kept until the app
+   * quits, unless `unencrypted` says to save it anyway.
+   */
+  setKey(key: string, options: KeyOptions): Promise<KeyResult>;
+  removeKey(): Promise<KeyStatus>;
+  /**
+   * Calls `listener` when the key is added, replaced or removed, from any
+   * window. Returns an unsubscribe function.
+   */
+  onKeyStatus(listener: (status: KeyStatus) => void): () => void;
+  /** The Claude model the next call uses. */
+  model(): Promise<ModelId>;
+  setModel(model: ModelId): void;
+}
+
+/**
  * App-level actions outside any one Project. A window shows one Project, or
  * the start screen. Opening a Project from a window that shows one opens it in
  * a new window.
@@ -305,6 +364,14 @@ export const channel = {
   setHighlightMentions: 'shell:setHighlightMentions',
   highlightMentionsChanged: 'shell:highlightMentionsChanged',
   flushRequest: 'shell:flushRequest',
+  showWelcome: 'settings:showWelcome',
+  dismissWelcome: 'settings:dismissWelcome',
+  keyStatus: 'settings:keyStatus',
+  setKey: 'settings:setKey',
+  removeKey: 'settings:removeKey',
+  keyStatusChanged: 'settings:keyStatusChanged',
+  model: 'settings:model',
+  setModel: 'settings:setModel',
   flushed: 'shell:flushed',
   projectEvent: 'project:event',
 } as const;
@@ -313,5 +380,6 @@ declare global {
   interface Window {
     project: ProjectApi;
     shell: ShellApi;
+    settings: SettingsApi;
   }
 }

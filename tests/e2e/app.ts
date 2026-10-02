@@ -3,6 +3,7 @@ import {
   test,
   type ElectronApplication,
 } from '@playwright/test';
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -21,22 +22,53 @@ export function useTempDir(): () => string {
   return () => dir;
 }
 
+export type LaunchOptions = {
+  /** Starts as on a new computer, with the welcome; otherwise it was skipped. */
+  firstRun?: boolean;
+  /** Where Anthropic is, such as a fake one the test runs. */
+  anthropicUrl?: string;
+};
+
 /**
  * Starts the app with its settings in `dir`, never the Author's own; launches
  * with the same `dir` share them, as restarts on one computer do.
  */
-export function launch(dir: string) {
-  return electron.launch({ args: [root], cwd: root, env: appEnv(dir) });
+export function launch(dir: string, options: LaunchOptions = {}) {
+  return electron.launch({
+    args: [root],
+    cwd: root,
+    env: appEnv(dir, options),
+  });
 }
 
 /** The environment the app runs in, with its settings in `dir`. */
-export function appEnv(dir: string): Record<string, string> {
+export function appEnv(
+  dir: string,
+  { firstRun = false, anthropicUrl }: LaunchOptions = {},
+): Record<string, string> {
+  const userData = path.join(dir, 'user-data');
+  const settings = path.join(userData, 'settings.json');
+  if (!firstRun && !existsSync(settings)) {
+    mkdirSync(userData, { recursive: true });
+    writeFileSync(
+      settings,
+      JSON.stringify({
+        version: 1,
+        global: { welcomed: true },
+        projects: {},
+        recent: [],
+      }),
+    );
+  }
   // Terminals inside VS Code set ELECTRON_RUN_AS_NODE, which would start
   // Electron as plain Node.
   const { ELECTRON_RUN_AS_NODE: _, ...env } = process.env;
   return {
     ...(env as Record<string, string>),
-    WRITING_TOOLS_USER_DATA: path.join(dir, 'user-data'),
+    WRITING_TOOLS_USER_DATA: userData,
+    // Never the real Anthropic: a port nothing listens on, unless a test
+    // runs a fake one.
+    WRITING_TOOLS_ANTHROPIC_URL: anthropicUrl ?? 'http://127.0.0.1:9',
   };
 }
 

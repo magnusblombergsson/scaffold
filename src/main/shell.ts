@@ -4,10 +4,13 @@ import {
   dialog,
   ipcMain,
   screen,
+  shell,
   type WebContents,
 } from 'electron';
 import path from 'node:path';
 import type {
+  KeyOptions,
+  KeyStatus,
   OpenedProject,
   OpenResult,
   ProjectView,
@@ -15,6 +18,7 @@ import type {
   Tip,
 } from '../shared/api';
 import { channel } from '../shared/api';
+import { isModelId } from '../shared/models';
 import { unitName } from '../shared/unit-name';
 import {
   loadAppSettings,
@@ -22,6 +26,9 @@ import {
   type AppSettings,
   type WindowBounds,
 } from './app-settings/app-settings';
+import { anthropicKeyCheck } from './key-store/check-key';
+import { loadKeyStore, type KeyStore } from './key-store/key-store';
+import { safeStorageEncryption } from './key-store/safe-storage';
 import { systemClock } from './project-store/clock';
 import { nodeFileSystem } from './project-store/file-system';
 import {
@@ -38,6 +45,7 @@ import {
 const deps = { fs: nodeFileSystem, clock: systemClock };
 
 let settings: AppSettings;
+let apiKey: KeyStore;
 
 /** The open Project of each window, keyed by its webContents id. */
 const stores = new Map<number, ProjectStore>();
@@ -55,6 +63,17 @@ export async function startShell(): Promise<void> {
   settings = await loadAppSettings(
     path.join(app.getPath('userData'), 'settings.json'),
     { ...deps, projects: projectLookup(deps.fs) },
+  );
+  apiKey = await loadKeyStore(
+    path.join(app.getPath('userData'), 'api-key.json'),
+    {
+      ...deps,
+      encryption: safeStorageEncryption,
+      // End-to-end tests stand in for Anthropic.
+      check: anthropicKeyCheck({
+        baseURL: process.env.WRITING_TOOLS_ANTHROPIC_URL,
+      }),
+    },
   );
 
   // A quit waits until every window's Project is closed, its edits on disk,
@@ -109,6 +128,11 @@ function createWindow(store: ProjectStore | null): BrowserWindow {
     },
   });
   if (store) attach(window.webContents, store);
+  // Links, such as to Anthropic Console, open in the browser.
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    if (url.startsWith('https://')) void shell.openExternal(url);
+    return { action: 'deny' };
+  });
   const rememberBounds = () => {
     const shown = stores.get(window.webContents.id);
     if (shown) {
@@ -369,6 +393,49 @@ export function registerShellIpc(): void {
       settings.updateProject(store.id, { dismissedTips: [...dismissed, tip] });
     }
   });
+}
+
+/** Settings for every Project on this computer: the welcome, the API key and the model. */
+export function registerSettingsIpc(): void {
+  ipcMain.handle(
+    channel.showWelcome,
+    () => !settings.welcomed() && apiKey.key() === null,
+  );
+
+  ipcMain.on(channel.dismissWelcome, () => settings.setWelcomed());
+
+  ipcMain.handle(channel.keyStatus, () => apiKey.status());
+
+  ipcMain.handle(
+    channel.setKey,
+    async (_event, key: string, options: KeyOptions) => {
+      const result = await apiKey.setKey(key, options);
+      if (result.check !== 'invalid') {
+        settings.setWelcomed();
+        announceKeyStatus(result.status);
+      }
+      return result;
+    },
+  );
+
+  ipcMain.handle(channel.removeKey, async () => {
+    const status = await apiKey.removeKey();
+    announceKeyStatus(status);
+    return status;
+  });
+
+  ipcMain.handle(channel.model, () => settings.model());
+
+  ipcMain.on(channel.setModel, (_event, model: unknown) => {
+    if (isModelId(model)) settings.setModel(model);
+  });
+}
+
+/** Tells every window the key changed, so the Assistant shows or asks for one. */
+function announceKeyStatus(status: KeyStatus): void {
+  for (const window of BrowserWindow.getAllWindows()) {
+    window.webContents.send(channel.keyStatusChanged, status);
+  }
 }
 
 /** The window of an IPC sender; dialogs are attached to it. */

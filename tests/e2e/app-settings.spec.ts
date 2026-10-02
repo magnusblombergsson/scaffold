@@ -7,7 +7,7 @@ import {
 import electronPath from 'electron';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { access, cp, readFile, rename, rm } from 'node:fs/promises';
+import { cp, readFile, rename, rm } from 'node:fs/promises';
 import path from 'node:path';
 import {
   answerDialogs,
@@ -47,13 +47,6 @@ async function windowsShowing(app: ElectronApplication) {
     }),
   );
   return new Map(names);
-}
-
-function exists(file: string): Promise<boolean> {
-  return access(file).then(
-    () => true,
-    () => false,
-  );
 }
 
 function projectId(projectPath: string): Promise<string> {
@@ -144,8 +137,10 @@ test('a second launch of the app quits and leaves the running one', async () => 
   try {
     // Started: it has saved which Projects are open.
     await expect
-      .poll(() => exists(path.join(tempDir(), 'user-data', 'settings.json')))
-      .toBe(true);
+      .poll(() =>
+        readFile(path.join(tempDir(), 'user-data', 'settings.json'), 'utf8'),
+      )
+      .toContain('openAtQuit');
 
     const second = start();
     const [code] = await once(second, 'exit');

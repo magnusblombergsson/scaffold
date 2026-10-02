@@ -2,7 +2,9 @@ import { contextBridge, ipcRenderer } from 'electron';
 import {
   channel,
   type ProjectApi,
+  type KeyStatus,
   type ProjectEvent,
+  type SettingsApi,
   type ShellApi,
 } from '../shared/api';
 
@@ -102,5 +104,23 @@ const shell: ShellApi = {
   },
 };
 
+const settings: SettingsApi = {
+  showWelcome: () => ipcRenderer.invoke(channel.showWelcome),
+  dismissWelcome: () => ipcRenderer.send(channel.dismissWelcome),
+  keyStatus: () => ipcRenderer.invoke(channel.keyStatus),
+  setKey: (key, options) => ipcRenderer.invoke(channel.setKey, key, options),
+  removeKey: () => ipcRenderer.invoke(channel.removeKey),
+  onKeyStatus(listener) {
+    const forward = (_event: unknown, status: KeyStatus) => listener(status);
+    ipcRenderer.on(channel.keyStatusChanged, forward);
+    return () => {
+      ipcRenderer.off(channel.keyStatusChanged, forward);
+    };
+  },
+  model: () => ipcRenderer.invoke(channel.model),
+  setModel: (model) => ipcRenderer.send(channel.setModel, model),
+};
+
 contextBridge.exposeInMainWorld('project', project);
 contextBridge.exposeInMainWorld('shell', shell);
+contextBridge.exposeInMainWorld('settings', settings);

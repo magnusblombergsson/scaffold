@@ -46,6 +46,7 @@
     "vitest": "^5.0.2"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.131.0",
     "@parcel/watcher": "^2.6.0",
     "@tiptap/core": "^3.31.3",
     "@tiptap/extension-bold": "^3.31.3",

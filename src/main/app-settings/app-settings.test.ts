@@ -97,6 +97,29 @@ describe('saving', () => {
     expect((await load()).highlightMentions()).toBe(false);
   });
 
+  it('uses Opus 5.5 until the Author chooses another model, and remembers it', async () => {
+    const settings = await load();
+    expect(settings.model()).toBe('claude-opus-5-5');
+
+    settings.setModel('claude-haiku-4-5');
+    await settings.flush();
+
+    expect((await load()).model()).toBe('claude-haiku-4-5');
+    expect(JSON.parse(await readFile(file, 'utf8')).global).toMatchObject({
+      model: 'claude-haiku-4-5',
+    });
+  });
+
+  it('welcomes the Author until they have been welcomed once', async () => {
+    const settings = await load();
+    expect(settings.welcomed()).toBe(false);
+
+    settings.setWelcomed();
+    await settings.flush();
+
+    expect((await load()).welcomed()).toBe(true);
+  });
+
   it('writes once, about 500 ms after a burst of changes', async () => {
     const time = heldTime();
     const settings = await loadAppSettings(file, { ...deps(), ...time });
@@ -225,7 +248,12 @@ describe('a bad or newer settings file', () => {
       file,
       JSON.stringify({
         version: 1,
-        global: { openAtQuit: 'C:/A', highlightMentions: 'no' },
+        global: {
+          openAtQuit: 'C:/A',
+          highlightMentions: 'no',
+          model: 'claude-gone-1',
+          welcomed: 'yes',
+        },
         projects: {
           a: {
             lastSceneId: 7,
@@ -244,6 +272,8 @@ describe('a bad or newer settings file', () => {
     expect(settings.recent()).toEqual([valid]);
     expect(settings.openAtQuit()).toEqual([]);
     expect(settings.highlightMentions()).toBe(true);
+    expect(settings.model()).toBe('claude-opus-5-5');
+    expect(settings.welcomed()).toBe(false);
     expect(settings.project('a')).toEqual({ panelWidths: { binder: 300 } });
     expect(settings.project('b')).toEqual({});
     expect(settings.project('c')).toEqual({ outlineNotesOpen: false });

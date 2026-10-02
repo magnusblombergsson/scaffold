@@ -27,6 +27,7 @@ import {
 } from '../shared/project-types';
 import { upgradedMessage } from '../shared/format-gate';
 import { capitalized, unitName } from '../shared/unit-name';
+import { AssistantPanel } from './AssistantPanel';
 import { Binder, type Selection } from './Binder';
 import { ConflictList, ConflictResolver } from './Conflicts';
 import { EntryView, VISIBILITY_LABELS } from './EntryView';
@@ -44,20 +45,31 @@ import { flushPendingEdits } from './pending-edits';
 import { ReadOnlyContext } from './read-only';
 import { SaveFailureBanner, SaveIndicator, useSaveStatus } from './SaveStatus';
 import { SceneEditor } from './SceneEditor';
+import { SettingsDialog } from './SettingsDialog';
 import { StartScreen } from './StartScreen';
 import { entryTitle, StoryBible } from './StoryBible';
 import { trashTitle, TrashView } from './TrashView';
 import { Toast } from './Toast';
 import { forgetUnitEditors } from './unit-editors';
+import { Welcome } from './Welcome';
 
 export function App() {
   /** Undefined until main says what this window shows. */
   const [project, setProject] = useState<OpenedProject | null>();
   const [error, setError] = useState<string | null>(null);
+  /** Undefined until main says whether to welcome the Author. */
+  const [welcome, setWelcome] = useState<boolean>();
+  /** Open while set; `addKey` opens it at the form for adding a key. */
+  const [settingsDialog, setSettingsDialog] = useState<{
+    addKey: boolean;
+  } | null>(null);
+  const openSettings = () => setSettingsDialog({ addKey: false });
+  const addKey = useCallback(() => setSettingsDialog({ addKey: true }), []);
 
   useEffect(() => window.shell.onFlushRequest(flushPendingEdits), []);
   useEffect(() => {
     void window.shell.currentProject().then(setProject);
+    void window.settings.showWelcome().then(setWelcome);
   }, []);
 
   async function open(action: () => Promise<OpenResult>) {
@@ -81,21 +93,33 @@ export function App() {
       <button onClick={() => open(window.shell.openProject)}>
         Open Project…
       </button>
+      <button onClick={openSettings}>Settings…</button>
     </>
   );
 
-  if (project === undefined) return null;
-  if (!project) {
-    return <StartScreen actions={startButtons} error={error} onOpen={open} />;
-  }
-
+  if (project === undefined || welcome === undefined) return null;
   return (
-    <ProjectView
-      project={project}
-      error={error}
-      onError={setError}
-      headerActions={startButtons}
-    />
+    <>
+      {project ? (
+        <ProjectView
+          project={project}
+          error={error}
+          onError={setError}
+          headerActions={startButtons}
+          onAddKey={addKey}
+        />
+      ) : welcome ? (
+        <Welcome onDone={() => setWelcome(false)} />
+      ) : (
+        <StartScreen actions={startButtons} error={error} onOpen={open} />
+      )}
+      {settingsDialog && (
+        <SettingsDialog
+          addKey={settingsDialog.addKey}
+          onClose={() => setSettingsDialog(null)}
+        />
+      )}
+    </>
   );
 }
 
@@ -111,11 +135,14 @@ function ProjectView({
   error,
   onError,
   headerActions,
+  onAddKey,
 }: {
   project: OpenedProject;
   error: string | null;
   onError(message: string | null): void;
   headerActions: ReactNode;
+  /** Opens Settings to add an API key for the Assistant. */
+  onAddKey(): void;
 }) {
   const [manuscript, setManuscript] = useState(project.manuscript);
   const [selected, setSelected] = useState<Selection | null>(() => {
@@ -562,6 +589,7 @@ function ProjectView({
               />
             </main>
           )}
+          <AssistantPanel onAddKey={onAddKey} />
         </div>
         {peek && (
           <MentionPeek
