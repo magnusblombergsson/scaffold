@@ -1,9 +1,10 @@
 import { Editor, type Extensions, type JSONContent } from '@tiptap/core';
 import { EditorContent } from '@tiptap/react';
-import { useEffect, useState } from 'react';
+import { useContext, useEffect, useState } from 'react';
 import { unitKey as keyOf, unitText } from '../shared/project-types';
 import { createAutosave } from './autosave';
 import { registerPendingEdits } from './pending-edits';
+import { ReadOnlyContext } from './read-only';
 import { reloadUnitEditor, unitEditor } from './unit-editors';
 
 type Props = {
@@ -29,7 +30,8 @@ type Props = {
  * Edits one unit's text, and autosaves it. Leaving the unit flushes its
  * pending edits; coming back finds its editor, and undo history, as it was.
  * When another computer changes the unit, the editor shows the new text,
- * unless the Author has edits here that main doesn't have yet.
+ * unless the Author has edits here that main doesn't have yet. Once the
+ * Project is read-only, it takes no more edits.
  */
 export function UnitEditor({
   unitKey,
@@ -62,6 +64,12 @@ export function UnitEditor({
     return { editor, created };
   });
   const [autosave] = useState(() => createAutosave(save));
+  const readOnly = useContext(ReadOnlyContext);
+
+  useEffect(() => {
+    // Without an update event: there is nothing new to save.
+    editor.setEditable(!readOnly, false);
+  }, [editor, readOnly]);
 
   useEffect(() => {
     const change = () => autosave.change(toText(editor.getJSON()));

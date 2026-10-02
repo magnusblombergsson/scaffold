@@ -409,13 +409,8 @@ describe('project.json saved on two computers', () => {
     ).toBe(0);
   });
 
-  it('leaves alone a copy of a newer format than this app reads, or of another Project', async () => {
+  it('leaves alone a copy of another Project', async () => {
     await diverged();
-    const copy = path.join(projectPath, 'project-ALPHA.json');
-    await writeFile(
-      copy,
-      JSON.stringify({ ...(await readManifest(copy)), format: 99 }),
-    );
     await writeFile(
       path.join(projectPath, 'other-GAMMA.json'),
       JSON.stringify({ ...(await readManifest()), id: 'someone else' }),
@@ -428,7 +423,7 @@ describe('project.json saved on two computers', () => {
       'Our Chapter',
     ]);
     expect(await readdir(projectPath)).toEqual(
-      expect.arrayContaining(['project-ALPHA.json', 'other-GAMMA.json']),
+      expect.arrayContaining(['other-GAMMA.json']),
     );
     expect(error).toHaveBeenCalledWith(
       expect.stringContaining('other-GAMMA.json'),

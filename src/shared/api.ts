@@ -79,12 +79,22 @@ export type ConflictsChanged = {
   conflicts: Conflict[];
 };
 
+/** A newer app upgraded the Project; `host` is the computer it did so on, when known. */
+export type Upgrade = { host?: string };
+
+/**
+ * A newer app upgraded the Project on another computer: the window hands
+ * over its pending edits, which are saved, and then nothing more is written.
+ */
+export type ReadOnly = { type: 'readOnly' } & Upgrade;
+
 /** What main tells a window about its Project as it happens. */
 export type ProjectEvent =
   | UnitSaveStatus
   | UnitReloaded
   | StructureChanged
-  | ConflictsChanged;
+  | ConflictsChanged
+  | ReadOnly;
 
 /** Mirrors the main-process ProjectStore of this window's Project. */
 export interface ProjectApi {
@@ -180,6 +190,8 @@ export type OpenedProject = {
   sessions: SessionNotice;
   /** What versions of `project.json` that met as it opened lost; told once. */
   dropped: Dropped[];
+  /** Set once a newer app has upgraded the Project, as when the window reloads. */
+  readOnly: Upgrade | null;
 };
 
 /**

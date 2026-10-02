@@ -196,6 +196,7 @@ function openedProject(store: ProjectStore): OpenedProject {
     view: { lastSceneId, cursor, panelWidths, outlineNotesOpen },
     sessions: store.sessionNotice(),
     dropped: store.takeDropped(),
+    readOnly: store.readOnly(),
   };
 }
 

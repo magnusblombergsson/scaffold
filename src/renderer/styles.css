@@ -232,10 +232,15 @@ button.recent-open:hover {
   font-weight: 600;
 }
 
+.read-only-banner,
 .save-failures {
   border-bottom: 1px solid #b3261e;
   background: rgb(179 38 30 / 8%);
   padding: 0.5rem 1rem;
+}
+
+.read-only-banner {
+  margin: 0;
 }
 
 .save-failures p {

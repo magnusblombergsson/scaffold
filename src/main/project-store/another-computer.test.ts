@@ -310,6 +310,7 @@ describe('session markers', () => {
     await store.startSession();
     expect(await marker('ALPHA')).toEqual({
       host: 'ALPHA',
+      format: 1,
       heartbeat: 10 * MIN,
       activeAt: 10 * MIN,
       open: true,
@@ -325,6 +326,7 @@ describe('session markers', () => {
 
     expect(await marker('ALPHA')).toEqual({
       host: 'ALPHA',
+      format: 1,
       // The watcher's waits move the test clock on.
       heartbeat: expect.any(Number),
       activeAt: expect.any(Number),

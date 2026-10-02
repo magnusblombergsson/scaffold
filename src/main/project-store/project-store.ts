@@ -29,10 +29,12 @@ import type {
   Created,
   Dropped,
   ProjectEvent,
+  Upgrade,
   ProjectView,
   SessionNotice,
   UnitSaveStatus,
 } from '../../shared/api';
+import { newerFormatMessage, upgradedMessage } from '../../shared/format-gate';
 import { unitName } from '../../shared/unit-name';
 import type { Clock } from './clock';
 import type { FileSystem, Fingerprint } from './file-system';
@@ -41,6 +43,11 @@ import { formatUnitFile, parseUnitFile, type UnitFile } from './unit-file';
 
 export const FORMAT = 1;
 const MANIFEST = 'project.json';
+/** How long edits are still saved once a newer app has upgraded the Project, for the window to hand its over. */
+const HANDOVER_MS = 2000;
+
+/** Keys of a file, or of a Chapter's or Scene's place in the tree, that this app doesn't know. */
+type UnknownKeys = Record<string, unknown>;
 
 /** `host` names this computer in its session marker; the OS's name by default. */
 export type StoreDeps = { fs: FileSystem; clock: Clock; host?: string };
@@ -64,7 +71,9 @@ export class ProjectError extends Error {
       | 'in-manuscript'
       | 'in-trash'
       | 'not-latest'
-      | 'unsaved',
+      | 'unsaved'
+      | 'newer-format'
+      | 'read-only',
     message: string,
   ) {
     super(message);
@@ -143,6 +152,14 @@ export async function openProject(
       `${projectPath} can't be opened: its ${MANIFEST} is unreadable (${(error as Error).message})`,
     );
   }
+  // Refused before anything is written: there is no read-only view.
+  const format = await newestFormat(projectPath, manifest, deps.fs);
+  if (format > FORMAT) {
+    throw new ProjectError(
+      'newer-format',
+      newerFormatMessage(path.basename(projectPath), format, FORMAT),
+    );
+  }
   await sweepTempFiles(projectPath, deps.fs);
   const unrecognised = new Set<string>();
   const resolved = await resolveManifestCopies(
@@ -197,13 +214,37 @@ export function projectLookup(fs: FileSystem): ProjectLookup {
 }
 
 /**
+ * The highest `format` that `project.json`, or a copy of it that a sync
+ * client left beside it, holds: of two copies, the higher one wins.
+ */
+async function newestFormat(
+  projectPath: string,
+  manifest: Manifest,
+  fs: FileSystem,
+): Promise<number> {
+  let newest = manifest.format;
+  for (const name of await fs.readdir(projectPath)) {
+    if (name === MANIFEST || !name.endsWith('.json')) continue;
+    const copy = await readJson<Partial<Manifest>>(
+      fs,
+      path.join(projectPath, name),
+    );
+    if (copy?.id === manifest.id && typeof copy.format === 'number') {
+      newest = Math.max(newest, copy.format);
+    }
+  }
+  return newest;
+}
+
+/**
  * Settles versions of `project.json` that two computers saved, which a sync
  * client leaves beside it as `<name>.json` files carrying the Project's id.
  * Without asking: the one with the higher `format` is kept, or the original
  * if they are equal, and the other goes to Trash. Scenes only the other
  * placed are then Unplaced; what it had that is lost is returned, to tell the
- * Author once. A copy of a format newer than this app reads is left for a
- * newer app; a file with no Project id is logged and left alone.
+ * Author once. A file with no Project id is logged and left alone. A copy of
+ * a format newer than this app reads must be ruled out first, as the gate
+ * does: this app never writes its winner.
  */
 async function resolveManifestCopies(
   projectPath: string,
@@ -230,7 +271,6 @@ async function resolveManifestCopies(
       logOnce(unrecognised, `${name} is left alone: it isn't this Project's`);
       continue;
     }
-    if (copy.format > FORMAT) continue;
     const copyWins = copy.format > manifest.format;
     const [winner, loser] = copyWins
       ? [copy as Manifest, manifest]
@@ -329,6 +369,8 @@ type TrashedScene = {
   trashedAt: number;
   chapter?: { id: string; title: string };
   index?: number;
+  /** The keys of its place in the tree that this app doesn't know. */
+  node?: UnknownKeys;
 };
 
 /** A Chapter in Trash, with the Scenes deleted along with it. */
@@ -339,6 +381,8 @@ type TrashedChapter = {
   trashedAt: number;
   index: number;
   scenes: SceneNode[];
+  /** The keys of its place in the tree that this app doesn't know. */
+  node: UnknownKeys;
 };
 
 /** A version of a unit set aside when its Conflict was resolved; `id` is its own. */
@@ -363,7 +407,8 @@ type TrashedVersionInfo = Omit<TrashedVersion, 'kind' | 'id' | 'trashedAt'> & {
 
 /**
  * What `trash/<id>.md` records beside the Prose. `withChapter` marks a Scene
- * deleted with its Chapter, which `trash/<chapter id>.json` lists.
+ * deleted with its Chapter, which `trash/<chapter id>.json` lists. `node`
+ * holds the keys of its place in the tree that this app doesn't know.
  */
 type TrashedSceneInfo = {
   at: number;
@@ -371,8 +416,10 @@ type TrashedSceneInfo = {
   chapter?: { id: string; title: string };
   index?: number;
   withChapter?: true;
+  node?: UnknownKeys;
 };
 
+/** Beside these, the keys of the Chapter's place in the tree that this app doesn't know. */
 type ChapterFile = {
   id: string;
   format: number;
@@ -478,6 +525,7 @@ function trashedScene(id: string, info: TrashedSceneInfo): TrashedScene {
     title: info.title,
     trashedAt: info.at,
     ...(info.chapter && { chapter: info.chapter, index: info.index }),
+    ...(info.node && { node: info.node }),
   };
 }
 
@@ -493,14 +541,19 @@ function trashedVersion(id: string, info: TrashedVersionInfo): TrashedVersion {
 }
 
 function trashedChapter(file: ChapterFile): TrashedChapter {
-  return {
-    kind: 'chapter',
-    id: file.id,
-    title: file.title,
-    trashedAt: file.trashedAt,
-    index: file.index,
-    scenes: file.scenes,
-  };
+  const { id, format: _, title, index, trashedAt, scenes, ...node } = file;
+  return { kind: 'chapter', id, title, trashedAt, index, scenes, node };
+}
+
+/** The keys of a Chapter's or Scene's place in the tree that this app doesn't know. */
+function unknownKeys(node: ChapterNode | SceneNode): UnknownKeys | undefined {
+  const {
+    id: _,
+    title: _t,
+    scenes: _s,
+    ...unknown
+  } = node as Partial<ChapterNode>;
+  return Object.keys(unknown).length > 0 ? unknown : undefined;
 }
 
 async function readJson<T>(fs: FileSystem, file: string): Promise<T | null> {
@@ -527,6 +580,8 @@ const COALESCE_MS = 250;
  */
 type SessionMarker = ProjectView & {
   host: string;
+  /** The format of the app that wrote it; markers before it have none. */
+  format?: number;
   heartbeat: number;
   activeAt?: number;
   open: boolean;
@@ -710,6 +765,15 @@ export class ProjectStore {
   private readonly unrecognised: Set<string>;
   /** What versions of `project.json` that met as the Project opened lost, until told. */
   private dropped: Dropped[];
+  /**
+   * Set once a newer app has upgraded the Project, which this app then only
+   * reads; `host` is where, if known.
+   */
+  private upgraded: Upgrade | null = null;
+  /** Set a short while after the upgrade was seen, once the window has handed over its edits. */
+  private editsRefused = false;
+  /** `project.json` as the format gate last read it. */
+  private gateFingerprint: Fingerprint | null = null;
 
   private readonly host: string;
   private readonly sessions: Sessions;
@@ -740,6 +804,7 @@ export class ProjectStore {
     this.sessions = sessions;
     const {
       host: _,
+      format: _f,
       heartbeat: _h,
       activeAt: _a,
       open: _o,
@@ -819,6 +884,7 @@ export class ProjectStore {
     const marker: SessionMarker = {
       ...this.view,
       host: this.host,
+      format: FORMAT,
       heartbeat: this.deps.clock.now(),
       activeAt: this.activeAt,
       open,
@@ -859,8 +925,11 @@ export class ProjectStore {
    */
   checkForChanges(): Promise<void> {
     return this.enqueueStructure(async () => {
+      // What a newer app writes, this one may misread.
+      if (this.upgraded) return;
       try {
         await this.checkStructure();
+        if (this.upgraded) return;
         await this.checkUnits();
         await this.findConflicts();
       } catch (error) {
@@ -876,13 +945,21 @@ export class ProjectStore {
     if (!sameFingerprint(fingerprint, this.manifestFingerprint)) {
       const read = await readJson<Manifest>(this.deps.fs, file);
       // Unreadable, as while it is still arriving: the next check tries again.
-      if (!read || !Array.isArray(read.tree?.chapters)) return;
-      // A newer app's tree is never adopted, nor overwritten from here: the
-      // format gate decides what this app does with it.
-      if (typeof read.format !== 'number' || read.format > FORMAT) return;
+      if (
+        !read ||
+        !Array.isArray(read.tree?.chapters) ||
+        typeof read.format !== 'number'
+      ) {
+        return;
+      }
       manifest = read;
-      this.manifestFingerprint = fingerprint;
     }
+    // A newer app's tree, or copy of it, is never adopted nor written over.
+    if ((await newestFormat(this.path, manifest, this.deps.fs)) > FORMAT) {
+      await this.goReadOnly();
+      return;
+    }
+    this.manifestFingerprint = fingerprint;
     const resolved = await resolveManifestCopies(
       this.path,
       manifest,
@@ -952,6 +1029,90 @@ export class ProjectStore {
         this.emit({ type: 'unitReloaded', ref: known.ref, value });
       }
     }
+  }
+
+  /**
+   * The format gate, checked before every write: once `project.json`, or a
+   * copy of it beside it, says a newer app has upgraded the Project, this one
+   * goes read-only. `project.json` is read only when its time or size changed
+   * since, and one that can't be read now, as while it is still arriving, is
+   * read again before the next write. Copies are rare: their names are
+   * listed each time.
+   */
+  private async checkFormat(): Promise<void> {
+    if (this.upgraded) return;
+    const file = path.join(this.path, MANIFEST);
+    const fingerprint = await this.deps.fs.stat(file);
+    if (fingerprint && !sameFingerprint(fingerprint, this.gateFingerprint)) {
+      const read = await readJson<Partial<Manifest>>(this.deps.fs, file);
+      if (read) {
+        this.gateFingerprint = fingerprint;
+        if (typeof read.format === 'number' && read.format > FORMAT) {
+          return this.goReadOnly();
+        }
+      }
+    }
+    if ((await newestFormat(this.path, this.manifest, this.deps.fs)) > FORMAT) {
+      return this.goReadOnly();
+    }
+  }
+
+  /**
+   * Stops writing to a Project a newer app upgraded. Structure operations
+   * are refused at once. Edits are saved, in this app's format, for a short
+   * while longer: those pending here, and those the window hands over as it
+   * hears of it. After that, no edit is accepted; one that failed to save is
+   * still tried until it is saved.
+   */
+  private async goReadOnly(): Promise<void> {
+    if (this.upgraded) return;
+    const upgraded: Upgrade = {};
+    this.upgraded = upgraded;
+    this.latest = null;
+    for (const key of this.unsaved.keys()) this.startWriting(key);
+    const host = await this.upgradedOn();
+    if (host) upgraded.host = host;
+    this.emit({ type: 'readOnly', ...upgraded });
+    void this.deps.clock.sleep(HANDOVER_MS).then(() => {
+      this.editsRefused = true;
+    });
+  }
+
+  /** The computer whose session marker says a newer app had the Project open, lately first. */
+  private async upgradedOn(): Promise<string | undefined> {
+    try {
+      const markers = await readSessionMarkers(this.path, this.deps.fs);
+      return [...markers.values()]
+        .filter(
+          (m) =>
+            m.host !== this.host &&
+            typeof m.format === 'number' &&
+            m.format > FORMAT,
+        )
+        .sort((a, b) => b.heartbeat - a.heartbeat)[0]?.host;
+    } catch {
+      return undefined;
+    }
+  }
+
+  /** Set once a newer app has upgraded the Project, after which nothing more is written. */
+  readOnly(): Upgrade | null {
+    return this.upgraded && { ...this.upgraded };
+  }
+
+  /** Passes the format gate, or refuses once the Project was upgraded. */
+  private async passFormatGate(): Promise<void> {
+    await this.checkFormat();
+    this.refuseIfUpgraded();
+  }
+
+  /** Refuses once the Project was upgraded, without checking the gate again. */
+  private refuseIfUpgraded(): void {
+    if (!this.upgraded) return;
+    throw new ProjectError(
+      'read-only',
+      upgradedMessage(this.displayName, this.upgraded.host),
+    );
   }
 
   /**
@@ -1091,7 +1252,7 @@ export class ProjectStore {
 
   /** Makes a copied folder a separate Project: writes a new id to `project.json`. */
   assignNewId(): Promise<void> {
-    return this.enqueueStructure(() =>
+    return this.enqueueWrite(() =>
       this.writeManifest({ ...this.manifest, id: randomUUID() }),
     );
   }
@@ -1307,6 +1468,7 @@ export class ProjectStore {
     this.resolving.add(key);
     return this.enqueueStructure(async () => {
       try {
+        await this.passFormatGate();
         this.refuseUnavailable(ref);
         await this.findConflicts();
         const entry = this.conflicts.get(key);
@@ -1351,8 +1513,10 @@ export class ProjectStore {
       });
     }
     const onDisk = await this.deps.fs.stat(file);
+    let frontmatter: UnknownKeys = {};
     if (onDisk) {
       const text = await this.deps.fs.readFile(file);
+      ({ frontmatter } = parseUnitFile(text));
       if (differs(text, pending ? [pending.value] : [])) {
         const known = this.loaded.get(unitKey(ref));
         const unchanged =
@@ -1363,7 +1527,7 @@ export class ProjectStore {
         });
       }
     }
-    const keptText = unitFile(ref, kept);
+    const keptText = unitFile(ref, kept, frontmatter);
     await safeWrite(this.deps.fs, this.deps.clock, file, keptText);
     const loaded: Loaded = {
       ref,
@@ -1461,7 +1625,7 @@ export class ProjectStore {
 
   /** Reverts `step` if it is still the latest structure operation. */
   undo(step: number): Promise<Manuscript> {
-    return this.enqueueStructure(async () => {
+    return this.enqueueWrite(async () => {
       const latest = this.latest;
       if (latest?.step !== step) {
         throw new ProjectError(
@@ -1477,7 +1641,7 @@ export class ProjectStore {
 
   /** Deletes everything in Trash for good. Nothing done before can be undone. */
   emptyTrash(): Promise<void> {
-    return this.enqueueStructure(async () => {
+    return this.enqueueWrite(async () => {
       this.latest = null;
       const dir = trashDir(this.path);
       // Chapter records first: a crash then leaves their Scenes in Trash on
@@ -1522,7 +1686,7 @@ export class ProjectStore {
   private step(
     operation: () => Promise<(() => Promise<void>) | void>,
   ): Promise<Changed> {
-    return this.enqueueStructure(async () => {
+    return this.enqueueWrite(async () => {
       const before = this.tree();
       // Unless the operation says otherwise, undo puts the tree back.
       const undo =
@@ -1557,6 +1721,8 @@ export class ProjectStore {
       if (found) {
         info.chapter = { id: found.chapter.id, title: found.chapter.title };
         info.index = found.chapter.scenes.indexOf(found.scene);
+        const node = unknownKeys(found.scene);
+        if (node) info.node = node;
         found.chapter.scenes.splice(info.index, 1);
       }
       await this.writeTrashedScene(sceneId, prose.get(sceneId)!, info);
@@ -1589,6 +1755,7 @@ export class ProjectStore {
         });
       }
       const record: ChapterFile = {
+        ...unknownKeys(chapter),
         id: chapter.id,
         format: FORMAT,
         title: chapter.title,
@@ -1611,18 +1778,18 @@ export class ProjectStore {
 
   /**
    * Takes Scenes out of `scenes/`: refuses their writes from now on, waits
-   * for the ones already accepted, and hands their latest Prose to `toTrash`,
+   * for the ones already accepted, and hands their latest files to `toTrash`,
    * which writes their Trash copies and the tree. Then their `scenes/` files
    * go.
    */
   private async closeScenes(
     ids: string[],
-    toTrash: (prose: Map<string, string>) => Promise<void>,
+    toTrash: (prose: Map<string, UnitFile>) => Promise<void>,
   ): Promise<void> {
     for (const id of ids) this.closing.add(id);
     try {
-      const prose = new Map<string, string>();
-      for (const id of ids) prose.set(id, await this.settledProse(id));
+      const prose = new Map<string, UnitFile>();
+      for (const id of ids) prose.set(id, await this.settledScene(id));
       await toTrash(prose);
       for (const id of ids) {
         this.files.delete(id);
@@ -1637,19 +1804,21 @@ export class ProjectStore {
     }
   }
 
-  /** A Scene's Prose once every write accepted for it has run. */
-  private async settledProse(id: string): Promise<string> {
+  /** A Scene's file, with its latest Prose once every write accepted for it has run. */
+  private async settledScene(id: string): Promise<UnitFile> {
     const key = unitKey(sceneRef(id));
     while (this.writing.has(key)) await this.writing.get(key);
+    const file = parseUnitFile(
+      await this.deps.fs.readFile(scenePath(this.path, id)),
+    );
     const pending = this.unsaved.get(key);
-    if (pending) return (pending.value as SceneValue).markdown;
-    const text = await this.deps.fs.readFile(scenePath(this.path, id));
-    return parseUnitFile(text).body;
+    if (pending) file.body = (pending.value as SceneValue).markdown;
+    return file;
   }
 
   private async writeTrashedScene(
     id: string,
-    markdown: string,
+    { frontmatter, body }: UnitFile,
     trashed: TrashedSceneInfo,
   ): Promise<void> {
     await this.deps.fs.mkdir(trashDir(this.path));
@@ -1658,8 +1827,8 @@ export class ProjectStore {
       this.deps.clock,
       sceneTrashPath(this.path, id),
       formatUnitFile({
-        frontmatter: { id, format: FORMAT, trashed },
-        body: markdown,
+        frontmatter: { ...frontmatterOf(id, frontmatter), trashed },
+        body,
       }),
     );
   }
@@ -1691,12 +1860,15 @@ export class ProjectStore {
     const restoreFile = async (sceneId: string) => {
       const file = sceneTrashPath(this.path, sceneId);
       if (!(await this.deps.fs.exists(file))) return;
-      const { body } = parseUnitFile(await this.deps.fs.readFile(file));
+      const { frontmatter, body } = parseUnitFile(
+        await this.deps.fs.readFile(file),
+      );
+      const { trashed: _, ...previous } = frontmatter;
       await safeWrite(
         this.deps.fs,
         this.deps.clock,
         scenePath(this.path, sceneId),
-        sceneFile({ id: sceneId, markdown: body }),
+        sceneFile({ id: sceneId, markdown: body }, previous),
       );
       restored.push(sceneId);
     };
@@ -1705,6 +1877,7 @@ export class ProjectStore {
       const scenes = item.scenes.filter((s) => !live(s.id));
       for (const scene of scenes) await restoreFile(scene.id);
       tree.chapters.splice(Math.min(item.index, tree.chapters.length), 0, {
+        ...item.node,
         id,
         title: item.title,
         scenes,
@@ -1720,7 +1893,11 @@ export class ProjectStore {
           chapter.id === item.chapter.id
             ? Math.min(item.index ?? Infinity, chapter.scenes.length)
             : chapter.scenes.length;
-        chapter.scenes.splice(index, 0, { id, title: item.title });
+        chapter.scenes.splice(index, 0, {
+          ...item.node,
+          id,
+          title: item.title,
+        });
         await this.writeManifest({ ...this.manifest, tree });
       }
     }
@@ -1757,7 +1934,17 @@ export class ProjectStore {
     return run;
   }
 
+  /** Enqueues a structure operation that writes, past the format gate. */
+  private enqueueWrite<T>(operation: () => Promise<T>): Promise<T> {
+    return this.enqueueStructure(async () => {
+      await this.passFormatGate();
+      return operation();
+    });
+  }
+
   private async writeManifest(manifest: Manifest): Promise<void> {
+    // A newer app's project.json is never written over.
+    this.refuseIfUpgraded();
     const file = path.join(this.path, MANIFEST);
     await safeWrite(
       this.deps.fs,
@@ -1767,6 +1954,7 @@ export class ProjectStore {
     );
     this.manifest = manifest;
     this.manifestFingerprint = await this.deps.fs.stat(file);
+    this.gateFingerprint = this.manifestFingerprint;
   }
 
   private refuseMissing(ref: UnitRef): void {
@@ -1839,10 +2027,13 @@ export class ProjectStore {
 
   /**
    * Resolves once main has accepted the value, not when it is on disk.
-   * Rejects for a Missing unit, which is never recreated, and a trashed one.
+   * Rejects for a Missing unit, which is never recreated, a trashed one, and
+   * any once a newer app has upgraded the Project and the window has handed
+   * over its edits.
    * A failure to save it is never thrown: it shows as a `unitSaveStatus`.
    */
   async write<R extends UnitRef>(ref: R, value: ValueOf<R>): Promise<void> {
+    if (this.editsRefused) this.refuseIfUpgraded();
     this.refuseUnavailable(ref);
     const key = unitKey(ref);
     this.unsaved.set(key, { ref, value: structuredClone(value) });
@@ -1933,12 +2124,15 @@ export class ProjectStore {
       // A unit being resolved takes its next write once that is done.
       if (!pending || this.resolving.has(key)) return;
       try {
+        // Once upgraded, edits are still saved, in this app's format.
+        await this.checkFormat();
         const file = unitPath(this.path, pending.ref);
         if (pending.ref.kind !== 'scene') {
           await this.deps.fs.mkdir(path.dirname(file));
         }
-        if (await this.setAsideChangeOnDisk(pending, file)) onSetAside();
-        const text = unitFile(pending.ref, pending.value);
+        const onDisk = await this.checkBeforeSave(pending, file);
+        if (onDisk.setAside) onSetAside();
+        const text = unitFile(pending.ref, pending.value, onDisk.frontmatter);
         await safeWrite(this.deps.fs, this.deps.clock, file, text);
         this.loaded.set(key, {
           ref: pending.ref,
@@ -1976,30 +2170,33 @@ export class ProjectStore {
    * since this store read or wrote it, as when another computer saved it, is never overwritten. Its
    * version goes beside it as a conflict copy, and the Author's text here
    * then goes to the unit's own file, with nothing to interrupt them. The
-   * same text rewritten is no change. True if it set a version aside.
+   * same text rewritten is no change. Resolves with whether it set a version
+   * aside, and the frontmatter on disk, for the save to keep the keys this
+   * app doesn't know.
    */
-  private async setAsideChangeOnDisk(
+  private async checkBeforeSave(
     { ref, value }: Pending,
     file: string,
-  ): Promise<boolean> {
-    const known = this.loaded.get(unitKey(ref));
-    if (!known) return false;
+  ): Promise<{ setAside: boolean; frontmatter: UnknownKeys }> {
     const fingerprint = await this.deps.fs.stat(file);
-    if (!fingerprint) return false;
+    if (!fingerprint) return { setAside: false, frontmatter: {} };
     const text = await this.deps.fs.readFile(file);
-    if (
-      sameFingerprint(fingerprint, known.fingerprint) &&
-      hashOf(text) === known.hash
-    ) {
-      return false;
-    }
     const onDisk = parseUnitFile(text);
+    const unchanged = { setAside: false, frontmatter: onDisk.frontmatter };
+    const known = this.loaded.get(unitKey(ref));
+    if (
+      !known ||
+      (sameFingerprint(fingerprint, known.fingerprint) &&
+        hashOf(text) === known.hash)
+    ) {
+      return unchanged;
+    }
     const theirs = unitValue(ref, onDisk);
     if (
       isDeepStrictEqual(theirs, known.value) ||
       isDeepStrictEqual(theirs, value)
     ) {
-      return false;
+      return unchanged;
     }
     const dir = path.dirname(file);
     const name = await freeName(this.deps.fs, dir, `${ref.id}-conflict`, '.md');
@@ -2015,7 +2212,7 @@ export class ProjectStore {
             frontmatter: { ...onDisk.frontmatter, id: ref.id },
           }),
     );
-    return true;
+    return { setAside: true, frontmatter: onDisk.frontmatter };
   }
 
   /** Finds the units in Conflict again; failing to only leaves the list as it was. */
@@ -2234,19 +2431,36 @@ function isChapterFile(name: string): boolean {
   return CHAPTER_FILE.test(name);
 }
 
-function sceneFile(value: SceneValue): string {
+/**
+ * A unit's frontmatter as this app writes it: its id and this app's format,
+ * then the keys of `previous`, the frontmatter it had, that this app doesn't
+ * know, so that a newer app's are never lost (the tolerant reader).
+ */
+function frontmatterOf(id: string, previous: UnknownKeys = {}): UnknownKeys {
+  const { id: _id, format: _format, ...unknown } = previous;
+  return { id, format: FORMAT, ...unknown };
+}
+
+function sceneFile(value: SceneValue, previous?: UnknownKeys): string {
   return formatUnitFile({
-    frontmatter: { id: value.id, format: FORMAT },
+    frontmatter: frontmatterOf(value.id, previous),
     body: value.markdown,
   });
 }
 
-/** An Outline's metadata is the rest of its frontmatter. */
-function unitFile(ref: UnitRef, value: UnitValue): string {
-  if (ref.kind === 'scene') return sceneFile(value as SceneValue);
+/**
+ * An Outline's metadata is the rest of its frontmatter, so it already holds
+ * what this app doesn't know; a Scene's or Notes' is kept from `previous`.
+ */
+function unitFile(
+  ref: UnitRef,
+  value: UnitValue,
+  previous?: UnknownKeys,
+): string {
+  if (ref.kind === 'scene') return sceneFile(value as SceneValue, previous);
   const { id, body } = value as OutlineValue | NotesValue;
-  const meta = ref.kind === 'outline' ? (value as OutlineValue).meta : {};
-  return formatUnitFile({ frontmatter: { id, format: FORMAT, ...meta }, body });
+  const kept = ref.kind === 'outline' ? (value as OutlineValue).meta : previous;
+  return formatUnitFile({ frontmatter: frontmatterOf(id, kept), body });
 }
 
 function unitValue(ref: UnitRef, { frontmatter, body }: UnitFile): UnitValue {
