@@ -12,6 +12,7 @@ import type {
   OpenResult,
   ProjectView,
   RecentProject,
+  Tip,
 } from '../shared/api';
 import { channel } from '../shared/api';
 import { unitName } from '../shared/unit-name';
@@ -175,6 +176,7 @@ function attach(contents: WebContents, store: ProjectStore): void {
     displayName: store.displayName,
   });
   rememberOpenProjects();
+  void store.startSession();
   // On macOS the OS chooses the spellchecker language.
   if (process.platform !== 'darwin')
     contents.session.setSpellCheckerLanguages([store.language]);
@@ -185,14 +187,14 @@ function rememberOpenProjects(): void {
 }
 
 function openedProject(store: ProjectStore): OpenedProject {
-  const { lastSceneId, panelWidths, outlineNotesOpen } = settings.project(
-    store.id,
-  );
+  const { lastSceneId, cursor, panelWidths, outlineNotesOpen } =
+    settings.project(store.id);
   return {
     displayName: store.displayName,
     language: store.language,
     manuscript: store.manuscript(),
-    view: { lastSceneId, panelWidths, outlineNotesOpen },
+    view: { lastSceneId, cursor, panelWidths, outlineNotesOpen },
+    sessions: store.sessionNotice(),
   };
 }
 
@@ -323,9 +325,38 @@ export function registerShellIpc(): void {
     return recentProjects();
   });
 
-  ipcMain.on(channel.saveView, (event, view: ProjectView) => {
+  ipcMain.on(channel.saveView, (event, change: ProjectView) => {
     const store = stores.get(event.sender.id);
-    if (store) settings.updateProject(store.id, view);
+    if (!store) return;
+    const view = { ...change };
+    // A cursor is where it was in the last Scene, so it goes with it: the
+    // key, set even to undefined, clears the cursor kept for the Scene before.
+    if (
+      view.lastSceneId !== undefined &&
+      view.cursor === undefined &&
+      view.lastSceneId !== settings.project(store.id).lastSceneId
+    ) {
+      view.cursor = undefined;
+    }
+    settings.updateProject(store.id, view);
+    store.updateSession(view);
+  });
+
+  ipcMain.handle(channel.tips, async (event): Promise<Tip[]> => {
+    const store = stores.get(event.sender.id);
+    if (!store) return [];
+    const dismissed = settings.project(store.id).dismissedTips ?? [];
+    if (dismissed.includes('keep-on-device')) return [];
+    return (await store.hasOnlineOnlyFiles()) ? ['keep-on-device'] : [];
+  });
+
+  ipcMain.on(channel.dismissTip, (event, tip: Tip) => {
+    const store = stores.get(event.sender.id);
+    if (!store) return;
+    const dismissed = settings.project(store.id).dismissedTips ?? [];
+    if (!dismissed.includes(tip)) {
+      settings.updateProject(store.id, { dismissedTips: [...dismissed, tip] });
+    }
   });
 }
 

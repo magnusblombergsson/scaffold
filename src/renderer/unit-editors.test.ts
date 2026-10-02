@@ -2,7 +2,11 @@
 import { Editor } from '@tiptap/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { docToText, plainTextExtensions, textToDoc } from './plain-text-editor';
-import { forgetUnitEditors, unitEditor } from './unit-editors';
+import {
+  forgetUnitEditors,
+  reloadUnitEditor,
+  unitEditor,
+} from './unit-editors';
 
 afterEach(forgetUnitEditors);
 
@@ -50,5 +54,53 @@ describe('editor undo per unit', () => {
     expect(docToText(changed.getJSON())).toBe('- Changed elsewhere');
     expect(changed.commands.undo()).toBe(false);
     expect(outline.isDestroyed).toBe(true);
+  });
+});
+
+describe('reloading a unit changed on another computer', () => {
+  const textOf = (editor: Editor) => docToText(editor.getJSON());
+  /** The text before the cursor. */
+  const beforeCursor = (editor: Editor) =>
+    editor.state.doc.textBetween(0, editor.state.selection.from, '\n');
+
+  function cursorAfter(editor: Editor, text: string) {
+    let at = -1;
+    editor.state.doc.descendants((node, pos) => {
+      const index = node.isText ? (node.text ?? '').indexOf(text) : -1;
+      if (at < 0 && index >= 0) at = pos + index + text.length;
+    });
+    editor.commands.setTextSelection(at);
+  }
+
+  it('shows the new text, keeping the cursor by the same words', () => {
+    const editor = editorFor('notes:a', 'One\nTwo three\nFour');
+    cursorAfter(editor, 'Two');
+
+    reloadUnitEditor(editor, textToDoc('Zero\nOne\nTwo three\nFour five'));
+
+    expect(textOf(editor)).toBe('Zero\nOne\nTwo three\nFour five');
+    expect(beforeCursor(editor)).toBe('Zero\nOne\nTwo');
+  });
+
+  it('keeps the cursor where it was when the change comes after it', () => {
+    const editor = editorFor('notes:a', 'One\nTwo');
+    cursorAfter(editor, 'On');
+
+    reloadUnitEditor(editor, textToDoc('One\nTwo\nThree'));
+
+    expect(beforeCursor(editor)).toBe('On');
+  });
+
+  it('is not an edit: it neither saves nor can be undone', () => {
+    const editor = editorFor('notes:a', 'One');
+    typeAtEnd(editor, ' two');
+    const updates: string[] = [];
+    editor.on('update', () => updates.push(textOf(editor)));
+
+    reloadUnitEditor(editor, textToDoc('Changed elsewhere'));
+
+    expect(updates).toEqual([]);
+    editor.commands.undo();
+    expect(textOf(editor)).toBe('Changed elsewhere');
   });
 });

@@ -58,8 +58,11 @@ export function faultyFileSystem() {
     },
     mkdir: (path) => base.mkdir(path),
     exists: (path) => base.exists(path),
+    stat: (path) => base.stat(path),
     unlink: (path) => base.unlink(path),
     readdir: (path) => base.readdir(path),
+    watch: (dir, onChange) => base.watch(dir, onChange),
+    onlineOnly: (dir) => base.onlineOnly(dir),
   };
 
   return {

@@ -1,13 +1,22 @@
-import { useCallback, useEffect, useState, type ReactNode } from 'react';
-import type { Changed, OpenedProject, OpenResult } from '../shared/api';
+import {
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+import type { Changed, OpenedProject, OpenResult, Tip } from '../shared/api';
 import {
   PROJECT_OUTLINE,
   type Manuscript,
   type ManuscriptChapter,
   type ManuscriptScene,
   type TrashItem,
+  type UnitRef,
 } from '../shared/project-types';
+import { unitName } from '../shared/unit-name';
 import { Binder, type Selection } from './Binder';
+import { Notices } from './Notices';
 import { OutlineNotes } from './OutlineNotes';
 import { PanelResizer } from './PanelResizer';
 import { flushPendingEdits } from './pending-edits';
@@ -15,7 +24,7 @@ import { SaveFailureBanner, SaveIndicator, useSaveStatus } from './SaveStatus';
 import { SceneEditor } from './SceneEditor';
 import { StartScreen } from './StartScreen';
 import { TrashView } from './TrashView';
-import { UndoToast } from './UndoToast';
+import { Toast } from './Toast';
 import { forgetUnitEditors } from './unit-editors';
 
 export function App() {
@@ -68,6 +77,11 @@ export function App() {
 }
 
 const DEFAULT_BINDER_WIDTH = 256;
+/** How long a structure change can be undone from its toast. */
+const UNDO_TOAST_MS = 10_000;
+const RELOADED_TOAST_MS = 5000;
+/** How long the cursor rests before where it is gets remembered. */
+const CURSOR_REPORT_MS = 1000;
 
 function ProjectView({
   project,
@@ -100,11 +114,50 @@ function ProjectView({
     project.view.outlineNotesOpen ?? true,
   );
   const saveStatus = useSaveStatus();
+  /** Where to put the cursor in a Scene as it opens, as where the Author left it. */
+  const [jump, setJump] = useState<
+    { sceneId: string; cursor: number } | undefined
+  >(() => {
+    const { lastSceneId, cursor } = project.view;
+    return lastSceneId && cursor !== undefined
+      ? { sceneId: lastSceneId, cursor }
+      : undefined;
+  });
+  const [tips, setTips] = useState<Tip[]>([]);
 
+  function select(selection: Selection) {
+    setJump(undefined);
+    setSelected(selection);
+  }
+
+  function continueAt(sceneId: string, cursor?: number) {
+    setTab('manuscript');
+    setSelected({ kind: 'scene', id: sceneId });
+    setJump(cursor === undefined ? undefined : { sceneId, cursor });
+  }
+
+  const cursorTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   useEffect(() => {
+    // A cursor still waiting to be reported belongs to the Scene left.
+    clearTimeout(cursorTimer.current);
     if (openSceneId) window.shell.saveView({ lastSceneId: openSceneId });
   }, [openSceneId]);
+  useEffect(() => () => clearTimeout(cursorTimer.current), []);
+  const reportCursor = useCallback(
+    (cursor: number) => {
+      if (!openSceneId) return;
+      clearTimeout(cursorTimer.current);
+      cursorTimer.current = setTimeout(
+        () => window.shell.saveView({ lastSceneId: openSceneId, cursor }),
+        CURSOR_REPORT_MS,
+      );
+    },
+    [openSceneId],
+  );
   useEffect(() => forgetUnitEditors, []);
+  useEffect(() => {
+    void window.shell.tips().then(setTips);
+  }, []);
 
   function toggleOutlineNotes() {
     setOutlineNotesOpen(!outlineNotesOpen);
@@ -124,6 +177,25 @@ function ProjectView({
   useEffect(() => {
     void refreshTrash();
   }, [refreshTrash]);
+
+  /** The latest unit another computer changed; `count` starts its toast's time over. */
+  const [reloaded, setReloaded] = useState<{ ref: UnitRef; count: number }>();
+  const reloads = useRef(0);
+  const closeReloaded = useCallback(() => setReloaded(undefined), []);
+  useEffect(
+    () =>
+      window.project.subscribe((event) => {
+        if (event.type === 'structureChanged') {
+          setManuscript(event.manuscript);
+          // Main can no longer undo it.
+          setLatest(undefined);
+          void refreshTrash();
+        } else if (event.type === 'unitReloaded') {
+          setReloaded({ ref: event.ref, count: ++reloads.current });
+        }
+      }),
+    [refreshTrash],
+  );
 
   /** Runs a structure operation, and offers to undo it. */
   async function change(operation: () => Promise<Changed>, message: string) {
@@ -178,6 +250,16 @@ function ProjectView({
         statuses={saveStatus.statuses}
         manuscript={manuscript}
       />
+      <Notices
+        sessions={project.sessions}
+        manuscript={manuscript}
+        tips={tips}
+        onContinue={continueAt}
+        onDismissTip={(tip) => {
+          window.shell.dismissTip(tip);
+          setTips(tips.filter((t) => t !== tip));
+        }}
+      />
       {error && <p role="alert">{error}</p>}
       <div className="project-body">
         <aside className="left-pane" style={{ width: binderWidth }}>
@@ -204,7 +286,7 @@ function ProjectView({
               <Binder
                 manuscript={manuscript}
                 selected={selected}
-                onSelect={setSelected}
+                onSelect={select}
                 onChange={change}
               />
             ) : (
@@ -257,7 +339,7 @@ function ProjectView({
           <div className="editor missing" role="status">
             <p>
               <strong>{open.scene.title}</strong> is missing, possibly not
-              synced yet. Reopen the Project once the file has arrived.
+              synced yet. It opens here once its file has arrived.
             </p>
           </div>
         ) : (
@@ -279,18 +361,36 @@ function ProjectView({
                 />
               )}
             </section>
-            <SceneEditor sceneId={open.scene.id} language={project.language} />
+            <SceneEditor
+              sceneId={open.scene.id}
+              language={project.language}
+              focusAt={
+                jump?.sceneId === open.scene.id ? jump.cursor : undefined
+              }
+              onCursor={reportCursor}
+            />
           </main>
         )}
       </div>
-      {latest && (
-        <UndoToast
-          key={latest.step}
-          message={latest.message}
-          onUndo={() => undo(latest.step)}
-          onClose={closeToast}
-        />
-      )}
+      <div className="toasts">
+        {reloaded && (
+          <Toast
+            key={`reloaded-${reloaded.count}`}
+            message={`${capitalized(unitName(reloaded.ref, manuscript))} updated from another computer`}
+            ms={RELOADED_TOAST_MS}
+            onClose={closeReloaded}
+          />
+        )}
+        {latest && (
+          <Toast
+            key={latest.step}
+            message={latest.message}
+            ms={UNDO_TOAST_MS}
+            action={{ label: 'Undo', run: () => undo(latest.step) }}
+            onClose={closeToast}
+          />
+        )}
+      </div>
     </div>
   );
 }
@@ -304,4 +404,8 @@ function allScenes(
     ),
     ...manuscript.unplaced.map((scene) => ({ chapter: null, scene })),
   ];
+}
+
+function capitalized(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }

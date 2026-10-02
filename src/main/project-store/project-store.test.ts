@@ -1314,8 +1314,11 @@ function crashingFileSystem(survive = Infinity) {
   const fs: FileSystem = {
     readFile: guarded(nodeFileSystem.readFile),
     exists: guarded(nodeFileSystem.exists),
+    stat: guarded(nodeFileSystem.stat),
     readdir: guarded(nodeFileSystem.readdir),
     mkdir: guarded(nodeFileSystem.mkdir),
+    watch: nodeFileSystem.watch,
+    onlineOnly: nodeFileSystem.onlineOnly,
     unlink: mutate(nodeFileSystem.unlink),
     writeFileDurable: mutate(nodeFileSystem.writeFileDurable),
     rename: mutate(nodeFileSystem.rename),

@@ -4,13 +4,20 @@ import { proseExtensions } from './prose-editor';
 import { docToMarkdown, markdownToDoc } from './prose-markdown';
 import { UnitEditor } from './UnitEditor';
 
-/** Loads a Scene's Prose, then hands it to the editor. */
+/**
+ * Loads a Scene's Prose, then hands it to the editor. `focusAt` puts the
+ * cursor there, and `onCursor` hears where the Author moves it.
+ */
 export function SceneEditor({
   sceneId,
   language,
+  focusAt,
+  onCursor,
 }: {
   sceneId: string;
   language: ProseLanguage;
+  focusAt?: number;
+  onCursor?(position: number): void;
 }) {
   const [markdown, setMarkdown] = useState<string | null>(null);
 
@@ -45,6 +52,8 @@ export function SceneEditor({
         lang: language,
       }}
       autofocus
+      focusAt={focusAt}
+      onCursor={onCursor}
       className="editor"
     />
   );

@@ -6,6 +6,8 @@ export type Autosave<T> = {
   change(value: T): void;
   /** Saves any pending value now. */
   flush(): void;
+  /** Whether a value is waiting to be saved. */
+  pending(): boolean;
   /** Drops the timers without saving. */
   dispose(): void;
 };
@@ -38,6 +40,7 @@ export function createAutosave<T>(save: (value: T) => void): Autosave<T> {
       maxTimer ??= setTimeout(flush, MAX_WAIT_MS);
     },
     flush,
+    pending: () => pending !== null,
     dispose: clearTimers,
   };
 }

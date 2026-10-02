@@ -74,6 +74,7 @@ describe('saving', () => {
         new Promise<void>((wake) => {
           sleepers.push({ ms, wake });
         }),
+      every: () => () => {},
     };
     let writes = 0;
     const fs: FileSystem = {

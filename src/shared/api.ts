@@ -3,6 +3,7 @@ import type {
   ProseLanguage,
   TrashItem,
   UnitRef,
+  UnitValue,
   ValueOf,
 } from './project-types';
 
@@ -29,8 +30,27 @@ export type UnitSaveStatus =
 /** A unit that failed to save, and why. */
 export type SaveFailure = { ref: UnitRef; reason: string };
 
+/**
+ * A unit that wasn't dirty changed on disk, as when a sync client brought
+ * another computer's version: `value` is what it holds now.
+ */
+export type UnitReloaded = {
+  type: 'unitReloaded';
+  ref: UnitRef;
+  value: UnitValue;
+};
+
+/**
+ * `project.json`, or the Scene and Trash files it orders, changed on disk;
+ * nothing done before can be undone.
+ */
+export type StructureChanged = {
+  type: 'structureChanged';
+  manuscript: Manuscript;
+};
+
 /** What main tells a window about its Project as it happens. */
-export type ProjectEvent = UnitSaveStatus;
+export type ProjectEvent = UnitSaveStatus | UnitReloaded | StructureChanged;
 
 /** Mirrors the main-process ProjectStore of this window's Project. */
 export interface ProjectApi {
@@ -84,13 +104,26 @@ export interface ProjectApi {
 export type PanelWidths = { binder?: number };
 
 /**
- * How the Author left a Project's window on this computer; `outlineNotesOpen`
- * says whether the Outline & Notes box above the Prose is open.
+ * How the Author left a Project's window on this computer; `cursor` is where
+ * it was in the last Scene, and `outlineNotesOpen` says whether the Outline &
+ * Notes box above the Prose is open.
  */
 export type ProjectView = {
   lastSceneId?: string;
+  cursor?: number;
   panelWidths?: PanelWidths;
   outlineNotesOpen?: boolean;
+};
+
+/**
+ * What the session markers in the Project said when it opened: the other
+ * computers it was open on lately, and where the Author left off on another
+ * computer, if they worked there after they last did here. A marker never
+ * locks the Project.
+ */
+export type SessionNotice = {
+  alsoOpen: { host: string; minutesAgo: number }[];
+  continueAt?: { host: string; sceneId: string; cursor?: number };
 };
 
 export type OpenedProject = {
@@ -98,7 +131,14 @@ export type OpenedProject = {
   language: ProseLanguage;
   manuscript: Manuscript;
   view: ProjectView;
+  sessions: SessionNotice;
 };
+
+/**
+ * A tip the Author sees once per Project on this computer, until dismissed:
+ * `keep-on-device` suggests keeping an online-only Project downloaded.
+ */
+export type Tip = 'keep-on-device';
 
 /**
  * Null when nothing changes in this window: the Author cancelled the dialog,
@@ -137,8 +177,15 @@ export interface ShellApi {
   /** Latest first. */
   recentProjects(): Promise<RecentProject[]>;
   removeRecent(path: string): Promise<RecentProject[]>;
-  /** Remembers, on this computer, how the Author left this window's Project. */
+  /**
+   * Remembers, on this computer, how the Author left this window's Project,
+   * and tells other computers through its session marker.
+   */
   saveView(view: ProjectView): void;
+  /** The tips to show for this window's Project now. */
+  tips(): Promise<Tip[]>;
+  /** Never shows the tip again for this window's Project on this computer. */
+  dismissTip(tip: Tip): void;
   /**
    * Main asks the window to hand over pending edits before it closes. The
    * listener must push them with `project.write` before returning. Returns an
@@ -157,6 +204,8 @@ export const channel = {
   recentProjects: 'shell:recentProjects',
   removeRecent: 'shell:removeRecent',
   saveView: 'shell:saveView',
+  tips: 'shell:tips',
+  dismissTip: 'shell:dismissTip',
   flushRequest: 'shell:flushRequest',
   flushed: 'shell:flushed',
   projectEvent: 'project:event',

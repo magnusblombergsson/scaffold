@@ -64,6 +64,8 @@ const shell: ShellApi = {
   recentProjects: () => ipcRenderer.invoke(channel.recentProjects),
   removeRecent: (path) => ipcRenderer.invoke(channel.removeRecent, path),
   saveView: (view) => ipcRenderer.send(channel.saveView, view),
+  tips: () => ipcRenderer.invoke(channel.tips),
+  dismissTip: (tip) => ipcRenderer.send(channel.dismissTip, tip),
   onFlushRequest(listener) {
     flushListeners.add(listener);
     return () => {

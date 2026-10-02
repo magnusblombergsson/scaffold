@@ -50,4 +50,15 @@ describe('autosave', () => {
     autosave.flush();
     expect(save).toHaveBeenCalledOnce();
   });
+
+  it('says whether a change is waiting to be saved', () => {
+    const autosave = createAutosave(vi.fn());
+    expect(autosave.pending()).toBe(false);
+
+    autosave.change('a');
+    expect(autosave.pending()).toBe(true);
+
+    vi.advanceTimersByTime(1000);
+    expect(autosave.pending()).toBe(false);
+  });
 });

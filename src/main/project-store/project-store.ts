@@ -1,5 +1,7 @@
 import { randomUUID } from 'node:crypto';
+import { hostname } from 'node:os';
 import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
 import {
   PROJECT_OUTLINE,
   proseLanguage,
@@ -24,17 +26,20 @@ import type {
   Changed,
   Created,
   ProjectEvent,
+  ProjectView,
+  SessionNotice,
   UnitSaveStatus,
 } from '../../shared/api';
 import type { Clock } from './clock';
-import type { FileSystem } from './file-system';
+import type { FileSystem, Fingerprint } from './file-system';
 import { safeWrite, writeFailureReason } from './safe-write';
 import { formatUnitFile, parseUnitFile, type UnitFile } from './unit-file';
 
 export const FORMAT = 1;
 const MANIFEST = 'project.json';
 
-export type StoreDeps = { fs: FileSystem; clock: Clock };
+/** `host` names this computer in its session marker; the OS's name by default. */
+export type StoreDeps = { fs: FileSystem; clock: Clock; host?: string };
 
 type Manifest = {
   format: number;
@@ -104,10 +109,13 @@ export async function createProject(
     path.join(projectPath, MANIFEST),
     `${JSON.stringify(manifest, null, 2)}\n`,
   );
-  return new ProjectStore(projectPath, manifest, deps, {
-    files: new Set([sceneId]),
-    trash: new Map(),
-  });
+  return new ProjectStore(
+    projectPath,
+    manifest,
+    deps,
+    { files: new Set([sceneId]), trash: new Map() },
+    { notice: { alsoOpen: [] }, own: null },
+  );
 }
 
 /** Opens an existing Project folder: one that contains `project.json`. */
@@ -132,8 +140,16 @@ export async function openProject(
     );
   }
   await sweepTempFiles(projectPath, deps.fs);
-  const units = await reconcileUnits(projectPath, manifest.tree, deps.fs);
-  const store = new ProjectStore(projectPath, manifest, deps, units);
+  const units = await scanUnits(projectPath, manifest.tree, deps.fs, {
+    repair: true,
+  });
+  const sessions = sessionsAtOpen(
+    await readSessionMarkers(projectPath, deps.fs),
+    hostOf(deps),
+    deps.clock.now(),
+    (sceneId) => units.files.has(sceneId),
+  );
+  const store = new ProjectStore(projectPath, manifest, deps, units, sessions);
   // Every Manuscript has at least one Chapter.
   if (manifest.tree.chapters.length === 0) await store.createChapter(0);
   return store;
@@ -166,7 +182,7 @@ export function projectLookup(fs: FileSystem): ProjectLookup {
 
 /** Removes temp files left by a write that crashed before its rename. */
 async function sweepTempFiles(projectPath: string, fs: FileSystem) {
-  const dirs = ['scenes', 'outlines', 'notes', 'trash'].map((d) =>
+  const dirs = ['scenes', 'outlines', 'notes', 'trash', SESSIONS].map((d) =>
     path.join(projectPath, d),
   );
   for (const dir of [projectPath, ...dirs]) {
@@ -232,8 +248,10 @@ type Units = {
 };
 
 /**
- * Compares the tree with the files in `scenes/` and `trash/`, and finishes
- * any structure operation that a crash cut off.
+ * Compares the tree with the files in `scenes/` and `trash/`. With
+ * `repair`, as on open, it also finishes any structure operation that a
+ * crash cut off. Without, as while the Project is open, it deletes nothing:
+ * another computer's operation may still be arriving one file at a time.
  *
  * - A Trash copy of a unit that the tree places is left from a delete that
  *   never reached `project.json`, or a restore that did: it goes.
@@ -244,10 +262,11 @@ type Units = {
  *
  * Only `<id>` names count; anything else is left alone.
  */
-async function reconcileUnits(
+async function scanUnits(
   projectPath: string,
   tree: ProjectTree,
   fs: FileSystem,
+  { repair }: { repair: boolean },
 ): Promise<Units> {
   const files = new Set(
     (await fs.readdir(path.join(projectPath, 'scenes')))
@@ -265,7 +284,7 @@ async function reconcileUnits(
     const chapterId = CHAPTER_FILE.exec(name)?.[1];
     if (chapterId) {
       if (chapterIds.has(chapterId)) {
-        await fs.unlink(file);
+        if (repair) await fs.unlink(file);
         continue;
       }
       const chapter = await readJson<ChapterFile>(fs, file);
@@ -275,7 +294,7 @@ async function reconcileUnits(
     const id = ID_FILE.exec(name)?.[1];
     if (!id) continue;
     if (placed.has(id)) {
-      await fs.unlink(file);
+      if (repair) await fs.unlink(file);
       continue;
     }
     const trashed = parseUnitFile(await fs.readFile(file));
@@ -284,7 +303,7 @@ async function reconcileUnits(
     if (files.has(id)) {
       const live = parseUnitFile(await fs.readFile(scenePath(projectPath, id)));
       if (live.body === trashed.body) {
-        await fs.unlink(scenePath(projectPath, id));
+        if (repair) await fs.unlink(scenePath(projectPath, id));
         files.delete(id);
       }
     }
@@ -331,7 +350,122 @@ async function readJson<T>(fs: FileSystem, file: string): Promise<T | null> {
   }
 }
 
+const SESSIONS = '.sessions';
+const MINUTE_MS = 60_000;
+const HEARTBEAT_MS = 5 * MINUTE_MS;
+/** A marker whose heartbeat is older than this was left by a computer that stopped. */
+const STALE_MS = 15 * MINUTE_MS;
+/** How long a burst of watcher events gathers before the files are checked. */
+const COALESCE_MS = 250;
+
+/**
+ * `.sessions/<HOST>.json`: when this computer last had the Project open, and
+ * how it left it. Only a warning to other computers, never a lock. The
+ * heartbeat goes on while the Project is open; `activeAt` is when the Author
+ * last moved in it, so a computer merely left open doesn't seem worked on.
+ */
+type SessionMarker = ProjectView & {
+  host: string;
+  heartbeat: number;
+  activeAt?: number;
+  open: boolean;
+};
+
+/** When the Author last worked on a marker's computer; old markers have only a heartbeat. */
+function activeAt(marker: SessionMarker): number {
+  return typeof marker.activeAt === 'number'
+    ? marker.activeAt
+    : marker.heartbeat;
+}
+
+type Sessions = {
+  notice: SessionNotice;
+  /** This computer's own marker, as the Project opened. */
+  own: SessionMarker | null;
+};
+
+function hostOf(deps: StoreDeps): string {
+  return deps.host ?? hostname();
+}
+
+/** A marker's file name: the host, with what a file name can't hold replaced. */
+function markerName(host: string): string {
+  return `${host.replace(/[^\w.-]/g, '_')}.json`;
+}
+
+/** Every marker that can be read, by file name; one that can't is skipped. */
+async function readSessionMarkers(
+  projectPath: string,
+  fs: FileSystem,
+): Promise<Map<string, SessionMarker>> {
+  const markers = new Map<string, SessionMarker>();
+  const dir = path.join(projectPath, SESSIONS);
+  for (const name of await fs.readdir(dir)) {
+    if (!name.endsWith('.json')) continue;
+    const marker = await readJson<Partial<SessionMarker>>(
+      fs,
+      path.join(dir, name),
+    );
+    if (
+      typeof marker?.host === 'string' &&
+      typeof marker.heartbeat === 'number' &&
+      typeof marker.open === 'boolean'
+    ) {
+      markers.set(name, marker as SessionMarker);
+    }
+  }
+  return markers;
+}
+
+/**
+ * Which other computers have the Project open, by a heartbeat that isn't
+ * stale, and where the Author left off on the computer they worked on last,
+ * if that isn't this one and the Scene is still here.
+ */
+function sessionsAtOpen(
+  markers: Map<string, SessionMarker>,
+  host: string,
+  now: number,
+  hasScene: (sceneId: string) => boolean,
+): Sessions {
+  const own = markers.get(markerName(host)) ?? null;
+  const others = [...markers]
+    .filter(([name]) => name !== markerName(host))
+    .map(([, marker]) => marker)
+    .sort((a, b) => activeAt(b) - activeAt(a));
+  const notice: SessionNotice = {
+    alsoOpen: others
+      .filter((m) => m.open && now - m.heartbeat < STALE_MS)
+      .map((m) => ({
+        host: m.host,
+        minutesAgo: Math.max(0, Math.floor((now - m.heartbeat) / MINUTE_MS)),
+      })),
+  };
+  const last = others[0];
+  if (
+    last &&
+    activeAt(last) > (own ? activeAt(own) : -Infinity) &&
+    typeof last.lastSceneId === 'string' &&
+    hasScene(last.lastSceneId)
+  ) {
+    notice.continueAt = {
+      host: last.host,
+      sceneId: last.lastSceneId,
+      ...(typeof last.cursor === 'number' && { cursor: last.cursor }),
+    };
+  }
+  return { notice, own };
+}
+
 type Pending = { ref: UnitRef; value: UnitValue };
+
+/** A unit as this store last read or wrote it, to tell when another computer changes it. */
+type Loaded = {
+  ref: UnitRef;
+  /** Null when it had no file. */
+  fingerprint: Fingerprint | null;
+  value: UnitValue;
+};
 
 /** How long a unit that failed to save waits before the next try, by failures in a row. */
 const RETRY_BACKOFF_MS = [1000, 2000, 5000, 10_000, 30_000];
@@ -362,14 +496,221 @@ export class ProjectStore {
   private latest: Step | null = null;
   private steps = 0;
 
+  /** The units read or written since the Project opened, by key. */
+  private readonly loaded = new Map<string, Loaded>();
+  /** `project.json` as last read or written; null until then. */
+  private manifestFingerprint: Fingerprint | null = null;
+  /** Whether a check for changes on disk is waiting for a burst of events to end. */
+  private checkScheduled = false;
+
+  private readonly host: string;
+  private readonly sessions: Sessions;
+  /** How the Author leaves the Project, for this computer's session marker. */
+  private view: ProjectView;
+  /** Ends the session: stops the heartbeat and the watcher. */
+  private endSession: (() => Promise<void>) | null = null;
+  private markerWrites: Promise<void> = Promise.resolve();
+  /** When the Author last opened or moved in the Project here. */
+  private activeAt = 0;
+
   constructor(
     readonly path: string,
     private manifest: Manifest,
     private readonly deps: StoreDeps,
     units: Units,
+    sessions: Sessions,
   ) {
     this.files = units.files;
     this.trash = units.trash;
+    this.host = hostOf(deps);
+    this.sessions = sessions;
+    const {
+      host: _,
+      heartbeat: _h,
+      activeAt: _a,
+      open: _o,
+      ...view
+    } = sessions.own ?? {};
+    this.view = view;
+  }
+
+  /** What the session markers said when the Project opened. */
+  sessionNotice(): SessionNotice {
+    return structuredClone(this.sessions.notice);
+  }
+
+  /**
+   * Starts this computer's session: writes its marker, beats every 5
+   * minutes, and watches the folder for changes that a sync client brings.
+   */
+  async startSession(): Promise<void> {
+    if (this.endSession) return;
+    this.activeAt = this.deps.clock.now();
+    const stopBeating = this.deps.clock.every(HEARTBEAT_MS, () => {
+      void this.writeMarker(true);
+    });
+    let stopWatching = async () => {};
+    this.endSession = async () => {
+      stopBeating();
+      await stopWatching();
+    };
+    try {
+      stopWatching = await this.deps.fs.watch(this.path, () =>
+        this.changeSeen(),
+      );
+    } catch (error) {
+      // Changes are still found on the next open.
+      console.error(`Can't watch ${this.path}:`, error);
+    }
+    await this.writeMarker(true);
+    // What arrived between opening and watching.
+    void this.checkForChanges();
+  }
+
+  /** Records how the Author leaves the Project; a new Scene is written at once. */
+  updateSession(view: ProjectView): void {
+    const sceneChanged =
+      view.lastSceneId !== undefined &&
+      view.lastSceneId !== this.view.lastSceneId;
+    this.view = { ...this.view, ...view };
+    this.activeAt = this.deps.clock.now();
+    if (sceneChanged && this.endSession) void this.writeMarker(true);
+  }
+
+  /** Whether a sync client keeps any of the Project's files online-only. */
+  async hasOnlineOnlyFiles(): Promise<boolean> {
+    try {
+      return (await this.deps.fs.onlineOnly(this.path)).length > 0;
+    } catch (error) {
+      console.error(
+        `Can't tell which files of ${this.path} are online-only:`,
+        error,
+      );
+      return false;
+    }
+  }
+
+  /** Writes this computer's marker; it is advisory, so failing to is only logged. */
+  private writeMarker(open: boolean): Promise<void> {
+    const marker: SessionMarker = {
+      ...this.view,
+      host: this.host,
+      heartbeat: this.deps.clock.now(),
+      activeAt: this.activeAt,
+      open,
+    };
+    const dir = path.join(this.path, SESSIONS);
+    this.markerWrites = this.markerWrites.then(async () => {
+      try {
+        await this.deps.fs.mkdir(dir);
+        await safeWrite(
+          this.deps.fs,
+          this.deps.clock,
+          path.join(dir, markerName(this.host)),
+          `${JSON.stringify(marker, null, 2)}\n`,
+        );
+      } catch (error) {
+        console.error("Can't write the session marker:", error);
+      }
+    });
+    return this.markerWrites;
+  }
+
+  /** A watcher event: checks the files once the burst it belongs to is over. */
+  private changeSeen(): void {
+    if (this.checkScheduled || !this.endSession) return;
+    this.checkScheduled = true;
+    void this.deps.clock.sleep(COALESCE_MS).then(() => {
+      this.checkScheduled = false;
+      if (this.endSession) return this.checkForChanges();
+    });
+  }
+
+  /**
+   * Compares what the store holds with the disk, as after another computer's
+   * changes arrive: a changed tree, or Scene or Trash files, update the
+   * Manuscript, and a unit that changed and isn't dirty is reloaded. A dirty
+   * one is left alone. Never throws: what it can't read now it reads on a
+   * later check.
+   */
+  checkForChanges(): Promise<void> {
+    return this.enqueueStructure(async () => {
+      try {
+        await this.checkStructure();
+        await this.checkUnits();
+      } catch (error) {
+        console.error(`Can't check ${this.path} for changes:`, error);
+      }
+    });
+  }
+
+  private async checkStructure(): Promise<void> {
+    const file = path.join(this.path, MANIFEST);
+    const fingerprint = await this.deps.fs.stat(file);
+    let manifest = this.manifest;
+    if (!sameFingerprint(fingerprint, this.manifestFingerprint)) {
+      const read = await readJson<Manifest>(this.deps.fs, file);
+      // Unreadable, as while it is still arriving: the next check tries again.
+      if (!read || !Array.isArray(read.tree?.chapters)) return;
+      // A newer app's tree is never adopted, nor overwritten from here: the
+      // format gate decides what this app does with it.
+      if (typeof read.format !== 'number' || read.format > FORMAT) return;
+      manifest = read;
+      this.manifestFingerprint = fingerprint;
+    }
+    const units = await scanUnits(this.path, manifest.tree, this.deps.fs, {
+      repair: false,
+    });
+    const before = JSON.stringify([
+      this.manifest,
+      this.manuscript(),
+      this.listTrash(),
+    ]);
+    this.manifest = manifest;
+    replaceAll(this.files, units.files);
+    this.trash.clear();
+    for (const [id, item] of units.trash) this.trash.set(id, item);
+    const manuscript = this.manuscript();
+    if (
+      JSON.stringify([this.manifest, manuscript, this.listTrash()]) === before
+    ) {
+      return;
+    }
+    // Its undo was made for a tree that is gone.
+    this.latest = null;
+    this.emit({ type: 'structureChanged', manuscript });
+  }
+
+  private async checkUnits(): Promise<void> {
+    for (const [key, known] of this.loaded) {
+      if (this.isDirty(key)) continue;
+      try {
+        this.refuseUnavailable(known.ref);
+      } catch {
+        this.loaded.delete(key);
+        continue;
+      }
+      const file = unitPath(this.path, known.ref);
+      const fingerprint = await this.deps.fs.stat(file);
+      // A file that is gone is the structure's business.
+      if (!fingerprint || sameFingerprint(fingerprint, known.fingerprint)) {
+        continue;
+      }
+      const value = unitValue(
+        known.ref,
+        parseUnitFile(await this.deps.fs.readFile(file)),
+      );
+      // Written to since: what to keep is decided when it is saved.
+      if (this.isDirty(key)) continue;
+      this.loaded.set(key, { ref: known.ref, fingerprint, value });
+      if (!isDeepStrictEqual(value, known.value)) {
+        this.emit({ type: 'unitReloaded', ref: known.ref, value });
+      }
+    }
+  }
+
+  private isDirty(key: string): boolean {
+    return this.unsaved.has(key) || this.writing.has(key);
   }
 
   get displayName(): string {
@@ -865,13 +1206,15 @@ export class ProjectStore {
   }
 
   private async writeManifest(manifest: Manifest): Promise<void> {
+    const file = path.join(this.path, MANIFEST);
     await safeWrite(
       this.deps.fs,
       this.deps.clock,
-      path.join(this.path, MANIFEST),
+      file,
       `${JSON.stringify(manifest, null, 2)}\n`,
     );
     this.manifest = manifest;
+    this.manifestFingerprint = await this.deps.fs.stat(file);
   }
 
   private refuseMissing(ref: UnitRef): void {
@@ -922,12 +1265,19 @@ export class ProjectStore {
     const pending = this.unsaved.get(unitKey(ref));
     if (pending) return structuredClone(pending.value) as ValueOf<R>;
     const file = unitPath(this.path, ref);
+    // Taken first: a change while reading then shows on the next check.
+    const fingerprint = await this.deps.fs.stat(file);
     // An Outline or Notes has no file until the Author first writes it.
     const text =
-      ref.kind === 'scene' || (await this.deps.fs.exists(file))
+      ref.kind === 'scene' || fingerprint
         ? await this.deps.fs.readFile(file)
         : '';
-    return unitValue(ref, parseUnitFile(text)) as ValueOf<R>;
+    const value = unitValue(ref, parseUnitFile(text));
+    const key = unitKey(ref);
+    if (!this.isDirty(key)) {
+      this.loaded.set(key, { ref, fingerprint, value: structuredClone(value) });
+    }
+    return value as ValueOf<R>;
   }
 
   /**
@@ -983,6 +1333,12 @@ export class ProjectStore {
         `${this.displayName} can't close: some changes aren't saved yet`,
       );
     }
+    if (this.endSession) {
+      const end = this.endSession;
+      this.endSession = null;
+      await end();
+      await this.writeMarker(false);
+    }
   }
 
   private startWriting(key: string): void {
@@ -1013,6 +1369,11 @@ export class ProjectStore {
           file,
           unitFile(pending.ref, pending.value),
         );
+        this.loaded.set(key, {
+          ref: pending.ref,
+          fingerprint: await this.deps.fs.stat(file),
+          value: pending.value,
+        });
       } catch (error) {
         // The unit stays unsaved in memory, and is tried again later.
         console.error(`Can't save ${key}:`, error);
@@ -1051,6 +1412,7 @@ export class ProjectStore {
 
   /** Drops a unit's unsaved value once it is kept elsewhere or deleted. */
   private settle(key: string): void {
+    this.loaded.delete(key);
     this.unsaved.delete(key);
     this.failures.delete(key);
     this.retries.delete(key);
@@ -1066,8 +1428,25 @@ export class ProjectStore {
     if (sameStatus(this.status.get(key), status)) return;
     if (status.state === 'saved') this.status.delete(key);
     else this.status.set(key, status);
-    for (const listener of this.listeners) listener(structuredClone(status));
+    this.emit(status);
   }
+
+  private emit(event: ProjectEvent): void {
+    for (const listener of this.listeners) listener(structuredClone(event));
+  }
+}
+
+function sameFingerprint(
+  a: Fingerprint | null,
+  b: Fingerprint | null,
+): boolean {
+  return a?.mtimeMs === b?.mtimeMs && a?.size === b?.size;
+}
+
+/** Makes `set` hold just what `items` holds. */
+function replaceAll<T>(set: Set<T>, items: Set<T>): void {
+  set.clear();
+  for (const item of items) set.add(item);
 }
 
 /** Whether `status` says nothing new; no status is saved. */

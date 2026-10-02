@@ -3,7 +3,7 @@ import type { Clock } from '../project-store/clock';
 import type { FileSystem } from '../project-store/file-system';
 import type { ProjectLookup } from '../project-store/project-store';
 import { safeWrite } from '../project-store/safe-write';
-import type { PanelWidths } from '../../shared/api';
+import type { PanelWidths, Tip } from '../../shared/api';
 
 export const SETTINGS_VERSION = 1;
 const RECENT_LIMIT = 20;
@@ -29,7 +29,10 @@ export type ProjectSettings = {
   windowBounds?: WindowBounds;
   panelWidths?: PanelWidths;
   lastSceneId?: string;
+  /** Where the cursor was in the last Scene. */
+  cursor?: number;
   outlineNotesOpen?: boolean;
+  dismissedTips?: Tip[];
 };
 
 type SettingsFile = {
@@ -123,6 +126,8 @@ function parseProjectSettings(raw: JsonObject): ProjectSettings & JsonObject {
     delete settings.panelWidths;
   }
   if (typeof settings.lastSceneId !== 'string') delete settings.lastSceneId;
+  if (!isFiniteNumber(settings.cursor)) delete settings.cursor;
+  if (!isStringArray(settings.dismissedTips)) delete settings.dismissedTips;
   if (typeof settings.outlineNotesOpen !== 'boolean') {
     delete settings.outlineNotesOpen;
   }
