@@ -27,6 +27,27 @@ export type ManuscriptChapter = {
 /** `missing`: in the tree, but its file isn't there (possibly not synced yet). */
 export type ManuscriptScene = SceneNode & { missing?: true };
 
+/**
+ * A deleted Scene or Chapter, recoverable until Trash is emptied. A Scene
+ * names the Chapter it was deleted from, if it had one; a Chapter lists the
+ * Scenes deleted with it.
+ */
+export type TrashItem =
+  | {
+      kind: 'scene';
+      id: string;
+      title: string;
+      trashedAt: number;
+      chapterTitle?: string;
+    }
+  | {
+      kind: 'chapter';
+      id: string;
+      title: string;
+      trashedAt: number;
+      scenes: SceneNode[];
+    };
+
 /** The languages Prose is spellchecked and typeset in. */
 export type ProseLanguage = 'sv-SE' | 'en-US';
 

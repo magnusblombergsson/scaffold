@@ -20,6 +20,14 @@ const project: ProjectApi = {
     ipcRenderer.invoke(channel.project('moveChapter'), chapterId, index),
   moveScene: (sceneId, chapterId, index) =>
     ipcRenderer.invoke(channel.project('moveScene'), sceneId, chapterId, index),
+  trashScene: (sceneId) =>
+    ipcRenderer.invoke(channel.project('trashScene'), sceneId),
+  trashChapter: (chapterId) =>
+    ipcRenderer.invoke(channel.project('trashChapter'), chapterId),
+  restore: (id) => ipcRenderer.invoke(channel.project('restore'), id),
+  undo: (step) => ipcRenderer.invoke(channel.project('undo'), step),
+  listTrash: () => ipcRenderer.invoke(channel.project('listTrash')),
+  emptyTrash: () => ipcRenderer.invoke(channel.project('emptyTrash')),
 };
 
 const flushListeners = new Set<() => void>();

@@ -35,6 +35,7 @@ test('the Author builds the Manuscript in the binder, and only project.json reco
   await menu(page, 'Chapter actions: Chapter 1', 'New Scene');
   await expect(scene(page, 'Scene 2')).toHaveAttribute('aria-current', 'true');
   await expect(page.getByLabel('Prose')).toHaveText('');
+  await expect(page.getByLabel('Prose')).toBeFocused();
   await page.keyboard.type('The train arrived.');
   await scene(page, 'Scene 1').click();
   await expect(page.getByLabel('Prose')).toHaveText('It was a dark night.');

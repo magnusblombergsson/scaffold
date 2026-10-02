@@ -1,15 +1,18 @@
-import { useEffect, useState, type ReactNode } from 'react';
-import type { Created, OpenedProject, OpenResult } from '../shared/api';
+import { useCallback, useEffect, useState, type ReactNode } from 'react';
+import type { Changed, OpenedProject, OpenResult } from '../shared/api';
 import type {
   Manuscript,
   ManuscriptChapter,
   ManuscriptScene,
+  TrashItem,
 } from '../shared/project-types';
 import { Binder } from './Binder';
 import { PanelResizer } from './PanelResizer';
 import { flushPendingEdits } from './pending-edits';
 import { SceneEditor } from './SceneEditor';
 import { StartScreen } from './StartScreen';
+import { TrashView } from './TrashView';
+import { UndoToast } from './UndoToast';
 
 export function App() {
   /** Undefined until main says what this window shows. */
@@ -88,13 +91,52 @@ function ProjectView({
     if (openSceneId) window.shell.saveView({ lastSceneId: openSceneId });
   }, [openSceneId]);
 
-  async function change(operation: () => Promise<Manuscript | Created>) {
+  const [tab, setTab] = useState<'manuscript' | 'trash'>('manuscript');
+  const [trash, setTrash] = useState<TrashItem[]>([]);
+  /** The latest structure change, while it can still be undone. */
+  const [latest, setLatest] = useState<{ message: string; step: number }>();
+  const closeToast = useCallback(() => setLatest(undefined), []);
+
+  const refreshTrash = useCallback(
+    () => window.project.listTrash().then(setTrash),
+    [],
+  );
+  useEffect(() => {
+    void refreshTrash();
+  }, [refreshTrash]);
+
+  /** Runs a structure operation, and offers to undo it. */
+  async function change(operation: () => Promise<Changed>, message: string) {
+    // Edits reach main before the structure changes under them.
+    flushPendingEdits();
     try {
       const result = await operation();
-      setManuscript('manuscript' in result ? result.manuscript : result);
+      setManuscript(result.manuscript);
+      setLatest({ message, step: result.step });
       onError(null);
     } catch (error) {
       onError(`Can't change the Manuscript: ${(error as Error).message}`);
+    }
+    await refreshTrash();
+  }
+
+  async function undo(step: number) {
+    flushPendingEdits();
+    setLatest(undefined);
+    try {
+      setManuscript(await window.project.undo(step));
+      onError(null);
+    } catch (error) {
+      onError(`Can't undo: ${(error as Error).message}`);
+    }
+    await refreshTrash();
+  }
+
+  async function emptyTrash() {
+    if (await window.project.emptyTrash()) {
+      // Nothing before it can be undone.
+      setLatest(undefined);
+      await refreshTrash();
     }
   }
 
@@ -112,17 +154,43 @@ function ProjectView({
       <div className="project-body">
         <aside className="left-pane" style={{ width: binderWidth }}>
           <div role="tablist" className="tabs">
-            <button role="tab" aria-selected="true" id="manuscript-tab">
+            <button
+              role="tab"
+              aria-selected={tab === 'manuscript'}
+              id="manuscript-tab"
+              onClick={() => setTab('manuscript')}
+            >
               Manuscript
             </button>
+            <button
+              role="tab"
+              aria-selected={tab === 'trash'}
+              id="trash-tab"
+              onClick={() => setTab('trash')}
+            >
+              Trash{trash.length > 0 && ` (${trash.length})`}
+            </button>
           </div>
-          <div role="tabpanel" aria-labelledby="manuscript-tab">
-            <Binder
-              manuscript={manuscript}
-              openSceneId={openSceneId}
-              onOpenScene={setOpenSceneId}
-              onChange={change}
-            />
+          <div role="tabpanel" aria-labelledby={`${tab}-tab`}>
+            {tab === 'manuscript' ? (
+              <Binder
+                manuscript={manuscript}
+                openSceneId={openSceneId}
+                onOpenScene={setOpenSceneId}
+                onChange={change}
+              />
+            ) : (
+              <TrashView
+                items={trash}
+                onRestore={(item) =>
+                  change(
+                    () => window.project.restore(item.id),
+                    `Restored “${item.title}”`,
+                  )
+                }
+                onEmpty={emptyTrash}
+              />
+            )}
           </div>
         </aside>
         <PanelResizer
@@ -154,6 +222,14 @@ function ProjectView({
           />
         )}
       </div>
+      {latest && (
+        <UndoToast
+          key={latest.step}
+          message={latest.message}
+          onUndo={() => undo(latest.step)}
+          onClose={closeToast}
+        />
+      )}
     </div>
   );
 }

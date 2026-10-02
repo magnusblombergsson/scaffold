@@ -1,6 +1,7 @@
 import type {
   Manuscript,
   ProseLanguage,
+  TrashItem,
   UnitRef,
   UnitValue,
 } from './project-types';
@@ -8,8 +9,14 @@ import type {
 // The preload exposes these two objects on `window`. Main registers a handler
 // per method, and both sides are checked against these interfaces.
 
+/**
+ * What a structure operation resolves with once it is on disk: the Manuscript,
+ * and the step that `undo` reverts while it is still the latest one.
+ */
+export type Changed = { manuscript: Manuscript; step: number };
+
 /** A structure operation that made a Chapter or Scene: its id, and the result. */
-export type Created = { id: string; manuscript: Manuscript };
+export type Created = Changed & { id: string };
 
 /** Mirrors the main-process ProjectStore of this window's Project. */
 export interface ProjectApi {
@@ -19,22 +26,35 @@ export interface ProjectApi {
   flush(): Promise<void>;
   hasUnsaved(): Promise<boolean>;
 
-  // Structure operations change only project.json (and write the file of a
-  // new Scene), and resolve with the Manuscript once it is on disk.
+  // Structure operations change project.json, and move unit files in and out
+  // of Trash. They resolve once the change is on disk.
   createChapter(index: number, title?: string): Promise<Created>;
   createScene(
     chapterId: string,
     index: number,
     title?: string,
   ): Promise<Created>;
-  renameChapter(chapterId: string, title: string): Promise<Manuscript>;
-  renameScene(sceneId: string, title: string): Promise<Manuscript>;
-  moveChapter(chapterId: string, index: number): Promise<Manuscript>;
+  renameChapter(chapterId: string, title: string): Promise<Changed>;
+  renameScene(sceneId: string, title: string): Promise<Changed>;
+  moveChapter(chapterId: string, index: number): Promise<Changed>;
   moveScene(
     sceneId: string,
     chapterId: string,
     index: number,
-  ): Promise<Manuscript>;
+  ): Promise<Changed>;
+  /** Moves a Scene, placed or Unplaced, to Trash. */
+  trashScene(sceneId: string): Promise<Changed>;
+  /** Moves a Chapter and its Scenes to Trash; never the last Chapter. */
+  trashChapter(chapterId: string): Promise<Changed>;
+  /** Puts a Trash item back where it was, as near as the Manuscript allows. */
+  restore(id: string): Promise<Changed>;
+  /** Reverts `step` if it is still the latest structure operation. */
+  undo(step: number): Promise<Manuscript>;
+
+  /** Latest first. */
+  listTrash(): Promise<TrashItem[]>;
+  /** Asks the Author to confirm, then deletes Trash for good; false if not. */
+  emptyTrash(): Promise<boolean>;
 }
 
 /** Widths in CSS pixels of the panels the Author can resize. */

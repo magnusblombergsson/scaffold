@@ -83,6 +83,8 @@ test('the Projects open at quit reopen in their windows, at the Scene and binder
   await expect(
     page.getByRole('button', { name: 'Scene 2', exact: true }),
   ).toHaveAttribute('aria-current', 'true');
+  // The new Scene's editor takes focus once it has loaded.
+  await expect(page.getByLabel('Prose')).toBeFocused();
   const resizer = page.getByRole('separator', { name: 'Binder width' });
   await resizer.focus();
   await page.keyboard.press('ArrowRight');

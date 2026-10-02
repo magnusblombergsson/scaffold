@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, type DragEvent } from 'react';
-import type { Created } from '../shared/api';
+import type { Changed, Created } from '../shared/api';
 import type {
   Manuscript,
   ManuscriptChapter,
@@ -11,8 +11,11 @@ type Props = {
   manuscript: Manuscript;
   openSceneId: string | null;
   onOpenScene(sceneId: string): void;
-  /** Runs a structure operation and shows the Manuscript it resolves with. */
-  onChange(operation: () => Promise<Manuscript | Created>): Promise<void>;
+  /**
+   * Runs a structure operation and shows the Manuscript it resolves with;
+   * `message` says what it did, beside Undo.
+   */
+  onChange(operation: () => Promise<Changed>, message: string): Promise<void>;
 };
 
 /** What is being renamed: a Chapter or Scene id. */
@@ -34,6 +37,7 @@ export function Binder({
 
   async function create(
     operation: () => Promise<Created>,
+    message: string,
     then: (id: string) => void,
   ) {
     let id: string | undefined;
@@ -41,16 +45,41 @@ export function Binder({
       const created = await operation();
       id = created.id;
       return created;
-    });
+    }, message);
     if (id) then(id);
   }
 
   function rename(id: string, title: string, kind: 'chapter' | 'scene') {
     setRenaming(null);
-    void onChange(() =>
-      kind === 'chapter'
-        ? project.renameChapter(id, title)
-        : project.renameScene(id, title),
+    void (kind === 'chapter'
+      ? onChange(() => project.renameChapter(id, title), 'Chapter renamed')
+      : onChange(() => project.renameScene(id, title), 'Scene renamed'));
+  }
+
+  function moveScene(sceneId: string, chapterId: string, index: number) {
+    return onChange(
+      () => project.moveScene(sceneId, chapterId, index),
+      'Scene moved',
+    );
+  }
+
+  function moveChapter(chapterId: string, index: number) {
+    return onChange(
+      () => project.moveChapter(chapterId, index),
+      'Chapter moved',
+    );
+  }
+
+  function trash(
+    node: { id: string; title: string },
+    kind: 'scene' | 'chapter',
+  ) {
+    return onChange(
+      () =>
+        kind === 'scene'
+          ? project.trashScene(node.id)
+          : project.trashChapter(node.id),
+      `“${node.title}” moved to Trash`,
     );
   }
 
@@ -64,9 +93,7 @@ export function Binder({
     const rest = chapter.scenes.filter((s) => s.id !== sceneId);
     const at = target ? rest.findIndex((s) => s.id === target.id) : rest.length;
     if (at < 0) return;
-    void onChange(() =>
-      project.moveScene(sceneId, chapter.id, at + (target && after ? 1 : 0)),
-    );
+    void moveScene(sceneId, chapter.id, at + (target && after ? 1 : 0));
   }
 
   function dropChapter(
@@ -77,46 +104,58 @@ export function Binder({
     if (chapterId === target.id) return;
     const rest = chapters.filter((c) => c.id !== chapterId);
     const at = rest.findIndex((c) => c.id === target.id);
-    void onChange(() => project.moveChapter(chapterId, at + (after ? 1 : 0)));
+    void moveChapter(chapterId, at + (after ? 1 : 0));
   }
 
   function sceneMenu(
-    scene: SceneNode,
+    scene: ManuscriptScene,
     chapter: ManuscriptChapter | null,
   ): MenuItem[] {
     const others = chapters.filter((c) => c !== chapter);
     const moves = others.map((c) => ({
       label: `Move to ${c.title}`,
-      run: () =>
-        onChange(() => project.moveScene(scene.id, c.id, c.scenes.length)),
+      run: () => moveScene(scene.id, c.id, c.scenes.length),
     }));
-    if (!chapter) return moves;
+    const toTrash = {
+      label: 'Move to Trash',
+      // A Missing Scene has no Prose here to keep.
+      disabled: scene.missing,
+      run: () => trash(scene, 'scene'),
+    };
+    if (!chapter) return [...moves, toTrash];
     const index = chapter.scenes.indexOf(scene);
     return [
       { label: 'Rename…', run: () => setRenaming(scene.id) },
       {
         label: 'New Scene Above',
         run: () =>
-          create(() => project.createScene(chapter.id, index), onOpenScene),
+          create(
+            () => project.createScene(chapter.id, index),
+            'Scene created',
+            onOpenScene,
+          ),
       },
       {
         label: 'New Scene Below',
         run: () =>
-          create(() => project.createScene(chapter.id, index + 1), onOpenScene),
+          create(
+            () => project.createScene(chapter.id, index + 1),
+            'Scene created',
+            onOpenScene,
+          ),
       },
       {
         label: 'Move Up',
         disabled: index === 0,
-        run: () =>
-          onChange(() => project.moveScene(scene.id, chapter.id, index - 1)),
+        run: () => moveScene(scene.id, chapter.id, index - 1),
       },
       {
         label: 'Move Down',
         disabled: index === chapter.scenes.length - 1,
-        run: () =>
-          onChange(() => project.moveScene(scene.id, chapter.id, index + 1)),
+        run: () => moveScene(scene.id, chapter.id, index + 1),
       },
       ...moves,
+      toTrash,
     ];
   }
 
@@ -128,26 +167,45 @@ export function Binder({
         run: () =>
           create(
             () => project.createScene(chapter.id, chapter.scenes.length),
+            'Scene created',
             onOpenScene,
           ),
       },
       {
         label: 'New Chapter Above',
-        run: () => create(() => project.createChapter(index), setRenaming),
+        run: () =>
+          create(
+            () => project.createChapter(index),
+            'Chapter created',
+            setRenaming,
+          ),
       },
       {
         label: 'New Chapter Below',
-        run: () => create(() => project.createChapter(index + 1), setRenaming),
+        run: () =>
+          create(
+            () => project.createChapter(index + 1),
+            'Chapter created',
+            setRenaming,
+          ),
       },
       {
         label: 'Move Up',
         disabled: index === 0,
-        run: () => onChange(() => project.moveChapter(chapter.id, index - 1)),
+        run: () => moveChapter(chapter.id, index - 1),
       },
       {
         label: 'Move Down',
         disabled: index === chapters.length - 1,
-        run: () => onChange(() => project.moveChapter(chapter.id, index + 1)),
+        run: () => moveChapter(chapter.id, index + 1),
+      },
+      {
+        label: 'Move to Trash',
+        // The Manuscript keeps at least one Chapter, and a Missing Scene has
+        // no Prose here to keep.
+        disabled:
+          chapters.length === 1 || chapter.scenes.some((s) => s.missing),
+        run: () => trash(chapter, 'chapter'),
       },
     ];
   }
@@ -271,7 +329,11 @@ export function Binder({
       <button
         className="binder-add"
         onClick={() =>
-          create(() => project.createChapter(chapters.length), setRenaming)
+          create(
+            () => project.createChapter(chapters.length),
+            'Chapter created',
+            setRenaming,
+          )
         }
       >
         New Chapter

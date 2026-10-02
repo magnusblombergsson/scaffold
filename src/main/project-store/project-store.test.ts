@@ -11,6 +11,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { createProject, openProject, type ProjectStore } from './project-store';
 import type { Manuscript } from '../../shared/project-types';
+import type { Changed } from '../../shared/api';
 import { nodeFileSystem, type FileSystem } from './file-system';
 import { instantClock } from './clock';
 
@@ -462,9 +463,406 @@ describe('Manuscript structure', () => {
   });
 });
 
+describe('Trash', () => {
+  /** Chapter 1 holds a (with Prose) and b; Two holds c. */
+  async function newProject() {
+    const projectPath = path.join(dir, 'My Novel');
+    const store = await createProject(projectPath, deps());
+    const one = store.manuscript().chapters[0].id;
+    const a = store.manuscript().chapters[0].scenes[0].id;
+    await store.write(sceneRef(a), { id: a, markdown: 'It was a dark night.' });
+    const b = (await store.createScene(one, 1, 'B')).id;
+    const two = (await store.createChapter(1, 'Two')).id;
+    const c = (await store.createScene(two, 0, 'C')).id;
+    return { projectPath, store, one, two, a, b, c };
+  }
+
+  it('moves a deleted Scene to trash/ with its Prose, and takes it out of the tree', async () => {
+    const { projectPath, store, a, b } = await newProject();
+
+    await store.trashScene(a);
+
+    expect(ids(store.manuscript().chapters[0].scenes)).toEqual([b]);
+    const files = await listFiles(projectPath);
+    expect(files).not.toContain(path.join('scenes', `${a}.md`));
+    expect(files).toContain(path.join('trash', `${a}.md`));
+    expect(store.listTrash()).toEqual([
+      {
+        kind: 'scene',
+        id: a,
+        title: 'Scene 1',
+        trashedAt: expect.any(Number),
+        chapterTitle: 'Chapter 1',
+      },
+    ]);
+    await expect(store.read(sceneRef(a))).rejects.toMatchObject({
+      reason: 'trashed',
+    });
+    await expect(
+      store.write(sceneRef(a), { id: a, markdown: 'Too late.' }),
+    ).rejects.toMatchObject({ reason: 'trashed' });
+
+    const reopened = await openProject(projectPath, deps());
+    expect(reopened.manuscript()).toEqual(store.manuscript());
+    expect(reopened.listTrash()).toEqual(store.listTrash());
+  });
+
+  it('keeps Prose written just before the delete', async () => {
+    const { projectPath, a } = await newProject();
+    const gate = heldRenames();
+    const store = await openProject(projectPath, { ...deps(), fs: gate.fs });
+
+    await store.write(sceneRef(a), { id: a, markdown: 'The last words.' });
+    const trashing = store.trashScene(a);
+    gate.release();
+    await trashing;
+    await store.restore(a);
+
+    expect(await store.read(sceneRef(a))).toEqual({
+      id: a,
+      markdown: 'The last words.',
+    });
+  });
+
+  it('restores a Scene to its old place in its Chapter', async () => {
+    const { projectPath, store, one, a, b } = await newProject();
+    const scene = store.manuscript().chapters[0].scenes[0];
+
+    await store.trashScene(a);
+    const d = (await store.createScene(one, 1, 'D')).id;
+    await store.restore(a);
+
+    expect(store.manuscript().chapters[0].scenes).toEqual([
+      scene,
+      { id: b, title: 'B' },
+      { id: d, title: 'D' },
+    ]);
+    expect(await store.read(sceneRef(a))).toEqual({
+      id: a,
+      markdown: 'It was a dark night.',
+    });
+    expect(store.listTrash()).toEqual([]);
+    expect(await listFiles(projectPath)).not.toContain(
+      path.join('trash', `${a}.md`),
+    );
+    expect((await openProject(projectPath, deps())).manuscript()).toEqual(
+      store.manuscript(),
+    );
+  });
+
+  it('restores a Scene whose Chapter is gone to the end of the Manuscript', async () => {
+    const { store, two, a, b, c } = await newProject();
+
+    await store.trashScene(c);
+    await store.trashChapter(two);
+    const three = (await store.createChapter(1, 'Three')).id;
+    await store.restore(c);
+
+    expect(
+      store.manuscript().chapters.map((ch) => [ch.id, ids(ch.scenes)]),
+    ).toEqual([
+      [expect.any(String), [a, b]],
+      [three, [c]],
+    ]);
+  });
+
+  it('deletes a Chapter with its Scenes as one Trash item, and restores it whole', async () => {
+    const { projectPath, store, one, a, b } = await newProject();
+    const before = store.manuscript();
+
+    await store.trashChapter(one);
+
+    expect(store.manuscript().chapters.map((ch) => ch.title)).toEqual(['Two']);
+    expect(store.listTrash()).toEqual([
+      {
+        kind: 'chapter',
+        id: one,
+        title: 'Chapter 1',
+        trashedAt: expect.any(Number),
+        scenes: [
+          { id: a, title: 'Scene 1' },
+          { id: b, title: 'B' },
+        ],
+      },
+    ]);
+    const files = await listFiles(projectPath);
+    expect(files.filter((f) => f.startsWith('scenes'))).toHaveLength(1);
+    expect(files.filter((f) => f.startsWith('trash'))).toHaveLength(3);
+    expect((await openProject(projectPath, deps())).listTrash()).toEqual(
+      store.listTrash(),
+    );
+
+    await store.restore(one);
+    expect(store.manuscript()).toEqual(before);
+    expect(store.listTrash()).toEqual([]);
+    expect(await store.read(sceneRef(a))).toEqual({
+      id: a,
+      markdown: 'It was a dark night.',
+    });
+    expect(
+      (await listFiles(projectPath)).filter((f) => f.startsWith('trash')),
+    ).toEqual([]);
+    expect((await openProject(projectPath, deps())).manuscript()).toEqual(
+      before,
+    );
+  });
+
+  it('never deletes the last Chapter', async () => {
+    const { store, one, two } = await newProject();
+    await store.trashChapter(two);
+
+    await expect(store.trashChapter(one)).rejects.toMatchObject({
+      reason: 'last-chapter',
+    });
+    expect(store.manuscript().chapters).toHaveLength(1);
+  });
+
+  it('deletes an Unplaced Scene, and restores it as Unplaced', async () => {
+    const { projectPath, store } = await newProject();
+    await store.close();
+    const stray = '0b9f4a52-3c1e-4d7a-9f5e-2a6c8b1d4e70';
+    await writeFile(
+      path.join(projectPath, 'scenes', `${stray}.md`),
+      `---\nid: ${stray}\nformat: 1\n---\nFrom the laptop.`,
+    );
+    const reopened = await openProject(projectPath, deps());
+
+    await reopened.trashScene(stray);
+    expect(reopened.manuscript().unplaced).toEqual([]);
+    expect(reopened.listTrash()).toEqual([
+      {
+        kind: 'scene',
+        id: stray,
+        title: 'Untitled Scene',
+        trashedAt: expect.any(Number),
+      },
+    ]);
+    expect(
+      (await openProject(projectPath, deps())).manuscript().unplaced,
+    ).toEqual([]);
+
+    await reopened.restore(stray);
+    expect(reopened.manuscript().unplaced).toEqual([
+      { id: stray, title: 'Untitled Scene' },
+    ]);
+    expect(await reopened.read(sceneRef(stray))).toEqual({
+      id: stray,
+      markdown: 'From the laptop.',
+    });
+  });
+
+  it('refuses to delete a Missing Scene, or a Chapter holding one', async () => {
+    const { projectPath, store, one, a } = await newProject();
+    await store.close();
+    await rm(path.join(projectPath, 'scenes', `${a}.md`));
+    const reopened = await openProject(projectPath, deps());
+
+    await expect(reopened.trashScene(a)).rejects.toMatchObject({
+      reason: 'missing',
+    });
+    await expect(reopened.trashChapter(one)).rejects.toMatchObject({
+      reason: 'missing',
+    });
+    expect(reopened.listTrash()).toEqual([]);
+  });
+
+  it('lists Trash latest first', async () => {
+    const projectPath = path.join(dir, 'My Novel');
+    const clock = instantClock(1000);
+    const store = await createProject(projectPath, { ...deps(), clock });
+    const one = store.manuscript().chapters[0].id;
+    const b = (await store.createScene(one, 1, 'B')).id;
+    const two = (await store.createChapter(1, 'Two')).id;
+
+    await store.trashScene(b);
+    await clock.sleep(10);
+    await store.trashChapter(two);
+
+    expect(store.listTrash().map((item) => [item.id, item.trashedAt])).toEqual([
+      [two, 1010],
+      [b, 1000],
+    ]);
+  });
+
+  it('empties Trash for good', async () => {
+    const { projectPath, store, one, a, b, c } = await newProject();
+    await store.trashScene(c);
+    await store.trashChapter(one);
+
+    await store.emptyTrash();
+
+    expect(store.listTrash()).toEqual([]);
+    const files = await listFiles(projectPath);
+    expect(files.filter((f) => f.startsWith('trash'))).toEqual([]);
+    for (const id of [a, b, c]) {
+      expect(files).not.toContain(path.join('scenes', `${id}.md`));
+    }
+    const reopened = await openProject(projectPath, deps());
+    expect(reopened.listTrash()).toEqual([]);
+    expect(reopened.manuscript()).toEqual(store.manuscript());
+  });
+
+  it('keeps a deleted Scene that another computer wrote to before the delete synced, as Unplaced', async () => {
+    const { projectPath, store, a } = await newProject();
+    await store.trashScene(a);
+    await store.close();
+    await writeFile(
+      path.join(projectPath, 'scenes', `${a}.md`),
+      `---\nid: ${a}\nformat: 1\n---\nWritten on the laptop.`,
+    );
+
+    const reopened = await openProject(projectPath, deps());
+    expect(reopened.manuscript().unplaced).toEqual([
+      { id: a, title: 'Untitled Scene' },
+    ]);
+    expect(await reopened.read(sceneRef(a))).toEqual({
+      id: a,
+      markdown: 'Written on the laptop.',
+    });
+    await expect(reopened.restore(a)).rejects.toMatchObject({
+      reason: 'in-manuscript',
+    });
+    // Deleting the other version would overwrite the one in Trash.
+    await expect(reopened.trashScene(a)).rejects.toMatchObject({
+      reason: 'in-trash',
+    });
+    const trashed = await readFile(
+      path.join(projectPath, 'trash', `${a}.md`),
+      'utf8',
+    );
+    expect(trashed).toContain('It was a dark night.');
+    expect(await reopened.read(sceneRef(a))).toEqual({
+      id: a,
+      markdown: 'Written on the laptop.',
+    });
+  });
+});
+
+describe('Undo of a structure operation', () => {
+  type Fixture = { one: string; two: string; a: string; b: string };
+
+  async function newProject() {
+    const projectPath = path.join(dir, 'My Novel');
+    const store = await createProject(projectPath, deps());
+    const one = store.manuscript().chapters[0].id;
+    const a = store.manuscript().chapters[0].scenes[0].id;
+    const b = (await store.createScene(one, 1, 'B')).id;
+    const two = (await store.createChapter(1, 'Two')).id;
+    return { projectPath, store, f: { one, two, a, b } };
+  }
+
+  const operations: [
+    string,
+    (store: ProjectStore, f: Fixture) => Promise<Changed>,
+  ][] = [
+    ['createScene', (s, f) => s.createScene(f.one, 0, 'New')],
+    ['createChapter', (s) => s.createChapter(0)],
+    ['renameChapter', (s, f) => s.renameChapter(f.one, 'Renamed')],
+    ['renameScene', (s, f) => s.renameScene(f.a, 'Renamed')],
+    ['moveScene', (s, f) => s.moveScene(f.a, f.two, 0)],
+    ['moveChapter', (s, f) => s.moveChapter(f.two, 0)],
+    ['trashScene', (s, f) => s.trashScene(f.a)],
+    ['trashChapter', (s, f) => s.trashChapter(f.one)],
+  ];
+
+  it.each(operations)('reverts %s, on disk too', async (_, operation) => {
+    const { projectPath, store, f } = await newProject();
+    const before = store.manuscript();
+
+    const { step } = await operation(store, f);
+    expect(store.manuscript()).not.toEqual(before);
+    expect(await store.undo(step)).toEqual(before);
+
+    expect(store.manuscript()).toEqual(before);
+    const reopened = await openProject(projectPath, deps());
+    expect(reopened.manuscript()).toEqual(before);
+    // An undone create leaves its Scene in Trash, in case it got Prose.
+    expect(reopened.listTrash().filter((item) => item.title !== 'New')).toEqual(
+      [],
+    );
+  });
+
+  it('reverts a restore from Trash', async () => {
+    const { store, f } = await newProject();
+    await store.trashScene(f.a);
+    const before = store.manuscript();
+
+    const { step } = await store.restore(f.a);
+    await store.undo(step);
+
+    expect(store.manuscript()).toEqual(before);
+    expect(ids(store.listTrash())).toEqual([f.a]);
+  });
+
+  it('reverts the placing of an Unplaced Scene', async () => {
+    const { projectPath, store, f } = await newProject();
+    await store.close();
+    const stray = '0b9f4a52-3c1e-4d7a-9f5e-2a6c8b1d4e70';
+    await writeFile(
+      path.join(projectPath, 'scenes', `${stray}.md`),
+      `---\nid: ${stray}\nformat: 1\n---\n`,
+    );
+    const reopened = await openProject(projectPath, deps());
+    const before = reopened.manuscript();
+
+    const { step } = await reopened.moveScene(stray, f.one, 0);
+    await reopened.undo(step);
+
+    expect(reopened.manuscript()).toEqual(before);
+  });
+
+  it('reverts only the latest step, and only once', async () => {
+    const { store, f } = await newProject();
+    const first = await store.renameScene(f.a, 'Night');
+    const second = await store.renameScene(f.a, 'Storm');
+
+    await expect(store.undo(first.step)).rejects.toMatchObject({
+      reason: 'not-latest',
+    });
+    await store.undo(second.step);
+    expect(store.manuscript().chapters[0].scenes[0].title).toBe('Night');
+    await expect(store.undo(second.step)).rejects.toMatchObject({
+      reason: 'not-latest',
+    });
+    expect(store.manuscript().chapters[0].scenes[0].title).toBe('Night');
+  });
+
+  it('keeps a step that failed to revert, so the Author can try again', async () => {
+    const { projectPath, store: created, f } = await newProject();
+    await created.close();
+    let failing = false;
+    const fs: FileSystem = {
+      ...nodeFileSystem,
+      async writeFileDurable(file, data) {
+        if (failing) throw Object.assign(new Error('EIO'), { code: 'EIO' });
+        return nodeFileSystem.writeFileDurable(file, data);
+      },
+    };
+    const store = await openProject(projectPath, { ...deps(), fs });
+    const { step } = await store.trashScene(f.a);
+
+    failing = true;
+    await expect(store.undo(step)).rejects.toThrow('EIO');
+    failing = false;
+    await store.undo(step);
+    expect(ids(store.manuscript().chapters[0].scenes)).toEqual([f.a, f.b]);
+  });
+
+  it('cannot revert a delete once Trash is emptied', async () => {
+    const { store, f } = await newProject();
+    const { step } = await store.trashScene(f.a);
+    await store.emptyTrash();
+
+    await expect(store.undo(step)).rejects.toMatchObject({
+      reason: 'not-latest',
+    });
+  });
+});
+
 /**
- * A file system that crashes after `survive` mutations (a durable temp write
- * or a rename): from then on every call fails, as if the app had died.
+ * A file system that crashes after `survive` mutations (a durable temp write,
+ * a rename or an unlink): from then on every call fails, as if the app had
+ * died.
  */
 function crashingFileSystem(survive = Infinity) {
   let mutations = 0;
@@ -491,7 +889,7 @@ function crashingFileSystem(survive = Infinity) {
     exists: guarded(nodeFileSystem.exists),
     readdir: guarded(nodeFileSystem.readdir),
     mkdir: guarded(nodeFileSystem.mkdir),
-    unlink: guarded(nodeFileSystem.unlink),
+    unlink: mutate(nodeFileSystem.unlink),
     writeFileDurable: mutate(nodeFileSystem.writeFileDurable),
     rename: mutate(nodeFileSystem.rename),
   };
@@ -506,6 +904,11 @@ describe('a crash during a structure operation', () => {
     b: string;
     c: string;
     stray: string;
+    /** A Scene deleted from Chapter one. */
+    t: string;
+    /** A Chapter deleted with its Scene d. */
+    three: string;
+    d: string;
   };
   const operations: [
     string,
@@ -519,37 +922,58 @@ describe('a crash during a structure operation', () => {
     ['moveScene to another Chapter', (s, f) => s.moveScene(f.b, f.two, 0)],
     ['moveScene from Unplaced', (s, f) => s.moveScene(f.stray, f.two, 1)],
     ['moveChapter', (s, f) => s.moveChapter(f.two, 0)],
+    ['trashScene', (s, f) => s.trashScene(f.a)],
+    ['trashScene from Unplaced', (s, f) => s.trashScene(f.stray)],
+    ['trashChapter', (s, f) => s.trashChapter(f.one)],
+    ['restore a Scene', (s, f) => s.restore(f.t)],
+    ['restore a Chapter', (s, f) => s.restore(f.three)],
   ];
 
-  /** A Project with two Chapters, three Scenes and one Unplaced Scene. */
+  /**
+   * A Project with two Chapters, three Scenes and one Unplaced Scene, and in
+   * Trash a Scene and a Chapter holding one.
+   */
   async function fixture(projectPath: string): Promise<Fixture> {
     const store = await createProject(projectPath, deps());
     const one = store.manuscript().chapters[0].id;
     const a = store.manuscript().chapters[0].scenes[0].id;
+    await store.write(sceneRef(a), { id: a, markdown: 'Prose of a.' });
     const b = (await store.createScene(one, 1, 'B')).id;
     const two = (await store.createChapter(1, 'Two')).id;
     const c = (await store.createScene(two, 0, 'C')).id;
+    const t = (await store.createScene(one, 2, 'T')).id;
+    await store.write(sceneRef(t), { id: t, markdown: 'Prose of t.' });
+    await store.trashScene(t);
+    const three = (await store.createChapter(2, 'Three')).id;
+    const d = (await store.createScene(three, 0, 'D')).id;
+    await store.trashChapter(three);
     const stray = '0b9f4a52-3c1e-4d7a-9f5e-2a6c8b1d4e70';
     await writeFile(
       path.join(projectPath, 'scenes', `${stray}.md`),
       `---\nid: ${stray}\nformat: 1\n---\n`,
     );
     await store.close();
-    return { one, two, a, b, c, stray };
+    return { one, two, a, b, c, stray, t, three, d };
   }
 
-  /** Replaces ids the fixture doesn't know (made by the operation) with 'new'. */
-  function anonymise(manuscript: Manuscript, f: Fixture): Manuscript {
+  type State = { manuscript: Manuscript; trash: string[] };
+
+  /** The Manuscript and Trash, with ids the fixture doesn't know as 'new'. */
+  function state(store: ProjectStore, f: Fixture): State {
     const known = new Set(Object.values(f));
     const node = <T extends { id: string }>(n: T): T =>
       known.has(n.id) ? n : { ...n, id: 'new' };
+    const manuscript = store.manuscript();
     return {
-      chapters: manuscript.chapters.map((c) => ({
-        ...node(c),
-        scenes: c.scenes.map(node),
-      })),
-      // Unplaced Scenes are sorted by id, so a new one lands anywhere.
-      unplaced: manuscript.unplaced.map(node).sort(byId),
+      manuscript: {
+        chapters: manuscript.chapters.map((c) => ({
+          ...node(c),
+          scenes: c.scenes.map(node),
+        })),
+        // Unplaced Scenes are sorted by id, so a new one lands anywhere.
+        unplaced: manuscript.unplaced.map(node).sort(byId),
+      },
+      trash: ids(store.listTrash()).sort(),
     };
   }
 
@@ -566,14 +990,8 @@ describe('a crash during a structure operation', () => {
         await openProject(reference, { ...deps(), fs: counting.fs }),
         f,
       );
-      const before = anonymise(
-        (await openProject(original, deps())).manuscript(),
-        f,
-      );
-      const after = anonymise(
-        (await openProject(reference, deps())).manuscript(),
-        f,
-      );
+      const before = state(await openProject(original, deps()), f);
+      const after = state(await openProject(reference, deps()), f);
       expect(counting.mutations()).toBeGreaterThan(0);
 
       for (let survive = 0; survive < counting.mutations(); survive++) {
@@ -586,37 +1004,84 @@ describe('a crash during a structure operation', () => {
         });
         await expect(operation(store, f)).rejects.toThrow('crashed');
 
-        const reopened = (await openProject(projectPath, deps())).manuscript();
+        const reopened = await openProject(projectPath, deps());
         // Either as before or as after the operation. A new Scene whose file
         // was written before the crash is Unplaced: never lost, never Missing.
-        const result = anonymise(reopened, f);
-        const createdButUnplaced = result.unplaced.some((s) => s.id === 'new');
+        const result = state(reopened, f);
+        const createdButUnplaced = result.manuscript.unplaced.some(
+          (s) => s.id === 'new',
+        );
         expect(
           createdButUnplaced
             ? [
                 {
                   ...before,
-                  unplaced: [
-                    ...before.unplaced,
-                    { id: 'new', title: 'Untitled Scene' },
-                  ].sort(byId),
+                  manuscript: {
+                    ...before.manuscript,
+                    unplaced: [
+                      ...before.manuscript.unplaced,
+                      { id: 'new', title: 'Untitled Scene' },
+                    ].sort(byId),
+                  },
                 },
               ]
             : [before, after],
         ).toContainEqual(result);
+        // The Prose goes along wherever the Scene ends up.
+        for (const id of [f.a, f.t]) {
+          const trashed = reopened
+            .listTrash()
+            .flatMap((item) =>
+              item.kind === 'chapter' ? ids(item.scenes) : [item.id],
+            );
+          if (trashed.includes(id)) continue;
+          expect((await reopened.read(sceneRef(id))).markdown).toMatch(
+            /^Prose of/,
+          );
+        }
         expect(
           (await listFiles(projectPath)).filter((p) => p.endsWith('.tmp')),
         ).toEqual([]);
         // Opening again changes nothing.
-        expect((await openProject(projectPath, deps())).manuscript()).toEqual(
-          reopened,
+        expect(state(await openProject(projectPath, deps()), f)).toEqual(
+          result,
         );
       }
     },
   );
+
+  it('emptyTrash leaves what it did not reach restorable after a crash', async () => {
+    const original = path.join(dir, 'original');
+    const f = await fixture(original);
+    const reference = path.join(dir, 'reference');
+    await cp(original, reference, { recursive: true });
+    const counting = crashingFileSystem();
+    await (
+      await openProject(reference, { ...deps(), fs: counting.fs })
+    ).emptyTrash();
+    const before = state(await openProject(original, deps()), f);
+
+    for (let survive = 0; survive < counting.mutations(); survive++) {
+      const projectPath = path.join(dir, `crash-${survive}`);
+      await cp(original, projectPath, { recursive: true });
+      const store = await openProject(projectPath, {
+        ...deps(),
+        fs: crashingFileSystem(survive).fs,
+      });
+      await expect(store.emptyTrash()).rejects.toThrow('crashed');
+
+      const reopened = await openProject(projectPath, deps());
+      expect(state(reopened, f).manuscript).toEqual(before.manuscript);
+      for (const item of reopened.listTrash()) await reopened.restore(item.id);
+      expect(
+        reopened.manuscript().chapters.flatMap((c) => c.scenes),
+      ).not.toContainEqual(expect.objectContaining({ missing: true }));
+    }
+  });
 });
 
 const ids = (nodes: { id: string }[]) => nodes.map((n) => n.id);
+const sceneRef = (id: string) => ({ kind: 'scene', id }) as const;
 const byId = (a: { id: string }, b: { id: string }) =>
   a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
 
