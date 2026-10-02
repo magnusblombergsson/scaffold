@@ -1,5 +1,10 @@
 import { contextBridge, ipcRenderer } from 'electron';
-import { channel, type ProjectApi, type ShellApi } from '../shared/api';
+import {
+  channel,
+  type ProjectApi,
+  type ProjectEvent,
+  type ShellApi,
+} from '../shared/api';
 
 const project: ProjectApi = {
   manuscript: () => ipcRenderer.invoke(channel.project('manuscript')),
@@ -8,6 +13,7 @@ const project: ProjectApi = {
     ipcRenderer.invoke(channel.project('write'), ref, value),
   flush: () => ipcRenderer.invoke(channel.project('flush')),
   hasUnsaved: () => ipcRenderer.invoke(channel.project('hasUnsaved')),
+  saveStatuses: () => ipcRenderer.invoke(channel.project('saveStatuses')),
   createChapter: (index, title) =>
     ipcRenderer.invoke(channel.project('createChapter'), index, title),
   createScene: (chapterId, index, title) =>
@@ -28,6 +34,13 @@ const project: ProjectApi = {
   undo: (step) => ipcRenderer.invoke(channel.project('undo'), step),
   listTrash: () => ipcRenderer.invoke(channel.project('listTrash')),
   emptyTrash: () => ipcRenderer.invoke(channel.project('emptyTrash')),
+  subscribe(listener) {
+    const forward = (_event: unknown, event: ProjectEvent) => listener(event);
+    ipcRenderer.on(channel.projectEvent, forward);
+    return () => {
+      ipcRenderer.off(channel.projectEvent, forward);
+    };
+  },
 };
 
 const flushListeners = new Set<() => void>();

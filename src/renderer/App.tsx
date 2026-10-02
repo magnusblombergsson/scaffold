@@ -11,6 +11,7 @@ import { Binder, type Selection } from './Binder';
 import { OutlineNotes } from './OutlineNotes';
 import { PanelResizer } from './PanelResizer';
 import { flushPendingEdits } from './pending-edits';
+import { SaveFailureBanner, SaveIndicator, useSaveStatus } from './SaveStatus';
 import { SceneEditor } from './SceneEditor';
 import { StartScreen } from './StartScreen';
 import { TrashView } from './TrashView';
@@ -98,6 +99,7 @@ function ProjectView({
   const [outlineNotesOpen, setOutlineNotesOpen] = useState(
     project.view.outlineNotesOpen ?? true,
   );
+  const saveStatus = useSaveStatus();
 
   useEffect(() => {
     if (openSceneId) window.shell.saveView({ lastSceneId: openSceneId });
@@ -169,8 +171,13 @@ function ProjectView({
               ? openChapter.title
               : selected?.kind === 'project' && 'Project Outline'}
         </span>
+        <SaveIndicator {...saveStatus} />
         <span className="header-actions">{headerActions}</span>
       </header>
+      <SaveFailureBanner
+        statuses={saveStatus.statuses}
+        manuscript={manuscript}
+      />
       {error && <p role="alert">{error}</p>}
       <div className="project-body">
         <aside className="left-pane" style={{ width: binderWidth }}>

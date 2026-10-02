@@ -3,6 +3,7 @@ import path from 'node:path';
 import {
   PROJECT_OUTLINE,
   proseLanguage,
+  unitKey,
   type ChapterNode,
   type Manuscript,
   type NotesRef,
@@ -19,10 +20,15 @@ import {
   type UnitValue,
   type ValueOf,
 } from '../../shared/project-types';
-import type { Changed, Created } from '../../shared/api';
+import type {
+  Changed,
+  Created,
+  ProjectEvent,
+  UnitSaveStatus,
+} from '../../shared/api';
 import type { Clock } from './clock';
 import type { FileSystem } from './file-system';
-import { safeWrite } from './safe-write';
+import { safeWrite, writeFailureReason } from './safe-write';
 import { formatUnitFile, parseUnitFile, type UnitFile } from './unit-file';
 
 export const FORMAT = 1;
@@ -48,7 +54,8 @@ export class ProjectError extends Error {
       | 'last-chapter'
       | 'in-manuscript'
       | 'in-trash'
-      | 'not-latest',
+      | 'not-latest'
+      | 'unsaved',
     message: string,
   ) {
     super(message);
@@ -326,6 +333,9 @@ async function readJson<T>(fs: FileSystem, file: string): Promise<T | null> {
 
 type Pending = { ref: UnitRef; value: UnitValue };
 
+/** How long a unit that failed to save waits before the next try, by failures in a row. */
+const RETRY_BACKOFF_MS = [1000, 2000, 5000, 10_000, 30_000];
+
 /** The latest structure operation, and how to revert it. */
 type Step = { step: number; undo: () => Promise<void> };
 
@@ -334,6 +344,14 @@ export class ProjectStore {
   private readonly unsaved = new Map<string, Pending>();
   /** The running write loop per unit, so writes to one unit never overlap. */
   private readonly writing = new Map<string, Promise<void>>();
+  /** The save status last reported per unit; none means saved. */
+  private readonly status = new Map<string, UnitSaveStatus>();
+  /** Failed tries in a row per unit; the next try waits longer after each. */
+  private readonly failures = new Map<string, number>();
+  /** The one retry per failed unit that may still run, by a token unique to it. */
+  private readonly retries = new Map<string, number>();
+  private retryTokens = 0;
+  private readonly listeners = new Set<(event: ProjectEvent) => void>();
 
   private readonly files: Set<string>;
   private readonly trash: Map<string, Trashed>;
@@ -605,7 +623,7 @@ export class ProjectStore {
     for (const ref of [outlineRef(id), notesRef(id)]) {
       const key = unitKey(ref);
       while (this.writing.has(key)) await this.writing.get(key);
-      this.unsaved.delete(key);
+      this.settle(key);
       const file = unitPath(this.path, ref);
       if (await this.deps.fs.exists(file)) await this.deps.fs.unlink(file);
     }
@@ -719,7 +737,8 @@ export class ProjectStore {
       await toTrash(prose);
       for (const id of ids) {
         this.files.delete(id);
-        this.unsaved.delete(unitKey(sceneRef(id)));
+        // Its Prose is in Trash now.
+        this.settle(unitKey(sceneRef(id)));
       }
       for (const id of ids) {
         await this.deps.fs.unlink(scenePath(this.path, id));
@@ -914,21 +933,25 @@ export class ProjectStore {
   /**
    * Resolves once main has accepted the value, not when it is on disk.
    * Rejects for a Missing unit, which is never recreated, and a trashed one.
+   * A failure to save it is never thrown: it shows as a `unitSaveStatus`.
    */
   async write<R extends UnitRef>(ref: R, value: ValueOf<R>): Promise<void> {
     this.refuseUnavailable(ref);
     const key = unitKey(ref);
     this.unsaved.set(key, { ref, value: structuredClone(value) });
-    if (!this.writing.has(key)) {
-      this.writing.set(
-        key,
-        this.drain(key).finally(() => this.writing.delete(key)),
-      );
-    }
+    // A failed unit stays failed until it is saved, and its next try waits
+    // for the backoff, which picks up this value.
+    if (this.failures.has(key)) return;
+    this.report({ type: 'unitSaveStatus', ref, state: 'saving' });
+    this.startWriting(key);
   }
 
-  /** Resolves when every accepted value has been written, or has failed to. */
+  /**
+   * Resolves when every accepted value has been written, or has failed to.
+   * A unit waiting to try again after a failure tries at once.
+   */
   async flush(): Promise<void> {
+    for (const key of this.failures.keys()) this.startWriting(key);
     while (this.writing.size > 0) {
       await Promise.all(this.writing.values());
     }
@@ -938,8 +961,41 @@ export class ProjectStore {
     return this.unsaved.size > 0;
   }
 
+  /** The status of each unit that isn't saved; a failed one is still being retried. */
+  saveStatuses(): UnitSaveStatus[] {
+    return [...this.status.values()].map((status) => structuredClone(status));
+  }
+
+  /** Calls `listener` with each event; returns an unsubscribe function. */
+  subscribe(listener: (event: ProjectEvent) => void): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  /** Flushes, and refuses while anything is unsaved: unsaved changes are never discarded. */
   async close(): Promise<void> {
     await this.flush();
+    if (this.hasUnsaved()) {
+      throw new ProjectError(
+        'unsaved',
+        `${this.displayName} can't close: some changes aren't saved yet`,
+      );
+    }
+  }
+
+  private startWriting(key: string): void {
+    if (this.writing.has(key)) return;
+    this.writing.set(
+      key,
+      this.drain(key).finally(() => {
+        this.writing.delete(key);
+        const failures = this.failures.get(key);
+        if (failures !== undefined) void this.retryLater(key, failures);
+        else this.retries.delete(key);
+      }),
+    );
   }
 
   private async drain(key: string): Promise<void> {
@@ -958,14 +1014,72 @@ export class ProjectStore {
           unitFile(pending.ref, pending.value),
         );
       } catch (error) {
-        // The unit stays unsaved; the next write retries it. Reporting the
-        // failure to the Author comes with save status handling.
+        // The unit stays unsaved in memory, and is tried again later.
         console.error(`Can't save ${key}:`, error);
+        const failures = (this.failures.get(key) ?? 0) + 1;
+        this.failures.set(key, failures);
+        this.report({
+          type: 'unitSaveStatus',
+          ref: pending.ref,
+          state: 'failed',
+          reason: writeFailureReason(error),
+        });
         return;
       }
-      if (this.unsaved.get(key) === pending) this.unsaved.delete(key);
+      this.failures.delete(key);
+      const done = this.unsaved.get(key) === pending;
+      if (done) this.unsaved.delete(key);
+      this.report({
+        type: 'unitSaveStatus',
+        ref: pending.ref,
+        state: done ? 'saved' : 'saving',
+      });
     }
   }
+
+  /**
+   * Tries a failed unit again after its backoff. A retry scheduled since, or
+   * a save, makes this one stale.
+   */
+  private async retryLater(key: string, failures: number): Promise<void> {
+    const token = ++this.retryTokens;
+    this.retries.set(key, token);
+    const index = Math.min(failures, RETRY_BACKOFF_MS.length) - 1;
+    await this.deps.clock.sleep(RETRY_BACKOFF_MS[index]);
+    if (this.retries.get(key) === token) this.startWriting(key);
+  }
+
+  /** Drops a unit's unsaved value once it is kept elsewhere or deleted. */
+  private settle(key: string): void {
+    this.unsaved.delete(key);
+    this.failures.delete(key);
+    this.retries.delete(key);
+    const status = this.status.get(key);
+    if (status) {
+      this.report({ type: 'unitSaveStatus', ref: status.ref, state: 'saved' });
+    }
+  }
+
+  /** Tells the listeners when a unit's save status changes. */
+  private report(status: UnitSaveStatus): void {
+    const key = unitKey(status.ref);
+    if (sameStatus(this.status.get(key), status)) return;
+    if (status.state === 'saved') this.status.delete(key);
+    else this.status.set(key, status);
+    for (const listener of this.listeners) listener(structuredClone(status));
+  }
+}
+
+/** Whether `status` says nothing new; no status is saved. */
+function sameStatus(
+  was: UnitSaveStatus | undefined,
+  status: UnitSaveStatus,
+): boolean {
+  if (!was) return status.state === 'saved';
+  if (was.state === 'failed' && status.state === 'failed') {
+    return was.reason === status.reason;
+  }
+  return was.state === status.state;
 }
 
 function sceneIds(tree: ProjectTree): string[] {
@@ -1008,10 +1122,6 @@ function outlineRef(id: string): OutlineRef {
 
 function notesRef(id: string): NotesRef {
   return { kind: 'notes', id };
-}
-
-function unitKey(ref: UnitRef): string {
-  return `${ref.kind}:${ref.id}`;
 }
 
 function scenePath(projectPath: string, id: string): string {

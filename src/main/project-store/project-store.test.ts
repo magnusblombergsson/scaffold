@@ -9,12 +9,17 @@ import {
 } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createProject, openProject, type ProjectStore } from './project-store';
-import { PROJECT_OUTLINE, type Manuscript } from '../../shared/project-types';
+import {
+  PROJECT_OUTLINE,
+  type Manuscript,
+  type UnitRef,
+} from '../../shared/project-types';
 import type { Changed } from '../../shared/api';
 import { nodeFileSystem, type FileSystem } from './file-system';
-import { instantClock } from './clock';
+import { heldClock, instantClock, type Clock } from './clock';
+import { faultyFileSystem } from './faulty-file-system';
 
 let dir: string;
 const deps = () => ({ fs: nodeFileSystem, clock: instantClock() });
@@ -250,6 +255,228 @@ describe('ProjectStore', () => {
     expect(reopened.id).toBe(store.id);
     expect(reopened.tree()).toEqual(tree);
     expect((await openProject(original, deps())).id).toBe(oldId);
+  });
+});
+
+describe('Save status and save failures', () => {
+  /** The save states the store reports for `ref`, in order. */
+  function statuses(store: ProjectStore, ref: UnitRef): string[] {
+    const seen: string[] = [];
+    store.subscribe((event) => {
+      if (event.type !== 'unitSaveStatus' || event.ref.id !== ref.id) return;
+      if (event.ref.kind !== ref.kind) return;
+      seen.push(
+        event.state === 'failed' ? `failed: ${event.reason}` : event.state,
+      );
+    });
+    return seen;
+  }
+
+  async function project(clock: Clock = instantClock()) {
+    const projectPath = path.join(dir, 'My Novel');
+    await (await createProject(projectPath, deps())).close();
+    const faulty = faultyFileSystem();
+    const store = await openProject(projectPath, { fs: faulty.fs, clock });
+    const ref = {
+      kind: 'scene',
+      id: store.tree().chapters[0].scenes[0].id,
+    } as const;
+    const onDisk = async () =>
+      (await openProject(projectPath, deps())).read(ref);
+    return { projectPath, faulty, store, ref, onDisk };
+  }
+
+  it('reports a unit saving, then saved once it is on disk', async () => {
+    const { store, ref } = await project();
+    const seen = statuses(store, ref);
+
+    await store.write(ref, { id: ref.id, markdown: 'One.' });
+    await store.write(ref, { id: ref.id, markdown: 'One. Two.' });
+    await store.flush();
+
+    expect(seen).toEqual(['saving', 'saved']);
+  });
+
+  it('keeps a unit that the full disk refuses in memory, and retries it with backoff until it is saved', async () => {
+    const clock = heldClock();
+    const { faulty, store, ref, onDisk } = await project(clock);
+    const seen = statuses(store, ref);
+    faulty.fail('ENOSPC');
+
+    // Never thrown: the failure shows only as a status.
+    await store.write(ref, { id: ref.id, markdown: 'Not lost.' });
+    await store.flush();
+
+    expect(seen).toEqual(['saving', 'failed: the disk is full']);
+    expect(store.hasUnsaved()).toBe(true);
+    expect(await store.read(ref)).toEqual({
+      id: ref.id,
+      markdown: 'Not lost.',
+    });
+    expect(store.saveStatuses()).toEqual([
+      {
+        type: 'unitSaveStatus',
+        ref,
+        state: 'failed',
+        reason: 'the disk is full',
+      },
+    ]);
+
+    const [first] = clock.sleeping();
+    clock.wake();
+    await vi.waitUntil(() => clock.sleeping().length > 0);
+    expect(clock.sleeping()[0]).toBeGreaterThan(first);
+    expect(seen).toHaveLength(2);
+
+    faulty.heal();
+    clock.wake();
+    await vi.waitUntil(() => !store.hasUnsaved());
+    expect(seen).toEqual(['saving', 'failed: the disk is full', 'saved']);
+    expect(store.saveStatuses()).toEqual([]);
+    expect(await onDisk()).toEqual({ id: ref.id, markdown: 'Not lost.' });
+  });
+
+  it('reports a file still locked once rename retries are used up, and saves it on a later try', async () => {
+    const { faulty, store, ref, onDisk } = await project();
+    const seen = statuses(store, ref);
+    // One more failure than the rename itself retries.
+    faulty.fail('EPERM', 7);
+
+    await store.write(ref, { id: ref.id, markdown: 'Locked.' });
+    await store.flush();
+    await vi.waitUntil(() => !store.hasUnsaved());
+
+    expect(seen).toEqual(['saving', 'failed: permission denied', 'saved']);
+    expect(await onDisk()).toEqual({ id: ref.id, markdown: 'Locked.' });
+  });
+
+  it('reports a sync client that blocks hydration, and saves once it lets go', async () => {
+    const clock = heldClock();
+    const { faulty, store, ref, onDisk } = await project(clock);
+    const seen = statuses(store, ref);
+    faulty.fail('hydration-blocked');
+
+    await store.write(ref, { id: ref.id, markdown: 'Waiting.' });
+    await store.flush();
+    expect(seen).toEqual([
+      'saving',
+      'failed: the disk or sync client refused it (UNKNOWN)',
+    ]);
+
+    faulty.heal();
+    clock.wake();
+    await vi.waitUntil(() => !store.hasUnsaved());
+    expect(await onDisk()).toEqual({ id: ref.id, markdown: 'Waiting.' });
+  });
+
+  it('keeps the failed status while more edits come, and saves the latest', async () => {
+    const clock = heldClock();
+    const { faulty, store, ref, onDisk } = await project(clock);
+    const seen = statuses(store, ref);
+    faulty.fail('ENOSPC');
+
+    await store.write(ref, { id: ref.id, markdown: 'One.' });
+    await store.flush();
+    await store.write(ref, { id: ref.id, markdown: 'One. Two.' });
+    await store.flush();
+    expect(seen).toEqual(['saving', 'failed: the disk is full']);
+
+    faulty.heal();
+    clock.wake();
+    await vi.waitUntil(() => !store.hasUnsaved());
+    expect(await onDisk()).toEqual({ id: ref.id, markdown: 'One. Two.' });
+  });
+
+  it('lets new edits to a failed unit wait for its backoff', async () => {
+    const clock = heldClock();
+    const { faulty, store, ref, onDisk } = await project(clock);
+    faulty.fail('ENOSPC');
+    await store.write(ref, { id: ref.id, markdown: 'One.' });
+    await store.flush();
+    faulty.heal();
+
+    await store.write(ref, { id: ref.id, markdown: 'One. Two.' });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(await onDisk()).toEqual({ id: ref.id, markdown: '' });
+
+    clock.wake();
+    await vi.waitUntil(() => !store.hasUnsaved());
+    expect(await onDisk()).toEqual({ id: ref.id, markdown: 'One. Two.' });
+  });
+
+  it('tries a failed unit again at once on flush, without waiting for the backoff', async () => {
+    const clock = heldClock();
+    const { faulty, store, ref, onDisk } = await project(clock);
+    faulty.fail('ENOSPC');
+    await store.write(ref, { id: ref.id, markdown: 'Saved by Ctrl+S.' });
+    await store.flush();
+    expect(store.hasUnsaved()).toBe(true);
+
+    faulty.heal();
+    await store.flush();
+
+    expect(store.hasUnsaved()).toBe(false);
+    expect(await onDisk()).toEqual({
+      id: ref.id,
+      markdown: 'Saved by Ctrl+S.',
+    });
+  });
+
+  it('refuses to close while anything is unsaved, and closes once it is saved', async () => {
+    const clock = heldClock();
+    const { faulty, store, ref, onDisk } = await project(clock);
+    faulty.fail('ENOSPC');
+    await store.write(ref, { id: ref.id, markdown: 'Never discarded.' });
+
+    await expect(store.close()).rejects.toMatchObject({ reason: 'unsaved' });
+    expect(await store.read(ref)).toEqual({
+      id: ref.id,
+      markdown: 'Never discarded.',
+    });
+
+    faulty.heal();
+    await expect(store.close()).resolves.toBeUndefined();
+    expect(await onDisk()).toEqual({
+      id: ref.id,
+      markdown: 'Never discarded.',
+    });
+  });
+
+  it('clears a failed status when the unit goes to Trash with its Prose', async () => {
+    const clock = heldClock();
+    const { faulty, store, ref } = await project(clock);
+    const seen = statuses(store, ref);
+    faulty.fail('ENOSPC', 1);
+    await store.write(ref, { id: ref.id, markdown: 'Into Trash.' });
+    await store.flush();
+
+    await store.trashScene(ref.id);
+
+    expect(seen).toEqual(['saving', 'failed: the disk is full', 'saved']);
+    expect(store.hasUnsaved()).toBe(false);
+    expect(store.saveStatuses()).toEqual([]);
+  });
+
+  it('sweeps leftover temp files on open', async () => {
+    const projectPath = path.join(dir, 'My Novel');
+    const store = await createProject(projectPath, deps());
+    const sceneId = store.tree().chapters[0].scenes[0].id;
+    await store.write(
+      { kind: 'outline', id: sceneId },
+      { id: sceneId, body: '- Beat', meta: {} },
+    );
+    await store.close();
+    await mkdir(path.join(projectPath, 'trash'));
+    const leftovers = ['', 'scenes', 'outlines', 'trash'].map((d) =>
+      path.join(projectPath, d, `${sceneId}.md.0f0e.tmp`),
+    );
+    for (const file of leftovers) await writeFile(file, 'half written');
+
+    await openProject(projectPath, deps());
+
+    const files = await listFiles(projectPath);
+    expect(files.filter((f) => f.endsWith('.tmp'))).toEqual([]);
+    expect(files).toContain(path.join('scenes', `${sceneId}.md`));
   });
 });
 

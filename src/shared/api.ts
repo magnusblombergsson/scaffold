@@ -18,13 +18,36 @@ export type Changed = { manuscript: Manuscript; step: number };
 /** A structure operation that made a Chapter or Scene: its id, and the result. */
 export type Created = Changed & { id: string };
 
+/**
+ * Where main is with saving a unit: `failed` keeps its value unsaved in
+ * memory, and main tries it again, waiting longer each time.
+ */
+export type UnitSaveStatus =
+  | { type: 'unitSaveStatus'; ref: UnitRef; state: 'saving' | 'saved' }
+  | { type: 'unitSaveStatus'; ref: UnitRef; state: 'failed'; reason: string };
+
+/** A unit that failed to save, and why. */
+export type SaveFailure = { ref: UnitRef; reason: string };
+
+/** What main tells a window about its Project as it happens. */
+export type ProjectEvent = UnitSaveStatus;
+
 /** Mirrors the main-process ProjectStore of this window's Project. */
 export interface ProjectApi {
   manuscript(): Promise<Manuscript>;
   read<R extends UnitRef>(ref: R): Promise<ValueOf<R>>;
+  /**
+   * Resolves once main has the value, not once it is on disk; a failure to
+   * save it shows only as a `unitSaveStatus` event.
+   */
   write<R extends UnitRef>(ref: R, value: ValueOf<R>): Promise<void>;
+  /** Writes every accepted value now, trying failed ones again at once. */
   flush(): Promise<void>;
   hasUnsaved(): Promise<boolean>;
+  /** The status of each unit that isn't saved, as of now. */
+  saveStatuses(): Promise<UnitSaveStatus[]>;
+  /** Calls `listener` with each event; returns an unsubscribe function. */
+  subscribe(listener: (event: ProjectEvent) => void): () => void;
 
   // Structure operations change project.json, and move unit files in and out
   // of Trash. They resolve once the change is on disk.
@@ -136,6 +159,7 @@ export const channel = {
   saveView: 'shell:saveView',
   flushRequest: 'shell:flushRequest',
   flushed: 'shell:flushed',
+  projectEvent: 'project:event',
 } as const;
 
 declare global {

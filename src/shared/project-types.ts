@@ -11,6 +11,11 @@ export type OutlineRef = { kind: 'outline'; id: string };
 export type NotesRef = { kind: 'notes'; id: string };
 export type UnitRef = SceneRef | OutlineRef | NotesRef;
 
+/** A unit's key in maps, such as `scene:<id>`. */
+export function unitKey(ref: UnitRef): string {
+  return `${ref.kind}:${ref.id}`;
+}
+
 export type SceneValue = { id: string; markdown: string };
 /**
  * An Outline's bullets as plain text, and its unit's metadata (such as POV,

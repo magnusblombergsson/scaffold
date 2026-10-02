@@ -134,9 +134,11 @@ test('a stray Scene file shows as Unplaced, and a missing one is shown but never
   await expect(
     scene(reopened, 'Scene 1 Missing, possibly not synced yet'),
   ).toHaveAttribute('aria-current', 'true');
-  await expect(reopened.getByRole('status')).toContainText(
-    'Scene 1 is missing, possibly not synced yet',
-  );
+  await expect(
+    reopened
+      .getByRole('status')
+      .filter({ hasText: 'Scene 1 is missing, possibly not synced yet' }),
+  ).toBeVisible();
   await expect(reopened.getByLabel('Prose')).toHaveCount(0);
 
   const unplaced = reopened.getByRole('region', { name: 'Unplaced Scenes' });

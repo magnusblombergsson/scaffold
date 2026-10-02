@@ -216,6 +216,36 @@ button.recent-open:hover {
   padding: 0 1rem;
 }
 
+.save-status {
+  color: var(--muted);
+  font-size: 0.85rem;
+  transition: color 0.2s;
+}
+
+.save-status.confirmed {
+  color: var(--fg);
+  font-weight: 600;
+}
+
+.save-status.failed {
+  color: #b3261e;
+  font-weight: 600;
+}
+
+.save-failures {
+  border-bottom: 1px solid #b3261e;
+  background: rgb(179 38 30 / 8%);
+  padding: 0.5rem 1rem;
+}
+
+.save-failures p {
+  margin: 0.25rem 0;
+}
+
+.save-failures-detail {
+  font-size: 0.85rem;
+}
+
 .project-body {
   display: flex;
   flex: 1;

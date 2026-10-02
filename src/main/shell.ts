@@ -14,6 +14,7 @@ import type {
   RecentProject,
 } from '../shared/api';
 import { channel } from '../shared/api';
+import { unitName } from '../shared/unit-name';
 import {
   loadAppSettings,
   samePath,
@@ -39,6 +40,8 @@ let settings: AppSettings;
 
 /** The open Project of each window, keyed by its webContents id. */
 const stores = new Map<number, ProjectStore>();
+/** Stops sending a window its store's events, by webContents id. */
+const unsubscribes = new Map<number, () => void>();
 
 let quitting = false;
 
@@ -56,12 +59,14 @@ export async function startShell(): Promise<void> {
   // A quit waits until every window's Project is closed, its edits on disk,
   // then asks again. Those Projects stay listed to reopen at startup.
   app.on('before-quit', (event) => {
-    quitting = true;
-    if (stores.size === 0) return;
+    if (stores.size === 0) {
+      quitting = true;
+      return;
+    }
     event.preventDefault();
-    void Promise.all(
-      BrowserWindow.getAllWindows().map((window) => closeProject(window)),
-    ).then(() => app.quit());
+    if (quitting) return;
+    quitting = true;
+    void quitWhenSaved();
   });
   // Every window is closed by now. A quit asked for again after will-quit is
   // held up doesn't go through, so exit once the settings are on disk.
@@ -158,6 +163,12 @@ function windowShowing(projectPath: string): BrowserWindow | undefined {
 /** Makes `store` the Project of the window with these contents. */
 function attach(contents: WebContents, store: ProjectStore): void {
   stores.set(contents.id, store);
+  unsubscribes.set(
+    contents.id,
+    store.subscribe((event) => {
+      if (!contents.isDestroyed()) contents.send(channel.projectEvent, event);
+    }),
+  );
   settings.recordOpened({
     path: store.path,
     id: store.id,
@@ -344,7 +355,8 @@ const closing = new Map<number, Promise<void>>();
 
 /**
  * Asks the window's renderer to hand over pending edits, waits until they are
- * on disk, then closes its Project.
+ * on disk, then closes its Project. Rejects, keeping the Project open, while
+ * anything can't be saved.
  */
 function closeProject(window: BrowserWindow): Promise<void> {
   const contents = window.webContents;
@@ -353,14 +365,84 @@ function closeProject(window: BrowserWindow): Promise<void> {
   let closed = closing.get(id);
   if (!closed) {
     closed = (async () => {
-      await requestRendererFlush(contents);
-      await stores.get(id)?.close();
-      stores.delete(id);
-      closing.delete(id);
+      try {
+        await requestRendererFlush(contents);
+        await stores.get(id)?.close();
+        unsubscribes.get(id)?.();
+        unsubscribes.delete(id);
+        stores.delete(id);
+      } finally {
+        closing.delete(id);
+      }
     })();
     closing.set(id, closed);
   }
   return closed;
+}
+
+/**
+ * Asks the window's renderer to hand over pending edits, and tries to write
+ * everything; false while anything is unsaved.
+ */
+async function saveWindow(window: BrowserWindow): Promise<boolean> {
+  const store = stores.get(window.webContents.id);
+  if (!store) return true;
+  await requestRendererFlush(window.webContents);
+  await store.flush();
+  return !store.hasUnsaved();
+}
+
+/**
+ * Quits once every window's Project is saved and closed. While any can't be
+ * saved, nothing closes and the Author is told why: unsaved changes are never
+ * discarded.
+ */
+async function quitWhenSaved(): Promise<void> {
+  const windows = BrowserWindow.getAllWindows().filter((window) =>
+    stores.has(window.webContents.id),
+  );
+  const saved = await Promise.all(windows.map(saveWindow));
+  let stuck = windows.filter((_, i) => !saved[i]);
+  if (stuck.length === 0) {
+    const closed = await Promise.allSettled(windows.map(closeProject));
+    stuck = windows.filter((_, i) => closed[i].status === 'rejected');
+    // An edit that failed between saving and closing: the windows already
+    // closed go, the rest stay.
+    if (stuck.length > 0) {
+      for (const window of windows) {
+        if (!stuck.includes(window)) window.close();
+      }
+    }
+  }
+  if (stuck.length === 0) {
+    app.quit();
+    return;
+  }
+  quitting = false;
+  for (const window of stuck) warnUnsaved(window);
+}
+
+/** Tells the Author why a window's Project can't close yet. */
+function warnUnsaved(window: BrowserWindow): void {
+  const store = stores.get(window.webContents.id);
+  if (!store || window.isDestroyed()) return;
+  const manuscript = store.manuscript();
+  const failures = store
+    .saveStatuses()
+    .flatMap((status) =>
+      status.state === 'failed'
+        ? [`Can't save ${unitName(status.ref, manuscript)}: ${status.reason}.`]
+        : [],
+    );
+  void dialog.showMessageBox(window, {
+    type: 'warning',
+    buttons: ['OK'],
+    message: `${store.displayName} has changes that aren't saved yet`,
+    detail: [
+      ...failures,
+      'Writing Tools stays open so that nothing is lost, and keeps trying to save. Close it again once the problem is fixed.',
+    ].join('\n\n'),
+  });
 }
 
 /**
@@ -372,14 +454,17 @@ function flushBeforeClose(window: BrowserWindow): void {
   window.on('close', (event) => {
     if (!stores.has(window.webContents.id)) return;
     event.preventDefault();
-    void closeProject(window).then(() => {
-      // Counted now, not when the close began: of windows closed together,
-      // the one closed last is kept.
-      if (!quitting && BrowserWindow.getAllWindows().length > 1) {
-        rememberOpenProjects();
-      }
-      window.close();
-    });
+    void closeProject(window).then(
+      () => {
+        // Counted now, not when the close began: of windows closed together,
+        // the one closed last is kept.
+        if (!quitting && BrowserWindow.getAllWindows().length > 1) {
+          rememberOpenProjects();
+        }
+        window.close();
+      },
+      () => warnUnsaved(window),
+    );
   });
 }
 

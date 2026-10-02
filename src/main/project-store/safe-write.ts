@@ -45,3 +45,20 @@ async function renameWithRetry(
     }
   }
 }
+
+const REASONS: Record<string, string> = {
+  ENOSPC: 'the disk is full',
+  EPERM: 'permission denied',
+  EACCES: 'permission denied',
+  EBUSY: 'the file is in use by another program',
+  EROFS: 'the disk is read-only',
+  ENOENT: 'its folder is gone',
+};
+
+/** Why a write failed, as the Author is told it. */
+export function writeFailureReason(error: unknown): string {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  if (code && code in REASONS) return REASONS[code];
+  // A message would name the file's path, which the renderer never sees.
+  return `the disk or sync client refused it${code ? ` (${code})` : ''}`;
+}

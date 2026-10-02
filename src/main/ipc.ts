@@ -9,8 +9,11 @@ import { channel, type ProjectApi } from '../shared/api';
 import type { ProjectStore } from './project-store/project-store';
 import { storeOf } from './shell';
 
-/** Every method but `emptyTrash`, which asks the Author first. */
-type StoreMethod = Exclude<keyof ProjectApi, 'emptyTrash'>;
+/**
+ * Every method but `emptyTrash`, which asks the Author first, and
+ * `subscribe`, whose events the shell sends to the window.
+ */
+type StoreMethod = Exclude<keyof ProjectApi, 'emptyTrash' | 'subscribe'>;
 
 type Handlers = {
   [K in StoreMethod]: (
@@ -25,6 +28,7 @@ const projectHandlers: Handlers = {
   write: (store, ref, value) => store.write(ref, value),
   flush: (store) => store.flush(),
   hasUnsaved: async (store) => store.hasUnsaved(),
+  saveStatuses: async (store) => store.saveStatuses(),
   createChapter: (store, index, title) => store.createChapter(index, title),
   createScene: (store, chapterId, index, title) =>
     store.createScene(chapterId, index, title),
