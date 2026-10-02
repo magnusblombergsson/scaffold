@@ -11,8 +11,9 @@ import {
 } from '../../shared/project-types';
 
 // How an Entry's type-specific fields sit in the frontmatter of
-// `bible/<id>.md`: `role`, `voice`, `senses` and `status`, each left out
-// while it has no value. As everywhere, what this app doesn't know is kept.
+// `bible/<id>.md`: `role`, `voice` and `senses`, each left out while it has
+// no value, and `status`, always written for a Plot Thread. As everywhere,
+// what this app doesn't know is kept.
 
 type Frontmatter = Record<string, unknown>;
 

@@ -270,7 +270,7 @@ test('changing an Entry’s type writes the fields that don’t fit into its des
   await expect(toast(page)).toContainText('Type changed to Item');
   await expect(page.getByRole('region', { name: 'Voice' })).toHaveCount(0);
   await expect(page.getByLabel('Description', { exact: true })).toHaveText(
-    'A ferry pilot.Role: supportingVoice traits: dry',
+    'A ferry pilot.Role: SupportingVoice traits: dry',
   );
   await expect(
     storyBible(page).getByRole('region', { name: 'Items' }),
@@ -280,7 +280,7 @@ test('changing an Entry’s type writes the fields that don’t fit into its des
   expect(file).toContain('type: item\n');
   expect(file).not.toContain('role:');
   expect(file).toMatch(
-    /A ferry pilot\.\n\nRole: supporting\nVoice traits: dry$/,
+    /A ferry pilot\.\n\nRole: Supporting\nVoice traits: dry$/,
   );
 
   await toast(page).getByRole('button', { name: 'Undo' }).click();

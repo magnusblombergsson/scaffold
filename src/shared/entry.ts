@@ -1,8 +1,10 @@
-import type {
-  EntryFields,
-  EntrySummary,
-  EntryType,
-  EntryValue,
+import {
+  ROLE_LABELS,
+  STATUS_LABELS,
+  type EntryFields,
+  type EntrySummary,
+  type EntryType,
+  type EntryValue,
 } from './project-types';
 
 /** The fields an Entry of `type` starts with: empty, and a Plot Thread open. */
@@ -75,7 +77,7 @@ function fieldLines({ role, voice, senses, status }: EntryFields): string[] {
   const add = (label: string, text: string) => {
     if (text.trim()) lines.push(`${label}: ${text}`);
   };
-  if (role) add('Role', role);
+  if (role) add('Role', ROLE_LABELS[role]);
   if (voice) {
     add('Voice traits', voice.traits);
     add('Says', voice.says.join(', '));
@@ -92,7 +94,7 @@ function fieldLines({ role, voice, senses, status }: EntryFields): string[] {
     add('Atmosphere', senses.atmosphere);
   }
   // Every Plot Thread starts open: only resolved says anything.
-  if (status === 'resolved') add('Status', status);
+  if (status === 'resolved') add('Status', STATUS_LABELS[status]);
   return lines;
 }
 

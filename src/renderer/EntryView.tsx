@@ -3,7 +3,9 @@ import { entryCollisions } from '../shared/entry';
 import {
   ENTRY_TYPE_LABELS,
   ENTRY_TYPES,
+  ROLE_LABELS,
   ROLES,
+  STATUS_LABELS,
   THREAD_STATUSES,
   unitKey,
   VISIBILITIES,
@@ -13,9 +15,7 @@ import {
   type EntryValue,
   type PrivateValue,
   type ProseLanguage,
-  type Role,
   type Senses,
-  type ThreadStatus,
   type UnitValue,
   type Visibility,
   type Voice,
@@ -33,17 +33,6 @@ export const VISIBILITY_LABELS: Record<Visibility, string> = {
   always: 'Always',
   mentioned: 'When mentioned',
   never: 'Never',
-};
-
-const ROLE_LABELS: Record<Role, string> = {
-  protagonist: 'Protagonist',
-  supporting: 'Supporting',
-  mentioned: 'Mentioned only',
-};
-
-const STATUS_LABELS: Record<ThreadStatus, string> = {
-  open: 'Open',
-  resolved: 'Resolved',
 };
 
 /** One item per line; blank lines and surrounding spaces don't count. */

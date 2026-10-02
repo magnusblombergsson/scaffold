@@ -423,7 +423,7 @@ describe('Changing an Entry’s type', () => {
 
     expect(await store.read(entry(id))).toMatchObject({
       type: 'place',
-      description: 'A ferry pilot.\n\nRole: supporting\nVoice traits: dry',
+      description: 'A ferry pilot.\n\nRole: Supporting\nVoice traits: dry',
       fields: {
         senses: { smells: '', sight: '', sound: '', touch: '', atmosphere: '' },
       },
@@ -455,7 +455,7 @@ describe('Changing an Entry’s type', () => {
     expect(await store.read(entry(id))).toMatchObject({
       type: 'character',
       name: 'Anna Berg',
-      description: 'Now: A ferry pilot.\n\nStatus: resolved',
+      description: 'Now: A ferry pilot.\n\nStatus: Resolved',
       fields: {
         role: 'supporting',
         voice: { traits: 'dry', says: [], neverSays: [], examples: [] },

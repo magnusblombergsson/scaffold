@@ -28,7 +28,7 @@ describe('changing an Entry’s type', () => {
       description: [
         'A ferry pilot.',
         '',
-        'Role: protagonist',
+        'Role: Protagonist',
         'Voice traits: clipped, dry',
         'Says: right then, aye',
         'Never says: okay',
@@ -92,7 +92,18 @@ describe('changing an Entry’s type', () => {
     };
 
     expect(changeEntryType(thread, 'theme').description).toBe(
-      'Who sank the Maria?\n\nStatus: resolved',
+      'Who sank the Maria?\n\nStatus: Resolved',
+    );
+  });
+
+  it('writes a Role as the Author chose it', () => {
+    const extra: EntryValue = {
+      ...anna,
+      fields: { ...anna.fields, role: 'mentioned' },
+    };
+
+    expect(changeEntryType(extra, 'other').description).toContain(
+      '\nRole: Mentioned only\n',
     );
   });
 });

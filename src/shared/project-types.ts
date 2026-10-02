@@ -61,6 +61,11 @@ export const ROLES: readonly Role[] = [
   'supporting',
   'mentioned',
 ];
+export const ROLE_LABELS: Record<Role, string> = {
+  protagonist: 'Protagonist',
+  supporting: 'Supporting',
+  mentioned: 'Mentioned only',
+};
 
 /**
  * A Character's Voice: traits (register, rhythm, tics), words they say and
@@ -85,6 +90,10 @@ export type Senses = {
 /** Whether a Plot Thread is still open. */
 export type ThreadStatus = 'open' | 'resolved';
 export const THREAD_STATUSES: readonly ThreadStatus[] = ['open', 'resolved'];
+export const STATUS_LABELS: Record<ThreadStatus, string> = {
+  open: 'Open',
+  resolved: 'Resolved',
+};
 
 /**
  * An Entry's type-specific fields: a Character has `role` and `voice`, a
