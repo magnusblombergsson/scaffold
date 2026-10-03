@@ -55,11 +55,13 @@ import {
   FIELD_LABELS,
   fieldOf,
   isFieldValue,
+  orphanedText,
   sameValue,
   withField,
   type EntryCreation,
   type EntryFieldChange,
   type FieldValue,
+  type NewEntry,
   type OutlineChange,
   type PendingProposal,
   type Proposal,
@@ -82,6 +84,7 @@ import {
   parseLog,
   proposedEvent,
   type ConversationEvent,
+  type Decision,
   type LoggedConversation,
   type LoggedProposal,
 } from './conversation-log';
@@ -150,7 +153,9 @@ export class ProjectError extends Error {
       | 'read-only'
       | 'decided'
       | 'orphaned'
-      | 'stale',
+      | 'stale'
+      | 'not-accepted'
+      | 'changed',
     message: string,
   ) {
     super(message);
@@ -2663,11 +2668,21 @@ export class ProjectStore {
     };
   }
 
-  /** Creates a new Entry under the id the Proposal gave it, as `acceptProposal`. */
+  /**
+   * Creates a new Entry under the id the Proposal gave it, as
+   * `acceptProposal`. Refuses once an undo moved it to Trash and it was
+   * changed there since: that copy is the Author's.
+   */
   private async acceptNewEntry(
-    { entryId }: EntryCreation,
+    { entryId, state }: EntryCreation & { state: ProposalState },
     value: ProposedValue,
   ): Promise<Accepted> {
+    if ('orphaned' in state) {
+      throw new ProjectError(
+        'orphaned',
+        'Its Entry is in Trash, changed since it was created',
+      );
+    }
     const entry = asNewEntry(value);
     if (!entry) throw new Error('A new Entry needs a type and a name');
     // The Author's edit too: a name, and a description on one line.
@@ -2676,6 +2691,12 @@ export class ProjectStore {
       name: entry.name.trim(),
       description: entry.description.replace(/\s+/g, ' ').trim(),
     };
+    // Accepted again after an undo moved it to Trash untouched: that copy
+    // goes first, so a crash leaves no Entry and the Proposal pending.
+    if (this.trash.get(entryId)?.kind === 'entry') {
+      await this.deps.fs.unlink(entryTrashPath(this.path, entryId));
+      this.trash.delete(entryId);
+    }
     await this.addEntry(
       newEntryValue(entryId, wrote.type, wrote.name, wrote.description),
     );
@@ -2706,6 +2727,92 @@ export class ProjectStore {
   }
 
   /**
+   * Undoes an accepted Proposal while its target still holds what the accept
+   * wrote: writes back what it replaced first, an Entry's field or an
+   * Outline, and waits until it is saved, then logs the undo; the Proposal
+   * is pending again. A new Entry, untouched since, goes to Trash instead.
+   * Refuses one not accepted, one whose target changed since or is in
+   * Trash, and any once a newer app has upgraded the Project.
+   */
+  undoProposal(conversationId: string, proposalId: string): Promise<void> {
+    return this.inLog(conversationId, async () => {
+      await this.passFormatGate();
+      const { proposals } = await this.readLogged(conversationId);
+      const logged = proposals.find((p) => p.id === proposalId);
+      if (!logged) throw new Error(`No Proposal ${proposalId}`);
+      const { state } = await this.proposalView(logged);
+      if (state.kind !== 'accepted') {
+        throw new ProjectError('not-accepted', "The Proposal isn't accepted");
+      }
+      const { decision } = logged;
+      if (state.undoBlocked || decision.kind !== 'accepted') {
+        throw new ProjectError('changed', state.undoBlocked ?? NOT_LOGGED);
+      }
+      const reloaded =
+        logged.kind === 'field'
+          ? await this.undoField(logged, decision)
+          : logged.kind === 'outline'
+            ? await this.undoOutline(logged, decision)
+            : await this.undoNewEntry(logged, decision.wrote as NewEntry);
+      await this.appendEvent(conversationId, {
+        type: 'proposal.undone',
+        id: proposalId,
+        at: this.deps.clock.now(),
+      });
+      if (reloaded) {
+        this.emit({ type: 'unitReloaded', ...reloaded, byProposal: true });
+      }
+      this.emit({ type: 'proposalsChanged' });
+    });
+  }
+
+  /** Writes back the value a field held before the accept, as `undoProposal`. */
+  private async undoField(
+    proposal: EntryFieldChange,
+    { replaced, wrote }: Accepted,
+  ): Promise<Accepted['reloaded']> {
+    const { entryId, field } = proposal;
+    const ref = entryRef(entryId);
+    const { after } = await this.changeUnit(ref, (value) => {
+      if (!sameValue(fieldOf(value, field), wrote)) {
+        throw new ProjectError('changed', changedSinceAccepted(proposal));
+      }
+      return withField(value, field, replaced as FieldValue);
+    });
+    this.refuseUnsaved(ref, after.name);
+    return { ref, value: after };
+  }
+
+  /** Writes back the Outline body before the accept, keeping its metadata, as `undoProposal`. */
+  private async undoOutline(
+    proposal: OutlineChange,
+    { replaced, wrote }: Accepted,
+  ): Promise<Accepted['reloaded']> {
+    const ref = outlineRef(proposal.outlineId);
+    const { after } = await this.changeUnit(ref, (value) => {
+      if (value.body !== wrote) {
+        throw new ProjectError('changed', changedSinceAccepted(proposal));
+      }
+      return { ...value, body: replaced as string };
+    });
+    this.refuseUnsaved(ref, unitName(ref, this.manuscript()));
+    return { ref, value: after };
+  }
+
+  /** Moves a new Entry to Trash, if untouched since the accept, as `undoProposal`. */
+  private async undoNewEntry(
+    { entryId }: EntryCreation,
+    wrote: NewEntry,
+  ): Promise<undefined> {
+    await this.enqueueWrite(async () => {
+      const blocked = await this.newEntryUndoBlocked(entryId, wrote);
+      if (blocked) throw new ProjectError('changed', blocked);
+      await this.moveEntryToTrash(entryId);
+    });
+    return undefined;
+  }
+
+  /**
    * The Proposals still pending on a field of an Entry, in every
    * Conversation, derived from the logs; one whose value the Entry already
    * holds counts as applied.
@@ -2725,13 +2832,13 @@ export class ProjectStore {
   }
 
   /**
-   * A Proposal still pending; refuses one not in the log, one the log says
-   * is decided, and one found already applied.
+   * A Proposal still pending, and where it stands; refuses one not in the
+   * log, one the log says is decided, and one found already applied.
    */
   private async undecided(
     conversationId: string,
     proposalId: string,
-  ): Promise<LoggedProposal> {
+  ): Promise<LoggedProposal & { state: ProposalState }> {
     const { proposals } = await this.readLogged(conversationId);
     const proposal = proposals.find((p) => p.id === proposalId);
     if (!proposal) throw new Error(`No Proposal ${proposalId}`);
@@ -2742,60 +2849,169 @@ export class ProjectStore {
         `The Proposal was already ${state.kind}`,
       );
     }
-    return proposal;
+    return { ...proposal, state };
   }
 
   /** Where a Proposal stands now, against its target as it is. */
   private async proposalView(logged: LoggedProposal): Promise<ProposalView> {
     const { message: _, decision, ...proposal } = logged;
-    const view = (state: ProposalState): ProposalView => ({
-      ...proposal,
-      name: this.proposalName(proposal),
-      state,
+    const state =
+      decision.kind === 'rejected'
+        ? decision
+        : decision.kind === 'accepted'
+          ? await this.acceptedState(proposal, decision)
+          : await this.undecidedState(proposal, decision.undid);
+    return { ...proposal, name: this.proposalName(proposal), state };
+  }
+
+  /**
+   * Where a Proposal the log says is accepted stands: undoable while its
+   * target holds what the accept wrote, and a new Entry is untouched since;
+   * undone when its target holds again what the accept replaced, or its new
+   * Entry is in Trash untouched, as after a crash between undoing it and
+   * logging the undo.
+   */
+  private async acceptedState(
+    proposal: Proposal,
+    decision: Extract<Decision, { kind: 'accepted' }>,
+  ): Promise<ProposalState> {
+    const accepted = (undoBlocked: string | null): ProposalState => ({
+      kind: 'accepted',
+      edited: !sameValue(decision.wrote, proposal.proposed),
+      ...(undoBlocked && { undoBlocked }),
     });
-    if (decision.kind === 'rejected') return view(decision);
-    if (decision.kind === 'accepted') {
-      return view({
-        kind: 'accepted',
-        edited: !sameValue(decision.wrote, proposal.proposed),
-      });
+    if (proposal.kind === 'new-entry') {
+      const wrote = decision.wrote as NewEntry;
+      if (await this.untouchedInTrash(proposal.entryId, wrote)) {
+        return this.undecidedState(proposal, wrote);
+      }
+      return accepted(await this.newEntryUndoBlocked(proposal.entryId, wrote));
     }
-    return view(await this.undecidedState(proposal));
+    const target = await this.target(proposal);
+    if ('orphaned' in target) {
+      const name = this.proposalName(proposal);
+      return accepted(orphanedText({ ...proposal, name }, target.orphaned));
+    }
+    const { current } = target;
+    if (sameValue(current, decision.wrote)) return accepted(null);
+    if (sameValue(current, decision.replaced)) {
+      return this.undecidedState(proposal, decision.wrote);
+    }
+    return accepted(changedSinceAccepted(proposal));
+  }
+
+  /**
+   * Why undoing a new Entry's accept isn't possible now, or null when it is:
+   * the Entry must be in the Story Bible and untouched, as written, with no
+   * private notes.
+   */
+  private async newEntryUndoBlocked(
+    entryId: string,
+    wrote: NewEntry,
+  ): Promise<string | null> {
+    const name = this.entryName(entryId) ?? wrote.name;
+    if (!this.entries.has(entryId)) {
+      return this.trash.has(entryId)
+        ? `${name} is in Trash.`
+        : `${name} is no longer in the Story Bible.`;
+    }
+    const untouched = asCreated(
+      await this.read(entryRef(entryId)),
+      (await this.read({ kind: 'private', id: entryId })).body,
+      wrote,
+    );
+    return untouched ? null : `${name} has changed since it was created.`;
+  }
+
+  /** Whether an Entry in Trash is just as an accept created it, `wrote`, with no private notes. */
+  private async untouchedInTrash(
+    entryId: string,
+    wrote: NewEntry,
+  ): Promise<boolean> {
+    if (this.trash.get(entryId)?.kind !== 'entry') return false;
+    const { frontmatter, body } = parseUnitFile(
+      await this.deps.fs.readFile(entryTrashPath(this.path, entryId)),
+    );
+    const { trashedEntry: _, ...own } = frontmatter;
+    // Its private notes stay in place while it is in Trash.
+    const notes = unitPath(this.path, { kind: 'private', id: entryId });
+    const privateNotes = (await this.deps.fs.exists(notes))
+      ? parseUnitFile(await this.deps.fs.readFile(notes)).body
+      : '';
+    return asCreated(
+      entryValue(entryId, { frontmatter: own, body }),
+      privateNotes,
+      wrote,
+    );
   }
 
   /**
    * Where a Proposal the log leaves undecided stands: applied when its target
    * already holds the proposed value, or its new Entry exists, as after a
-   * crash between writing the target and logging the accept.
+   * crash between writing the target and logging the accept. A new Entry an
+   * undo moved to Trash, `undid` being what its accept wrote, is no sign of
+   * that; changed there since, it is the Author's, and the Proposal can only
+   * be rejected.
    */
-  private async undecidedState(proposal: Proposal): Promise<ProposalState> {
-    const applied: ProposalState = { kind: 'accepted', edited: false };
+  private async undecidedState(
+    proposal: Proposal,
+    undid: ProposedValue | undefined,
+  ): Promise<ProposalState> {
+    const applied: ProposalState = {
+      kind: 'accepted',
+      edited: false,
+      undoBlocked: NOT_LOGGED,
+    };
     if (proposal.kind === 'new-entry') {
       const { entryId } = proposal;
-      return this.entries.has(entryId) || this.trash.has(entryId)
-        ? applied
-        : { kind: 'pending', current: null, stale: false };
+      const pending: ProposalState = {
+        kind: 'pending',
+        current: null,
+        stale: false,
+      };
+      if (this.entries.has(entryId)) return applied;
+      if (!this.trash.has(entryId)) return pending;
+      if (undid === undefined) return applied;
+      return (await this.untouchedInTrash(entryId, undid as NewEntry))
+        ? pending
+        : { kind: 'pending', orphaned: 'trashed' };
     }
-    let current: FieldValue | undefined;
-    if (proposal.kind === 'field') {
-      const { entryId, field } = proposal;
-      if (!this.entries.has(entryId)) {
-        const orphaned = this.trash.has(entryId) ? 'trashed' : 'gone';
-        return { kind: 'pending', orphaned };
-      }
-      current = fieldOf(await this.read(entryRef(entryId)), field);
-      if (current === undefined) return { kind: 'pending', orphaned: 'field' };
-    } else {
-      const orphaned = this.outlineOrphaned(proposal.outlineId);
-      if (orphaned) return { kind: 'pending', orphaned };
-      current = (await this.read(outlineRef(proposal.outlineId))).body;
+    const target = await this.target(proposal);
+    if ('orphaned' in target) {
+      return { kind: 'pending', orphaned: target.orphaned };
     }
+    const { current } = target;
     if (sameValue(current, proposal.proposed)) return applied;
     return {
       kind: 'pending',
       current,
       stale: !sameValue(current, proposal.base),
     };
+  }
+
+  /**
+   * What a Proposal's target holds now: an Entry's field or an Outline's
+   * body; or why it holds nothing, being in Trash or gone, or an Entry
+   * without the field.
+   */
+  private async target(
+    proposal: EntryFieldChange | OutlineChange,
+  ): Promise<
+    { current: FieldValue } | { orphaned: 'trashed' | 'gone' | 'field' }
+  > {
+    if (proposal.kind === 'outline') {
+      const orphaned = this.outlineOrphaned(proposal.outlineId);
+      if (orphaned) return { orphaned };
+      return {
+        current: (await this.read(outlineRef(proposal.outlineId))).body,
+      };
+    }
+    const { entryId, field } = proposal;
+    if (!this.entries.has(entryId)) {
+      return { orphaned: this.trash.has(entryId) ? 'trashed' : 'gone' };
+    }
+    const current = fieldOf(await this.read(entryRef(entryId)), field);
+    return current === undefined ? { orphaned: 'field' } : { current };
   }
 
   /** Whether an Outline's Chapter or Scene is in Trash or gone; the Project Outline never is. */
@@ -2811,12 +3027,7 @@ export class ProjectStore {
   private proposalName(proposal: Proposal): string {
     if (proposal.kind === 'new-entry') return proposal.proposed.name;
     if (proposal.kind === 'field') {
-      const { entryId } = proposal;
-      const trashed = this.trash.get(entryId);
-      return (
-        this.entries.get(entryId)?.name ??
-        (trashed?.kind === 'entry' ? trashed.name : 'An Entry')
-      );
+      return this.entryName(proposal.entryId) ?? 'An Entry';
     }
     const { outlineId } = proposal;
     if (outlineId === PROJECT_OUTLINE) return 'The story';
@@ -2836,6 +3047,15 @@ export class ProjectStore {
         )
         .find((s) => s.id === outlineId);
     return scene ? `Scene “${scene.title}”` : 'An Outline';
+  }
+
+  /** An Entry's name, in the Story Bible or in Trash. */
+  private entryName(entryId: string): string | undefined {
+    const trashed = this.trash.get(entryId);
+    return (
+      this.entries.get(entryId)?.name ??
+      (trashed?.kind === 'entry' ? trashed.name : undefined)
+    );
   }
 
   /** Runs `run` once what was asked of a Conversation's log before is done: one at a time. */
@@ -3372,6 +3592,32 @@ function entryValue(id: string, { frontmatter, body }: UnitFile): EntryValue {
     description: body,
     fields: readEntryFields(entryType, frontmatter),
   };
+}
+
+/** Why a Proposal found applied, with no accept logged, can't be undone. */
+const NOT_LOGGED = 'It was found applied, so what it replaced is not known.';
+
+/** Why an accept can't be undone once its target holds something else. */
+function changedSinceAccepted(
+  proposal: EntryFieldChange | OutlineChange,
+): string {
+  const what =
+    proposal.kind === 'field' ? FIELD_LABELS[proposal.field] : 'The Outline';
+  return `${what} has changed since it was accepted.`;
+}
+
+/** Whether an Entry, with its private notes, is just as an accept created it, `wrote`. */
+function asCreated(
+  entry: EntryValue,
+  privateNotes: string,
+  { type, name, description }: NewEntry,
+): boolean {
+  return (
+    isDeepStrictEqual(
+      entry,
+      newEntryValue(entry.id, type, name, description),
+    ) && privateNotes.trim() === ''
+  );
 }
 
 /** A new Entry, seen when mentioned, with the empty fields of its type. */

@@ -307,6 +307,7 @@ describe('Proposals in a Conversation', () => {
     expect((await cardOf(reopened, conversationId))?.state).toEqual({
       kind: 'accepted',
       edited: false,
+      undoBlocked: 'It was found applied, so what it replaced is not known.',
     });
     expect(await reopened.pendingProposals(annaId)).toEqual([]);
     await expect(
@@ -567,6 +568,7 @@ describe('a Proposal to create an Entry', () => {
     expect((await cardOf(reopened, conversationId))?.state).toEqual({
       kind: 'accepted',
       edited: false,
+      undoBlocked: 'It was found applied, so what it replaced is not known.',
     });
     await expect(
       reopened.acceptProposal(conversationId, 'p1'),
@@ -752,6 +754,7 @@ describe('a Proposal to replace an Outline', () => {
     expect((await cardOf(reopened, conversationId))?.state).toEqual({
       kind: 'accepted',
       edited: false,
+      undoBlocked: 'It was found applied, so what it replaced is not known.',
     });
     await expect(
       reopened.acceptProposal(conversationId, 'p1'),
@@ -783,5 +786,407 @@ describe('a Proposal to replace an Outline', () => {
     const { messages } = await store.readConversation(conversationId);
     expect(messages[1].proposals).toBeUndefined();
     await store.close();
+  });
+});
+
+describe('undoing an accepted Proposal', () => {
+  it('writes back the value it replaced, then logs the undo; the Proposal is pending again', async () => {
+    const { store, annaId, conversationId } = await proposed();
+    await store.acceptProposal(conversationId, 'p1');
+    const events = eventsOf(store);
+
+    await store.undoProposal(conversationId, 'p1');
+
+    expect((await store.read(entryRef(annaId))).description).toBe(
+      'Her sister.',
+    );
+    expect(
+      await readFile(path.join(projectPath, 'bible', `${annaId}.md`), 'utf8'),
+    ).not.toContain('Older by two years.');
+    expect((await logLines(conversationId)).at(-1)).toEqual({
+      type: 'proposal.undone',
+      id: 'p1',
+      at: 1_000,
+    });
+    expect((await cardOf(store, conversationId))?.state).toEqual({
+      kind: 'pending',
+      current: 'Her sister.',
+      stale: false,
+    });
+    expect(await store.pendingProposals(annaId)).toHaveLength(1);
+    expect(events).toContainEqual({
+      type: 'unitReloaded',
+      ref: entryRef(annaId),
+      value: expect.objectContaining({ description: 'Her sister.' }),
+      byProposal: true,
+    });
+    expect(events).toContainEqual({ type: 'proposalsChanged' });
+  });
+
+  it('can be undone in a later session, and accepted again', async () => {
+    const { store, annaId, conversationId } = await proposed();
+    await store.acceptProposal(conversationId, 'p1');
+    await store.close();
+    const reopened = await openProject(projectPath, {
+      fs: nodeFileSystem,
+      clock: instantClock(),
+    });
+
+    await reopened.undoProposal(conversationId, 'p1');
+    await reopened.acceptProposal(conversationId, 'p1');
+
+    expect((await reopened.read(entryRef(annaId))).description).toBe(
+      'Her sister.\nOlder by two years.',
+    );
+    expect((await cardOf(reopened, conversationId))?.state).toEqual({
+      kind: 'accepted',
+      edited: false,
+    });
+    await reopened.close();
+  });
+
+  it('writes back what an accept anyway replaced, not what was proposed against', async () => {
+    const { store, annaId, conversationId } = await proposed();
+    const anna = await store.read(entryRef(annaId));
+    await store.write(entryRef(annaId), { ...anna, description: 'Twin.' });
+    await store.flush();
+    await store.acceptProposal(conversationId, 'p1', { anyway: true });
+
+    await store.undoProposal(conversationId, 'p1');
+
+    expect((await store.read(entryRef(annaId))).description).toBe('Twin.');
+    expect((await cardOf(store, conversationId))?.state).toEqual({
+      kind: 'pending',
+      current: 'Twin.',
+      stale: true,
+    });
+  });
+
+  it('is not offered once the field has changed since the accept, and is refused', async () => {
+    const { store, annaId, conversationId } = await proposed();
+    await store.acceptProposal(conversationId, 'p1');
+    const anna = await store.read(entryRef(annaId));
+    await store.write(entryRef(annaId), {
+      ...anna,
+      description: 'Her sister.\nOlder by three years.',
+    });
+    await store.flush();
+
+    expect((await cardOf(store, conversationId))?.state).toEqual({
+      kind: 'accepted',
+      edited: false,
+      undoBlocked: 'Description has changed since it was accepted.',
+    });
+    await expect(
+      store.undoProposal(conversationId, 'p1'),
+    ).rejects.toMatchObject({ reason: 'changed' });
+    expect((await store.read(entryRef(annaId))).description).toBe(
+      'Her sister.\nOlder by three years.',
+    );
+    expect((await logLines(conversationId)).at(-1)).toMatchObject({
+      type: 'proposal.accepted',
+    });
+  });
+
+  it('is not offered while the Entry is in Trash', async () => {
+    const { store, annaId, conversationId } = await proposed();
+    await store.acceptProposal(conversationId, 'p1');
+    await store.trashEntry(annaId);
+
+    expect((await cardOf(store, conversationId))?.state).toEqual({
+      kind: 'accepted',
+      edited: false,
+      undoBlocked: 'Anna is in Trash.',
+    });
+    await expect(
+      store.undoProposal(conversationId, 'p1'),
+    ).rejects.toMatchObject({ reason: 'changed' });
+  });
+
+  it('is not offered for one found applied, whose accept was never logged', async () => {
+    const { store, annaId, conversationId } = await proposed();
+    const anna = await store.read(entryRef(annaId));
+    await store.write(entryRef(annaId), {
+      ...anna,
+      description: 'Her sister.\nOlder by two years.',
+    });
+    await store.flush();
+
+    expect((await cardOf(store, conversationId))?.state).toEqual({
+      kind: 'accepted',
+      edited: false,
+      undoBlocked: 'It was found applied, so what it replaced is not known.',
+    });
+    await expect(
+      store.undoProposal(conversationId, 'p1'),
+    ).rejects.toMatchObject({ reason: 'changed' });
+  });
+
+  it('refuses one that is pending or rejected', async () => {
+    const { store, conversationId } = await proposed();
+
+    await expect(
+      store.undoProposal(conversationId, 'p1'),
+    ).rejects.toMatchObject({ reason: 'not-accepted' });
+    await store.rejectProposal(conversationId, 'p1');
+    await expect(
+      store.undoProposal(conversationId, 'p1'),
+    ).rejects.toMatchObject({ reason: 'not-accepted' });
+  });
+
+  it('counts as undone when the Entry holds what the accept replaced, as after a crash before the undo was logged', async () => {
+    const { store, annaId, conversationId } = await proposed();
+    await store.acceptProposal(conversationId, 'p1');
+    await store.undoProposal(conversationId, 'p1');
+    await store.close();
+    await dropLastEvent(conversationId);
+
+    const reopened = await openProject(projectPath, {
+      fs: nodeFileSystem,
+      clock: instantClock(),
+    });
+
+    expect((await cardOf(reopened, conversationId))?.state).toEqual({
+      kind: 'pending',
+      current: 'Her sister.',
+      stale: false,
+    });
+    await reopened.acceptProposal(conversationId, 'p1');
+    expect((await reopened.read(entryRef(annaId))).description).toBe(
+      'Her sister.\nOlder by two years.',
+    );
+    await reopened.close();
+  });
+
+  it('refuses once a newer app has upgraded the Project', async () => {
+    const { store, annaId, conversationId } = await proposed();
+    await store.acceptProposal(conversationId, 'p1');
+    const manifest = path.join(projectPath, 'project.json');
+    await writeFile(
+      manifest,
+      JSON.stringify({
+        ...JSON.parse(await readFile(manifest, 'utf8')),
+        format: FORMAT + 1,
+      }),
+    );
+
+    await expect(
+      store.undoProposal(conversationId, 'p1'),
+    ).rejects.toMatchObject({ reason: 'read-only' });
+    expect((await store.read(entryRef(annaId))).description).toBe(
+      'Her sister.\nOlder by two years.',
+    );
+  });
+
+  describe('of an Outline', () => {
+    const outline = (outlineId: string): Proposal => ({
+      kind: 'outline',
+      id: 'p1',
+      outlineId,
+      base: '- She waits.',
+      proposed: '- She waits.\n- The ferry comes.',
+    });
+
+    it('writes back the body it replaced, keeping its metadata', async () => {
+      const { store, sceneId, conversationId } = await withReply();
+      await store.appendProposal(conversationId, outline(sceneId));
+      await store.acceptProposal(conversationId, 'p1');
+
+      await store.undoProposal(conversationId, 'p1');
+
+      expect(await store.read({ kind: 'outline', id: sceneId })).toEqual({
+        id: sceneId,
+        body: '- She waits.',
+        meta: { pov: 'Anna' },
+      });
+      expect((await cardOf(store, conversationId))?.state).toEqual({
+        kind: 'pending',
+        current: '- She waits.',
+        stale: false,
+      });
+      await store.close();
+    });
+
+    it('is not offered once the Outline has changed since the accept', async () => {
+      const { store, sceneId, conversationId } = await withReply();
+      await store.appendProposal(conversationId, outline(sceneId));
+      await store.acceptProposal(conversationId, 'p1');
+      await store.write(
+        { kind: 'outline', id: sceneId },
+        { id: sceneId, body: '- Something else.', meta: { pov: 'Anna' } },
+      );
+      await store.flush();
+
+      expect((await cardOf(store, conversationId))?.state).toEqual({
+        kind: 'accepted',
+        edited: false,
+        undoBlocked: 'The Outline has changed since it was accepted.',
+      });
+      await expect(
+        store.undoProposal(conversationId, 'p1'),
+      ).rejects.toMatchObject({ reason: 'changed' });
+      await store.close();
+    });
+  });
+
+  describe('of a new Entry', () => {
+    const MIRA = 'c0a8e8a2-5d4f-4a8e-9b1e-0f6a1c2d3e4f';
+    const mira: Proposal = {
+      kind: 'new-entry',
+      id: 'p1',
+      entryId: MIRA,
+      proposed: {
+        type: 'character',
+        name: 'Mira',
+        description: 'Anna’s younger sister.',
+      },
+    };
+
+    it('moves the untouched Entry to Trash; the Proposal is pending again', async () => {
+      const { store, conversationId } = await withReply();
+      await store.appendProposal(conversationId, mira);
+      await store.acceptProposal(conversationId, 'p1');
+
+      await store.undoProposal(conversationId, 'p1');
+
+      expect(store.listEntries()).toEqual([]);
+      expect(store.listTrash()).toEqual([
+        expect.objectContaining({ kind: 'entry', id: MIRA, title: 'Mira' }),
+      ]);
+      expect((await logLines(conversationId)).at(-1)).toEqual({
+        type: 'proposal.undone',
+        id: 'p1',
+        at: 1_000,
+      });
+      expect((await cardOf(store, conversationId))?.state).toEqual({
+        kind: 'pending',
+        current: null,
+        stale: false,
+      });
+      await store.close();
+    });
+
+    it('can be accepted again, as edited, once undone', async () => {
+      const { store, conversationId } = await withReply();
+      await store.appendProposal(conversationId, mira);
+      await store.acceptProposal(conversationId, 'p1');
+      await store.undoProposal(conversationId, 'p1');
+
+      await store.acceptProposal(conversationId, 'p1', {
+        edited: { type: 'character', name: 'Mirja', description: '' },
+      });
+
+      expect(store.listEntries()).toEqual([
+        expect.objectContaining({ id: MIRA, name: 'Mirja' }),
+      ]);
+      expect(store.listTrash()).toEqual([]);
+      expect((await cardOf(store, conversationId))?.state).toEqual({
+        kind: 'accepted',
+        edited: true,
+      });
+      await store.close();
+    });
+
+    it('is not offered once the Entry was changed since it was created', async () => {
+      const { store, conversationId } = await withReply();
+      await store.appendProposal(conversationId, mira);
+      await store.acceptProposal(conversationId, 'p1');
+      const entry = await store.read(entryRef(MIRA));
+      await store.write(entryRef(MIRA), { ...entry, aliases: ['Mi'] });
+      await store.flush();
+
+      expect((await cardOf(store, conversationId))?.state).toEqual({
+        kind: 'accepted',
+        edited: false,
+        undoBlocked: 'Mira has changed since it was created.',
+      });
+      await expect(
+        store.undoProposal(conversationId, 'p1'),
+      ).rejects.toMatchObject({ reason: 'changed' });
+      expect(store.listEntries()).toHaveLength(1);
+      await store.close();
+    });
+
+    it('is not offered once the Entry has private notes', async () => {
+      const { store, conversationId } = await withReply();
+      await store.appendProposal(conversationId, mira);
+      await store.acceptProposal(conversationId, 'p1');
+      await store.write(
+        { kind: 'private', id: MIRA },
+        { id: MIRA, body: 'Based on my cousin.' },
+      );
+      await store.flush();
+
+      expect((await cardOf(store, conversationId))?.state).toMatchObject({
+        undoBlocked: 'Mira has changed since it was created.',
+      });
+      await store.close();
+    });
+
+    it('is not offered while the Entry, changed since, is in Trash', async () => {
+      const { store, conversationId } = await withReply();
+      await store.appendProposal(conversationId, mira);
+      await store.acceptProposal(conversationId, 'p1');
+      const entry = await store.read(entryRef(MIRA));
+      await store.write(entryRef(MIRA), { ...entry, aliases: ['Mi'] });
+      await store.flush();
+      await store.trashEntry(MIRA);
+
+      expect((await cardOf(store, conversationId))?.state).toEqual({
+        kind: 'accepted',
+        edited: false,
+        undoBlocked: 'Mira is in Trash.',
+      });
+      await store.close();
+    });
+
+    it('counts as undone when the untouched Entry is in Trash, as after a crash before the undo was logged', async () => {
+      const { store, conversationId } = await withReply();
+      await store.appendProposal(conversationId, mira);
+      await store.acceptProposal(conversationId, 'p1');
+      await store.undoProposal(conversationId, 'p1');
+      await store.close();
+      await dropLastEvent(conversationId);
+
+      const reopened = await openProject(projectPath, {
+        fs: nodeFileSystem,
+        clock: instantClock(),
+      });
+
+      expect((await cardOf(reopened, conversationId))?.state).toEqual({
+        kind: 'pending',
+        current: null,
+        stale: false,
+      });
+      await reopened.acceptProposal(conversationId, 'p1');
+      expect(reopened.listEntries()).toHaveLength(1);
+      expect(reopened.listTrash()).toEqual([]);
+      await reopened.close();
+    });
+
+    it('can only be rejected once undone, when its Entry was changed in Trash since', async () => {
+      const { store, conversationId } = await withReply();
+      await store.appendProposal(conversationId, mira);
+      await store.acceptProposal(conversationId, 'p1');
+      await store.undoProposal(conversationId, 'p1');
+      // Restored, changed, and moved to Trash again.
+      await store.restore(MIRA);
+      const entry = await store.read(entryRef(MIRA));
+      await store.write(entryRef(MIRA), { ...entry, aliases: ['Mi'] });
+      await store.flush();
+      await store.trashEntry(MIRA);
+
+      expect((await cardOf(store, conversationId))?.state).toEqual({
+        kind: 'pending',
+        orphaned: 'trashed',
+      });
+      await expect(
+        store.acceptProposal(conversationId, 'p1'),
+      ).rejects.toMatchObject({ reason: 'orphaned' });
+      expect(store.listTrash()).toEqual([
+        expect.objectContaining({ kind: 'entry', id: MIRA }),
+      ]);
+      await store.close();
+    });
   });
 });

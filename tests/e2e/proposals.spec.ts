@@ -208,6 +208,91 @@ test('the Assistant proposes a new Entry and a Scene’s Outline, and the Author
   await app.close();
 });
 
+test('the Author undoes accepted Proposals from their cards, while their targets still hold what was accepted', async () => {
+  const projectPath = path.join(tempDir(), 'My Novel');
+  const app = await launch(tempDir(), { anthropicUrl: anthropic.url });
+  await answerDialogs(app, projectPath);
+  const page = await app.firstWindow();
+  await page.getByRole('button', { name: 'New Project…' }).click();
+  await expect(page.getByLabel('Prose')).toBeFocused();
+  const assistant = await addKey(page);
+  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await page.getByRole('button', { name: 'New Entry' }).click();
+  await page.getByRole('menuitem', { name: 'Character', exact: true }).click();
+  await fill(page, 'Name', 'Anna');
+  await fill(page, 'Description', 'Her sister.');
+  await page.keyboard.press('ControlOrMeta+s');
+  await expect(page.locator('.save-status.confirmed')).toBeVisible();
+  const [file] = await readdir(path.join(projectPath, 'bible'));
+  const annaId = path.basename(file, '.md');
+
+  anthropic.calls.push({
+    reply: [
+      'Noted.\n\n',
+      block({ entry: annaId, field: 'description', append: 'Older.' }),
+      '\n',
+      block({ create: 'character', name: 'Mira', description: 'Her sister.' }),
+    ],
+  });
+  await assistant
+    .getByRole('textbox', { name: 'Message' })
+    .fill('Anna is older than her sister Mira.');
+  await assistant.getByRole('button', { name: 'Send' }).click();
+  const reply = assistant.getByRole('article', { name: 'Assistant' });
+  const description = reply.getByRole('region', {
+    name: 'Proposal: Anna › Description',
+  });
+  const editor = page.getByLabel('Description', { exact: true });
+
+  await description.getByRole('button', { name: 'Accept' }).click();
+  await expect(description).toContainText('✓ Accepted');
+  await expect(editor).toHaveText(/Her sister\.\s*Older\./);
+  // Ctrl+Z in the Entry never reverts an accept.
+  await editor.click();
+  await page.keyboard.press('ControlOrMeta+z');
+  await page.keyboard.press('ControlOrMeta+z');
+  await expect(editor).toHaveText(/Her sister\.\s*Older\./);
+
+  await description.getByRole('button', { name: 'Undo' }).click();
+  await expect(
+    description.getByRole('button', { name: 'Accept' }),
+  ).toBeVisible();
+  await expect(editor).toHaveText('Her sister.');
+
+  await description.getByRole('button', { name: 'Accept' }).click();
+  await fill(page, 'Description', 'Her older sister.');
+  await page.keyboard.press('ControlOrMeta+s');
+  await expect(page.locator('.save-status.confirmed')).toBeVisible();
+  await expect(
+    description.getByRole('button', { name: 'Undo' }),
+  ).toBeDisabled();
+  await expect(description).toContainText(
+    'Can’t undo: Description has changed since it was accepted.',
+  );
+
+  const mira = reply.getByRole('region', {
+    name: 'Proposal: New Character · Mira',
+  });
+  await mira.getByRole('button', { name: 'Accept' }).click();
+  await expect(mira).toContainText('✓ Accepted');
+  await mira.getByRole('button', { name: 'Undo' }).click();
+  await expect(mira.getByRole('button', { name: 'Accept' })).toBeVisible();
+  await page.getByRole('tab', { name: 'Trash (1)' }).click();
+  await expect(page.getByRole('region', { name: 'Trash' })).toContainText(
+    'Mira',
+  );
+
+  const events = (await logLines(projectPath)).map((e) => e.type);
+  expect(events.slice(-5)).toEqual([
+    'proposal.accepted',
+    'proposal.undone',
+    'proposal.accepted',
+    'proposal.accepted',
+    'proposal.undone',
+  ]);
+  await app.close();
+});
+
 test('a Proposal shown from an Entry opens at its card in the Conversation', async () => {
   const projectPath = path.join(tempDir(), 'My Novel');
   const app = await launch(tempDir(), { anthropicUrl: anthropic.url });

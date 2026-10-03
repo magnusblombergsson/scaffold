@@ -291,6 +291,8 @@ function ProjectView({
           setConflicts(event.conflicts);
         } else if (event.type === 'entriesChanged') {
           setEntries(event.entries);
+          // An Entry may have gone to Trash, or come out, as by a Proposal's undo.
+          void refreshTrash();
         } else if (event.type === 'readOnly') {
           // Main still takes edits for a moment: these are the last.
           flushPendingEdits();

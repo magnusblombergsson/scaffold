@@ -13,6 +13,7 @@ import {
   fieldDiff,
   fieldText,
   isChoiceField,
+  orphanedText,
   textValue,
   type FieldValue,
   type NewEntry,
@@ -39,21 +40,6 @@ export function proposalTitle(proposal: ProposalView): string {
   return `${proposal.name} › Outline`;
 }
 
-/** Why a pending Proposal can only be rejected. */
-function orphanedText(
-  proposal: ProposalView,
-  orphaned: 'trashed' | 'gone' | 'field',
-): string {
-  const { name } = proposal;
-  if (orphaned === 'trashed') return `${name} is in Trash.`;
-  if (orphaned === 'field' && proposal.kind === 'field') {
-    return `${name} has no ${FIELD_LABELS[proposal.field]} now.`;
-  }
-  return proposal.kind === 'outline'
-    ? `${name} is no longer in the Manuscript.`
-    : `${name} is no longer in the Story Bible.`;
-}
-
 /**
  * What the Author edits a proposed value as, until accepted or cancelled: a
  * field's or an Outline's text, or a new Entry's type, name and description.
@@ -65,8 +51,10 @@ type Draft = string | NewEntry;
  * Edit… and Reject while it is pending. A field shows a diff, an Outline its
  * body before and after side by side, a new Entry its description. A stale
  * one shows the target's current value too, in warning style; an orphaned
- * one can only be rejected. Decided, it collapses to a line. Nothing is
- * decided in a read-only Project.
+ * one can only be rejected. Decided, it collapses to a line; an accepted
+ * one offers Undo, disabled with the reason while its target no longer
+ * holds what the accept wrote. Nothing is decided or undone in a read-only
+ * Project.
  */
 export function ProposalCard({
   conversationId,
@@ -85,27 +73,6 @@ export function ProposalCard({
   const [error, setError] = useState<string | null>(null);
   const title = proposalTitle(proposal);
 
-  if (state.kind !== 'pending') {
-    return (
-      <section
-        id={proposalCardId(id)}
-        className={`proposal-card decided${highlighted ? ' highlighted' : ''}`}
-        aria-label={`Proposal: ${title}`}
-      >
-        <p className="proposal-decided">
-          <span className="proposal-title">{title}</span>{' '}
-          {state.kind === 'accepted'
-            ? `✓ Accepted${state.edited ? ' (edited)' : ''}`
-            : '✕ Rejected'}
-        </p>
-      </section>
-    );
-  }
-
-  const orphaned = 'orphaned' in state ? state.orphaned : null;
-  const current = 'current' in state ? state.current : null;
-  const stale = 'stale' in state && state.stale;
-
   async function decide(run: () => Promise<void>) {
     // Edits typed into the target reach main before it is changed.
     flushPendingEdits();
@@ -120,6 +87,50 @@ export function ProposalCard({
       setBusy(false);
     }
   }
+
+  if (state.kind !== 'pending') {
+    const { undoBlocked } = state.kind === 'accepted' ? state : {};
+    return (
+      <section
+        id={proposalCardId(id)}
+        className={`proposal-card decided${highlighted ? ' highlighted' : ''}`}
+        aria-label={`Proposal: ${title}`}
+      >
+        <p className="proposal-decided">
+          <span className="proposal-title">{title}</span>{' '}
+          {state.kind === 'accepted'
+            ? `✓ Accepted${state.edited ? ' (edited)' : ''}`
+            : '✕ Rejected'}
+          {state.kind === 'accepted' && (
+            <button
+              className="proposal-undo"
+              onClick={() =>
+                void decide(() =>
+                  window.assistant.undoProposal(conversationId, id),
+                )
+              }
+              disabled={readOnly || busy || !!undoBlocked}
+              title={undoBlocked}
+            >
+              Undo
+            </button>
+          )}
+        </p>
+        {undoBlocked && (
+          <p className="proposal-undo-blocked">Can’t undo: {undoBlocked}</p>
+        )}
+        {error && (
+          <p className="proposal-error" role="alert">
+            {error}
+          </p>
+        )}
+      </section>
+    );
+  }
+
+  const orphaned = 'orphaned' in state ? state.orphaned : null;
+  const current = 'current' in state ? state.current : null;
+  const stale = 'stale' in state && state.stale;
 
   const accept = (edited?: ProposedValue) =>
     decide(() =>

@@ -1,6 +1,6 @@
 import type { Editor, JSONContent } from '@tiptap/core';
 import type { Node as PMNode } from '@tiptap/pm/model';
-import { TextSelection } from '@tiptap/pm/state';
+import { EditorState, TextSelection } from '@tiptap/pm/state';
 
 // Editor undo is per unit and lasts for the session (MVP spec §8.1). Each
 // unit keeps its editor, and with it its history, while the Author works on
@@ -27,9 +27,11 @@ export function unitEditor(
 }
 
 /**
- * Shows a unit's text as another computer changed it, with the cursor by the
- * same words as before. It is not an edit: it isn't saved back, and undo
- * doesn't revert it.
+ * Shows a unit's text as another computer changed it, or as an accepted
+ * Proposal or its undo wrote it, with the cursor by the same words as
+ * before. It is not an edit: it isn't saved back. It is a barrier in the
+ * unit's history: undo reverts neither it nor anything before it, which
+ * could otherwise land on the new text.
  */
 export function reloadUnitEditor(editor: Editor, content: JSONContent): void {
   const { state } = editor;
@@ -37,9 +39,13 @@ export function reloadUnitEditor(editor: Editor, content: JSONContent): void {
   if (state.doc.eq(next)) return;
   const cursor = samePlace(state.doc, next, state.selection.head);
   const tr = state.tr.replaceWith(0, state.doc.content.size, next.content);
-  tr.setSelection(TextSelection.near(tr.doc.resolve(cursor)));
-  editor.view.dispatch(
-    tr.setMeta('addToHistory', false).setMeta('preventUpdate', true),
+  // A new state, so a history that starts here.
+  editor.view.updateState(
+    EditorState.create({
+      doc: tr.doc,
+      selection: TextSelection.near(tr.doc.resolve(cursor)),
+      plugins: state.plugins,
+    }),
   );
 }
 

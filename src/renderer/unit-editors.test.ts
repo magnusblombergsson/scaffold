@@ -103,4 +103,18 @@ describe('reloading a unit changed on another computer', () => {
     editor.commands.undo();
     expect(textOf(editor)).toBe('Changed elsewhere');
   });
+
+  it('is a barrier, as when the Author accepts a Proposal: undo reverts neither it nor edits before it', () => {
+    const editor = editorFor('outline:a', '');
+    // All of it replaced, as by Ctrl+A and typing.
+    editor.commands.selectAll();
+    editor.view.dispatch(editor.state.tr.insertText('- She waits.'));
+    typeAtEnd(editor, ' Alone.');
+
+    reloadUnitEditor(editor, textToDoc('- She waits. Alone.\n- The ferry.'));
+
+    editor.commands.undo();
+    editor.commands.undo();
+    expect(textOf(editor)).toBe('- She waits. Alone.\n- The ferry.');
+  });
 });

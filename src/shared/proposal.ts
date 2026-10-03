@@ -110,12 +110,14 @@ export type ProposedValue = FieldValue | NewEntry;
  * it can only be rejected. A new Entry is never either, and its `current`
  * value is null. An accepted one says whether the Author `edited` it first;
  * one found already applied on load, as after a crash between writing the
- * target and logging the accept, counts as accepted.
+ * target and logging the accept, counts as accepted. An accepted one can be
+ * undone unless `undoBlocked` says why not: its target no longer holds what
+ * the accept wrote, or what it replaced isn't known.
  */
 export type ProposalState =
   | { kind: 'pending'; current: FieldValue; stale: boolean }
   | { kind: 'pending'; orphaned: 'trashed' | 'gone' | 'field' }
-  | { kind: 'accepted'; edited: boolean }
+  | { kind: 'accepted'; edited: boolean; undoBlocked?: string }
   | { kind: 'rejected' };
 
 /**
@@ -126,6 +128,21 @@ export type ProposalView = Proposal & {
   name: string;
   state: ProposalState;
 };
+
+/** Why a Proposal's target is out of reach: in Trash, gone, or its Entry without the field. */
+export function orphanedText(
+  proposal: Proposal & { name: string },
+  orphaned: 'trashed' | 'gone' | 'field',
+): string {
+  const { name } = proposal;
+  if (orphaned === 'trashed') return `${name} is in Trash.`;
+  if (orphaned === 'field' && proposal.kind === 'field') {
+    return `${name} has no ${FIELD_LABELS[proposal.field]} now.`;
+  }
+  return proposal.kind === 'outline'
+    ? `${name} is no longer in the Manuscript.`
+    : `${name} is no longer in the Story Bible.`;
+}
 
 /** A pending Proposal on a field of an Entry, and the Conversation it is in. */
 export type PendingProposal = {

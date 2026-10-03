@@ -147,6 +147,8 @@ const assistant: AssistantApi = {
     ),
   rejectProposal: (conversationId, proposalId) =>
     ipcRenderer.invoke(channel.rejectProposal, conversationId, proposalId),
+  undoProposal: (conversationId, proposalId) =>
+    ipcRenderer.invoke(channel.undoProposal, conversationId, proposalId),
   pendingProposals: (entryId) =>
     ipcRenderer.invoke(channel.pendingProposals, entryId),
 };

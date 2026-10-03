@@ -55,13 +55,13 @@ export type UnitReloaded = {
   type: 'unitReloaded';
   ref: UnitRef;
   value: UnitValue;
-  /** Set when it changed because the Author accepted a Proposal, here. */
+  /** Set when it changed because the Author accepted or undid a Proposal, here. */
   byProposal?: true;
 };
 
 /**
- * A Proposal was made, accepted or rejected, in any Conversation, or an
- * Entry was written, which may make its Proposals stale or applied.
+ * A Proposal was made, accepted, rejected or undone, in any Conversation, or
+ * an Entry was written, which may make its Proposals stale or applied.
  */
 export type ProposalsChanged = { type: 'proposalsChanged' };
 
@@ -410,6 +410,12 @@ export interface AssistantApi {
     options?: AcceptOptions,
   ): Promise<void>;
   rejectProposal(conversationId: string, proposalId: string): Promise<void>;
+  /**
+   * Undoes an accepted Proposal: main writes back what the accept replaced,
+   * or moves its new Entry to Trash, then logs the undo. Refused while the
+   * target no longer holds what the accept wrote, and in a read-only Project.
+   */
+  undoProposal(conversationId: string, proposalId: string): Promise<void>;
   /** The Proposals pending on an Entry, in any Conversation. */
   pendingProposals(entryId: string): Promise<PendingProposal[]>;
 }
@@ -447,6 +453,7 @@ export const channel = {
   retry: 'assistant:retry',
   acceptProposal: 'assistant:acceptProposal',
   rejectProposal: 'assistant:rejectProposal',
+  undoProposal: 'assistant:undoProposal',
   pendingProposals: 'assistant:pendingProposals',
   replyText: 'assistant:replyText',
 } as const;

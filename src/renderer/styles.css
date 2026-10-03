@@ -1105,6 +1105,16 @@ p.message-used,
   font-size: 0.9em;
 }
 
+.proposal-undo {
+  margin-left: 0.5rem;
+  font-size: 0.85em;
+}
+
+.proposal-undo-blocked {
+  margin: 0.2rem 0 0;
+  font-size: 0.85em;
+}
+
 .proposal-diff,
 .proposal-values dd {
   margin: 0.3rem 0 0;

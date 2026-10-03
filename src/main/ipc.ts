@@ -150,6 +150,11 @@ export function registerAssistantIpc(): void {
     (event, conversationId: string, proposalId: string) =>
       storeOfWindow(event.sender).rejectProposal(conversationId, proposalId),
   );
+  ipcMain.handle(
+    channel.undoProposal,
+    (event, conversationId: string, proposalId: string) =>
+      storeOfWindow(event.sender).undoProposal(conversationId, proposalId),
+  );
   ipcMain.handle(channel.pendingProposals, (event, entryId: string) =>
     storeOfWindow(event.sender).pendingProposals(entryId),
   );

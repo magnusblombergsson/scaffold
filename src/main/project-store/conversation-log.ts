@@ -56,20 +56,28 @@ export type RejectedEvent = {
   at: number;
 };
 
+/** An undo of an accept, logged once its target holds what the accept replaced. */
+export type UndoneEvent = {
+  type: 'proposal.undone';
+  id: string;
+  at: number;
+};
+
 /** An event this app writes. */
 export type ConversationEvent =
   | MessageEvent
   | ProposedEvent
   | AcceptedEvent
-  | RejectedEvent;
+  | RejectedEvent
+  | UndoneEvent;
 
 /**
  * What the log says of a Proposal: undecided, accepted with the value it
  * replaced, if any, and the one it wrote, or rejected. An accept that was
- * undone leaves it undecided again.
+ * undone leaves it undecided again, with what that accept wrote as `undid`.
  */
 export type Decision =
-  | { kind: 'pending' }
+  | { kind: 'pending'; undid?: ProposedValue }
   | { kind: 'accepted'; replaced?: FieldValue; wrote: ProposedValue }
   | { kind: 'rejected' };
 
@@ -127,7 +135,9 @@ export function parseLog(log: string): LoggedConversation | null {
     } else if (known && event.type === 'proposal.rejected') {
       known.decision = { kind: 'rejected' };
     } else if (known && event.type === 'proposal.undone') {
-      known.decision = { kind: 'pending' };
+      if (known.decision.kind === 'accepted') {
+        known.decision = { kind: 'pending', undid: known.decision.wrote };
+      }
     }
   }
   const { id, mode, title, created } = header;
