@@ -27,6 +27,8 @@ import type {
   Manuscript,
   ManuscriptScene,
 } from '../shared/project-types';
+import type { Changed } from '../shared/api';
+import type { MenuItem } from './Binder';
 import { replyText } from '../shared/proposal';
 import { describeTotal, describeUsage } from '../shared/usage';
 import { focusLabel } from './interview-focus';
@@ -47,6 +49,12 @@ export const WINDOW_MODES = [
 
 /** The Project as it is now, which names what the Assistant saw. */
 export type Names = { manuscript: Manuscript; entries: EntrySummary[] };
+
+/** Runs a structure operation and offers to undo it, as the window does; null when cancelled. */
+export type OnChange = (
+  operation: () => Promise<Changed | null>,
+  message: string,
+) => Promise<void>;
 
 /**
  * A Proposal the Author asked to see in its Conversation, from an Entry;
@@ -95,8 +103,9 @@ function sceneOf(
  * Assistant in it. A new one starts in `mode` when its first message is
  * sent, which is about the Scene `sceneId`, if any, or a new Interview
  * about `focus`. `show` opens one at a Proposal the Author asked to see. A
- * decision made anywhere shows at once. A failed call is kept as `failure`,
- * for Retry; it isn't in the log.
+ * decision made anywhere shows at once, and so does a Conversation renamed,
+ * moved to Trash or restored, or forked on another computer. A failed call
+ * is kept as `failure`, for Retry; it isn't in the log.
  */
 export function useConversation({
   mode,
@@ -105,11 +114,14 @@ export function useConversation({
   active,
   show,
   focus = OPEN_FOCUS,
+  onChange,
 }: {
   mode: Mode;
   sceneId: string | null;
   focus?: InterviewFocus;
   names: Names;
+  /** Runs moving a Conversation to Trash, offering to undo it. */
+  onChange: OnChange;
   /** Whether it is shown; it lists the Conversations anew each time it is. */
   active: boolean;
   show?: ShowProposal | null;
@@ -134,6 +146,27 @@ export function useConversation({
     // Others may have started meanwhile, as in another Mode's room.
     if (active) void window.assistant.listConversations().then(setList);
   }, [active]);
+
+  useEffect(
+    () =>
+      window.project.subscribe((event) => {
+        if (event.type !== 'conversationsChanged') return;
+        void window.assistant.listConversations().then((listed) => {
+          setList(listed);
+          const id = currentId.current;
+          if (!id || answering.current) return;
+          // The one open went to Trash.
+          if (!listed.some((c) => c.id === id)) {
+            setCurrent(null);
+            return;
+          }
+          void window.assistant.readConversation(id).then((conversation) => {
+            if (currentId.current === conversation.id) setCurrent(conversation);
+          });
+        });
+      }),
+    [],
+  );
 
   useEffect(
     () =>
@@ -264,6 +297,29 @@ export function useConversation({
     );
   }
 
+  /** Gives a Conversation a new title; the list shows it once main says so. */
+  async function rename(id: string, title: string) {
+    setError(null);
+    try {
+      await window.assistant.renameConversation(id, title);
+    } catch (error) {
+      setError(`Can't rename the Conversation: ${(error as Error).message}`);
+    }
+  }
+
+  /**
+   * Moves a whole Conversation to Trash once the Author confirms it, with
+   * Undo offered; single messages can't be deleted.
+   */
+  async function trash(id: string) {
+    const title = list.find((c) => c.id === id)?.title ?? 'Conversation';
+    setError(null);
+    await onChange(
+      () => window.assistant.trashConversation(id),
+      `“${title}” moved to Trash`,
+    );
+  }
+
   /** Runs `ask` while the Assistant answers, its reply streaming in meanwhile. */
   async function asking(ask: () => Promise<void>) {
     // What the Author typed last reaches main before the request is built.
@@ -315,10 +371,30 @@ export function useConversation({
     review,
     retry,
     changeFocus,
+    rename,
+    trash,
   };
 }
 
 export type ConversationState = ReturnType<typeof useConversation>;
+
+/**
+ * What can be done to a listed Conversation: rename it in place, which
+ * `startRename` begins, or move it to Trash. Never while the Project is
+ * read-only or the Assistant answers.
+ */
+export function conversationActions(
+  { streaming, trash }: ConversationState,
+  id: string,
+  startRename: () => void,
+  readOnly: boolean,
+): MenuItem[] {
+  const disabled = readOnly || streaming !== null;
+  return [
+    { label: 'Rename…', run: startRename, disabled },
+    { label: 'Move to Trash…', run: () => trash(id), disabled },
+  ];
+}
 
 /**
  * The messages of the Conversation open, each change of an Interview's focus

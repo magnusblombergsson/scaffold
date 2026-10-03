@@ -72,7 +72,7 @@ The Author's working notes on a Chapter or Scene. Visible to the Assistant, unli
 _Avoid_: Comments (when meaning the Author's own), annotations
 
 **Trash**:
-Where deleted Scenes, Chapters and Entries go within a Project; they stay recoverable until the Author empties it. A Chapter goes with its Scenes and comes back with them.
+Where deleted Scenes, Chapters, Entries and Conversations go within a Project; they stay recoverable until the Author empties it. A Chapter goes with its Scenes and comes back with them; a Conversation goes with its pending Proposals.
 _Avoid_: Bin, archive
 
 **Export**:

@@ -4,12 +4,15 @@ import { reviewText, type ReviewCommand } from '../shared/finding';
 import { NoKeyState, useKeyStatus } from './ApiKey';
 import {
   Composer,
+  conversationActions,
   MessageLog,
   useConversation,
   WINDOW_MODES,
   type Names,
+  type OnChange,
   type ShowProposal,
 } from './Conversation';
+import { Menu, TitleInput } from './Binder';
 import { ReadOnlyContext } from './read-only';
 
 /**
@@ -24,6 +27,7 @@ export function AssistantPanel({
   names,
   show,
   onQuote,
+  onChange,
 }: {
   /** Whether the panel is shown, its Mode the window's. */
   active: boolean;
@@ -36,6 +40,7 @@ export function AssistantPanel({
   show: ShowProposal | null;
   /** Opens a Scene with a Finding's quote of its Prose selected. */
   onQuote(sceneId: string, quote: string): void;
+  onChange: OnChange;
 }) {
   const status = useKeyStatus();
   return (
@@ -50,6 +55,7 @@ export function AssistantPanel({
             show={show}
             onOpenSettings={onAddKey}
             onQuote={onQuote}
+            onChange={onChange}
           />
         ) : (
           <NoKeyState onAddKey={onAddKey} />
@@ -73,6 +79,7 @@ function Conversations({
   show,
   onOpenSettings,
   onQuote,
+  onChange,
 }: {
   active: boolean;
   sceneId: string | null;
@@ -80,6 +87,7 @@ function Conversations({
   show: ShowProposal | null;
   onOpenSettings(): void;
   onQuote(sceneId: string, quote: string): void;
+  onChange: OnChange;
 }) {
   const readOnly = useContext(ReadOnlyContext);
   const conversation = useConversation({
@@ -88,9 +96,12 @@ function Conversations({
     names,
     active,
     show,
+    onChange,
   });
-  const { list, current, error, streaming, total, resume, review } =
+  const { list, current, error, streaming, total, resume, review, rename } =
     conversation;
+  /** Whether the open Conversation's title is being edited. */
+  const [renaming, setRenaming] = useState(false);
   /** The Mode chosen in the selector, while no Conversation is open. */
   const [chosen, setChosen] = useState<Mode>('writing');
   const mode = current?.mode ?? chosen;
@@ -121,25 +132,48 @@ function Conversations({
             </option>
           ))}
         </select>
-        <select
-          aria-label="Conversation"
-          value={current?.id ?? ''}
-          onChange={(event) => void resume(event.target.value)}
-          disabled={streaming !== null}
-        >
-          {mode === 'writing' ? (
-            <option value="">New Conversation</option>
+        <div className="conversation-choice">
+          {renaming && current ? (
+            <TitleInput
+              title={current.title}
+              onDone={(title) => {
+                setRenaming(false);
+                if (title) void rename(current.id, title);
+              }}
+            />
           ) : (
-            <option value="" disabled>
-              Choose a Conversation
-            </option>
+            <select
+              aria-label="Conversation"
+              value={current?.id ?? ''}
+              onChange={(event) => void resume(event.target.value)}
+              disabled={streaming !== null}
+            >
+              {mode === 'writing' ? (
+                <option value="">New Conversation</option>
+              ) : (
+                <option value="" disabled>
+                  Choose a Conversation
+                </option>
+              )}
+              {listed.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.title}
+                </option>
+              ))}
+            </select>
           )}
-          {listed.map((c) => (
-            <option key={c.id} value={c.id}>
-              {c.title}
-            </option>
-          ))}
-        </select>
+          {current && (
+            <Menu
+              label={`Conversation actions: ${current.title}`}
+              items={conversationActions(
+                conversation,
+                current.id,
+                () => setRenaming(true),
+                readOnly,
+              )}
+            />
+          )}
+        </div>
         {total && (
           <p className="conversation-usage" aria-label="Conversation usage">
             {total}

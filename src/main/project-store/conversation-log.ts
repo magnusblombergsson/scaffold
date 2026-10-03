@@ -28,7 +28,11 @@ import type { Usage } from '../../shared/usage';
 // The format of a Conversation log, `conversations/<id>.jsonl` (ADR 0003): a
 // header line, then one event per line. The file is only ever appended to.
 
-export type ConversationHeader = ConversationSummary & { format: number };
+/** A log's header; one forked from a copy another computer saved names that copy's id. */
+export type ConversationHeader = ConversationSummary & {
+  format: number;
+  forkedFrom?: string;
+};
 
 /** A message event as it is written in the log. */
 export type MessageEvent = { type: 'message' } & ConversationMessage;
@@ -78,10 +82,22 @@ export type FocusChangedEvent = {
   at: number;
 };
 
+/** The Author gave the Conversation a new title. */
+export type RenamedEvent = { type: 'renamed'; title: string; at: number };
+
+/**
+ * The Conversation went to Trash, or came back from it: its log moves
+ * between `conversations/` and `trash/` with this appended, so it is only
+ * ever appended to.
+ */
+export type TrashMoveEvent = { type: 'trashed' | 'restored'; at: number };
+
 /** An event this app writes. */
 export type ConversationEvent =
   | MessageEvent
   | FocusChangedEvent
+  | RenamedEvent
+  | TrashMoveEvent
   | ProposedEvent
   | AcceptedEvent
   | RejectedEvent
@@ -100,8 +116,14 @@ export type Decision =
 /** A Proposal in a log: the message it came with, by index, and the latest decision on it. */
 export type LoggedProposal = Proposal & { message: number; decision: Decision };
 
-/** A Conversation as its log holds it: the messages, and the Proposals made in them. */
-export type LoggedConversation = Conversation & { proposals: LoggedProposal[] };
+/**
+ * A Conversation as its log holds it: the messages, and the Proposals made in
+ * them; `trashedAt` says when it went to Trash, while it is there.
+ */
+export type LoggedConversation = Conversation & {
+  proposals: LoggedProposal[];
+  trashedAt?: number;
+};
 
 export function headerLine(header: ConversationHeader): string {
   return `${JSON.stringify(header)}\n`;
@@ -117,10 +139,45 @@ export function eventLine(log: string, event: ConversationEvent): string {
 }
 
 /**
+ * The log of a Conversation forked from `log`, a copy of a log that another
+ * computer saved, or null when its header is unreadable: a header with the
+ * new `id`, `forkedFrom` the copy's id, and the title "<title> (from
+ * <host>)", then the copy's events as they are. A title the copy was
+ * renamed to would win over the header's, so then the new title is also
+ * logged as renamed, `at` the time given.
+ */
+export function forkedLog(
+  log: string,
+  id: string,
+  host: string,
+  at: number,
+): string | null {
+  const conversation = parseLog(log);
+  if (!conversation) return null;
+  const [first, ...events] = log.split('\n');
+  const header = parseLine(first) as ConversationHeader;
+  const forked: ConversationHeader = {
+    id,
+    mode: conversation.mode,
+    title: `${conversation.title} (from ${host})`,
+    created: conversation.created,
+    // Its events are in the format the copy was written in.
+    format: typeof header.format === 'number' ? header.format : 1,
+    forkedFrom: conversation.id,
+  };
+  const rest = events.join('\n');
+  const copied = `${headerLine(forked)}${rest === '' || rest.endsWith('\n') ? rest : `${rest}\n`}`;
+  if (parseLog(copied)?.title === forked.title) return copied;
+  const renamed: RenamedEvent = { type: 'renamed', title: forked.title, at };
+  return `${copied}${eventLine(copied, renamed)}`;
+}
+
+/**
  * The Conversation a log holds, or null when its header is unreadable. Lines
  * that can't be read, as one a crash cut short, and events this app doesn't
  * know are skipped; they stay in the file. A Proposal belongs to the message
- * before it. An Interview's focus is the one it was last set to.
+ * before it. An Interview's focus is the one it was last set to, and its
+ * title the one it was last renamed to.
  */
 export function parseLog(log: string): LoggedConversation | null {
   const [first, ...rest] = log.split('\n');
@@ -129,8 +186,18 @@ export function parseLog(log: string): LoggedConversation | null {
   const messages: ConversationMessage[] = [];
   const proposals = new Map<string, LoggedProposal>();
   const focusChanges: FocusChange[] = [];
+  let { title } = header;
+  let trashedAt: number | undefined;
   for (const line of rest) {
     const event = parseLine(line) as { type?: unknown; id?: unknown } | null;
+    if (isRenamed(event)) {
+      title = event.title;
+      continue;
+    }
+    if (isTrashed(event)) {
+      trashedAt = event.type === 'trashed' ? event.at : undefined;
+      continue;
+    }
     if (isMessage(event)) {
       messages.push(messageOf(event));
       continue;
@@ -162,12 +229,13 @@ export function parseLog(log: string): LoggedConversation | null {
       }
     }
   }
-  const { id, mode, title, created } = header;
+  const { id, mode, created } = header;
   return {
     id,
     mode,
     title,
     created,
+    ...(trashedAt !== undefined && { trashedAt }),
     ...(focusChanges.length > 0 && {
       focus: focusChanges.at(-1)!.focus,
       focusChanges,
@@ -371,6 +439,23 @@ function isHeader(value: unknown): value is ConversationHeader {
     MODES.includes(header.mode as Mode) &&
     typeof header.title === 'string' &&
     typeof header.created === 'number'
+  );
+}
+
+function isRenamed(value: unknown): value is RenamedEvent {
+  const event = value as Partial<RenamedEvent> | null;
+  return (
+    event?.type === 'renamed' &&
+    typeof event.title === 'string' &&
+    event.title.trim() !== ''
+  );
+}
+
+function isTrashed(value: unknown): value is TrashMoveEvent {
+  const event = value as Partial<TrashMoveEvent> | null;
+  return (
+    (event?.type === 'trashed' || event?.type === 'restored') &&
+    typeof event.at === 'number'
   );
 }
 

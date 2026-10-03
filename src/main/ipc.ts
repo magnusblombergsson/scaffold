@@ -5,7 +5,12 @@ import {
   type IpcMainInvokeEvent,
   type WebContents,
 } from 'electron';
-import { channel, type AcceptOptions, type ProjectApi } from '../shared/api';
+import {
+  channel,
+  type AcceptOptions,
+  type Changed,
+  type ProjectApi,
+} from '../shared/api';
 import type { InterviewFocus, Mode } from '../shared/conversation';
 import type { ReviewCommand } from '../shared/finding';
 import { createConversationEngine } from './assistant/conversation-engine';
@@ -13,6 +18,7 @@ import { claudeProvider } from './assistant/claude-provider';
 import { systemClock } from './project-store/clock';
 import type { ProjectStore } from './project-store/project-store';
 import { assistantKey, assistantModel, storeOf } from './shell';
+import { trashConversationQuestion } from './trash-question';
 
 /**
  * Every method but `emptyTrash`, which asks the Author first, and
@@ -117,6 +123,18 @@ export function registerAssistantIpc(): void {
       storeOfWindow(event.sender).startConversation(mode, title),
   );
   ipcMain.handle(
+    channel.renameConversation,
+    (event, conversationId: string, title: string) =>
+      storeOfWindow(event.sender).renameConversation(conversationId, title),
+  );
+  ipcMain.handle(channel.trashConversation, (event, conversationId: string) =>
+    trashConversation(
+      event.sender,
+      storeOfWindow(event.sender),
+      conversationId,
+    ),
+  );
+  ipcMain.handle(
     channel.setInterviewFocus,
     (event, conversationId: string, focus: InterviewFocus) =>
       storeOfWindow(event.sender).setInterviewFocus(conversationId, focus),
@@ -194,6 +212,32 @@ function storeOfWindow(sender: WebContents): ProjectStore {
   const store = storeOf(sender);
   if (!store) throw new Error('No Project is open in this window');
   return store;
+}
+
+/**
+ * Moves a Conversation to Trash once the Author confirms it, told how many
+ * pending Proposals go with it.
+ */
+async function trashConversation(
+  sender: WebContents,
+  store: ProjectStore,
+  conversationId: string,
+): Promise<Changed | null> {
+  const { title } = await store.readConversation(conversationId);
+  const pending = await store.pendingProposalCount(conversationId);
+  const options = {
+    type: 'warning' as const,
+    buttons: ['Move to Trash', 'Cancel'],
+    defaultId: 1,
+    cancelId: 1,
+    ...trashConversationQuestion(title, pending),
+  };
+  const window = BrowserWindow.fromWebContents(sender);
+  const { response } = window
+    ? await dialog.showMessageBox(window, options)
+    : await dialog.showMessageBox(options);
+  if (response !== 0) return null;
+  return store.trashConversation(conversationId);
 }
 
 /** Empties Trash once the Author confirms it; there is no undo. */

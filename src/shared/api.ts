@@ -68,6 +68,12 @@ export type UnitReloaded = {
 export type ProposalsChanged = { type: 'proposalsChanged' };
 
 /**
+ * A Conversation was renamed, went to Trash or came back, or one forked from
+ * a log saved on another computer appeared.
+ */
+export type ConversationsChanged = { type: 'conversationsChanged' };
+
+/**
  * `project.json`, or the Scene and Trash files it orders, changed on disk;
  * nothing done before can be undone.
  */
@@ -133,6 +139,7 @@ export type ProjectEvent =
   | ConflictsChanged
   | EntriesChanged
   | ProposalsChanged
+  | ConversationsChanged
   | ReadOnly;
 
 /** Mirrors the main-process ProjectStore of this window's Project. */
@@ -390,6 +397,14 @@ export interface AssistantApi {
   listConversations(): Promise<ConversationSummary[]>;
   readConversation(id: string): Promise<Conversation>;
   startConversation(mode: Mode, title: string): Promise<ConversationSummary>;
+  /** Gives a Conversation a new title; refused for an empty one. */
+  renameConversation(conversationId: string, title: string): Promise<void>;
+  /**
+   * Asks the Author to confirm, saying how many pending Proposals go with
+   * it, then moves the whole Conversation to Trash; null if not. Single
+   * messages can't be deleted.
+   */
+  trashConversation(conversationId: string): Promise<Changed | null>;
   /**
    * Sets an Interview's focus from its next message on, logged as an event.
    * Refused for a Conversation of another Mode.
@@ -479,6 +494,8 @@ export const channel = {
   listConversations: 'assistant:listConversations',
   readConversation: 'assistant:readConversation',
   startConversation: 'assistant:startConversation',
+  renameConversation: 'assistant:renameConversation',
+  trashConversation: 'assistant:trashConversation',
   setInterviewFocus: 'assistant:setInterviewFocus',
   ask: 'assistant:ask',
   review: 'assistant:review',

@@ -347,6 +347,9 @@ function ProjectView({
           setReloaded({ ref: event.ref, count: ++reloads.current });
         } else if (event.type === 'conflictsChanged') {
           setConflicts(event.conflicts);
+        } else if (event.type === 'conversationsChanged') {
+          // A Conversation may have gone to Trash, or come out.
+          void refreshTrash();
         } else if (event.type === 'entriesChanged') {
           setEntries(event.entries);
           // An Entry may have gone to Trash, or come out, as by a Proposal's undo.
@@ -362,12 +365,16 @@ function ProjectView({
     [refreshTrash],
   );
 
-  /** Runs a structure operation, and offers to undo it. */
-  async function change(operation: () => Promise<Changed>, message: string) {
+  /** Runs a structure operation, and offers to undo it; null when the Author cancelled it. */
+  async function change(
+    operation: () => Promise<Changed | null>,
+    message: string,
+  ) {
     // Edits reach main before the structure changes under them.
     flushPendingEdits();
     try {
       const result = await operation();
+      if (!result) return;
       setManuscript(result.manuscript);
       setLatest({ message, step: result.step });
       onError(null);
@@ -481,6 +488,7 @@ function ProjectView({
                 pane={pane}
                 onAddKey={onAddKey}
                 onOpenEntry={openEntryInWriting}
+                onChange={change}
               />
             </div>
           )}
@@ -492,6 +500,7 @@ function ProjectView({
                 pane={pane}
                 onAddKey={onAddKey}
                 onOpenEntry={openEntryInWriting}
+                onChange={change}
               />
             </div>
           )}
@@ -715,6 +724,7 @@ function ProjectView({
                 names={{ manuscript, entries }}
                 show={showProposal}
                 onQuote={showQuote}
+                onChange={change}
               />
             </div>
           )}

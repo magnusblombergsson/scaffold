@@ -399,7 +399,7 @@ function inLowerHalf(event: DragEvent<HTMLElement>): boolean {
 }
 
 /** Edits a title in place: Enter or leaving the field keeps it, Escape cancels. */
-function TitleInput({
+export function TitleInput({
   title,
   onDone,
 }: {

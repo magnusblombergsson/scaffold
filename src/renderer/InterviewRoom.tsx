@@ -20,6 +20,7 @@ import {
   MessageLog,
   useConversation,
   type Names,
+  type OnChange,
   type ShowProposal,
 } from './Conversation';
 import { EntryCard } from './EntryCard';
@@ -48,6 +49,7 @@ export function InterviewRoom({
   pane,
   onAddKey,
   onOpenEntry,
+  onChange,
 }: {
   /** Whether the room is shown, its Mode the window's. */
   active: boolean;
@@ -57,6 +59,7 @@ export function InterviewRoom({
   onAddKey(): void;
   /** Opens an Entry in the Writing Mode. */
   onOpenEntry(entryId: string): void;
+  onChange: OnChange;
 }) {
   const status = useKeyStatus();
   const readOnly = useContext(ReadOnlyContext);
@@ -72,6 +75,7 @@ export function InterviewRoom({
     names,
     active,
     show,
+    onChange,
   });
   const { list, current, error, streaming, total, send, changeFocus } =
     conversation;

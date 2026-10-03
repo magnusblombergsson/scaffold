@@ -116,7 +116,7 @@ test('the Author is interviewed about a focus they pick and change, and sees the
     name: 'Interview Conversations',
   });
   await expect(
-    conversations.getByRole('button', { name: /Ask me about Anna/ }),
+    conversations.getByRole('button', { name: /^Ask me about Anna/ }),
   ).toContainText('Scene “Scene 1”');
 
   const dir = path.join(projectPath, 'conversations');
@@ -176,7 +176,7 @@ test('with open focus, the Assistant is asked to say first which gap it chose an
   await expect(
     page
       .getByRole('navigation', { name: 'Interview Conversations' })
-      .getByRole('button', { name: /Ask me about what is missing/ }),
+      .getByRole('button', { name: /^Ask me about what is missing/ }),
   ).toContainText('Open');
   await app.close();
 });

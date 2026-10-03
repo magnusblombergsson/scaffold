@@ -1027,6 +1027,17 @@ h2.binder-title > button[aria-current='true'],
   width: 100%;
 }
 
+.conversation-choice {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.conversation-choice select {
+  flex: 1;
+  min-width: 0;
+}
+
 .messages {
   flex: 1;
   overflow-y: auto;
@@ -1349,7 +1360,13 @@ button.finding-quote:hover {
   padding: 0 0.5rem;
 }
 
-.room-conversations button {
+.room-conversation {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.room-conversations .binder-title {
   display: block;
   width: 100%;
   padding: 0.3rem 0.5rem;

@@ -105,7 +105,10 @@ test('the Author brainstorms in the Brainstorm room, decides its Proposals inlin
     name: 'Brainstorm Conversations',
   });
   await expect(
-    conversations.getByRole('button', { name: 'What if Anna has a sister?' }),
+    conversations.getByRole('button', {
+      name: 'What if Anna has a sister?',
+      exact: true,
+    }),
   ).toHaveAttribute('aria-current', 'true');
 
   await reply

@@ -11,6 +11,7 @@ import {
   MessageLog,
   useConversation,
   type Names,
+  type OnChange,
 } from './Conversation';
 import { EntryCard } from './EntryCard';
 import { PanelResizer, type PaneSize } from './PanelResizer';
@@ -28,6 +29,7 @@ export function BrainstormRoom({
   pane,
   onAddKey,
   onOpenEntry,
+  onChange,
 }: {
   /** Whether the room is shown, its Mode the window's. */
   active: boolean;
@@ -37,6 +39,7 @@ export function BrainstormRoom({
   onAddKey(): void;
   /** Opens an Entry in the Writing Mode. */
   onOpenEntry(entryId: string): void;
+  onChange: OnChange;
 }) {
   const status = useKeyStatus();
   const conversation = useConversation({
@@ -44,6 +47,7 @@ export function BrainstormRoom({
     sceneId: null,
     names,
     active,
+    onChange,
   });
   const { list, current, error, total } = conversation;
   const listed = list.filter((c) => c.mode === 'brainstorm');

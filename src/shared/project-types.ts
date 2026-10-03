@@ -1,3 +1,5 @@
+import type { Mode } from './conversation';
+
 // Types shared by main, preload and renderer. The renderer never sees paths or
 // file formats, only these values.
 
@@ -222,6 +224,13 @@ export type TrashItem =
       title: string;
       trashedAt: number;
       type: EntryType;
+    }
+  | {
+      kind: 'conversation';
+      id: string;
+      title: string;
+      trashedAt: number;
+      mode: Mode;
     };
 
 /** The languages Prose is spellchecked and typeset in. */

@@ -81,6 +81,7 @@ import type { Clock } from './clock';
 import {
   acceptedEvent,
   eventLine,
+  forkedLog,
   headerLine,
   parseLog,
   proposedEvent,
@@ -268,6 +269,7 @@ export async function openProject(
   // Every Manuscript has at least one Chapter.
   if (manifest.tree.chapters.length === 0) await store.createChapter(0);
   await store.findConflicts();
+  await store.forkConversationCopies();
   return store;
 }
 
@@ -491,7 +493,21 @@ type TrashedEntry = {
   trashedAt: number;
 };
 
-type Trashed = TrashedScene | TrashedChapter | TrashedVersion | TrashedEntry;
+/** A Conversation in Trash: its whole log, at `trash/<id>.jsonl`. */
+type TrashedConversation = {
+  kind: 'conversation';
+  id: string;
+  title: string;
+  mode: Mode;
+  trashedAt: number;
+};
+
+type Trashed =
+  | TrashedScene
+  | TrashedChapter
+  | TrashedVersion
+  | TrashedEntry
+  | TrashedConversation;
 
 /** What `trash/<id>.entry.md` records beside the Entry's own frontmatter and description. */
 type TrashedEntryInfo = { at: number };
@@ -574,10 +590,22 @@ async function scanUnits(
   const chapters = new Map<string, TrashedChapter>();
   const scenes: TrashedScene[] = [];
   const versions: TrashedVersion[] = [];
+  const conversations: TrashedConversation[] = [];
   const withChapter = new Map<string, string>();
 
   for (const name of await fs.readdir(trashDir(projectPath))) {
     const file = path.join(trashDir(projectPath), name);
+    const conversationId = CONVERSATION_FILE.exec(name)?.[1];
+    if (conversationId) {
+      const trashed = await trashedConversation(
+        projectPath,
+        conversationId,
+        fs,
+        { repair },
+      );
+      if (trashed) conversations.push(trashed);
+      continue;
+    }
     const versionId = VERSION_FILE.exec(name)?.[1];
     if (versionId) {
       const { frontmatter } = parseUnitFile(await fs.readFile(file));
@@ -630,6 +658,7 @@ async function scanUnits(
   const trash = new Map<string, Trashed>(chapters);
   for (const version of versions) trash.set(version.id, version);
   for (const item of trashedEntries) trash.set(item.id, item);
+  for (const item of conversations) trash.set(item.id, item);
   for (const scene of scenes) {
     // A Scene deleted with its Chapter is restored with it, unless the
     // Chapter's record isn't here, such as when it hasn't synced yet.
@@ -637,6 +666,34 @@ async function scanUnits(
     if (!chapterId || !chapters.has(chapterId)) trash.set(scene.id, scene);
   }
   return { files, entries, trash };
+}
+
+/**
+ * The Conversation whose log is in Trash, unless its log is also in
+ * `conversations/`, which wins: a crash cut off its move to Trash or back.
+ * With `repair`, that Trash copy is deleted when one log only adds to the
+ * other, as such a crash leaves them; else both are left alone.
+ */
+async function trashedConversation(
+  projectPath: string,
+  id: string,
+  fs: FileSystem,
+  { repair }: { repair: boolean },
+): Promise<TrashedConversation | null> {
+  const file = conversationTrashPath(projectPath, id);
+  const text = await fs.readFile(file);
+  const live = conversationPath(projectPath, id);
+  if (await fs.exists(live)) {
+    const liveText = await fs.readFile(live);
+    if (repair && (liveText.startsWith(text) || text.startsWith(liveText))) {
+      await fs.unlink(file);
+    }
+    return null;
+  }
+  const log = parseLog(text);
+  if (!log) return null;
+  const { title, mode, trashedAt = 0 } = log;
+  return { kind: 'conversation', id, title, mode, trashedAt };
 }
 
 /** The Entries in `bible/`, by id; a file that can't be read is skipped. */
@@ -1098,6 +1155,7 @@ export class ProjectStore {
         if (this.upgraded) return;
         await this.checkUnits();
         await this.findConflicts();
+        await this.forkConversationCopies();
       } catch (error) {
         console.error(`Can't check ${this.path} for changes:`, error);
       }
@@ -1470,38 +1528,40 @@ export class ProjectStore {
       .sort((a, b) => b.trashedAt - a.trashedAt)
       .map(
         (item): TrashItem =>
-          item.kind === 'version'
-            ? {
-                kind: 'version',
-                id: item.id,
-                title: unitName(item.ref, manuscript, entries),
-                trashedAt: item.trashedAt,
-                ...(item.host && { host: item.host }),
-                savedAt: item.savedAt,
-              }
-            : item.kind === 'entry'
+          item.kind === 'conversation'
+            ? { ...item }
+            : item.kind === 'version'
               ? {
-                  kind: 'entry',
+                  kind: 'version',
                   id: item.id,
-                  title: item.name,
+                  title: unitName(item.ref, manuscript, entries),
                   trashedAt: item.trashedAt,
-                  type: item.type,
+                  ...(item.host && { host: item.host }),
+                  savedAt: item.savedAt,
                 }
-              : item.kind === 'chapter'
+              : item.kind === 'entry'
                 ? {
-                    kind: 'chapter',
+                    kind: 'entry',
                     id: item.id,
-                    title: item.title,
+                    title: item.name,
                     trashedAt: item.trashedAt,
-                    scenes: item.scenes.map((s) => ({ ...s })),
+                    type: item.type,
                   }
-                : {
-                    kind: 'scene',
-                    id: item.id,
-                    title: item.title,
-                    trashedAt: item.trashedAt,
-                    ...(item.chapter && { chapterTitle: item.chapter.title }),
-                  },
+                : item.kind === 'chapter'
+                  ? {
+                      kind: 'chapter',
+                      id: item.id,
+                      title: item.title,
+                      trashedAt: item.trashedAt,
+                      scenes: item.scenes.map((s) => ({ ...s })),
+                    }
+                  : {
+                      kind: 'scene',
+                      id: item.id,
+                      title: item.title,
+                      trashedAt: item.trashedAt,
+                      ...(item.chapter && { chapterTitle: item.chapter.title }),
+                    },
       );
   }
 
@@ -1815,7 +1875,9 @@ export class ProjectStore {
           ? this.moveChapterToTrash(id)
           : kind === 'entry'
             ? this.moveEntryToTrash(id)
-            : this.moveSceneToTrash(id);
+            : kind === 'conversation'
+              ? this.inLog(id, () => this.moveConversationToTrash(id))
+              : this.moveSceneToTrash(id);
     });
   }
 
@@ -2218,6 +2280,10 @@ export class ProjectStore {
       await this.restoreEntry(item);
       return;
     }
+    if (item.kind === 'conversation') {
+      await this.inLog(id, () => this.restoreConversation(id));
+      return;
+    }
     const tree = this.tree();
     const placed = new Set(sceneIds(tree));
     const live = (sceneId: string) =>
@@ -2508,11 +2574,167 @@ export class ProjectStore {
   }
 
   /**
+   * Gives a Conversation a new title, logged as an event; the header keeps
+   * the one it started with. Refuses an empty title.
+   */
+  renameConversation(id: string, title: string): Promise<void> {
+    const trimmed = title.trim();
+    return this.inLog(id, async () => {
+      if (trimmed === '') throw new Error('A Conversation needs a title');
+      await this.passFormatGate();
+      await this.appendEvent(id, {
+        type: 'renamed',
+        title: trimmed,
+        at: this.deps.clock.now(),
+      });
+      this.emit({ type: 'conversationsChanged' });
+    });
+  }
+
+  /** How many of a Conversation's Proposals are still pending, as its cards show them. */
+  async pendingProposalCount(id: string): Promise<number> {
+    let count = 0;
+    for (const proposal of (await this.readLogged(id)).proposals) {
+      const { state } = await this.proposalView(proposal);
+      if (state.kind === 'pending') count++;
+    }
+    return count;
+  }
+
+  /**
+   * Moves a whole Conversation to Trash, its pending Proposals with it, as a
+   * step that `undo` reverts. Single messages can't be deleted.
+   */
+  trashConversation(id: string): Promise<Changed> {
+    return this.step(async () => {
+      await this.inLog(id, () => this.moveConversationToTrash(id));
+      return () => this.inLog(id, () => this.restoreConversation(id));
+    });
+  }
+
+  /**
+   * Writes the log to Trash, with `trashed` appended, then removes it from
+   * `conversations/`: a crash between leaves it where it was.
+   */
+  private async moveConversationToTrash(id: string): Promise<void> {
+    const text = await this.readLog(id);
+    const at = this.deps.clock.now();
+    const trashed = `${text}${eventLine(text, { type: 'trashed', at })}`;
+    const log = parseLog(trashed);
+    if (!log) {
+      throw new ProjectError(
+        'unreadable',
+        `Conversation ${id} can't be read: its first line is damaged`,
+      );
+    }
+    await this.deps.fs.mkdir(trashDir(this.path));
+    await safeWrite(
+      this.deps.fs,
+      this.deps.clock,
+      conversationTrashPath(this.path, id),
+      trashed,
+    );
+    await this.deps.fs.unlink(conversationPath(this.path, id));
+    const { title, mode } = log;
+    this.trash.set(id, {
+      kind: 'conversation',
+      id,
+      title,
+      mode,
+      trashedAt: at,
+    });
+    this.emit({ type: 'conversationsChanged' });
+    this.emit({ type: 'proposalsChanged' });
+  }
+
+  /** Puts a Conversation's log back, with `restored` appended, then its Trash copy goes. */
+  private async restoreConversation(id: string): Promise<void> {
+    const file = conversationTrashPath(this.path, id);
+    const live = conversationPath(this.path, id);
+    if (this.trash.get(id)?.kind !== 'conversation') {
+      throw new Error(`Conversation ${id} is not in Trash`);
+    }
+    if (await this.deps.fs.exists(live)) {
+      throw new Error(`Conversation ${id} is already in conversations/`);
+    }
+    const text = await this.deps.fs.readFile(file);
+    const at = this.deps.clock.now();
+    await this.deps.fs.mkdir(path.join(this.path, CONVERSATIONS));
+    await safeWrite(
+      this.deps.fs,
+      this.deps.clock,
+      live,
+      `${text}${eventLine(text, { type: 'restored', at })}`,
+    );
+    this.trash.delete(id);
+    await this.deps.fs.unlink(file);
+    this.emit({ type: 'conversationsChanged' });
+    this.emit({ type: 'proposalsChanged' });
+  }
+
+  /**
+   * Makes each copy of a log that a sync client saved beside it, as
+   * `<id>-HOST.jsonl`, a Conversation of its own, never merged: a new log
+   * with a new id, `forkedFrom` and the title "<title> (from HOST)", holding
+   * the copy's events. Then the copy goes to Trash. The new id comes from
+   * the copy, so a crash before the copy went forks it once all the same. A
+   * copy with no readable header is logged and left alone.
+   */
+  async forkConversationCopies(): Promise<void> {
+    const dir = path.join(this.path, CONVERSATIONS);
+    let hosts: string[] | undefined;
+    let forked = false;
+    for (const name of await this.deps.fs.readdir(dir)) {
+      if (CONVERSATION_FILE.test(name) || !name.endsWith('.jsonl')) continue;
+      const file = path.join(dir, name);
+      const text = await this.deps.fs.readFile(file);
+      const original = parseLog(text);
+      if (!original) {
+        logOnce(this.unrecognised, `Can't read the Conversation log ${name}`);
+        continue;
+      }
+      hosts ??= [this.host, ...(await markerHosts(this.path, this.deps.fs))];
+      const host =
+        hostOfCopy(name, hosts).host ??
+        copySuffix(name, original.id) ??
+        'another computer';
+      const id = uuidFrom(`${name}
+${text}`);
+      const forkPath = conversationPath(this.path, id);
+      if (!(await this.deps.fs.exists(forkPath))) {
+        await safeWrite(
+          this.deps.fs,
+          this.deps.clock,
+          forkPath,
+          forkedLog(text, id, host, this.deps.clock.now())!,
+        );
+      }
+      await this.deps.fs.mkdir(trashDir(this.path));
+      await safeWrite(
+        this.deps.fs,
+        this.deps.clock,
+        path.join(trashDir(this.path), `${id}.fork.jsonl`),
+        text,
+      );
+      await this.deps.fs.unlink(file);
+      forked = true;
+    }
+    if (forked) {
+      this.emit({ type: 'conversationsChanged' });
+      this.emit({ type: 'proposalsChanged' });
+    }
+  }
+
+  /**
    * The Conversation a log holds: its header and the messages shown, each
    * reply with the Proposals made in it and where they stand now.
    */
   async readConversation(id: string): Promise<Conversation> {
-    const { proposals, ...conversation } = await this.readLogged(id);
+    const {
+      proposals,
+      trashedAt: _,
+      ...conversation
+    } = await this.readLogged(id);
     const messages = conversation.messages.map((m) => ({ ...m }));
     for (const proposal of proposals) {
       const message = messages[proposal.message];
@@ -3469,6 +3691,28 @@ const CONVERSATION_FILE = new RegExp(`^(${UUID})\\.jsonl$`);
 
 function conversationPath(projectPath: string, id: string): string {
   return path.join(projectPath, CONVERSATIONS, `${id}.jsonl`);
+}
+
+function conversationTrashPath(projectPath: string, id: string): string {
+  return path.join(trashDir(projectPath), `${id}.jsonl`);
+}
+
+/** What follows `<id>-` in a conflict copy's name, as the host a sync client named it by. */
+function copySuffix(name: string, id: string): string | undefined {
+  const stem = name.replace(/\.jsonl$/, '');
+  const prefix = `${id}-`;
+  return stem.startsWith(prefix) && stem.length > prefix.length
+    ? stem.slice(prefix.length)
+    : undefined;
+}
+
+/** A UUIDv4-shaped id that is always the same for the same `seed`. */
+function uuidFrom(seed: string): string {
+  const hex = hashOf(seed).slice(0, 32).split('');
+  hex[12] = '4';
+  hex[16] = ((parseInt(hex[16], 16) & 0x3) | 0x8).toString(16);
+  const h = hex.join('');
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
 }
 
 function copyPath(
