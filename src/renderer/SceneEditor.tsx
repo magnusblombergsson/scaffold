@@ -4,7 +4,7 @@ import type { ProseLanguage } from '../shared/project-types';
 import { findQuote } from './find-quote';
 import { MentionHighlight } from './mention-highlight';
 import { proseExtensions } from './prose-editor';
-import { docToMarkdown, markdownToDoc } from './prose-markdown';
+import { docToMarkdown, markdownToDoc } from '../shared/prose-markdown';
 import { UnitEditor } from './UnitEditor';
 
 /**

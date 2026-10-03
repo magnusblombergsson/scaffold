@@ -2,7 +2,8 @@ import type { JSONContent } from '@tiptap/core';
 
 // The editor boundary (ADR 0001): the rest of the app sees only restricted
 // Markdown (paragraphs, `*italic*`, `**bold**`); the editor's JSON never
-// leaves the editor.
+// leaves the editor. Outside it, as in an Export, Prose is read as paragraphs
+// of spans.
 //
 // Within a paragraph, every run of asterisks is read as the closing of open
 // marks followed by the opening of closed ones. For runs of one to three
@@ -10,11 +11,12 @@ import type { JSONContent } from '@tiptap/core';
 // to the same Prose, also when marks cross (which CommonMark would read
 // differently). Literal `*` and `\` are escaped with a backslash.
 
-type Mark = 'bold' | 'italic';
+export type Mark = 'bold' | 'italic';
 const MARKS: readonly Mark[] = ['bold', 'italic'];
 const DELIMITER: Record<Mark, string> = { bold: '**', italic: '*' };
 
-type Span = { text: string; marks: Mark[] };
+/** A stretch of Prose with the same marks, bold before italic. */
+export type Span = { text: string; marks: Mark[] };
 
 export function docToMarkdown(doc: JSONContent): string {
   return (doc.content ?? [])
@@ -42,6 +44,16 @@ export function markdownToDoc(markdown: string): JSONContent {
       ),
     })),
   };
+}
+
+/** Prose's paragraphs, each as its spans; none when it is empty. */
+export function readProse(markdown: string): Span[][] {
+  return markdown
+    .replace(/\r\n/g, '\n')
+    .split(/\n{2,}/)
+    .map((block) => block.trim())
+    .filter((block) => block !== '')
+    .map(readSpans);
 }
 
 // --- Writing ---

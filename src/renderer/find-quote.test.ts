@@ -3,7 +3,7 @@ import { Editor } from '@tiptap/core';
 import { afterEach, describe, expect, it } from 'vitest';
 import { findQuote } from './find-quote';
 import { proseExtensions } from './prose-editor';
-import { markdownToDoc } from './prose-markdown';
+import { markdownToDoc } from '../shared/prose-markdown';
 
 let editor: Editor | undefined;
 afterEach(() => editor?.destroy());

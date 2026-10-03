@@ -3,10 +3,13 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  Menu,
   screen,
   shell,
+  type MenuItemConstructorOptions,
   type WebContents,
 } from 'electron';
+import { access, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type {
   KeyOptions,
@@ -26,6 +29,14 @@ import {
   type AppSettings,
   type WindowBounds,
 } from './app-settings/app-settings';
+import {
+  conflictedScenes,
+  exportConflictQuestion,
+  exportManuscript,
+  EXPORT_FORMATS,
+  exportTarget,
+  insideProjectMessage,
+} from './export/manuscript-export';
 import { anthropicKeyCheck } from './key-store/check-key';
 import { loadKeyStore, type KeyStore } from './key-store/key-store';
 import { safeStorageEncryption } from './key-store/safe-storage';
@@ -38,6 +49,7 @@ import {
   projectLookup,
   type ProjectStore,
 } from './project-store/project-store';
+import { writeFailureReason } from './project-store/safe-write';
 
 // The app shell: its windows, the Project each one shows, and the settings
 // that remember them on this computer.
@@ -112,6 +124,8 @@ export async function startShell(): Promise<void> {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow(null);
   });
+  setApplicationMenu();
+  app.on('browser-window-focus', updateMenu);
 
   for (const projectPath of settings.openAtQuit()) {
     if (windowShowing(projectPath)) continue;
@@ -210,6 +224,7 @@ function attach(contents: WebContents, store: ProjectStore): void {
     displayName: store.displayName,
   });
   rememberOpenProjects();
+  updateMenu();
   void store.startSession();
   // On macOS the OS chooses the spellchecker language.
   if (process.platform !== 'darwin')
@@ -448,6 +463,120 @@ function announceKeyStatus(status: KeyStatus): void {
   }
 }
 
+/** The menus: File holds Export…; the others are Electron's own. */
+function setApplicationMenu(): void {
+  const mac = process.platform === 'darwin';
+  const template: MenuItemConstructorOptions[] = [
+    ...(mac ? [{ role: 'appMenu' as const }] : []),
+    {
+      label: 'File',
+      submenu: [
+        {
+          id: 'export',
+          label: 'Export…',
+          enabled: false,
+          click: (_item, window) => {
+            if (window instanceof BrowserWindow) void exportFrom(window);
+          },
+        },
+        { type: 'separator' },
+        mac ? { role: 'close' } : { role: 'quit' },
+      ],
+    },
+    { role: 'editMenu' },
+    { role: 'viewMenu' },
+    { role: 'windowMenu' },
+  ];
+  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+}
+
+/** Export is there for the window in front while it shows a Project. */
+function updateMenu(): void {
+  const item = Menu.getApplicationMenu()?.getMenuItemById('export');
+  const window = BrowserWindow.getFocusedWindow();
+  if (item) item.enabled = !!window && stores.has(window.webContents.id);
+}
+
+/** The real path of `target`, or `target` when it can't be resolved. */
+function realOrSame(target: string): Promise<string> {
+  return realpath(target).catch(() => target);
+}
+
+/**
+ * Exports the Manuscript of the window's Project where the Author chooses,
+ * once they have agreed to export the main version of Scenes in Conflict.
+ */
+async function exportFrom(window: BrowserWindow): Promise<void> {
+  const store = stores.get(window.webContents.id);
+  if (!store) return;
+  await requestRendererFlush(window.webContents);
+  const titles = conflictedScenes(store.manuscript(), store.listConflicts());
+  if (titles.length > 0) {
+    const { response } = await dialog.showMessageBox(window, {
+      type: 'warning',
+      buttons: ['Export Anyway', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      ...exportConflictQuestion(titles),
+    });
+    if (response !== 0) return;
+  }
+  const { canceled, filePath } = await dialog.showSaveDialog(window, {
+    title: 'Export',
+    buttonLabel: 'Export',
+    defaultPath: path.join(
+      app.getPath('documents'),
+      `${store.displayName}.docx`,
+    ),
+    filters: [EXPORT_FORMATS.docx, EXPORT_FORMATS.markdown],
+    properties: ['createDirectory', 'showOverwriteConfirmation'],
+  });
+  if (canceled || !filePath) return;
+  // Real paths, so that a link into the Project folder is seen as inside it.
+  const target = exportTarget(
+    path.join(
+      await realOrSame(path.dirname(filePath)),
+      path.basename(filePath),
+    ),
+    await realOrSame(store.path),
+  );
+  if (!target) {
+    await dialog.showMessageBox(window, {
+      type: 'warning',
+      buttons: ['OK'],
+      ...insideProjectMessage(store.displayName),
+    });
+    return;
+  }
+  // The dialog asked about replacing the file chosen, not one with `.docx` added.
+  if (path.basename(target.path) !== path.basename(filePath)) {
+    const exists = await access(target.path).then(
+      () => true,
+      () => false,
+    );
+    if (exists) {
+      const { response } = await dialog.showMessageBox(window, {
+        type: 'warning',
+        buttons: ['Replace', 'Cancel'],
+        defaultId: 1,
+        cancelId: 1,
+        message: `${path.basename(target.path)} already exists. Replace it?`,
+      });
+      if (response !== 0) return;
+    }
+  }
+  try {
+    await writeFile(target.path, await exportManuscript(store, target.format));
+  } catch (error) {
+    await dialog.showMessageBox(window, {
+      type: 'error',
+      buttons: ['OK'],
+      message: `Can't export ${path.basename(target.path)}`,
+      detail: `Saving it failed: ${writeFailureReason(error)}.`,
+    });
+  }
+}
+
 /** The window of an IPC sender; dialogs are attached to it. */
 function windowOf(sender: WebContents): BrowserWindow {
   const window = BrowserWindow.fromWebContents(sender);
@@ -490,6 +619,7 @@ function closeProject(window: BrowserWindow): Promise<void> {
         unsubscribes.get(id)?.();
         unsubscribes.delete(id);
         stores.delete(id);
+        updateMenu();
       } finally {
         closing.delete(id);
       }

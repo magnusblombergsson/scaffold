@@ -10,7 +10,7 @@ import {
 } from './mention-highlight';
 import { plainTextExtensions, textToDoc } from './plain-text-editor';
 import { proseExtensions } from './prose-editor';
-import { markdownToDoc } from './prose-markdown';
+import { markdownToDoc } from '../shared/prose-markdown';
 
 const anna = { id: 'anna', name: 'Anna', aliases: ['Annie'] };
 const ring = { id: 'ring', name: 'ring', aliases: [] };
