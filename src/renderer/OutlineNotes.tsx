@@ -53,7 +53,8 @@ export function OutlineNotes({
     };
   }, [unitId, withNotes]);
 
-  if (!loaded) return <div className="outline-notes-fields loading" />;
+  if (!loaded)
+    return <div className="outline-notes-fields loading" aria-busy="true" />;
   const { outline, notes } = loaded;
   return (
     <div className="outline-notes-fields">
@@ -64,7 +65,7 @@ export function OutlineNotes({
         bullets
         language={language}
         save={(body) =>
-          void window.project.write(
+          window.project.write(
             { kind: 'outline', id: unitId },
             { id: unitId, body, meta: meta.current },
           )
@@ -78,7 +79,7 @@ export function OutlineNotes({
           bullets={false}
           language={language}
           save={(body) =>
-            void window.project.write(
+            window.project.write(
               { kind: 'notes', id: unitId },
               { id: unitId, body },
             )
@@ -102,7 +103,7 @@ function PlainTextField({
   text: string;
   bullets: boolean;
   language: ProseLanguage;
-  save(text: string): void;
+  save(text: string): Promise<void>;
 }) {
   return (
     <section className="plain-text-field">

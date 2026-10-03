@@ -1,7 +1,7 @@
 import { Editor, type Extensions, type JSONContent } from '@tiptap/core';
 import type { Node } from '@tiptap/pm/model';
 import { EditorContent } from '@tiptap/react';
-import { useContext, useEffect, useState } from 'react';
+import { useContext, useEffect, useRef, useState } from 'react';
 import {
   unitKey as keyOf,
   unitText,
@@ -30,8 +30,11 @@ type Props = {
   madeWith?: string;
   toDoc(text: string): JSONContent;
   toText(doc: JSONContent): string;
-  /** Pushes the text to main; autosave calls it after the debounce. */
-  save(text: string): void;
+  /**
+   * Pushes the text to main; autosave calls it after the debounce. Resolves
+   * once main has it.
+   */
+  save(text: string): Promise<void>;
   attributes: Record<string, string>;
   autofocus?: boolean;
   /** Where to put the cursor when it gets focus, instead of where it was. */
@@ -50,7 +53,9 @@ type Props = {
  * Edits one unit's text, and autosaves it. Leaving the unit flushes its
  * pending edits; coming back finds its editor, and undo history, as it was.
  * When another computer changes the unit, the editor shows the new text,
- * unless the Author has edits here that main doesn't have yet. Once the
+ * unless the Author has edits here that main doesn't have yet, or that are
+ * on their way to it: those are kept, and the new text goes beside them as a
+ * Conflict. Once the
  * Project is read-only, it takes no more edits.
  */
 export function UnitEditor({
@@ -87,7 +92,17 @@ export function UnitEditor({
     );
     return { editor, created };
   });
-  const [autosave] = useState(() => createAutosave(save));
+  /** Writes sent to main that it hasn't yet said it has. */
+  const sending = useRef(0);
+  const [autosave] = useState(() =>
+    createAutosave((text: string) => {
+      sending.current++;
+      const sent = () => {
+        sending.current--;
+      };
+      save(text).then(sent, sent);
+    }),
+  );
   const readOnly = useContext(ReadOnlyContext);
 
   useEffect(() => {
@@ -129,9 +144,15 @@ export function UnitEditor({
         if (event.type !== 'unitReloaded' || keyOf(event.ref) !== reloadKey) {
           return;
         }
-        if (!autosave.pending()) {
+        if (!autosave.pending() && sending.current === 0) {
           reloadUnitEditor(editor, toDoc(textOf(event.value)));
+          void window.project.reloadTaken(event.ref);
+          return;
         }
+        // The edits here were made on the version before: saved now, they
+        // put the reloaded one beside them as a Conflict.
+        void window.project.keepEditsOverReload(event.ref);
+        autosave.flush();
       }),
     [editor, autosave, reloadKey, textOf, toDoc],
   );

@@ -1,0 +1,21 @@
+{
+  "format": 1,
+  "id": "a31050b6-3220-4570-9d8e-2ef8a37b87f8",
+  "language": "en-US",
+  "tree": {
+    "chapters": [
+      {
+        "id": "a77dc465-e75b-4ef1-a2c1-7eae80407ea6",
+        "title": "Arrival",
+        "scenes": [
+          {
+            "id": "ca533177-bc83-4f2d-8620-9d5c22b5c662",
+            "title": "Harbour"
+          }
+        ],
+        "colour": "red"
+      }
+    ]
+  },
+  "series": "Harbour Books"
+}

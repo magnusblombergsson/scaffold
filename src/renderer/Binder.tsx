@@ -389,7 +389,7 @@ export function Binder({
 }
 
 /** Marks a unit in Conflict; it stays editable. */
-function ConflictMarker({ shown }: { shown: boolean }) {
+export function ConflictMarker({ shown }: { shown: boolean }) {
   return shown ? <span className="binder-conflict"> Conflict</span> : null;
 }
 

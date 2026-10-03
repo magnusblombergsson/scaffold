@@ -1,10 +1,11 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ProjectEvent } from '../../shared/api';
 import type { Proposal } from '../../shared/proposal';
-import { instantClock } from './clock';
+import { heldClock, instantClock } from './clock';
+import { crashingFileSystem } from './faulty-file-system';
 import { nodeFileSystem } from './file-system';
 import {
   createProject,
@@ -1189,4 +1190,123 @@ describe('undoing an accepted Proposal', () => {
       await store.close();
     });
   });
+});
+
+describe('a crash while accepting a Proposal', () => {
+  const MIRA = 'c0a8e8a2-5d4f-4a8e-9b1e-0f6a1c2d3e4f';
+
+  type Case = {
+    /** Makes the Project at `projectPath`, closed, with Proposal p1 pending. */
+    make(): Promise<{ conversationId: string }>;
+    /** What the accept changes: as before it, or as after it. */
+    target(store: ProjectStore): Promise<unknown>;
+  };
+  const cases: [string, Case][] = [
+    [
+      'to an Entry field',
+      {
+        async make() {
+          const { store, conversationId } = await proposed();
+          await store.close();
+          return { conversationId };
+        },
+        async target(store) {
+          const [anna] = store.listEntries();
+          return (await store.read(entryRef(anna.id))).description;
+        },
+      },
+    ],
+    [
+      'to an Outline',
+      {
+        async make() {
+          const { store, sceneId, conversationId } = await withReply();
+          await store.appendProposal(conversationId, {
+            kind: 'outline',
+            id: 'p1',
+            outlineId: sceneId,
+            base: '- She waits.',
+            proposed: '- She waits.\n- The ferry comes.',
+          });
+          await store.close();
+          return { conversationId };
+        },
+        async target(store) {
+          const sceneId = store.tree().chapters[0].scenes[0].id;
+          return (await store.read({ kind: 'outline', id: sceneId })).body;
+        },
+      },
+    ],
+    [
+      'to create an Entry',
+      {
+        async make() {
+          const { store, conversationId } = await withReply();
+          await store.appendProposal(conversationId, {
+            kind: 'new-entry',
+            id: 'p1',
+            entryId: MIRA,
+            proposed: { type: 'character', name: 'Mira', description: 'Her.' },
+          });
+          await store.close();
+          return { conversationId };
+        },
+        async target(store) {
+          return store.listEntries().map((entry) => entry.name);
+        },
+      },
+    ],
+  ];
+
+  it.each(cases)(
+    '%s converges after a crash at any write',
+    async (_, { make, target }) => {
+      const { conversationId } = await make();
+      const original = projectPath;
+      const quiet = () => ({ fs: nodeFileSystem, clock: instantClock(1_000) });
+      const stateOf = async (at: string) => {
+        const store = await openProject(at, quiet());
+        const result = {
+          target: await target(store),
+          card: (await cardOf(store, conversationId))?.state.kind,
+        };
+        await store.close();
+        return result;
+      };
+
+      const reference = path.join(dir, 'reference');
+      await cp(original, reference, { recursive: true });
+      const counting = crashingFileSystem();
+      const accepting = await openProject(reference, {
+        ...quiet(),
+        fs: counting.fs,
+      });
+      await accepting.acceptProposal(conversationId, 'p1');
+      await accepting.close();
+      const before = await stateOf(original);
+      const after = await stateOf(reference);
+      expect(before.card).toBe('pending');
+      expect(after.card).toBe('accepted');
+      // The target, then the log: at least two writes to crash at.
+      expect(counting.mutations()).toBeGreaterThan(1);
+
+      for (let survive = 0; survive < counting.mutations(); survive++) {
+        const at = path.join(dir, `crash-${survive}`);
+        await cp(original, at, { recursive: true });
+        const store = await openProject(at, {
+          fs: crashingFileSystem(survive).fs,
+          // Retries of a failed save wait for good: the app has died.
+          clock: heldClock(1_000),
+        });
+        await expect(
+          store.acceptProposal(conversationId, 'p1'),
+        ).rejects.toThrow();
+
+        const result = await stateOf(at);
+        expect([before, after]).toContainEqual(result);
+        // Opening again changes nothing.
+        expect(await stateOf(at)).toEqual(result);
+      }
+    },
+  );
 });

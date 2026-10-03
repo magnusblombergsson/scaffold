@@ -5,7 +5,7 @@ import {
   type EntrySummary,
   type EntryType,
 } from '../shared/project-types';
-import { Menu } from './Binder';
+import { ConflictMarker, Menu } from './Binder';
 
 const GROUP_TITLES: Record<EntryType, string> = {
   character: 'Characters',
@@ -29,6 +29,7 @@ export function entryTitle(entry: { name: string }): string {
 export function StoryBible({
   entries,
   openId,
+  conflicted,
   onOpen,
   onChange,
   highlight,
@@ -37,6 +38,8 @@ export function StoryBible({
   entries: EntrySummary[];
   /** The Entry the centre shows, if any. */
   openId: string | null;
+  /** The ids of Entries whose own file or private notes are in Conflict. */
+  conflicted: ReadonlySet<string>;
   onOpen(id: string): void;
   /** Runs a change the Author can undo; `message` says what it did, beside Undo. */
   onChange(operation: () => Promise<Changed>, message: string): Promise<void>;
@@ -98,6 +101,7 @@ export function StoryBible({
                     onClick={() => onOpen(entry.id)}
                   >
                     {entryTitle(entry)}
+                    <ConflictMarker shown={conflicted.has(entry.id)} />
                   </button>
                   <Menu
                     label={`Entry actions: ${entryTitle(entry)}`}

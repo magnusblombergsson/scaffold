@@ -1,0 +1,5 @@
+{"id":"17934b2c-b110-447d-aaf7-0575eab3044d","mode":"writing","title":"Anna","created":1767225600000,"format":1}
+{"type":"message","role":"author","text":"Is she older?","focus":["ca533177-bc83-4f2d-8620-9d5c22b5c662"],"at":1767225600000}
+{"type":"message","role":"assistant","text":"The Story Bible could say.","focus":["ca533177-bc83-4f2d-8620-9d5c22b5c662"],"at":1767225600000}
+{"type":"bookmark","message":1,"at":1767225600000}
+{"type":"proposal.proposed","id":"p1","target":{"kind":"entry","id":"3976caf4-84fd-4aef-bccf-4f55ccd11d12"},"fields":{"description":{"base":"Her sister.","proposed":"Her older sister."}},"at":1767225600000}

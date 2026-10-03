@@ -1550,3 +1550,18 @@ button.finding-quote:hover {
   white-space: pre-wrap;
   margin: 0;
 }
+
+/* A unit still being read, as while a sync client downloads an online-only
+   file. Said only once it takes a moment, so a quick read doesn't flash. */
+.loading::after {
+  content: 'Loading…';
+  color: var(--muted);
+  opacity: 0;
+  animation: show-loading 0s 0.5s forwards;
+}
+
+@keyframes show-loading {
+  to {
+    opacity: 1;
+  }
+}

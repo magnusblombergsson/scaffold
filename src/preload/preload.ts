@@ -14,6 +14,9 @@ const project: ProjectApi = {
   read: (ref) => ipcRenderer.invoke(channel.project('read'), ref),
   write: (ref, value) =>
     ipcRenderer.invoke(channel.project('write'), ref, value),
+  reloadTaken: (ref) => ipcRenderer.invoke(channel.project('reloadTaken'), ref),
+  keepEditsOverReload: (ref) =>
+    ipcRenderer.invoke(channel.project('keepEditsOverReload'), ref),
   flush: () => ipcRenderer.invoke(channel.project('flush')),
   hasUnsaved: () => ipcRenderer.invoke(channel.project('hasUnsaved')),
   saveStatuses: () => ipcRenderer.invoke(channel.project('saveStatuses')),

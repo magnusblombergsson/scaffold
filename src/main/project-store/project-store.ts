@@ -938,7 +938,19 @@ type Loaded = {
   value: UnitValue;
   /** Whether this computer wrote the file, rather than read it. */
   savedHere?: true;
+  /**
+   * When it was reloaded from another computer's file: the version it
+   * replaced. A write is taken as made on that one until an editor takes the
+   * reload, or a read sees it; one an editor kept its own edits over stays so.
+   */
+  reload?: { before: Loaded; taken: boolean; kept: boolean };
 };
+
+/** The version of a unit that a write accepted now was made on. */
+function baseOf(loaded: Loaded): Loaded {
+  const { reload } = loaded;
+  return reload && (reload.kept || !reload.taken) ? reload.before : loaded;
+}
 
 /** The `versionId` of the version at a unit's own path. */
 const ORIGINAL = 'original';
@@ -1282,6 +1294,11 @@ export class ProjectStore {
         fingerprint,
         hash: hashOf(text),
         value,
+        reload: {
+          before: { ...baseOf(known), reload: undefined },
+          taken: false,
+          kept: false,
+        },
       });
       if (!isDeepStrictEqual(value, known.value)) {
         this.emit({ type: 'unitReloaded', ref: known.ref, value });
@@ -2411,10 +2428,31 @@ export class ProjectStore {
     return run;
   }
 
-  /** Enqueues a structure operation that writes, past the format gate. */
+  /**
+   * Enqueues a structure operation that writes, past the format gate. A tree
+   * another computer wrote since, which no check has seen yet, is taken
+   * first: the operation changes it rather than writing over it.
+   */
   private enqueueWrite<T>(operation: () => Promise<T>): Promise<T> {
     return this.enqueueStructure(async () => {
       await this.passFormatGate();
+      const file = path.join(this.path, MANIFEST);
+      const changed = async () =>
+        !sameFingerprint(
+          await this.deps.fs.stat(file),
+          this.manifestFingerprint,
+        );
+      if (await changed()) {
+        await this.checkStructure();
+        this.refuseIfUpgraded();
+        // Still arriving, it can't be read: never written over meanwhile.
+        if (await changed()) {
+          throw new ProjectError(
+            'unreadable',
+            `${this.displayName} is still arriving from another computer. Try again in a moment.`,
+          );
+        }
+      }
       return operation();
     });
   }
@@ -2515,7 +2553,12 @@ export class ProjectStore {
         : '';
     const value = unitValue(ref, parseUnitFile(text));
     const key = unitKey(ref);
-    if (!this.isDirty(key)) {
+    const known = this.loaded.get(key);
+    if (this.isDirty(key)) return value as ValueOf<R>;
+    if (known?.reload && sameFingerprint(fingerprint, known.fingerprint)) {
+      // What is written from now on is made on what was read.
+      known.reload.taken = true;
+    } else {
       this.loaded.set(key, {
         ref,
         fingerprint,
@@ -2549,6 +2592,27 @@ export class ProjectStore {
     if (this.failures.has(key)) return;
     this.report({ type: 'unitSaveStatus', ref, state: 'saving' });
     this.startWriting(key);
+  }
+
+  /**
+   * Says an editor shows the unit's latest reload: what it writes from now on
+   * is made on that version. Until then, or a read, a write is taken as made
+   * on the version before, and the reloaded one is set aside, not written
+   * over, as for a write that crossed the reload on its way.
+   */
+  reloadTaken(ref: UnitRef): void {
+    const reload = this.loaded.get(unitKey(ref))?.reload;
+    if (reload) reload.taken = true;
+  }
+
+  /**
+   * Says an editor kept its own edits over the unit's latest reload: they
+   * were made on the version before it. When they are saved, the reloaded
+   * version is set aside as a conflict copy, whatever another editor took.
+   */
+  keepEditsOverReload(ref: UnitRef): void {
+    const reload = this.loaded.get(unitKey(ref))?.reload;
+    if (reload) reload.kept = true;
   }
 
   /** Starts a Conversation in `mode`, written as its log's header line. */
@@ -3516,7 +3580,8 @@ ${text}`);
     const text = await this.deps.fs.readFile(file);
     const onDisk = parseUnitFile(text);
     const unchanged = { setAside: false, frontmatter: onDisk.frontmatter };
-    const known = this.loaded.get(unitKey(ref));
+    const loaded = this.loaded.get(unitKey(ref));
+    const known = loaded && baseOf(loaded);
     if (
       !known ||
       (sameFingerprint(fingerprint, known.fingerprint) &&

@@ -80,3 +80,44 @@ export function faultyFileSystem() {
     },
   };
 }
+
+/**
+ * A file system that crashes after `survive` mutations (a durable temp write,
+ * a rename or an unlink): from then on every call fails, as if the app had
+ * died.
+ */
+export function crashingFileSystem(survive = Infinity) {
+  let mutations = 0;
+  let crashed = false;
+  const crash = () => {
+    crashed = true;
+    throw Object.assign(new Error('crashed'), { code: 'ECRASH' });
+  };
+  const mutate =
+    <A extends unknown[]>(f: (...args: A) => Promise<void>) =>
+    async (...args: A) => {
+      if (mutations >= survive) crash();
+      await f(...args);
+      mutations++;
+    };
+  const guarded =
+    <A extends unknown[], R>(f: (...args: A) => Promise<R>) =>
+    async (...args: A) => {
+      if (crashed) crash();
+      return f(...args);
+    };
+  const fs: FileSystem = {
+    readFile: guarded(nodeFileSystem.readFile),
+    exists: guarded(nodeFileSystem.exists),
+    stat: guarded(nodeFileSystem.stat),
+    readdir: guarded(nodeFileSystem.readdir),
+    mkdir: guarded(nodeFileSystem.mkdir),
+    watch: nodeFileSystem.watch,
+    onlineOnly: nodeFileSystem.onlineOnly,
+    unlink: mutate(nodeFileSystem.unlink),
+    writeFileDurable: mutate(nodeFileSystem.writeFileDurable),
+    appendFileDurable: mutate(nodeFileSystem.appendFileDurable),
+    rename: mutate(nodeFileSystem.rename),
+  };
+  return { fs, mutations: () => mutations };
+}

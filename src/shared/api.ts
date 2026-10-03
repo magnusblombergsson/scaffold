@@ -159,6 +159,18 @@ export interface ProjectApi {
    * save it shows only as a `unitSaveStatus` event.
    */
   write<R extends UnitRef>(ref: R, value: ValueOf<R>): Promise<void>;
+  /**
+   * Says an editor shows the unit's latest `unitReloaded`: what it writes
+   * from now on is made on that version. Until then, a write is taken as made
+   * on the version before, and the reloaded one is set aside as a Conflict.
+   */
+  reloadTaken(ref: UnitRef): Promise<void>;
+  /**
+   * Says an editor kept its own edits over the unit's latest `unitReloaded`,
+   * made on the version before it. Sent before those edits are written, so
+   * the reloaded version is set aside as a Conflict, not written over.
+   */
+  keepEditsOverReload(ref: UnitRef): Promise<void>;
   /** Writes every accepted value now, trying failed ones again at once. */
   flush(): Promise<void>;
   hasUnsaved(): Promise<boolean>;

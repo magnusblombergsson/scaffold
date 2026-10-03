@@ -195,25 +195,28 @@ export function EntryView({
     if (value.current) value.current = { ...value.current, visibility };
   }, [visibility]);
 
-  function save(change: Partial<EntryValue>) {
+  /** Resolves once main has the Entry. */
+  async function save(change: Partial<EntryValue>): Promise<void> {
     if (!value.current) return;
     value.current = { ...value.current, ...change };
-    void window.project.write({ kind: 'entry', id: entryId }, value.current);
+    return window.project.write({ kind: 'entry', id: entryId }, value.current);
   }
 
-  function saveFields(change: (fields: EntryFields) => EntryFields) {
+  async function saveFields(
+    change: (fields: EntryFields) => EntryFields,
+  ): Promise<void> {
     if (!value.current) return;
-    save({ fields: change(value.current.fields) });
+    return save({ fields: change(value.current.fields) });
   }
 
   function choose(change: EntryFields) {
     setChoices((choices) => ({ ...choices, ...change }));
-    saveFields((fields) => ({ ...fields, ...change }));
+    void saveFields((fields) => ({ ...fields, ...change }));
   }
 
   const collisions = entryCollisions(summary, entries);
 
-  if (!loaded) return <main className="centre loading" />;
+  if (!loaded) return <main className="centre loading" aria-busy="true" />;
   const { entry, privateNotes } = loaded;
   const attributes = (label: string, className = 'plain-text') => ({
     class: className,
@@ -403,7 +406,7 @@ export function EntryView({
           toDoc={textToDoc}
           toText={docToText}
           save={(body) =>
-            void window.project.write(
+            window.project.write(
               { kind: 'private', id: entryId },
               { id: entryId, body },
             )

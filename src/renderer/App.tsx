@@ -602,6 +602,7 @@ function ProjectView({
                     <StoryBible
                       entries={entries}
                       openId={openEntry?.id ?? null}
+                      conflicted={conflicted}
                       onOpen={(id) => select({ kind: 'entry', id })}
                       onChange={change}
                       highlight={highlight}

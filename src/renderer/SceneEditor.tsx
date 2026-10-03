@@ -47,7 +47,8 @@ export function SceneEditor({
     };
   }, [sceneId]);
 
-  if (markdown === null) return <div className="editor loading" />;
+  if (markdown === null)
+    return <div className="editor loading" aria-busy="true" />;
   return (
     <UnitEditor
       unitKey={`scene:${sceneId}`}
@@ -57,7 +58,7 @@ export function SceneEditor({
       toDoc={markdownToDoc}
       toText={docToMarkdown}
       save={(markdown) =>
-        void window.project.write(
+        window.project.write(
           { kind: 'scene', id: sceneId },
           { id: sceneId, markdown },
         )

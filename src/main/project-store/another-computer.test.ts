@@ -160,6 +160,87 @@ describe('a unit changed on another computer', () => {
     expect((await here.read(sceneRef(sceneId))).markdown).toBe('New.');
   });
 
+  describe('saving after a reload', () => {
+    /** A Scene read here, then changed to 'Theirs.' there and reloaded here. */
+    async function reloaded() {
+      const { sceneId } = await newProject();
+      const here = await open('BETA');
+      const there = await open('ALPHA');
+      await here.read(sceneRef(sceneId));
+      await there.write(sceneRef(sceneId), {
+        id: sceneId,
+        markdown: 'Theirs.',
+      });
+      await there.flush();
+      await here.checkForChanges();
+      const ref = sceneRef(sceneId);
+      const save = async (markdown: string) => {
+        await here.write(ref, { id: sceneId, markdown });
+        await here.flush();
+      };
+      /** The text of each version in Conflict, the one at its own path first. */
+      const versions = async () => {
+        const [conflict] = here.listConflicts();
+        if (!conflict) return [];
+        return Promise.all(
+          conflict.versions.map(
+            async (v) =>
+              (await here.readConflictVersion(ref, v.versionId)).markdown,
+          ),
+        );
+      };
+      return { here, ref, save, versions };
+    }
+
+    it('sets the reloaded version aside when the window kept its own edits over it', async () => {
+      const { here, ref, save, versions } = await reloaded();
+
+      // The window had edits main didn't have yet, made on the version before.
+      here.keepEditsOverReload(ref);
+      await save('Mine.');
+
+      expect((await here.read(ref)).markdown).toBe('Mine.');
+      expect(await versions()).toEqual(['Mine.', 'Theirs.']);
+    });
+
+    it('sets it aside for a write that crossed the reload on its way', async () => {
+      const { save, versions } = await reloaded();
+
+      // Sent before the window had the reload: made on the version before.
+      await save('Mine.');
+
+      expect(await versions()).toEqual(['Mine.', 'Theirs.']);
+    });
+
+    it('saves over a reload the window took, with no Conflict', async () => {
+      const { here, ref, save, versions } = await reloaded();
+
+      here.reloadTaken(ref);
+      await save('Theirs+');
+
+      expect(await versions()).toEqual([]);
+    });
+
+    it('saves over a reload read since, as by an editor opened on it', async () => {
+      const { here, ref, save, versions } = await reloaded();
+
+      await here.read(ref);
+      await save('Theirs+');
+
+      expect(await versions()).toEqual([]);
+    });
+
+    it('still sets it aside when one editor of the unit took it and another kept its edits', async () => {
+      const { here, ref, save, versions } = await reloaded();
+
+      here.reloadTaken(ref);
+      here.keepEditsOverReload(ref);
+      await save('Mine.');
+
+      expect(await versions()).toEqual(['Mine.', 'Theirs.']);
+    });
+  });
+
   it('notices a change by watching the folder', async () => {
     const { sceneId } = await newProject();
     const here = await open('BETA');
@@ -293,6 +374,32 @@ describe('project.json changed on another computer', () => {
       'Theirs',
       'Mine',
     ]);
+  });
+
+  it('makes a structure change on the tree from there, not over it', async () => {
+    const { chapterId } = await newProject();
+    const here = await open('BETA');
+    const there = await open('ALPHA');
+    const { id } = await there.createScene(chapterId, 1, 'Theirs');
+
+    // Before any check here has seen the new tree.
+    await here.createChapter(1, 'Mine');
+
+    expect(here.manuscript().chapters[0].scenes.map((s) => s.id)).toContain(id);
+    await there.checkForChanges();
+    expect(there.manuscript()).toEqual(here.manuscript());
+  });
+
+  it('refuses a structure change while project.json is still arriving', async () => {
+    await newProject();
+    const here = await open('BETA');
+    const manifest = path.join(projectPath, 'project.json');
+    await writeFile(manifest, '{ "form');
+
+    await expect(here.createChapter(1, 'Mine')).rejects.toMatchObject({
+      reason: 'unreadable',
+    });
+    expect(await readFile(manifest, 'utf8')).toBe('{ "form');
   });
 
   it('keeps the tree it has while project.json is unreadable', async () => {
