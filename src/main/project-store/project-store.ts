@@ -165,11 +165,20 @@ export class ProjectError extends Error {
   }
 }
 
-/** Creates a new Project folder with one Chapter holding one empty Scene. */
+/** A Chapter of Prose to create a Project with, as when it is imported. */
+export type NewChapter = {
+  title: string;
+  scenes: { title: string; markdown: string }[];
+};
+
+/**
+ * Creates a new Project folder: with the `manuscript` given, or else one
+ * Chapter holding one empty Scene.
+ */
 export async function createProject(
   projectPath: string,
   deps: StoreDeps,
-  options: { language?: string } = {},
+  options: { language?: string; manuscript?: NewChapter[] } = {},
 ): Promise<ProjectStore> {
   const { fs, clock } = deps;
   if (await fs.exists(path.join(projectPath, MANIFEST))) {
@@ -178,29 +187,36 @@ export async function createProject(
       `${projectPath} is already a Project`,
     );
   }
-  const sceneId = randomUUID();
+  const chapters = options.manuscript?.length
+    ? options.manuscript
+    : [{ title: 'Chapter 1', scenes: [{ title: 'Scene 1', markdown: '' }] }];
+  const scenes: SceneValue[] = [];
   const manifest: Manifest = {
     format: FORMAT,
     id: randomUUID(),
     language: options.language ?? 'en-US',
     tree: {
-      chapters: [
-        {
-          id: randomUUID(),
-          title: 'Chapter 1',
-          scenes: [{ id: sceneId, title: 'Scene 1' }],
-        },
-      ],
+      chapters: chapters.map((chapter) => ({
+        id: randomUUID(),
+        title: chapter.title,
+        scenes: chapter.scenes.map(({ title, markdown }) => {
+          const id = randomUUID();
+          scenes.push({ id, markdown });
+          return { id, title };
+        }),
+      })),
     },
   };
   await fs.mkdir(path.join(projectPath, 'scenes'));
   // Unit files first, the manifest last.
-  await safeWrite(
-    fs,
-    clock,
-    scenePath(projectPath, sceneId),
-    sceneFile({ id: sceneId, markdown: '' }),
-  );
+  for (const scene of scenes) {
+    await safeWrite(
+      fs,
+      clock,
+      scenePath(projectPath, scene.id),
+      sceneFile(scene),
+    );
+  }
   await safeWrite(
     fs,
     clock,
@@ -211,7 +227,11 @@ export async function createProject(
     projectPath,
     manifest,
     deps,
-    { files: new Set([sceneId]), entries: new Map(), trash: new Map() },
+    {
+      files: new Set(scenes.map((scene) => scene.id)),
+      entries: new Map(),
+      trash: new Map(),
+    },
     { notice: { alsoOpen: [] }, own: null },
   );
 }

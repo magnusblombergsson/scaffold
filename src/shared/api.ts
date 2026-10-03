@@ -10,6 +10,7 @@ import type {
   Visibility,
 } from './project-types';
 import type { ReviewCommand } from './finding';
+import type { ImportBlock, ImportConvention } from './manuscript-import';
 import type { ModelId } from './models';
 import type { PendingProposal, ProposedValue } from './proposal';
 
@@ -343,6 +344,15 @@ export interface SettingsApi {
   setModel(model: ModelId): void;
 }
 
+/** A Word or Markdown file read for an Import: its name without extension, and its blocks. */
+export type ImportFile = { name: string; blocks: ImportBlock[] };
+
+/** The file the Author chose to import, read; or why it can't be, or null when they cancelled. */
+export type ImportChoice =
+  | null
+  | { ok: false; message: string }
+  | ({ ok: true } & ImportFile);
+
 /**
  * App-level actions outside any one Project. A window shows one Project, or
  * the start screen. Opening a Project from a window that shows one opens it in
@@ -355,6 +365,18 @@ export interface ShellApi {
   createProject(): Promise<OpenResult>;
   /** Asks for a Project folder and opens it. */
   openProject(): Promise<OpenResult>;
+  /** Asks for a Word or Markdown file and reads it, for the Author to preview its split. */
+  chooseImport(): Promise<ImportChoice>;
+  /**
+   * Asks for a new folder and creates a Project in it holding `file` split
+   * by `convention`; 'canceled' when the Author chose no folder.
+   */
+  importProject(
+    file: ImportFile,
+    convention: ImportConvention,
+  ): Promise<OpenResult | 'canceled'>;
+  /** Calls `listener` when the Author chooses File → Import…. Returns an unsubscribe function. */
+  onImportRequest(listener: () => void): () => void;
   /** Opens a Project from the recent list. */
   openRecent(path: string): Promise<OpenResult>;
   /** Asks where a recent Project that wasn't found is now, and opens it. */
@@ -470,6 +492,9 @@ export const channel = {
   currentProject: 'shell:currentProject',
   createProject: 'shell:createProject',
   openProject: 'shell:openProject',
+  chooseImport: 'shell:chooseImport',
+  importProject: 'shell:importProject',
+  importRequest: 'shell:importRequest',
   openRecent: 'shell:openRecent',
   locateProject: 'shell:locateProject',
   recentProjects: 'shell:recentProjects',

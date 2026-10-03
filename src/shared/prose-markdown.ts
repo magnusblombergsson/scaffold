@@ -56,6 +56,21 @@ export function readProse(markdown: string): Span[][] {
     .map(readSpans);
 }
 
+/** Paragraphs of spans as Prose, as `readProse` reads it back. */
+export function writeProse(paragraphs: Span[][]): string {
+  return docToMarkdown({
+    type: 'doc',
+    content: paragraphs.map((spans) => ({
+      type: 'paragraph',
+      content: spans.map(({ text, marks }) => ({
+        type: 'text',
+        text,
+        marks: marks.map((type) => ({ type })),
+      })),
+    })),
+  });
+}
+
 // --- Writing ---
 
 function spansOf(paragraph: JSONContent): Span[] {

@@ -114,7 +114,7 @@ const UTF8_FLAG = 0x0800;
 const DEFLATE = 8;
 
 /** A zip archive of `files`, each deflated. */
-function zip(files: [name: string, text: string][]): Uint8Array {
+export function zip(files: [name: string, text: string][]): Uint8Array {
   const locals: Buffer[] = [];
   const centrals: Buffer[] = [];
   let offset = 0;

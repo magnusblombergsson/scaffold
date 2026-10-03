@@ -12,6 +12,8 @@ import {
 import { access, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type {
+  ImportChoice,
+  ImportFile,
   KeyOptions,
   KeyStatus,
   OpenedProject,
@@ -21,6 +23,10 @@ import type {
   Tip,
 } from '../shared/api';
 import { channel } from '../shared/api';
+import {
+  splitManuscript,
+  type ImportConvention,
+} from '../shared/manuscript-import';
 import { isModelId, type ModelId } from '../shared/models';
 import { unitName } from '../shared/unit-name';
 import {
@@ -37,6 +43,11 @@ import {
   exportTarget,
   insideProjectMessage,
 } from './export/manuscript-export';
+import {
+  IMPORT_FORMATS,
+  newChapters,
+  readImportFile,
+} from './import/manuscript-import';
 import { anthropicKeyCheck } from './key-store/check-key';
 import { loadKeyStore, type KeyStore } from './key-store/key-store';
 import { safeStorageEncryption } from './key-store/safe-storage';
@@ -354,6 +365,55 @@ export function registerShellIpc(): void {
     return chosen && openPath(event.sender, chosen);
   });
 
+  ipcMain.handle(channel.chooseImport, async (event): Promise<ImportChoice> => {
+    const { canceled, filePaths } = await dialog.showOpenDialog(
+      windowOf(event.sender),
+      {
+        title: 'Import',
+        buttonLabel: 'Import',
+        filters: [
+          {
+            name: 'Word or Markdown',
+            extensions: [
+              ...IMPORT_FORMATS.docx.extensions,
+              ...IMPORT_FORMATS.markdown.extensions,
+            ],
+          },
+        ],
+        properties: ['openFile'],
+      },
+    );
+    if (canceled || filePaths.length === 0) return null;
+    return readImportFile(filePaths[0]);
+  });
+
+  // An Import always makes a new Project.
+  ipcMain.handle(
+    channel.importProject,
+    async (event, file: ImportFile, convention: ImportConvention) => {
+      const { canceled, filePath } = await dialog.showSaveDialog(
+        windowOf(event.sender),
+        {
+          title: 'Import into a New Project',
+          buttonLabel: 'Create',
+          nameFieldLabel: 'Project name',
+          defaultPath: path.join(app.getPath('documents'), file.name),
+          properties: ['createDirectory', 'showOverwriteConfirmation'],
+        },
+      );
+      if (canceled || !filePath) return 'canceled';
+      const manuscript = newChapters(splitManuscript(file.blocks, convention));
+      try {
+        return showOpened(
+          event.sender,
+          await createProject(filePath, deps, { manuscript }),
+        );
+      } catch (error) {
+        return openFailure(filePath, error);
+      }
+    },
+  );
+
   ipcMain.handle(channel.openRecent, (event, projectPath: string) =>
     openPath(event.sender, projectPath),
   );
@@ -463,7 +523,7 @@ function announceKeyStatus(status: KeyStatus): void {
   }
 }
 
-/** The menus: File holds Export…; the others are Electron's own. */
+/** The menus: File holds Import… and Export…; the others are Electron's own. */
 function setApplicationMenu(): void {
   const mac = process.platform === 'darwin';
   const template: MenuItemConstructorOptions[] = [
@@ -471,6 +531,18 @@ function setApplicationMenu(): void {
     {
       label: 'File',
       submenu: [
+        {
+          id: 'import',
+          label: 'Import…',
+          click: (_item, window) => {
+            // The window shows the file's split before anything is written.
+            if (window instanceof BrowserWindow) {
+              window.webContents.send(channel.importRequest);
+            } else {
+              createWindow(null);
+            }
+          },
+        },
         {
           id: 'export',
           label: 'Export…',

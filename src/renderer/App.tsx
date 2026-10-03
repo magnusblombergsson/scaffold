@@ -9,6 +9,7 @@ import type {
   Changed,
   Conflict,
   Dropped,
+  ImportFile,
   OpenedProject,
   OpenResult,
   PanelWidths,
@@ -27,6 +28,7 @@ import {
   type UnitValue,
 } from '../shared/project-types';
 import { MODE_LABELS, type Mode } from '../shared/conversation';
+import type { ImportConvention } from '../shared/manuscript-import';
 import { upgradedMessage } from '../shared/format-gate';
 import { capitalized, unitName } from '../shared/unit-name';
 import { AssistantPanel } from './AssistantPanel';
@@ -35,6 +37,7 @@ import { BrainstormRoom } from './BrainstormRoom';
 import { WINDOW_MODES, type ShowProposal } from './Conversation';
 import { ConflictList, ConflictResolver } from './Conflicts';
 import { EntryView, VISIBILITY_LABELS } from './EntryView';
+import { ImportDialog } from './ImportDialog';
 import { InterviewRoom } from './InterviewRoom';
 import { Notices } from './Notices';
 import { OutlineNotes } from './OutlineNotes';
@@ -70,8 +73,11 @@ export function App() {
   } | null>(null);
   const openSettings = () => setSettingsDialog({ addKey: false });
   const addKey = useCallback(() => setSettingsDialog({ addKey: true }), []);
+  /** The file being imported, while the Author previews its split. */
+  const [importing, setImporting] = useState<ImportFile | null>(null);
 
   useEffect(() => window.shell.onFlushRequest(flushPendingEdits), []);
+  useEffect(() => window.shell.onImportRequest(() => void chooseImport()), []);
   useEffect(() => {
     void window.shell.currentProject().then(setProject);
     void window.settings.showWelcome().then(setWelcome);
@@ -90,6 +96,29 @@ export function App() {
     setProject(result.project);
   }
 
+  async function chooseImport() {
+    const choice = await window.shell.chooseImport();
+    if (!choice) return;
+    if (!choice.ok) {
+      setError(choice.message);
+      return;
+    }
+    setError(null);
+    setImporting({ name: choice.name, blocks: choice.blocks });
+  }
+
+  async function importProject(file: ImportFile, convention: ImportConvention) {
+    let canceled = false;
+    await open(async () => {
+      const result = await window.shell.importProject(file, convention);
+      if (result !== 'canceled') return result;
+      canceled = true;
+      return null;
+    });
+    // The preview stays while the Author hasn't chosen where the Project goes.
+    if (!canceled) setImporting(null);
+  }
+
   const startButtons = (
     <>
       <button onClick={() => open(window.shell.createProject)}>
@@ -98,6 +127,7 @@ export function App() {
       <button onClick={() => open(window.shell.openProject)}>
         Open Project…
       </button>
+      <button onClick={() => void chooseImport()}>Import…</button>
       <button onClick={openSettings}>Settings…</button>
     </>
   );
@@ -117,6 +147,13 @@ export function App() {
         <Welcome onDone={() => setWelcome(false)} />
       ) : (
         <StartScreen actions={startButtons} error={error} onOpen={open} />
+      )}
+      {importing && (
+        <ImportDialog
+          file={importing}
+          onImport={(convention) => void importProject(importing, convention)}
+          onClose={() => setImporting(null)}
+        />
       )}
       {settingsDialog && (
         <SettingsDialog

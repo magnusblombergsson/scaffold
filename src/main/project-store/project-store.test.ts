@@ -210,6 +210,41 @@ describe('ProjectStore', () => {
     expect(manifest).not.toHaveProperty('title');
   });
 
+  it('creates a Project holding imported Chapters and Scenes', async () => {
+    const projectPath = path.join(dir, 'Imported');
+    const store = await createProject(projectPath, deps(), {
+      manuscript: [
+        {
+          title: 'The Storm',
+          scenes: [
+            { title: 'Scene 1', markdown: 'It was a *dark* night.' },
+            { title: 'Scene 2', markdown: 'Morning came.' },
+          ],
+        },
+        { title: 'Empty', scenes: [] },
+      ],
+    });
+    await store.close();
+
+    const reopened = await openProject(projectPath, deps());
+    const manuscript = reopened.manuscript();
+    expect(
+      manuscript.chapters.map((c) => [c.title, c.scenes.map((s) => s.title)]),
+    ).toEqual([
+      ['The Storm', ['Scene 1', 'Scene 2']],
+      ['Empty', []],
+    ]);
+    const [first, second] = manuscript.chapters[0].scenes;
+    expect(await reopened.read({ kind: 'scene', id: first.id })).toEqual({
+      id: first.id,
+      markdown: 'It was a *dark* night.',
+    });
+    expect(
+      (await reopened.read({ kind: 'scene', id: second.id })).markdown,
+    ).toBe('Morning came.');
+    await reopened.close();
+  });
+
   it('reports the language of the Prose from project.json', async () => {
     const swedish = path.join(dir, 'Min roman');
     await (await createProject(swedish, deps(), { language: 'sv-SE' })).close();

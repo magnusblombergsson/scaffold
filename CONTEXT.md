@@ -79,6 +79,10 @@ _Avoid_: Bin, archive
 A copy of the whole Manuscript's Prose written outside the Project for others to read: Chapter titles as headings, Scenes separated by a break, nothing else from the Project (no Scene titles, Outlines, Notes, Story Bible or Conversations).
 _Avoid_: Compile, publish, backup
 
+**Import**:
+Making a new Project from a Word or Markdown manuscript, the mirror of an Export: a Heading 1 starts a Chapter and a break such as `***` starts a Scene, unless the Author chooses another split after seeing it. An Import never adds to an existing Project.
+_Avoid_: Open (when meaning a manuscript file), convert
+
 **Conflict**:
 Two or more versions of one Scene, Outline, Notes or Entry, saved on different computers or at the same moment, kept side by side until the Author chooses one or merges them; the others go to Trash. A diverged Conversation is not a Conflict: it becomes a second Conversation.
 _Avoid_: Conflicted copy, sync error, merge conflict

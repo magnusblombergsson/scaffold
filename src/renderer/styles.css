@@ -978,6 +978,55 @@ h2.binder-title > button[aria-current='true'],
   margin-bottom: 0.5rem;
 }
 
+.import {
+  width: min(40rem, 90vw);
+}
+
+.import-hint,
+.import-summary,
+.import-words,
+.import-opening {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.import-convention {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+}
+
+.import-preview {
+  max-height: 50vh;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  list-style: none;
+}
+
+.import-preview ol {
+  margin: 0.25rem 0 0.75rem;
+  padding-left: 1rem;
+  list-style: none;
+}
+
+.import-chapter {
+  font-weight: 600;
+}
+
+.import-opening {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-close button + button {
+  margin-left: 0.5rem;
+}
+
 .key-status {
   display: flex;
   flex-wrap: wrap;

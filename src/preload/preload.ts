@@ -80,6 +80,16 @@ const shell: ShellApi = {
   currentProject: () => ipcRenderer.invoke(channel.currentProject),
   createProject: () => ipcRenderer.invoke(channel.createProject),
   openProject: () => ipcRenderer.invoke(channel.openProject),
+  chooseImport: () => ipcRenderer.invoke(channel.chooseImport),
+  importProject: (file, convention) =>
+    ipcRenderer.invoke(channel.importProject, file, convention),
+  onImportRequest(listener) {
+    const forward = () => listener();
+    ipcRenderer.on(channel.importRequest, forward);
+    return () => {
+      ipcRenderer.off(channel.importRequest, forward);
+    };
+  },
   openRecent: (path) => ipcRenderer.invoke(channel.openRecent, path),
   locateProject: (path) => ipcRenderer.invoke(channel.locateProject, path),
   recentProjects: () => ipcRenderer.invoke(channel.recentProjects),
