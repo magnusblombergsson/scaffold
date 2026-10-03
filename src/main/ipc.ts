@@ -6,8 +6,12 @@ import {
   type WebContents,
 } from 'electron';
 import { channel, type ProjectApi } from '../shared/api';
+import type { Mode } from '../shared/conversation';
+import { createConversationEngine } from './assistant/conversation-engine';
+import { fakeProvider } from './assistant/fake-provider';
+import { systemClock } from './project-store/clock';
 import type { ProjectStore } from './project-store/project-store';
-import { storeOf } from './shell';
+import { assistantModel, storeOf } from './shell';
 
 /**
  * Every method but `emptyTrash`, which asks the Author first, and
@@ -72,6 +76,51 @@ export function registerProjectIpc(): void {
   }
   ipcMain.handle(channel.project('emptyTrash'), (event) =>
     emptyTrash(event.sender, storeOfWindow(event.sender)),
+  );
+}
+
+// No model is asked until the Claude adapter is in: a stand-in replies.
+const provider = fakeProvider();
+
+/** Connects each window's `assistant` calls to the Conversations of its Project. */
+export function registerAssistantIpc(): void {
+  ipcMain.handle(channel.listConversations, (event) =>
+    storeOfWindow(event.sender).listConversations(),
+  );
+  ipcMain.handle(channel.readConversation, (event, id: string) =>
+    storeOfWindow(event.sender).readConversation(id),
+  );
+  ipcMain.handle(
+    channel.startConversation,
+    (event, mode: Mode, title: string) =>
+      storeOfWindow(event.sender).startConversation(mode, title),
+  );
+  ipcMain.handle(
+    channel.ask,
+    (
+      event,
+      askId: number,
+      conversationId: string,
+      message: string,
+      sceneId: string | null,
+    ) => {
+      const engine = createConversationEngine({
+        store: storeOfWindow(event.sender),
+        provider,
+        model: assistantModel,
+        clock: systemClock,
+      });
+      return engine.askAssistant(
+        conversationId,
+        message,
+        { sceneId },
+        (text) => {
+          if (!event.sender.isDestroyed()) {
+            event.sender.send(channel.replyText, askId, text);
+          }
+        },
+      );
+    },
   );
 }
 

@@ -1321,6 +1321,7 @@ function crashingFileSystem(survive = Infinity) {
     onlineOnly: nodeFileSystem.onlineOnly,
     unlink: mutate(nodeFileSystem.unlink),
     writeFileDurable: mutate(nodeFileSystem.writeFileDurable),
+    appendFileDurable: mutate(nodeFileSystem.appendFileDurable),
     rename: mutate(nodeFileSystem.rename),
   };
   return { fs, mutations: () => mutations };

@@ -11,7 +11,7 @@ const FAULTS: Record<
   { ops: (keyof FileSystem)[]; code: string; message: string }
 > = {
   ENOSPC: {
-    ops: ['writeFileDurable'],
+    ops: ['writeFileDurable', 'appendFileDurable'],
     code: 'ENOSPC',
     message: 'no space left on device',
   },
@@ -23,7 +23,7 @@ const FAULTS: Record<
   },
   // A cloud-file error that libuv has no name for.
   'hydration-blocked': {
-    ops: ['readFile', 'writeFileDurable', 'rename'],
+    ops: ['readFile', 'writeFileDurable', 'appendFileDurable', 'rename'],
     code: 'UNKNOWN',
     message: 'unknown error (the cloud operation was not completed)',
   },
@@ -51,6 +51,10 @@ export function faultyFileSystem() {
     async writeFileDurable(path, data) {
       check('writeFileDurable', path);
       return base.writeFileDurable(path, data);
+    },
+    async appendFileDurable(path, data) {
+      check('appendFileDurable', path);
+      return base.appendFileDurable(path, data);
     },
     async rename(from, to) {
       check('rename', to);

@@ -956,6 +956,8 @@ h2.binder-title > button[aria-current='true'],
 }
 
 .assistant-panel {
+  display: flex;
+  flex-direction: column;
   flex-shrink: 0;
   width: 280px;
   overflow-y: auto;
@@ -971,4 +973,60 @@ h2.binder-title > button[aria-current='true'],
 .assistant-empty,
 .no-key p {
   color: var(--muted);
+}
+
+.conversations {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  min-height: 0;
+  gap: 0.5rem;
+  padding-bottom: 1rem;
+}
+
+.conversation-picker select {
+  width: 100%;
+}
+
+.messages {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.message {
+  white-space: pre-wrap;
+  user-select: text;
+  padding: 0.4rem 0.6rem;
+  border-radius: 6px;
+}
+
+.message-author {
+  align-self: flex-end;
+  background: var(--line);
+}
+
+.message-assistant {
+  align-self: flex-start;
+}
+
+.assistant-error {
+  color: #b3261e;
+}
+
+.composer {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.composer textarea {
+  resize: vertical;
+  font: inherit;
+}
+
+.composer button {
+  align-self: flex-end;
 }

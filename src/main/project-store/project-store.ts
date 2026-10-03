@@ -50,7 +50,14 @@ import {
   revertEntryType,
 } from '../../shared/entry';
 import { unitName } from '../../shared/unit-name';
+import type {
+  Conversation,
+  ConversationMessage,
+  ConversationSummary,
+  Mode,
+} from '../../shared/conversation';
 import type { Clock } from './clock';
+import { eventLine, headerLine, parseLog } from './conversation-log';
 import { entryFieldsFrontmatter, readEntryFields } from './entry-fields-file';
 import type { FileSystem, Fingerprint } from './file-system';
 import { safeWrite, writeFailureReason } from './safe-write';
@@ -359,9 +366,12 @@ async function lostWith(
 
 /** Removes temp files left by a write that crashed before its rename. */
 async function sweepTempFiles(projectPath: string, fs: FileSystem) {
-  const dirs = [...Object.values(UNIT_DIRS), 'trash', SESSIONS].map((d) =>
-    path.join(projectPath, d),
-  );
+  const dirs = [
+    ...Object.values(UNIT_DIRS),
+    'trash',
+    SESSIONS,
+    CONVERSATIONS,
+  ].map((d) => path.join(projectPath, d));
   for (const dir of [projectPath, ...dirs]) {
     for (const name of await fs.readdir(dir)) {
       if (name.endsWith('.tmp')) await fs.unlink(path.join(dir, name));
@@ -832,6 +842,8 @@ export class ProjectStore {
   private readonly retries = new Map<string, number>();
   private retryTokens = 0;
   private readonly listeners = new Set<(event: ProjectEvent) => void>();
+  /** The latest append to each Conversation's log, which the next waits for. */
+  private readonly appends = new Map<string, Promise<void>>();
 
   private readonly files: Set<string>;
   /** The Entries in the Story Bible, with the values accepted for them by `write`. */
@@ -2359,6 +2371,96 @@ export class ProjectStore {
     this.startWriting(key);
   }
 
+  /** Starts a Conversation in `mode`, written as its log's header line. */
+  async startConversation(
+    mode: Mode,
+    title: string,
+  ): Promise<ConversationSummary> {
+    await this.passFormatGate();
+    const summary = {
+      id: randomUUID(),
+      mode,
+      title,
+      created: this.deps.clock.now(),
+    };
+    await this.deps.fs.mkdir(path.join(this.path, CONVERSATIONS));
+    await safeWrite(
+      this.deps.fs,
+      this.deps.clock,
+      conversationPath(this.path, summary.id),
+      headerLine({ ...summary, format: FORMAT }),
+    );
+    return summary;
+  }
+
+  /**
+   * The Conversations in `conversations/`, latest first; `project.json`
+   * doesn't list them. A log whose header can't be read is logged and left out.
+   */
+  async listConversations(): Promise<ConversationSummary[]> {
+    const dir = path.join(this.path, CONVERSATIONS);
+    const summaries: ConversationSummary[] = [];
+    for (const name of await this.deps.fs.readdir(dir)) {
+      if (!CONVERSATION_FILE.test(name)) continue;
+      const conversation = parseLog(
+        await this.deps.fs.readFile(path.join(dir, name)),
+      );
+      if (!conversation) {
+        logOnce(this.unrecognised, `Can't read the Conversation log ${name}`);
+        continue;
+      }
+      const { messages: _, ...summary } = conversation;
+      summaries.push(summary);
+    }
+    return summaries.sort((a, b) => b.created - a.created);
+  }
+
+  /** The Conversation a log holds: its header and the messages shown. */
+  async readConversation(id: string): Promise<Conversation> {
+    const conversation = parseLog(await this.readLog(id));
+    if (!conversation) {
+      throw new ProjectError(
+        'unreadable',
+        `Conversation ${id} can't be read: its first line is damaged`,
+      );
+    }
+    return conversation;
+  }
+
+  /**
+   * Appends a message to a Conversation's log; appends to one log are made
+   * one at a time, in the order asked.
+   */
+  appendMessage(id: string, message: ConversationMessage): Promise<void> {
+    const appended = (this.appends.get(id) ?? Promise.resolve()).then(
+      async () => {
+        await this.passFormatGate();
+        const line = eventLine(await this.readLog(id), {
+          type: 'message',
+          ...message,
+        });
+        await this.deps.fs.appendFileDurable(
+          conversationPath(this.path, id),
+          line,
+        );
+      },
+    );
+    const settled = appended.catch(() => {});
+    this.appends.set(id, settled);
+    void settled.then(() => {
+      if (this.appends.get(id) === settled) this.appends.delete(id);
+    });
+    return appended;
+  }
+
+  private async readLog(id: string): Promise<string> {
+    const file = conversationPath(this.path, id);
+    if (!ID.test(id) || !(await this.deps.fs.exists(file))) {
+      throw new Error(`No Conversation ${id}`);
+    }
+    return this.deps.fs.readFile(file);
+  }
+
   /**
    * Resolves when every accepted value has been written, or has failed to.
    * A unit waiting to try again after a failure tries at once.
@@ -2710,6 +2812,13 @@ const UNIT_DIRS = {
 
 function unitPath(projectPath: string, ref: UnitRef): string {
   return path.join(projectPath, UNIT_DIRS[ref.kind], `${ref.id}.md`);
+}
+
+const CONVERSATIONS = 'conversations';
+const CONVERSATION_FILE = new RegExp(`^(${UUID})\\.jsonl$`);
+
+function conversationPath(projectPath: string, id: string): string {
+  return path.join(projectPath, CONVERSATIONS, `${id}.jsonl`);
 }
 
 function copyPath(

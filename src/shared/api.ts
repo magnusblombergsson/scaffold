@@ -10,8 +10,14 @@ import type {
   Visibility,
 } from './project-types';
 import type { ModelId } from './models';
+import type {
+  Conversation,
+  ConversationMessage,
+  ConversationSummary,
+  Mode,
+} from './conversation';
 
-// The preload exposes these three objects on `window`. Main registers a handler
+// The preload exposes these four objects on `window`. Main registers a handler
 // per method, and both sides are checked against these interfaces.
 
 /**
@@ -348,6 +354,28 @@ export interface ShellApi {
   onFlushRequest(listener: () => void): () => void;
 }
 
+/**
+ * The Assistant of this window's Project. Main builds what is sent to the
+ * model; the renderer only says what the Author wrote and which Scene is open.
+ */
+export interface AssistantApi {
+  /** The Conversations in the Project, latest first. */
+  listConversations(): Promise<ConversationSummary[]>;
+  readConversation(id: string): Promise<Conversation>;
+  startConversation(mode: Mode, title: string): Promise<ConversationSummary>;
+  /**
+   * Sends the Author's message with the Scene open in the editor, if any:
+   * calls `onText` with each piece of the reply as it streams, and resolves
+   * with the whole reply once it is in the log.
+   */
+  ask(
+    conversationId: string,
+    message: string,
+    sceneId: string | null,
+    onText: (text: string) => void,
+  ): Promise<ConversationMessage>;
+}
+
 export const channel = {
   project: (method: keyof ProjectApi) => `project:${method}`,
   currentProject: 'shell:currentProject',
@@ -374,6 +402,11 @@ export const channel = {
   setModel: 'settings:setModel',
   flushed: 'shell:flushed',
   projectEvent: 'project:event',
+  listConversations: 'assistant:listConversations',
+  readConversation: 'assistant:readConversation',
+  startConversation: 'assistant:startConversation',
+  ask: 'assistant:ask',
+  replyText: 'assistant:replyText',
 } as const;
 
 declare global {
@@ -381,5 +414,6 @@ declare global {
     project: ProjectApi;
     shell: ShellApi;
     settings: SettingsApi;
+    assistant: AssistantApi;
   }
 }

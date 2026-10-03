@@ -18,7 +18,7 @@ import type {
   Tip,
 } from '../shared/api';
 import { channel } from '../shared/api';
-import { isModelId } from '../shared/models';
+import { isModelId, type ModelId } from '../shared/models';
 import { unitName } from '../shared/unit-name';
 import {
   loadAppSettings,
@@ -56,6 +56,11 @@ let quitting = false;
 
 export function storeOf(contents: WebContents): ProjectStore | undefined {
   return stores.get(contents.id);
+}
+
+/** The Claude model the next call to the Assistant uses, as chosen in Settings. */
+export function assistantModel(): ModelId {
+  return settings.model();
 }
 
 /** Loads the settings, then reopens the Projects open at quit, each in its window. */

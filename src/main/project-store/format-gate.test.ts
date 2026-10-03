@@ -328,10 +328,11 @@ describe('a Project upgraded while it is open here', () => {
     });
   });
 
-  it('refuses structure operations, and never writes project.json again', async () => {
+  it('refuses structure operations and Conversation appends, and never writes project.json again', async () => {
     const { sceneId, chapterId } = await newProject();
     const store = await open();
     const { step } = await store.renameChapter(chapterId, 'One');
+    const conversation = await store.startConversation('writing', 'Anna');
     await upgradeElsewhere('GAMMA');
     const upgraded = await readFile(manifestPath(), 'utf8');
 
@@ -343,6 +344,17 @@ describe('a Project upgraded while it is open here', () => {
     await expect(store.emptyTrash()).rejects.toMatchObject(refused);
     await expect(
       store.resolveConflict(sceneRef(sceneId), { id: sceneId, markdown: '' }),
+    ).rejects.toMatchObject(refused);
+    await expect(
+      store.startConversation('writing', 'Later'),
+    ).rejects.toMatchObject(refused);
+    await expect(
+      store.appendMessage(conversation.id, {
+        role: 'author',
+        text: 'Why?',
+        focus: [],
+        at: 0,
+      }),
     ).rejects.toMatchObject(refused);
     expect(store.readOnly()).toEqual({ host: 'GAMMA' });
     expect(await readFile(manifestPath(), 'utf8')).toBe(upgraded);

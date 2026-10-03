@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import {
   channel,
+  type AssistantApi,
   type ProjectApi,
   type KeyStatus,
   type ProjectEvent,
@@ -121,6 +122,30 @@ const settings: SettingsApi = {
   setModel: (model) => ipcRenderer.send(channel.setModel, model),
 };
 
+/** Tells the replies streaming at once apart. */
+let asked = 0;
+
+const assistant: AssistantApi = {
+  listConversations: () => ipcRenderer.invoke(channel.listConversations),
+  readConversation: (id) => ipcRenderer.invoke(channel.readConversation, id),
+  startConversation: (mode, title) =>
+    ipcRenderer.invoke(channel.startConversation, mode, title),
+  ask(conversationId, message, sceneId, onText) {
+    const askId = ++asked;
+    const forward = (_event: unknown, id: number, text: string) => {
+      if (id === askId) onText(text);
+    };
+    // IPC keeps message order, so every piece arrives before the reply.
+    ipcRenderer.on(channel.replyText, forward);
+    return ipcRenderer
+      .invoke(channel.ask, askId, conversationId, message, sceneId)
+      .finally(() => {
+        ipcRenderer.off(channel.replyText, forward);
+      });
+  },
+};
+
 contextBridge.exposeInMainWorld('project', project);
+contextBridge.exposeInMainWorld('assistant', assistant);
 contextBridge.exposeInMainWorld('shell', shell);
 contextBridge.exposeInMainWorld('settings', settings);

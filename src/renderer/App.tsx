@@ -589,7 +589,10 @@ function ProjectView({
               />
             </main>
           )}
-          <AssistantPanel onAddKey={onAddKey} />
+          <AssistantPanel
+            onAddKey={onAddKey}
+            sceneId={open && !open.scene.missing ? open.scene.id : null}
+          />
         </div>
         {peek && (
           <MentionPeek
