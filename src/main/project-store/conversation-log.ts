@@ -1,6 +1,7 @@
 import {
   isInterviewFocus,
   MODES,
+  type Compaction,
   type Conversation,
   type ConversationMessage,
   type ConversationSummary,
@@ -82,6 +83,12 @@ export type FocusChangedEvent = {
   at: number;
 };
 
+/**
+ * A summary of the first `covers` messages, which stands in for them when
+ * the Assistant is asked; the latest one logged is the one used.
+ */
+export type SummaryEvent = { type: 'summary' } & Compaction;
+
 /** The Author gave the Conversation a new title. */
 export type RenamedEvent = { type: 'renamed'; title: string; at: number };
 
@@ -96,6 +103,7 @@ export type TrashMoveEvent = { type: 'trashed' | 'restored'; at: number };
 export type ConversationEvent =
   | MessageEvent
   | FocusChangedEvent
+  | SummaryEvent
   | RenamedEvent
   | TrashMoveEvent
   | ProposedEvent
@@ -186,6 +194,7 @@ export function parseLog(log: string): LoggedConversation | null {
   const messages: ConversationMessage[] = [];
   const proposals = new Map<string, LoggedProposal>();
   const focusChanges: FocusChange[] = [];
+  const compactions: Compaction[] = [];
   let { title } = header;
   let trashedAt: number | undefined;
   for (const line of rest) {
@@ -205,6 +214,10 @@ export function parseLog(log: string): LoggedConversation | null {
     if (isFocusChanged(event)) {
       const { focus, at } = event;
       focusChanges.push({ focus, at, before: messages.length });
+      continue;
+    }
+    if (isSummary(event, messages.length)) {
+      compactions.push(compactionOf(event));
       continue;
     }
     if (typeof event?.id !== 'string') continue;
@@ -241,6 +254,7 @@ export function parseLog(log: string): LoggedConversation | null {
       focusChanges,
     }),
     messages,
+    ...(compactions.length > 0 && { compactions }),
     proposals: [...proposals.values()],
   };
 }
@@ -398,9 +412,22 @@ function messageOf(event: MessageEvent): ConversationMessage {
   };
 }
 
+/** The summary an event holds; what is known of its cost is kept if readable. */
+function compactionOf(event: SummaryEvent): Compaction {
+  const { text, covers, at, model, usage } = event;
+  return {
+    text,
+    covers,
+    at,
+    ...(typeof model === 'string' && { model }),
+    ...(isUsage(usage) && { usage }),
+  };
+}
+
 function isSaw(value: unknown): value is Saw {
   const saw = value as Partial<Saw> | null | undefined;
   return (
+    (saw?.summarised === undefined || typeof saw.summarised === 'number') &&
     Array.isArray(saw?.entries) &&
     saw.entries.every((id) => typeof id === 'string') &&
     Array.isArray(saw.units) &&
@@ -455,6 +482,20 @@ function isTrashed(value: unknown): value is TrashMoveEvent {
   const event = value as Partial<TrashMoveEvent> | null;
   return (
     (event?.type === 'trashed' || event?.type === 'restored') &&
+    typeof event.at === 'number'
+  );
+}
+
+/** Whether `value` is a summary of some of the `logged` messages before it. */
+function isSummary(value: unknown, logged: number): value is SummaryEvent {
+  const event = value as Partial<SummaryEvent> | null;
+  return (
+    event?.type === 'summary' &&
+    typeof event.text === 'string' &&
+    event.text.trim() !== '' &&
+    Number.isInteger(event.covers) &&
+    event.covers! > 0 &&
+    event.covers! <= logged &&
     typeof event.at === 'number'
   );
 }

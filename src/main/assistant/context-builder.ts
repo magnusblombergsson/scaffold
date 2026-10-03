@@ -1,5 +1,6 @@
 import {
   OPEN_FOCUS,
+  type Compaction,
   type ConversationMessage,
   type InterviewFocus,
   type Mode,
@@ -37,19 +38,23 @@ export type { InterviewFocus };
 
 /**
  * One turn: the Conversation's Mode and what it is about, and its messages
- * so far, ending with the Author's new one. In Writing, `sceneId` is the
- * Scene in focus, and a Review Chapter reviews its Chapter.
+ * so far, ending with the Author's new one, with the latest `summary` of
+ * the older ones once it is long. In Writing, `sceneId` is the Scene in
+ * focus, and a Review Chapter reviews its Chapter.
  */
 export type ContextRequest = (
   | { mode: 'brainstorm' }
   | { mode: 'interview'; focus: InterviewFocus }
   | { mode: 'writing'; command: Command; sceneId: string | null }
-) & { messages: ConversationMessage[] };
+) & {
+  messages: ConversationMessage[];
+  summary?: Pick<Compaction, 'text' | 'covers'>;
+};
 
 /**
- * What is sent, in order: system prompt, Story Bible, Outline skeleton and
- * Prose in focus as system blocks, then the Conversation's earlier messages
- * and the new one.
+ * What is sent, in order: system prompt, Story Bible, Outline skeleton,
+ * Prose in focus and the summary of the older messages, if any, as system
+ * blocks, then the Conversation's earlier messages and the new one.
  * Cache breakpoints follow the skeleton and the last block before the new
  * message. `saw` lists what was sent, by id.
  */
@@ -66,14 +71,19 @@ export async function buildContext(
   const manuscript = view.manuscript();
   const skeleton = await outlineSkeleton(view, manuscript);
   const focus = await inFocus(view, manuscript, request);
+  const { summary } = request;
+  const covered = request.messages.slice(0, summary?.covers ?? 0);
   // A reply cut short isn't sent back: the model would take it as one to
   // continue, and a Retry answers the Author's message afresh.
-  const sent = request.messages.filter((m) => !m.interrupted);
+  const sent = request.messages
+    .slice(covered.length)
+    .filter((m) => !m.interrupted);
   const bible = await storyBible(
     view,
     [
       ...skeleton.texts,
       ...focus.map((unit) => unit.text),
+      ...(summary ? [summary.text] : []),
       ...sent.map((m) => m.text),
     ],
     request.mode === 'interview' ? request.focus : null,
@@ -88,19 +98,13 @@ export async function buildContext(
     system.push({ text: interviewFocusText(view, manuscript, request.focus) });
   }
   if (focus.length > 0) system.push({ text: focusBlock(focus) });
+  if (summary) system.push({ text: summaryBlock(summary.text, covered) });
   // Every Review starts fresh, without the Findings of earlier ones.
   const reviewing =
     request.mode === 'writing' && request.command !== 'question';
   const messages: PromptMessage[] = sent.map((m) => ({
     role: m.role === 'author' ? 'user' : 'assistant',
-    content: [
-      m.text,
-      m.command && REVIEW_ASKS[m.command],
-      ...(reviewing ? [] : (m.findings ?? []).map(findingBlock)),
-      ...(m.proposals ?? []).map(proposalText),
-    ]
-      .filter(Boolean)
-      .join('\n\n'),
+    content: messageContent(m, { findings: !reviewing }),
   }));
   // The second breakpoint: all before the new message, which the next turn
   // sends again unchanged as long as the Prose in focus is.
@@ -114,8 +118,49 @@ export async function buildContext(
       entries: bible.ids,
       units: focus.map((unit) => unit.unit),
       messages: Math.max(0, sent.length - 1),
+      ...(summary && {
+        summarised: covered.filter((m) => !m.interrupted).length,
+      }),
     },
   };
+}
+
+/**
+ * A message as it is sent: its text, the Review it asked for, the Findings
+ * it made unless left out, and the Proposals made in it.
+ */
+export function messageContent(
+  m: ConversationMessage,
+  { findings }: { findings: boolean },
+): string {
+  return [
+    m.text,
+    m.command && REVIEW_ASKS[m.command],
+    ...(findings ? (m.findings ?? []).map(findingBlock) : []),
+    ...(m.proposals ?? []).map(proposalText),
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+}
+
+/**
+ * The summary that stands in for the `covered` messages, with the
+ * Proposals made in them that the Author hasn't decided on, in full.
+ */
+function summaryBlock(text: string, covered: ConversationMessage[]): string {
+  const undecided = covered
+    .flatMap((m) => m.proposals ?? [])
+    .filter((p) => p.state.kind === 'pending');
+  return [
+    'The earlier part of this Conversation, summarised; the messages it summarises are not sent.',
+    text.trim(),
+    ...(undecided.length > 0
+      ? [
+          'Proposals made in that part that the Author hasn’t decided on yet:',
+          ...undecided.map(proposalText),
+        ]
+      : []),
+  ].join('\n\n');
 }
 
 /**

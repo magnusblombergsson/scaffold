@@ -120,3 +120,12 @@ export const MODE_PROMPTS: Record<Mode, string> = {
   interview: INTERVIEW_PROMPT,
   writing: WRITING_PROMPT,
 };
+
+/** What a compaction summary is asked with (MVP spec §10). */
+export const SUMMARY_PROMPT = `You summarise the earlier part of a Conversation between an Author writing a work of fiction and the Assistant beside their editor, so that the Assistant can carry on without it. The summary stands in for that part from now on; the Story Bible, the Outlines and the Prose are sent separately, as they are at each turn.
+
+Keep, as short notes: what the Author asked about and decided, facts about the story the Author stated, questions still open on either side, and what the Assistant advised. Name characters, places and Chapters as the Conversation does. Leave out pleasantries and what the Story Bible already holds.
+
+Don't restate Proposals: those the Author hasn't decided on are sent in full separately, and those decided are in the Story Bible and the Outlines. Don't restate what a Review found either: every Review starts fresh. Note only which Scene or Chapter was reviewed and what the Author made of it.
+
+Write in the language of the Conversation. Never write Prose: quote the Author's own words only where they matter, and add no example sentences, dialogue or rewrites. Answer with the summary only.`;

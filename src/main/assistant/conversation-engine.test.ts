@@ -5,8 +5,12 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { instantClock } from '../project-store/clock';
 import { nodeFileSystem, type FileSystem } from '../project-store/file-system';
 import { createProject, openProject } from '../project-store/project-store';
-import { createConversationEngine } from './conversation-engine';
+import {
+  createConversationEngine,
+  type EngineDeps,
+} from './conversation-engine';
 import { fakeProvider, type FakeReply } from './fake-provider';
+import type { ProviderRequest } from './provider';
 
 let dir: string;
 
@@ -18,19 +22,24 @@ afterEach(async () => {
 });
 
 async function setUp(
-  reply: (n: number) => FakeReply = () => ['What does ', 'she fear?'],
+  reply: (n: number, request: ProviderRequest) => FakeReply = () => [
+    'What does ',
+    'she fear?',
+  ],
+  { compaction }: Pick<EngineDeps, 'compaction'> = {},
 ) {
   const projectPath = path.join(dir, 'My Novel');
   const clock = instantClock(1_000);
   const store = await createProject(projectPath, { fs: nodeFileSystem, clock });
   const chapterId = store.manuscript().chapters[0].id;
   const sceneId = store.manuscript().chapters[0].scenes[0].id;
-  const provider = fakeProvider((request, n) => reply(n));
+  const provider = fakeProvider((request, n) => reply(n, request));
   const engine = createConversationEngine({
     store,
     provider,
     model: () => 'claude-opus-5-5',
     clock,
+    compaction,
   });
   return { projectPath, store, clock, chapterId, sceneId, provider, engine };
 }
@@ -800,5 +809,191 @@ describe('Reviews', () => {
     ).rejects.toThrow(/no Chapter/);
     expect(provider.requests).toHaveLength(0);
     expect((await store.readConversation(id)).messages).toEqual([]);
+  });
+});
+
+describe('Compaction of a long Conversation', () => {
+  // Some 30 tokens each, at about 4 characters a token.
+  const long = (what: string) => `${what} `.repeat(120 / (what.length + 1));
+  /** Past 50 tokens of earlier messages, all but the newest 40 are summarised. */
+  const compaction = { compactAt: 50, keep: 40 };
+
+  it('past the threshold, summarises the older part into the log and sends the summary with the newer messages instead', async () => {
+    const { store, engine, provider, clock } = await setUp(
+      (n) => [n === 2 ? 'Anna wants to leave the island.' : `Reply ${n}`],
+      { compaction },
+    );
+    const { id } = await store.startConversation('brainstorm', 'Anna');
+    await engine.askAssistant(id, long('Anna'), { sceneId: null }, () => {});
+    await engine.askAssistant(id, long('Mira'), { sceneId: null }, () => {});
+    expect(provider.requests).toHaveLength(2);
+
+    const result = await engine.askAssistant(
+      id,
+      'And then?',
+      { sceneId: null },
+      () => {},
+    );
+
+    // The summary call sees the older part only.
+    const summarising = provider.requests[2];
+    expect(summarising.system[0].text).toMatch(/summar/i);
+    const transcript = summarising.messages.map((m) => m.content).join('\n');
+    expect(transcript).toContain(long('Anna').trim());
+    expect(transcript).toContain('Reply 0');
+    expect(transcript).not.toContain('Mira');
+    // The reply is asked with the summary in place of the older part.
+    const asked = provider.requests[3];
+    expect(asked.system.at(-1)!.text).toContain(
+      'Anna wants to leave the island.',
+    );
+    expect(asked.messages).toEqual([
+      { role: 'user', content: long('Mira') },
+      { role: 'assistant', content: 'Reply 1', cache: true },
+      { role: 'user', content: 'And then?' },
+    ]);
+    expect(result.reply).toMatchObject({
+      text: 'Reply 3',
+      saw: { messages: 2, summarised: 2 },
+    });
+    // The full log stays, with the summary appended to it.
+    const conversation = await store.readConversation(id);
+    expect(conversation.messages.map((m) => m.text)).toEqual([
+      long('Anna'),
+      'Reply 0',
+      long('Mira'),
+      'Reply 1',
+      'And then?',
+      'Reply 3',
+    ]);
+    expect(conversation.compactions).toEqual([
+      {
+        text: 'Anna wants to leave the island.',
+        covers: 2,
+        at: clock.now(),
+        model: 'claude-opus-5-5',
+      },
+    ]);
+  });
+
+  it('always sends the undecided Proposals of the summarised part in full, and no decided ones', async () => {
+    const block = (json: object) =>
+      `\`\`\`proposal\n${JSON.stringify(json)}\n\`\`\``;
+    const mira = { create: 'character', name: 'Mira', description: 'Sister.' };
+    const olle = { create: 'character', name: 'Olle', description: 'Father.' };
+    const { store, engine, provider } = await setUp(
+      (n, request) =>
+        /summarise/.test(request.system[0].text)
+          ? ['They are family.']
+          : n === 0
+            ? ['Noted.\n', block(mira), '\n', block(olle)]
+            : [`Reply ${n}`],
+      { compaction },
+    );
+    const { id } = await store.startConversation('brainstorm', 'Anna');
+    await engine.askAssistant(id, long('Anna'), { sceneId: null }, () => {});
+    const [, replied] = (await store.readConversation(id)).messages;
+    await store.rejectProposal(id, replied.proposals![1].id);
+    await engine.askAssistant(id, long('Wind'), { sceneId: null }, () => {});
+
+    await engine.askAssistant(id, 'And then?', { sceneId: null }, () => {});
+
+    const asked = provider.requests.at(-1)!;
+    const summary = asked.system.at(-1)!.text;
+    expect(summary).toContain('They are family.');
+    expect(summary).toContain(block(mira));
+    expect(summary).toContain(
+      "The Author hasn't decided on this Proposal yet.",
+    );
+    expect(summary).not.toContain('Olle');
+    expect(asked.messages.map((m) => m.content).join('\n')).not.toContain(
+      'Mira',
+    );
+  });
+
+  it('sends the latest summary until the messages since are past the threshold again, then summarises on from it', async () => {
+    let summaries = 0;
+    const { store, engine, provider } = await setUp(
+      (n, request) =>
+        /summarise/.test(request.system[0].text)
+          ? [`Summary ${++summaries}.`]
+          : [`Reply ${n}`],
+      { compaction },
+    );
+    const { id } = await store.startConversation('brainstorm', 'Anna');
+    for (const text of [long('Anna'), long('Mira'), 'And then?']) {
+      await engine.askAssistant(id, text, { sceneId: null }, () => {});
+    }
+    expect(provider.requests).toHaveLength(4);
+
+    await engine.askAssistant(id, 'Why?', { sceneId: null }, () => {});
+
+    // Within the threshold: no new summary, the latest one is sent.
+    expect(provider.requests).toHaveLength(5);
+    expect(provider.requests[4].system.at(-1)!.text).toContain('Summary 1.');
+    expect(provider.requests[4].messages[0].content).toBe(long('Mira'));
+
+    await engine.askAssistant(id, long('Wind'), { sceneId: null }, () => {});
+    await engine.askAssistant(id, 'So?', { sceneId: null }, () => {});
+
+    const resummarising = provider.requests.find((r) =>
+      r.messages[0].content.includes('Summary 1.'),
+    )!;
+    expect(resummarising.messages[0].content).toContain(long('Mira').trim());
+    expect(resummarising.messages[0].content).not.toContain(
+      long('Anna').trim(),
+    );
+    expect(provider.requests.at(-1)!.system.at(-1)!.text).toContain(
+      'Summary 2.',
+    );
+    const { compactions } = await store.readConversation(id);
+    expect(compactions?.map((c) => c.text)).toEqual([
+      'Summary 1.',
+      'Summary 2.',
+    ]);
+    expect(compactions![1].covers).toBeGreaterThan(compactions![0].covers);
+  });
+
+  it('doesn’t summarise again each turn when the summary alone is past the threshold', async () => {
+    const { store, engine } = await setUp(
+      (n, request) =>
+        /summarise/.test(request.system[0].text)
+          ? ['Summary. '.repeat(30)]
+          : [`Reply ${n}`],
+      { compaction: { compactAt: 50, keep: 10 } },
+    );
+    const { id } = await store.startConversation('brainstorm', 'Anna');
+    for (const text of [long('Anna'), long('Mira'), 'And then?']) {
+      await engine.askAssistant(id, text, { sceneId: null }, () => {});
+    }
+    expect((await store.readConversation(id)).compactions).toHaveLength(1);
+
+    await engine.askAssistant(id, 'Why?', { sceneId: null }, () => {});
+
+    expect((await store.readConversation(id)).compactions).toHaveLength(1);
+  });
+
+  it('sends the earlier messages in full and logs no summary when the summary call fails', async () => {
+    const { store, engine, provider } = await setUp(
+      (n, request) =>
+        /summarise/.test(request.system[0].text)
+          ? { text: [], fail: 'offline' }
+          : [`Reply ${n}`],
+      { compaction },
+    );
+    const { id } = await store.startConversation('brainstorm', 'Anna');
+    await engine.askAssistant(id, long('Anna'), { sceneId: null }, () => {});
+    await engine.askAssistant(id, long('Mira'), { sceneId: null }, () => {});
+
+    const result = await engine.askAssistant(
+      id,
+      'And then?',
+      { sceneId: null },
+      () => {},
+    );
+
+    expect(result).toMatchObject({ reply: { text: 'Reply 3' }, failure: null });
+    expect(provider.requests.at(-1)!.messages).toHaveLength(5);
+    expect((await store.readConversation(id)).compactions).toBeUndefined();
   });
 });

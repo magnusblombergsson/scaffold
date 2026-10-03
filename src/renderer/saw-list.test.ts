@@ -57,6 +57,23 @@ describe('what the Assistant saw', () => {
     ]);
   });
 
+  it('says how many earlier messages were sent as a summary, once the Conversation was compacted', () => {
+    expect(
+      sawList(
+        { entries: [], units: [], messages: 3, summarised: 40 },
+        manuscript,
+        entries,
+      ).slice(-2),
+    ).toEqual(['A summary of 40 earlier messages', '3 later messages']);
+    expect(
+      sawList(
+        { entries: [], units: [], messages: 0, summarised: 1 },
+        manuscript,
+        entries,
+      ).slice(-1),
+    ).toEqual(['A summary of 1 earlier message']);
+  });
+
   it('says when nothing of a kind was sent, and names what has since gone', () => {
     expect(
       sawList(

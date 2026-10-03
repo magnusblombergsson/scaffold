@@ -72,9 +72,15 @@ export type SawUnit = { kind: 'scene' | 'outline' | 'notes'; id: string };
 /**
  * What the Assistant saw for a reply, by id: the Entries of the Story Bible
  * it was sent, the units in focus, and how many earlier messages of the
- * Conversation. The Outline skeleton is sent every time.
+ * Conversation, in full and, once it was compacted, as a summary. The
+ * Outline skeleton is sent every time.
  */
-export type Saw = { entries: string[]; units: SawUnit[]; messages: number };
+export type Saw = {
+  entries: string[];
+  units: SawUnit[];
+  messages: number;
+  summarised?: number;
+};
 
 /**
  * One message in a Conversation: `focus` holds the ids of the Scenes in focus
@@ -122,8 +128,27 @@ export type AskResult = {
   failure: AssistantFailure | null;
 };
 
-/** A Conversation's messages, and in an Interview, each time its focus was set. */
+/**
+ * A summary of the older part of a long Conversation: it stands in for the
+ * first `covers` messages when the Assistant is asked, though they stay in
+ * the log and on screen. It says which `model` wrote it and what that used,
+ * when known.
+ */
+export type Compaction = {
+  text: string;
+  covers: number;
+  /** When it was made, in ms since the epoch. */
+  at: number;
+  model?: string;
+  usage?: Usage;
+};
+
+/**
+ * A Conversation's messages, and in an Interview, each time its focus was
+ * set; once it is long, the summaries made of it, the latest last.
+ */
 export type Conversation = ConversationSummary & {
   messages: ConversationMessage[];
   focusChanges?: FocusChange[];
+  compactions?: Compaction[];
 };

@@ -234,7 +234,7 @@ ${JSON.stringify({ type: 'message', role: 'assistant', text: 'Odd.', focus: [], 
     const { id } = await store.startConversation('writing', 'Why Anna?');
     const file = path.join(projectPath, 'conversations', `${id}.jsonl`);
     // From a newer app, then a line cut short by a crash.
-    await appendFile(file, '{"type":"summary","text":"Earlier: Anna."}\n');
+    await appendFile(file, '{"type":"bookmark","text":"Earlier: Anna."}\n');
     await appendFile(file, '{"type":"message","role":"auth');
 
     await store.appendMessage(id, {
@@ -249,7 +249,7 @@ ${JSON.stringify({ type: 'message', role: 'assistant', text: 'Odd.', focus: [], 
     ]);
     const lines = (await readFile(file, 'utf8')).split('\n');
     expect(lines.slice(1)).toEqual([
-      '{"type":"summary","text":"Earlier: Anna."}',
+      '{"type":"bookmark","text":"Earlier: Anna."}',
       '{"type":"message","role":"auth',
       '{"type":"message","role":"author","text":"Why does Anna leave?","focus":[],"at":2000}',
       '',
@@ -313,5 +313,43 @@ ${JSON.stringify({ type: 'message', role: 'assistant', text: 'Odd.', focus: [], 
     const conversation = await store.readConversation(id);
     expect(conversation).not.toHaveProperty('focus');
     expect(conversation).not.toHaveProperty('focusChanges');
+  });
+
+  it('appends a compaction summary as an event, keeping every message, and skips one that summarises more than came before it', async () => {
+    const { projectPath, store } = await newProject();
+    const { id } = await store.startConversation('brainstorm', 'Anna');
+    const message = (text: string, at: number) => ({
+      role: 'author' as const,
+      text,
+      focus: [],
+      at,
+    });
+    await store.appendMessage(id, message('Anna leaves.', 2_000));
+    await store.appendMessage(id, message('Why?', 3_000));
+    const usage = { input: 900, cached: 0, written: 0, output: 50 };
+    const summary = {
+      text: 'Anna leaves the island.',
+      covers: 2,
+      at: 4_000,
+      model: 'claude-opus-5-5',
+      usage,
+    };
+
+    await store.appendSummary(id, summary);
+    await appendFile(
+      path.join(projectPath, 'conversations', `${id}.jsonl`),
+      `${JSON.stringify({ ...summary, type: 'summary', text: 'Too far.', covers: 3 })}\n`,
+    );
+
+    expect((await logLines(projectPath, id)).at(-2)).toEqual({
+      type: 'summary',
+      ...summary,
+    });
+    const conversation = await store.readConversation(id);
+    expect(conversation.messages.map((m) => m.text)).toEqual([
+      'Anna leaves.',
+      'Why?',
+    ]);
+    expect(conversation.compactions).toEqual([summary]);
   });
 });

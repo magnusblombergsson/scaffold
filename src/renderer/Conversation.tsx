@@ -348,9 +348,10 @@ export function useConversation({
     setFailure(failure);
   }
 
+  // Summarising a long Conversation is a call too, and counts.
   const total = current
     ? describeTotal(
-        current.messages.flatMap((m) =>
+        [...current.messages, ...(current.compactions ?? [])].flatMap((m) =>
           m.model && m.usage ? [{ model: m.model, usage: m.usage }] : [],
         ),
       )

@@ -4,6 +4,7 @@ import {
   OPEN_FOCUS,
   type AskResult,
   type AssistantFailure,
+  type Compaction,
   type Conversation,
   type ConversationMessage,
   type Saw,
@@ -30,6 +31,12 @@ import {
 import type { Usage } from '../../shared/usage';
 import type { Clock } from '../project-store/clock';
 import type { ProjectStore } from '../project-store/project-store';
+import {
+  compactionPoint,
+  DEFAULT_COMPACTION,
+  summaryRequest,
+  type CompactionPolicy,
+} from './compaction';
 import { buildContext, defaultRequest, readableScene } from './context-builder';
 import { ProviderError, type Provider, type ProviderRequest } from './provider';
 
@@ -44,11 +51,14 @@ export type EngineDeps = {
     | 'readConversation'
     | 'appendMessage'
     | 'appendProposal'
+    | 'appendSummary'
   >;
   provider: Provider;
   /** The model the next call uses, as chosen in Settings. */
   model: () => ModelId;
   clock: Clock;
+  /** When a long Conversation is compacted; tests make it short. */
+  compaction?: CompactionPolicy;
 };
 
 /**
@@ -61,6 +71,7 @@ export function createConversationEngine({
   provider,
   model,
   clock,
+  compaction = DEFAULT_COMPACTION,
 }: EngineDeps) {
   /**
    * What a message is about, as it logs it: in a Writing Conversation, the
@@ -129,23 +140,32 @@ export function createConversationEngine({
    * Asks the model to answer the Conversation as logged, which ends with the
    * Author's message, with the context the Conversation's Mode gives the
    * Scene in `focus`, or in an Interview, the focus it was last set to.
+   * Past the threshold, the older messages are compacted first.
    * The reply is logged once it has come, or as interrupted if the call fails partway; a call that fails before any
    * reply logs nothing. A Review's reply holds Findings, never Proposals.
    */
   async function answer(
     conversationId: string,
-    { mode, focus: interviewFocus }: Pick<Conversation, 'mode' | 'focus'>,
+    {
+      mode,
+      focus: interviewFocus,
+      compactions,
+    }: Pick<Conversation, 'mode' | 'focus' | 'compactions'>,
     messages: ConversationMessage[],
     focus: string[],
     onText: (text: string) => void,
   ): Promise<AskResult> {
     const chosen = model();
-    const asked = defaultRequest(
-      mode,
-      focus[0] ?? null,
+    const summary = await summaryToSend(
+      conversationId,
       messages,
-      interviewFocus,
+      compactions?.at(-1),
+      chosen,
     );
+    const asked = {
+      ...defaultRequest(mode, focus[0] ?? null, messages, interviewFocus),
+      ...(summary && { summary }),
+    };
     const context = await buildContext(store.assistantView(), asked);
     const reviewing = asked.mode === 'writing' && asked.command !== 'question';
     const request: ProviderRequest = {
@@ -196,6 +216,44 @@ export function createConversationEngine({
       await store.appendProposal(conversationId, proposal);
     }
     return { reply, failure };
+  }
+
+  /**
+   * The summary that stands in for the older `messages` when the Assistant
+   * is asked: the `latest` one, or once the messages since are past the
+   * threshold, a new one, logged before it is used. If the summary call
+   * fails, the messages since the latest are sent in full instead.
+   */
+  async function summaryToSend(
+    conversationId: string,
+    messages: ConversationMessage[],
+    latest: Compaction | undefined,
+    chosen: ModelId,
+  ): Promise<Compaction | undefined> {
+    const covers = compactionPoint(messages, latest, compaction);
+    if (covers === null) return latest;
+    let text = '';
+    let usage: Usage | undefined;
+    try {
+      const request = summaryRequest(chosen, messages, covers, latest);
+      for await (const event of provider.stream(request)) {
+        if (event.type === 'usage') usage = event.usage;
+        else text += event.text;
+      }
+    } catch (error) {
+      console.error('Compacting the Conversation failed:', error);
+      return latest;
+    }
+    if (text.trim() === '') return latest;
+    const summary: Compaction = {
+      text: text.trim(),
+      covers,
+      at: clock.now(),
+      model: chosen,
+      ...(usage && { usage }),
+    };
+    await store.appendSummary(conversationId, summary);
+    return summary;
   }
 
   /**

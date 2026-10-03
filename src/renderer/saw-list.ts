@@ -19,12 +19,24 @@ export function sawList(
       ? `The Prose of ${unitName(unit, manuscript)}`
       : capitalized(unitName(unit, manuscript)),
   );
+  const messages = (count: number, which: string) =>
+    `${count} ${which} message${count === 1 ? '' : 's'}`;
+  const { summarised } = saw;
+  const earlier =
+    summarised === undefined
+      ? [
+          saw.messages === 0
+            ? 'No earlier messages'
+            : messages(saw.messages, 'earlier'),
+        ]
+      : [
+          `A summary of ${messages(summarised, 'earlier')}`,
+          ...(saw.messages > 0 ? [messages(saw.messages, 'later')] : []),
+        ];
   return [
     `Story Bible: ${names.length > 0 ? names.join(', ') : 'no Entries'}`,
     'Outline skeleton',
     ...units,
-    saw.messages === 0
-      ? 'No earlier messages'
-      : `${saw.messages} earlier message${saw.messages === 1 ? '' : 's'}`,
+    ...earlier,
   ];
 }

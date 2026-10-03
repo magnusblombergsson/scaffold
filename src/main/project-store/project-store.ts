@@ -71,6 +71,7 @@ import {
 } from '../../shared/proposal';
 import { capitalized, unitName } from '../../shared/unit-name';
 import type {
+  Compaction,
   Conversation,
   ConversationMessage,
   ConversationSummary,
@@ -2766,6 +2767,17 @@ ${text}`);
     return this.inLog(id, async () => {
       await this.passFormatGate();
       await this.appendEvent(id, { type: 'message', ...logged });
+    });
+  }
+
+  /**
+   * Appends a summary of the older part of a Conversation, which stands in
+   * for it when the Assistant is asked from now on.
+   */
+  appendSummary(id: string, compaction: Compaction): Promise<void> {
+    return this.inLog(id, async () => {
+      await this.passFormatGate();
+      await this.appendEvent(id, { type: 'summary', ...compaction });
     });
   }
 
