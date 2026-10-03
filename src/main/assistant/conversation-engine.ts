@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type {
   AskResult,
   AssistantFailure,
@@ -5,6 +6,12 @@ import type {
   Mode,
 } from '../../shared/conversation';
 import type { ModelId } from '../../shared/models';
+import {
+  proposalOf,
+  replyText,
+  splitReply,
+  type Proposal,
+} from '../../shared/proposal';
 import type { Usage } from '../../shared/usage';
 import type { Clock } from '../project-store/clock';
 import type { ProjectStore } from '../project-store/project-store';
@@ -17,7 +24,11 @@ export type Focus = { sceneId: string | null };
 export type EngineDeps = {
   store: Pick<
     ProjectStore,
-    'flush' | 'assistantView' | 'readConversation' | 'appendMessage'
+    | 'flush'
+    | 'assistantView'
+    | 'readConversation'
+    | 'appendMessage'
+    | 'appendProposal'
   >;
   provider: Provider;
   /** The model the next call uses, as chosen in Settings. */
@@ -27,7 +38,8 @@ export type EngineDeps = {
 
 /**
  * The Conversation engine: it turns the Author's message into a request,
- * streams the reply, and appends both to the Conversation's log.
+ * streams the reply, and appends both to the Conversation's log, with the
+ * Proposals the reply makes.
  */
 export function createConversationEngine({
   store,
@@ -94,7 +106,7 @@ export function createConversationEngine({
 
     const reply: ConversationMessage = {
       role: 'assistant',
-      text,
+      text: replyText(text),
       focus,
       at: clock.now(),
       model: chosen,
@@ -103,7 +115,30 @@ export function createConversationEngine({
       saw: context.saw,
     };
     await store.appendMessage(conversationId, reply);
+    // A reply cut short isn't sent back to the model, so neither are its Proposals.
+    for (const proposal of failure ? [] : await proposalsIn(text)) {
+      await store.appendProposal(conversationId, proposal);
+    }
     return { reply, failure };
+  }
+
+  /**
+   * The Proposals a reply makes, each against its Entry as it is now. A
+   * block that proposes nothing this app takes, such as a change to Prose or
+   * to a Voice's example lines, is left out.
+   */
+  async function proposalsIn(reply: string): Promise<Proposal[]> {
+    const view = store.assistantView();
+    const proposals: Proposal[] = [];
+    for (const block of splitReply(reply).blocks) {
+      const entryId = (block as { entry?: unknown } | null)?.entry;
+      const known = view.listEntries().some((e) => e.id === entryId);
+      if (!known) continue;
+      const entry = await view.read({ kind: 'entry', id: entryId as string });
+      const change = proposalOf(block, entry);
+      if (change) proposals.push({ id: randomUUID(), ...change });
+    }
+    return proposals;
   }
 
   return {

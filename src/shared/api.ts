@@ -10,6 +10,13 @@ import type {
   Visibility,
 } from './project-types';
 import type { ModelId } from './models';
+import type { FieldValue, PendingProposal } from './proposal';
+
+/**
+ * How the Author accepts a Proposal: with the value they `edited` it to,
+ * and `anyway` when they saw it was stale.
+ */
+export type AcceptOptions = { edited?: FieldValue; anyway?: boolean };
 import type {
   AskResult,
   Conversation,
@@ -48,7 +55,15 @@ export type UnitReloaded = {
   type: 'unitReloaded';
   ref: UnitRef;
   value: UnitValue;
+  /** Set when it changed because the Author accepted a Proposal, here. */
+  byProposal?: true;
 };
+
+/**
+ * A Proposal was made, accepted or rejected, in any Conversation, or an
+ * Entry was written, which may make its Proposals stale or applied.
+ */
+export type ProposalsChanged = { type: 'proposalsChanged' };
 
 /**
  * `project.json`, or the Scene and Trash files it orders, changed on disk;
@@ -115,6 +130,7 @@ export type ProjectEvent =
   | StructureChanged
   | ConflictsChanged
   | EntriesChanged
+  | ProposalsChanged
   | ReadOnly;
 
 /** Mirrors the main-process ProjectStore of this window's Project. */
@@ -382,6 +398,20 @@ export interface AssistantApi {
     conversationId: string,
     onText: (text: string) => void,
   ): Promise<AskResult>;
+  /**
+   * Accepts a pending Proposal, as proposed or as the Author edited it:
+   * main writes its Entry, then logs the accept. Refused for one already
+   * decided, an orphaned one, a stale one unless accepted anyway, and in a
+   * read-only Project.
+   */
+  acceptProposal(
+    conversationId: string,
+    proposalId: string,
+    options?: AcceptOptions,
+  ): Promise<void>;
+  rejectProposal(conversationId: string, proposalId: string): Promise<void>;
+  /** The Proposals pending on an Entry, in any Conversation. */
+  pendingProposals(entryId: string): Promise<PendingProposal[]>;
 }
 
 export const channel = {
@@ -415,6 +445,9 @@ export const channel = {
   startConversation: 'assistant:startConversation',
   ask: 'assistant:ask',
   retry: 'assistant:retry',
+  acceptProposal: 'assistant:acceptProposal',
+  rejectProposal: 'assistant:rejectProposal',
+  pendingProposals: 'assistant:pendingProposals',
   replyText: 'assistant:replyText',
 } as const;
 

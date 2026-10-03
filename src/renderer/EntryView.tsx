@@ -1,6 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
 import { entryCollisions } from '../shared/entry';
 import {
+  FIELD_LABELS,
+  fieldText,
+  type PendingProposal,
+  type ProposalField,
+} from '../shared/proposal';
+import {
   ENTRY_TYPE_LABELS,
   ENTRY_TYPES,
   ROLE_LABELS,
@@ -107,7 +113,8 @@ type Loaded = { entry: EntryValue; privateNotes: PrivateValue };
  * Author can undo from their toast; they come in as main has them, since
  * undo changes them from outside this view, and a type change shows the
  * Entry anew. A name or alias another Entry also goes by is allowed, with a
- * warning once it is saved.
+ * warning once it is saved. A Proposal pending on a field shows under it as
+ * a ghost value, until it is decided; an accepted one fills the field in.
  */
 export function EntryView({
   entry: summary,
@@ -115,6 +122,7 @@ export function EntryView({
   language,
   onType,
   onVisibility,
+  onShowProposal,
 }: {
   entry: EntrySummary;
   /** Every Entry in the Story Bible, to warn of names they share. */
@@ -122,6 +130,8 @@ export function EntryView({
   language: ProseLanguage;
   onType(type: EntryType): void;
   onVisibility(visibility: Visibility): void;
+  /** Opens a pending Proposal's Conversation at its card. */
+  onShowProposal(conversationId: string, proposalId: string): void;
 }) {
   const { id: entryId, visibility } = summary;
   const [loaded, setLoaded] = useState<Loaded | null>(null);
@@ -129,7 +139,29 @@ export function EntryView({
   const value = useRef<EntryValue | null>(null);
   /** A Character's Role and a Plot Thread's Status, as last saved or reloaded. */
   const [choices, setChoices] = useState<EntryFields>({});
+  const [pending, setPending] = useState<PendingProposal[]>([]);
   const entryKey = unitKey({ kind: 'entry', id: entryId });
+
+  useEffect(() => {
+    let current = true;
+    const refresh = () =>
+      void window.assistant.pendingProposals(entryId).then((pending) => {
+        if (current) setPending(pending);
+      });
+    refresh();
+    const unsubscribe = window.project.subscribe((event) => {
+      if (event.type === 'proposalsChanged') refresh();
+    });
+    return () => {
+      current = false;
+      unsubscribe();
+    };
+  }, [entryId]);
+
+  /** The ghost values of the Proposals pending on `field`. */
+  const ghosts = (field: ProposalField) => (
+    <Ghosts field={field} pending={pending} onShow={onShowProposal} />
+  );
 
   useEffect(() => {
     let current = true;
@@ -229,6 +261,7 @@ export function EntryView({
           attributes={attributes('Aliases')}
         />
         <p className="field-hint">One per line</p>
+        {ghosts('aliases')}
       </section>
       {collisions.length > 0 && (
         <ul className="entry-collisions" role="status">
@@ -266,6 +299,7 @@ export function EntryView({
           save={(description) => save({ description })}
           attributes={attributes('Description')}
         />
+        {ghosts('description')}
       </section>
       {entry.type === 'character' && (
         <>
@@ -282,6 +316,7 @@ export function EntryView({
                 {ROLE_LABELS[role]}
               </label>
             ))}
+            {ghosts('role')}
           </fieldset>
           <section className="entry-field-group" aria-label="Voice">
             <h3>Voice</h3>
@@ -307,6 +342,7 @@ export function EntryView({
                   attributes={attributes(label, 'plain-text short')}
                 />
                 {hint && <p className="field-hint">{hint}</p>}
+                {key !== 'examples' && ghosts(`voice.${key}`)}
               </section>
             ))}
           </section>
@@ -333,6 +369,7 @@ export function EntryView({
                 }
                 attributes={attributes(label, 'plain-text short')}
               />
+              {ghosts(`senses.${key}`)}
             </section>
           ))}
         </section>
@@ -351,6 +388,7 @@ export function EntryView({
               {STATUS_LABELS[status]}
             </label>
           ))}
+          {ghosts('status')}
         </fieldset>
       )}
       <section className="plain-text-field private-notes">
@@ -374,5 +412,39 @@ export function EntryView({
         />
       </section>
     </main>
+  );
+}
+
+/**
+ * The values Proposals pending on a field would give it, each with a way to
+ * its card in the Conversation; they are not in the field until accepted.
+ */
+function Ghosts({
+  field,
+  pending,
+  onShow,
+}: {
+  field: ProposalField;
+  pending: PendingProposal[];
+  onShow(conversationId: string, proposalId: string): void;
+}) {
+  const on = pending.filter((p) => p.proposal.field === field);
+  if (on.length === 0) return null;
+  return (
+    <ul className="ghost-values" aria-label={`Proposed ${FIELD_LABELS[field]}`}>
+      {on.map(({ conversationId, proposal }) => (
+        <li key={proposal.id} className="ghost-value">
+          <span className="ghost-text">
+            {fieldText(field, proposal.proposed)}
+          </span>
+          <button
+            className="link-button"
+            onClick={() => onShow(conversationId, proposal.id)}
+          >
+            Show in Conversation
+          </button>
+        </li>
+      ))}
+    </ul>
   );
 }

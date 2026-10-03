@@ -138,6 +138,17 @@ const assistant: AssistantApi = {
     streamReply(onText, (askId) =>
       ipcRenderer.invoke(channel.retry, askId, conversationId),
     ),
+  acceptProposal: (conversationId, proposalId, options) =>
+    ipcRenderer.invoke(
+      channel.acceptProposal,
+      conversationId,
+      proposalId,
+      options,
+    ),
+  rejectProposal: (conversationId, proposalId) =>
+    ipcRenderer.invoke(channel.rejectProposal, conversationId, proposalId),
+  pendingProposals: (entryId) =>
+    ipcRenderer.invoke(channel.pendingProposals, entryId),
 };
 
 /** Makes the call `invoke` with an id, passing on the pieces of its reply. */

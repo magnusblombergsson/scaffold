@@ -1,3 +1,4 @@
+import type { ProposalView } from './proposal';
 import type { Usage } from './usage';
 
 // Conversations between the Author and the Assistant, as main tells the
@@ -31,7 +32,7 @@ export type Saw = { entries: string[]; units: SawUnit[]; messages: number };
  * when it was sent, which the Conversation isn't bound to. An Assistant turn
  * also says which `model` answered and what it used, when that is known, and
  * is `interrupted` when the call failed partway and the reply is cut short,
- * and says what the Assistant `saw`.
+ * and says what the Assistant `saw`, and the `proposals` it made in it.
  */
 export type ConversationMessage = {
   role: 'author' | 'assistant';
@@ -43,6 +44,7 @@ export type ConversationMessage = {
   usage?: Usage;
   interrupted?: true;
   saw?: Saw;
+  proposals?: ProposalView[];
 };
 
 /**

@@ -34,6 +34,7 @@ import {
 import type {
   Changed,
   Conflict,
+  AcceptOptions,
   ConflictVersion,
   Created,
   Dropped,
@@ -49,6 +50,17 @@ import {
   emptyFields,
   revertEntryType,
 } from '../../shared/entry';
+import {
+  FIELD_LABELS,
+  fieldOf,
+  isFieldValue,
+  sameValue,
+  withField,
+  type FieldValue,
+  type PendingProposal,
+  type Proposal,
+  type ProposalView,
+} from '../../shared/proposal';
 import { unitName } from '../../shared/unit-name';
 import type {
   Conversation,
@@ -57,7 +69,14 @@ import type {
   Mode,
 } from '../../shared/conversation';
 import type { Clock } from './clock';
-import { eventLine, headerLine, parseLog } from './conversation-log';
+import {
+  eventLine,
+  headerLine,
+  parseLog,
+  type ConversationEvent,
+  type LoggedConversation,
+  type LoggedProposal,
+} from './conversation-log';
 import { entryFieldsFrontmatter, readEntryFields } from './entry-fields-file';
 import type { FileSystem, Fingerprint } from './file-system';
 import { safeWrite, writeFailureReason } from './safe-write';
@@ -110,7 +129,10 @@ export class ProjectError extends Error {
       | 'not-latest'
       | 'unsaved'
       | 'newer-format'
-      | 'read-only',
+      | 'read-only'
+      | 'decided'
+      | 'orphaned'
+      | 'stale',
     message: string,
   ) {
     super(message);
@@ -2392,6 +2414,8 @@ export class ProjectStore {
     if (ref.kind === 'entry') {
       const entry = entrySummary({ ...(value as EntryValue), id: ref.id });
       this.setEntries(() => this.entries.set(ref.id, entry));
+      // Its Proposals may be stale, or applied, now.
+      this.emit({ type: 'proposalsChanged' });
     }
     // A failed unit stays failed until it is saved, and its next try waits
     // for the backoff, which picks up this value.
@@ -2427,8 +2451,14 @@ export class ProjectStore {
    * doesn't list them. A log whose header can't be read is logged and left out.
    */
   async listConversations(): Promise<ConversationSummary[]> {
+    return (await this.readLogs())
+      .map(({ id, mode, title, created }) => ({ id, mode, title, created }))
+      .sort((a, b) => b.created - a.created);
+  }
+
+  private async readLogs(): Promise<LoggedConversation[]> {
     const dir = path.join(this.path, CONVERSATIONS);
-    const summaries: ConversationSummary[] = [];
+    const logs: LoggedConversation[] = [];
     for (const name of await this.deps.fs.readdir(dir)) {
       if (!CONVERSATION_FILE.test(name)) continue;
       const conversation = parseLog(
@@ -2438,14 +2468,29 @@ export class ProjectStore {
         logOnce(this.unrecognised, `Can't read the Conversation log ${name}`);
         continue;
       }
-      const { messages: _, ...summary } = conversation;
-      summaries.push(summary);
+      logs.push(conversation);
     }
-    return summaries.sort((a, b) => b.created - a.created);
+    return logs;
   }
 
-  /** The Conversation a log holds: its header and the messages shown. */
+  /**
+   * The Conversation a log holds: its header and the messages shown, each
+   * reply with the Proposals made in it and where they stand now.
+   */
   async readConversation(id: string): Promise<Conversation> {
+    const { proposals, ...conversation } = await this.readLogged(id);
+    const messages = conversation.messages.map((m) => ({ ...m }));
+    for (const proposal of proposals) {
+      const message = messages[proposal.message];
+      message.proposals = [
+        ...(message.proposals ?? []),
+        await this.proposalView(proposal),
+      ];
+    }
+    return { ...conversation, messages };
+  }
+
+  private async readLogged(id: string): Promise<LoggedConversation> {
     const conversation = parseLog(await this.readLog(id));
     if (!conversation) {
       throw new ProjectError(
@@ -2461,25 +2506,206 @@ export class ProjectStore {
    * one at a time, in the order asked.
    */
   appendMessage(id: string, message: ConversationMessage): Promise<void> {
-    const appended = (this.appends.get(id) ?? Promise.resolve()).then(
-      async () => {
-        await this.passFormatGate();
-        const line = eventLine(await this.readLog(id), {
-          type: 'message',
-          ...message,
-        });
-        await this.deps.fs.appendFileDurable(
-          conversationPath(this.path, id),
-          line,
+    const { proposals: _, ...logged } = message;
+    return this.inLog(id, async () => {
+      await this.passFormatGate();
+      await this.appendEvent(id, { type: 'message', ...logged });
+    });
+  }
+
+  /** Appends a Proposal the Assistant made in the reply logged last. */
+  appendProposal(id: string, proposal: Proposal): Promise<void> {
+    const { id: proposalId, entryId, field, base, proposed } = proposal;
+    return this.inLog(id, async () => {
+      await this.passFormatGate();
+      await this.appendEvent(id, {
+        type: 'proposal.proposed',
+        id: proposalId,
+        target: { kind: 'entry', id: entryId },
+        fields: { [field]: { base, proposed } },
+        at: this.deps.clock.now(),
+      });
+      this.emit({ type: 'proposalsChanged' });
+    });
+  }
+
+  /**
+   * Accepts a pending Proposal, as proposed or as the Author `edited` it:
+   * writes the Entry first and waits until it is saved, then logs the accept
+   * with the value the field held and the one written. A stale Proposal is
+   * accepted only `anyway`, and then replaces what the field holds now.
+   * Refuses one already decided or found applied, one whose Entry is in
+   * Trash or has no such field now, and any once a newer app has upgraded
+   * the Project.
+   */
+  acceptProposal(
+    conversationId: string,
+    proposalId: string,
+    { edited, anyway = false }: AcceptOptions = {},
+  ): Promise<void> {
+    return this.inLog(conversationId, async () => {
+      await this.passFormatGate();
+      const { entryId, field, base, proposed } = await this.undecided(
+        conversationId,
+        proposalId,
+      );
+      const wrote = edited === undefined ? proposed : edited;
+      if (!isFieldValue(field, wrote)) {
+        throw new Error(`${FIELD_LABELS[field]} can't hold that value`);
+      }
+      if (!this.entries.has(entryId)) {
+        throw new ProjectError(
+          'orphaned',
+          this.inTrash(entryId)
+            ? 'Its Entry is in Trash'
+            : 'Its Entry is no longer in the Story Bible',
         );
-      },
+      }
+      let replaced: FieldValue | undefined;
+      const { after } = await this.changeEntry(entryId, (value) => {
+        replaced = fieldOf(value, field);
+        if (replaced === undefined) {
+          throw new ProjectError(
+            'orphaned',
+            `${value.name} has no ${FIELD_LABELS[field]} now`,
+          );
+        }
+        if (!anyway && !sameValue(replaced, base)) {
+          throw new ProjectError(
+            'stale',
+            `${FIELD_LABELS[field]} has changed since this was proposed`,
+          );
+        }
+        return withField(value, field, wrote);
+      });
+      const ref = entryRef(entryId);
+      if (this.unsaved.has(unitKey(ref))) {
+        throw new Error(
+          `${after.name} couldn't be saved yet; it is tried again`,
+        );
+      }
+      await this.appendEvent(conversationId, {
+        type: 'proposal.accepted',
+        id: proposalId,
+        fields: { [field]: { replaced: replaced!, wrote } },
+        at: this.deps.clock.now(),
+      });
+      this.emit({ type: 'unitReloaded', ref, value: after, byProposal: true });
+      this.emit({ type: 'proposalsChanged' });
+    });
+  }
+
+  /** Rejects a pending Proposal, stale or orphaned too; the Entry is left alone. */
+  rejectProposal(conversationId: string, proposalId: string): Promise<void> {
+    return this.inLog(conversationId, async () => {
+      await this.passFormatGate();
+      await this.undecided(conversationId, proposalId);
+      await this.appendEvent(conversationId, {
+        type: 'proposal.rejected',
+        id: proposalId,
+        at: this.deps.clock.now(),
+      });
+      this.emit({ type: 'proposalsChanged' });
+    });
+  }
+
+  /**
+   * The Proposals still pending on an Entry, in every Conversation, derived
+   * from the logs; one whose value the Entry already holds counts as applied.
+   */
+  async pendingProposals(entryId: string): Promise<PendingProposal[]> {
+    const pending: PendingProposal[] = [];
+    for (const log of await this.readLogs()) {
+      for (const logged of log.proposals) {
+        if (logged.entryId !== entryId) continue;
+        const proposal = await this.proposalView(logged);
+        if (proposal.state.kind === 'pending') {
+          pending.push({ conversationId: log.id, proposal });
+        }
+      }
+    }
+    return pending;
+  }
+
+  /**
+   * A Proposal still pending; refuses one not in the log, one the log says
+   * is decided, and one found already applied.
+   */
+  private async undecided(
+    conversationId: string,
+    proposalId: string,
+  ): Promise<LoggedProposal> {
+    const { proposals } = await this.readLogged(conversationId);
+    const proposal = proposals.find((p) => p.id === proposalId);
+    if (!proposal) throw new Error(`No Proposal ${proposalId}`);
+    const { state } = await this.proposalView(proposal);
+    if (state.kind !== 'pending') {
+      throw new ProjectError(
+        'decided',
+        `The Proposal was already ${state.kind}`,
+      );
+    }
+    return proposal;
+  }
+
+  /** Where a Proposal stands now, against its Entry as it is. */
+  private async proposalView(logged: LoggedProposal): Promise<ProposalView> {
+    const { message: _, decision, ...proposal } = logged;
+    const { entryId, field, proposed } = proposal;
+    const trashed = this.trash.get(entryId);
+    const summary = this.entries.get(entryId);
+    const entryName =
+      summary?.name ?? (trashed?.kind === 'entry' ? trashed.name : 'An Entry');
+    const view = (state: ProposalView['state']): ProposalView => ({
+      ...proposal,
+      entryName,
+      state,
+    });
+    if (decision.kind === 'rejected') return view(decision);
+    if (decision.kind === 'accepted') {
+      return view({
+        kind: 'accepted',
+        edited: !sameValue(decision.wrote, proposed),
+      });
+    }
+    if (!summary) {
+      return view({ kind: 'pending', orphaned: trashed ? 'trashed' : 'gone' });
+    }
+    const current = fieldOf(await this.read(entryRef(entryId)), field);
+    if (current === undefined) {
+      return view({ kind: 'pending', orphaned: 'field' });
+    }
+    // Written, but the accept never logged, as after a crash between the two.
+    if (sameValue(current, proposed)) {
+      return view({ kind: 'accepted', edited: false });
+    }
+    return view({
+      kind: 'pending',
+      current,
+      stale: !sameValue(current, proposal.base),
+    });
+  }
+
+  /** Runs `run` once what was asked of a Conversation's log before is done: one at a time. */
+  private inLog<T>(id: string, run: () => Promise<T>): Promise<T> {
+    const ran = (this.appends.get(id) ?? Promise.resolve()).then(run);
+    const settled = ran.then(
+      () => {},
+      () => {},
     );
-    const settled = appended.catch(() => {});
     this.appends.set(id, settled);
     void settled.then(() => {
       if (this.appends.get(id) === settled) this.appends.delete(id);
     });
-    return appended;
+    return ran;
+  }
+
+  private async appendEvent(
+    id: string,
+    event: ConversationEvent,
+  ): Promise<void> {
+    const line = eventLine(await this.readLog(id), event);
+    await this.deps.fs.appendFileDurable(conversationPath(this.path, id), line);
   }
 
   private async readLog(id: string): Promise<string> {

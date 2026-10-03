@@ -348,3 +348,118 @@ describe('retry', () => {
     expect(provider.requests).toHaveLength(1);
   });
 });
+
+describe('Proposals in a reply', () => {
+  /** A setUp whose replies propose changes to the Character Anna. */
+  async function withAnna(reply: (annaId: string, n: number) => FakeReply) {
+    let annaId = '';
+    const setup = await setUp((n) => reply(annaId, n));
+    ({ id: annaId } = await setup.store.createEntry('character', 'Anna'));
+    const anna = await setup.store.read({ kind: 'entry', id: annaId });
+    await setup.store.write(
+      { kind: 'entry', id: annaId },
+      { ...anna, description: 'Her sister.', visibility: 'always' },
+    );
+    return { ...setup, annaId };
+  }
+
+  const block = (json: object) =>
+    `\`\`\`proposal\n${JSON.stringify(json)}\n\`\`\``;
+
+  it('turns structured Proposals into proposal.proposed events, with per-field base and proposed values', async () => {
+    const { store, engine, annaId } = await withAnna((annaId) => [
+      'Then the Story Bible should say so.\n\n',
+      block({ entry: annaId, field: 'description', append: 'Older.' }),
+      '\n',
+      block({ entry: annaId, field: 'aliases', add: 'Nan' }),
+    ]);
+    const { id } = await store.startConversation('writing', 'Anna');
+
+    const result = await engine.askAssistant(
+      id,
+      'She is older.',
+      { sceneId: null },
+      () => {},
+    );
+
+    expect(result.reply?.text).toBe('Then the Story Bible should say so.');
+    const [, replied] = (await store.readConversation(id)).messages;
+    expect(replied.text).toBe('Then the Story Bible should say so.');
+    expect(replied.proposals).toEqual([
+      expect.objectContaining({
+        entryId: annaId,
+        entryName: 'Anna',
+        field: 'description',
+        base: 'Her sister.',
+        proposed: 'Her sister.\nOlder.',
+        state: { kind: 'pending', current: 'Her sister.', stale: false },
+      }),
+      expect.objectContaining({
+        field: 'aliases',
+        base: [],
+        proposed: ['Nan'],
+      }),
+    ]);
+  });
+
+  it('never proposes Prose, Notes, private notes or Voice example lines, nor for an Entry not in the Story Bible', async () => {
+    const { store, engine, annaId, sceneId } = await withAnna((annaId) => [
+      block({ entry: annaId, field: 'voice.examples', add: 'Go home.' }),
+      block({ entry: annaId, field: 'private', value: 'A secret.' }),
+      block({ entry: sceneId, field: 'markdown', value: 'Anna ran.' }),
+      block({ entry: 'nobody', field: 'description', value: 'Who?' }),
+      'Noted.',
+    ]);
+    const { id } = await store.startConversation('writing', 'Anna');
+
+    await engine.askAssistant(id, 'Hm', { sceneId }, () => {});
+
+    const [, replied] = (await store.readConversation(id)).messages;
+    expect(replied.text).toBe('Noted.');
+    expect(replied.proposals).toBeUndefined();
+    expect(
+      (await store.read({ kind: 'entry', id: annaId })).fields.voice?.examples,
+    ).toEqual([]);
+  });
+
+  it('sends Proposals back with the reply they were made in, and how the Author decided', async () => {
+    const { store, engine, provider, annaId } = await withAnna((annaId, n) =>
+      n === 0
+        ? [
+            'Noted.\n',
+            block({ entry: annaId, field: 'role', value: 'supporting' }),
+          ]
+        : ['Fine.'],
+    );
+    const { id } = await store.startConversation('writing', 'Anna');
+    await engine.askAssistant(
+      id,
+      'Anna is minor.',
+      { sceneId: null },
+      () => {},
+    );
+    const [, replied] = (await store.readConversation(id)).messages;
+    await store.rejectProposal(id, replied.proposals![0].id);
+
+    await engine.askAssistant(id, 'Next?', { sceneId: null }, () => {});
+
+    const sent = provider.requests[1].messages[1].content;
+    expect(sent).toContain('Noted.');
+    expect(sent).toContain(
+      block({ entry: annaId, field: 'role', value: 'supporting' }),
+    );
+    expect(sent).toContain('The Author rejected this Proposal.');
+  });
+
+  it('tells the Assistant how to propose a change, and which Entry is which', async () => {
+    const { store, engine, provider, annaId } = await withAnna(() => ['Hm.']);
+    const { id } = await store.startConversation('interview', 'Anna');
+
+    await engine.askAssistant(id, 'Anna', { sceneId: null }, () => {});
+
+    const [prompt, bible] = provider.requests[0].system;
+    expect(prompt.text).toMatch(/```proposal/);
+    expect(prompt.text).toMatch(/never .*example lines/i);
+    expect(bible.text).toContain(`Id: ${annaId}`);
+  });
+});

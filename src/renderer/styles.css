@@ -1072,3 +1072,125 @@ p.message-used,
 .composer button {
   align-self: flex-end;
 }
+
+.proposal-card {
+  margin: 0.5rem 0 0;
+  padding: 0.5rem 0.6rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  white-space: normal;
+}
+
+.proposal-card.warning {
+  border-color: rgb(176 120 0 / 50%);
+  background: rgb(176 120 0 / 10%);
+}
+
+.proposal-card.highlighted {
+  outline: 2px solid rgb(64 120 200 / 60%);
+}
+
+.proposal-card.decided {
+  padding: 0.25rem 0.6rem;
+  color: var(--muted);
+}
+
+.proposal-title {
+  font-size: 0.85em;
+  font-weight: 600;
+}
+
+.proposal-decided {
+  margin: 0;
+  font-size: 0.9em;
+}
+
+.proposal-diff,
+.proposal-values dd {
+  margin: 0.3rem 0 0;
+  white-space: pre-wrap;
+}
+
+.proposal-card del {
+  color: var(--muted);
+}
+
+.proposal-card ins {
+  text-decoration: none;
+  background: rgb(60 160 80 / 22%);
+  border-radius: 2px;
+}
+
+.proposal-warning {
+  margin: 0.3rem 0 0;
+  font-size: 0.85em;
+}
+
+.proposal-values {
+  margin: 0.3rem 0 0;
+}
+
+.proposal-values dt {
+  margin-top: 0.3rem;
+  font-size: 0.8em;
+  color: var(--muted);
+}
+
+.proposal-values dd {
+  margin-left: 0;
+}
+
+.proposal-edit {
+  width: 100%;
+  box-sizing: border-box;
+  margin-top: 0.4rem;
+  resize: vertical;
+  font: inherit;
+}
+
+.proposal-error {
+  margin: 0.3rem 0 0;
+  color: #b3261e;
+  font-size: 0.85em;
+}
+
+.proposal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+}
+
+.ghost-values {
+  list-style: none;
+  margin: 0.3rem 0 0;
+  padding: 0;
+}
+
+.ghost-value {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.25rem 0.5rem;
+  border: 1px dashed var(--line);
+  border-radius: 6px;
+  color: var(--muted);
+}
+
+.ghost-text {
+  flex: 1;
+  font-style: italic;
+  white-space: pre-wrap;
+}
+
+.link-button {
+  border: none;
+  background: none;
+  padding: 0;
+  color: inherit;
+  font: inherit;
+  font-size: 0.85em;
+  text-decoration: underline;
+  cursor: pointer;
+}

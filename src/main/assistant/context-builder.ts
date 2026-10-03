@@ -5,6 +5,7 @@ import type {
   SawUnit,
 } from '../../shared/conversation';
 import { mentionMatcher } from '../../shared/mentions';
+import { proposalBlock, type ProposalView } from '../../shared/proposal';
 import {
   ENTRY_TYPE_LABELS,
   PROJECT_OUTLINE,
@@ -90,7 +91,9 @@ export async function buildContext(
   if (focus.length > 0) system.push({ text: focusBlock(focus) });
   const messages: PromptMessage[] = sent.map((m) => ({
     role: m.role === 'author' ? 'user' : 'assistant',
-    content: m.text,
+    content: [m.text, ...(m.proposals ?? []).map(proposalText)]
+      .filter(Boolean)
+      .join('\n\n'),
   }));
   // The second breakpoint: all before the new message, which the next turn
   // sends again unchanged as long as the Prose in focus is.
@@ -145,8 +148,28 @@ async function storyBible(
   };
 }
 
+/**
+ * A Proposal as the reply it was made in sent it, and what the Author made
+ * of it; undecided ones are always sent in full.
+ */
+function proposalText(proposal: ProposalView): string {
+  const { state } = proposal;
+  const decided =
+    state.kind === 'pending'
+      ? "The Author hasn't decided on this Proposal yet."
+      : state.kind === 'rejected'
+        ? 'The Author rejected this Proposal.'
+        : state.edited
+          ? 'The Author edited this Proposal, then accepted it.'
+          : 'The Author accepted this Proposal.';
+  return `${proposalBlock(proposal)}\n(${decided})`;
+}
+
 function entryText(entry: EntryValue): string {
-  const lines = [`## ${entry.name} (${ENTRY_TYPE_LABELS[entry.type]})`];
+  const lines = [
+    `## ${entry.name} (${ENTRY_TYPE_LABELS[entry.type]})`,
+    `Id: ${entry.id}`,
+  ];
   if (entry.aliases.length > 0) {
     lines.push(`Also called: ${entry.aliases.join(', ')}`);
   }

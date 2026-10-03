@@ -5,7 +5,7 @@ import {
   type IpcMainInvokeEvent,
   type WebContents,
 } from 'electron';
-import { channel, type ProjectApi } from '../shared/api';
+import { channel, type AcceptOptions, type ProjectApi } from '../shared/api';
 import type { Mode } from '../shared/conversation';
 import { createConversationEngine } from './assistant/conversation-engine';
 import { claudeProvider } from './assistant/claude-provider';
@@ -130,6 +130,28 @@ export function registerAssistantIpc(): void {
         { sceneId },
         replyTo(event.sender, askId),
       ),
+  );
+  ipcMain.handle(
+    channel.acceptProposal,
+    (
+      event,
+      conversationId: string,
+      proposalId: string,
+      options: AcceptOptions | undefined,
+    ) =>
+      storeOfWindow(event.sender).acceptProposal(
+        conversationId,
+        proposalId,
+        options,
+      ),
+  );
+  ipcMain.handle(
+    channel.rejectProposal,
+    (event, conversationId: string, proposalId: string) =>
+      storeOfWindow(event.sender).rejectProposal(conversationId, proposalId),
+  );
+  ipcMain.handle(channel.pendingProposals, (event, entryId: string) =>
+    storeOfWindow(event.sender).pendingProposals(entryId),
   );
   ipcMain.handle(
     channel.retry,

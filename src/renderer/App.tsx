@@ -27,7 +27,7 @@ import {
 } from '../shared/project-types';
 import { upgradedMessage } from '../shared/format-gate';
 import { capitalized, unitName } from '../shared/unit-name';
-import { AssistantPanel } from './AssistantPanel';
+import { AssistantPanel, type ShowProposal } from './AssistantPanel';
 import { Binder, type Selection } from './Binder';
 import { ConflictList, ConflictResolver } from './Conflicts';
 import { EntryView, VISIBILITY_LABELS } from './EntryView';
@@ -272,6 +272,9 @@ function ProjectView({
   const [reloaded, setReloaded] = useState<{ ref: UnitRef; count: number }>();
   const reloads = useRef(0);
   const closeReloaded = useCallback(() => setReloaded(undefined), []);
+  /** The Proposal the Author asked to see in its Conversation, from an Entry. */
+  const [showProposal, setShowProposal] = useState<ShowProposal | null>(null);
+  const shows = useRef(0);
   useEffect(
     () =>
       window.project.subscribe((event) => {
@@ -282,7 +285,7 @@ function ProjectView({
           // Main can no longer undo it.
           setLatest(undefined);
           void refreshTrash();
-        } else if (event.type === 'unitReloaded') {
+        } else if (event.type === 'unitReloaded' && !event.byProposal) {
           setReloaded({ ref: event.ref, count: ++reloads.current });
         } else if (event.type === 'conflictsChanged') {
           setConflicts(event.conflicts);
@@ -538,6 +541,13 @@ function ProjectView({
                     `Visibility set to ${VISIBILITY_LABELS[visibility]}`,
                   )
                 }
+                onShowProposal={(conversationId, proposalId) =>
+                  setShowProposal({
+                    conversationId,
+                    proposalId,
+                    count: ++shows.current,
+                  })
+                }
               />
             ) : (
               <div className="editor empty">No Entry open</div>
@@ -593,6 +603,7 @@ function ProjectView({
             onAddKey={onAddKey}
             sceneId={open && !open.scene.missing ? open.scene.id : null}
             names={{ manuscript, entries }}
+            show={showProposal}
           />
         </div>
         {peek && (
