@@ -1,19 +1,16 @@
-import { expect, test, type ElectronApplication } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import { existsSync } from 'node:fs';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { answerDialogs, answerQuestions, launch, useTempDir } from './app';
+import {
+  answerDialogs,
+  answerQuestions,
+  chooseExport,
+  launch,
+  useTempDir,
+} from './app';
 
 const tempDir = useTempDir();
-
-/** Chooses File → Export… in the menu, as the Author would in the first window. */
-async function chooseExport(app: ElectronApplication) {
-  await app.evaluate(({ BrowserWindow, Menu }) => {
-    const item = Menu.getApplicationMenu()?.getMenuItemById('export');
-    if (!item?.enabled) throw new Error('File → Export… is disabled');
-    item.click(undefined, BrowserWindow.getAllWindows()[0]);
-  });
-}
 
 test('File → Export… writes the Manuscript, with edits not yet saved, to the file chosen', async () => {
   const projectPath = path.join(tempDir(), 'My Novel');

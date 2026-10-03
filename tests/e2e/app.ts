@@ -109,3 +109,12 @@ export async function answerQuestions(
   return () =>
     app.evaluate(() => (globalThis as { asked?: string[] }).asked ?? []);
 }
+
+/** Chooses File → Export… in the menu, as the Author would in the first window. */
+export async function chooseExport(app: ElectronApplication) {
+  await app.evaluate(({ BrowserWindow, Menu }) => {
+    const item = Menu.getApplicationMenu()?.getMenuItemById('export');
+    if (!item?.enabled) throw new Error('File → Export… is disabled');
+    item.click(undefined, BrowserWindow.getAllWindows()[0]);
+  });
+}
