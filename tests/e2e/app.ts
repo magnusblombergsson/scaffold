@@ -17,7 +17,7 @@ export function useTempDir(): () => string {
     dir = await mkdtemp(path.join(tmpdir(), 'writing-tools-e2e-'));
   });
   test.afterEach(async () => {
-    await rm(dir, { recursive: true, force: true });
+    await rm(dir, { recursive: true, force: true, maxRetries: 5 });
   });
   return () => dir;
 }
@@ -117,4 +117,18 @@ export async function chooseExport(app: ElectronApplication) {
     if (!item?.enabled) throw new Error('File → Export… is disabled');
     item.click(undefined, BrowserWindow.getAllWindows()[0]);
   });
+}
+
+/** Chooses File → Prose Language → `label` in the menu, as the Author would in the first window. */
+export async function chooseProseLanguage(
+  app: ElectronApplication,
+  label: 'English' | 'Swedish',
+) {
+  await app.evaluate(({ BrowserWindow, Menu }, label) => {
+    const menu = Menu.getApplicationMenu()?.getMenuItemById('language');
+    if (!menu?.enabled) throw new Error('File → Prose Language is disabled');
+    const item = menu.submenu?.items.find((i) => i.label === label);
+    if (!item) throw new Error(`No Prose Language ${label}`);
+    item.click(undefined, BrowserWindow.getAllWindows()[0]);
+  }, label);
 }

@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
-import { readdir, readFile, writeFile } from 'node:fs/promises';
+import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { answerDialogs, launch, useTempDir } from './app';
+import { answerDialogs, chooseProseLanguage, launch, useTempDir } from './app';
 
 const tempDir = useTempDir();
 
@@ -62,28 +62,43 @@ test('italic, bold, typographic quotes and pasted Prose survive a restart', asyn
   await second.close();
 });
 
-test('a Swedish Project is spellchecked and typeset in Swedish', async () => {
+test('a Project made Swedish is spellchecked and typeset in Swedish, after a restart too', async () => {
   const projectPath = path.join(tempDir(), 'Min roman');
 
   const first = await launch(tempDir());
   await answerDialogs(first, projectPath);
   const page = await first.firstWindow();
   await page.getByRole('button', { name: 'New Project…' }).click();
-  await expect(page.getByLabel('Prose')).toBeFocused();
+  const prose = page.getByLabel('Prose');
+  await expect(prose).toBeFocused();
+  await page.keyboard.type(`"Late," she said.`);
+  await expect(prose).toHaveAttribute('lang', 'en-US');
+
+  await chooseProseLanguage(first, 'Swedish');
+
+  // The Scene's editor is made anew in Swedish, where the cursor was.
+  const swedish = page.getByLabel('Prose');
+  await expect(swedish).toHaveAttribute('lang', 'sv-SE');
+  await expect(swedish).toBeFocused();
+  await page.keyboard.press('Enter');
+  await page.keyboard.type(`"Det är sent," sa hon -- 'för sent.'`);
+  const typed = ['“Late,” she said.', '”Det är sent,” sa hon – ’för sent.’'];
+  await expect(swedish.locator('p')).toHaveText(typed);
+  await expect
+    .poll(async () => {
+      const manifestPath = path.join(projectPath, 'project.json');
+      return JSON.parse(await readFile(manifestPath, 'utf8')).language;
+    })
+    .toBe('sv-SE');
   await first.close();
 
-  const manifestPath = path.join(projectPath, 'project.json');
-  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
-  await writeFile(
-    manifestPath,
-    JSON.stringify({ ...manifest, language: 'sv-SE' }, null, 2),
-  );
-
   const second = await launch(tempDir());
-  const reopened = await second.firstWindow();
-  const prose = reopened.getByLabel('Prose');
-  await expect(prose).toBeFocused();
-
+  const reopened = await second
+    .firstWindow()
+    .then((p) => p.getByLabel('Prose'));
+  await expect(reopened).toBeFocused();
+  await expect(reopened).toHaveAttribute('lang', 'sv-SE');
+  await expect(reopened.locator('p')).toHaveText(typed);
   if (process.platform !== 'darwin') {
     expect(
       await second.evaluate(({ session }) =>
@@ -92,9 +107,5 @@ test('a Swedish Project is spellchecked and typeset in Swedish', async () => {
       // Chromium keeps its Swedish dictionary as plain `sv`.
     ).toEqual([expect.stringMatching(/^sv\b/)]);
   }
-  await reopened.keyboard.type(`"Det är sent," sa hon -- 'för sent.'`);
-  await expect(prose.locator('p')).toHaveText([
-    '”Det är sent,” sa hon – ’för sent.’',
-  ]);
   await second.close();
 });

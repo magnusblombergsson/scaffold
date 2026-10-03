@@ -58,7 +58,7 @@ beforeEach(async () => {
   dir = await mkdtemp(path.join(tmpdir(), 'writing-tools-'));
 });
 afterEach(async () => {
-  await rm(dir, { recursive: true, force: true });
+  await rm(dir, { recursive: true, force: true, maxRetries: 5 });
 });
 
 describe('ProjectStore', () => {
@@ -272,6 +272,33 @@ describe('ProjectStore', () => {
       JSON.stringify({ ...manifest, language: 'de-DE' }),
     );
     expect((await openProject(projectPath, deps())).language).toBe('en-US');
+  });
+
+  it('changes the language of the Prose, keeping the rest of project.json, and says so', async () => {
+    const projectPath = path.join(dir, 'Min roman');
+    const store = await createProject(projectPath, deps());
+    const tree = store.tree();
+    const events: unknown[] = [];
+    store.subscribe((event) => events.push(event));
+
+    await store.setLanguage('sv-SE');
+
+    expect(store.language).toBe('sv-SE');
+    expect(events).toEqual([{ type: 'languageChanged', language: 'sv-SE' }]);
+    await store.close();
+    const reopened = await openProject(projectPath, deps());
+    expect(reopened.language).toBe('sv-SE');
+    expect(reopened.tree()).toEqual(tree);
+  });
+
+  it('says nothing when the language is set to the one it has', async () => {
+    const store = await createProject(path.join(dir, 'My Novel'), deps());
+    const events: unknown[] = [];
+    store.subscribe((event) => events.push(event));
+
+    await store.setLanguage('en-US');
+
+    expect(events).toEqual([]);
   });
 
   it('takes a new id when a copied folder becomes a separate Project, keeping the rest', async () => {

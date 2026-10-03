@@ -21,7 +21,7 @@ beforeEach(async () => {
 afterEach(async () => {
   // Watchers hold the folder open.
   for (const store of opened.splice(0)) await store.close().catch(() => {});
-  await rm(dir, { recursive: true, force: true });
+  await rm(dir, { recursive: true, force: true, maxRetries: 5 });
 });
 
 const MIN = 60_000;
@@ -199,6 +199,19 @@ describe('project.json changed on another computer', () => {
       id,
       title: 'Arrival',
     });
+  });
+
+  it('takes the language of the Prose set there, and says only that', async () => {
+    await newProject();
+    const here = await open('BETA');
+    const there = await open('ALPHA');
+    const events = eventsOf(here);
+
+    await there.setLanguage('sv-SE');
+    await here.checkForChanges();
+
+    expect(here.language).toBe('sv-SE');
+    expect(events).toEqual([{ type: 'languageChanged', language: 'sv-SE' }]);
   });
 
   it('shows a Scene that arrives before the tree as Unplaced, then placed', async () => {

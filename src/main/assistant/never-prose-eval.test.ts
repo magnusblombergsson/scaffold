@@ -17,7 +17,7 @@ beforeEach(async () => {
   dir = await mkdtemp(path.join(tmpdir(), 'writing-tools-'));
 });
 afterEach(async () => {
-  await rm(dir, { recursive: true, force: true });
+  await rm(dir, { recursive: true, force: true, maxRetries: 5 });
 });
 
 const cases: EvalCase[] = [

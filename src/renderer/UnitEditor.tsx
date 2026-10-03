@@ -23,6 +23,11 @@ type Props = {
    */
   field?: { unitKey: string; text(value: UnitValue): string };
   extensions: Extensions;
+  /**
+   * What the extensions are made with, such as the Prose's language: an
+   * editor kept from earlier and made otherwise is made anew.
+   */
+  madeWith?: string;
   toDoc(text: string): JSONContent;
   toText(doc: JSONContent): string;
   /** Pushes the text to main; autosave calls it after the debounce. */
@@ -53,6 +58,7 @@ export function UnitEditor({
   text,
   field,
   extensions,
+  madeWith,
   toDoc,
   toText,
   save,
@@ -77,6 +83,7 @@ export function UnitEditor({
         });
       },
       (editor) => toText(editor.getJSON()),
+      madeWith,
     );
     return { editor, created };
   });
@@ -87,6 +94,17 @@ export function UnitEditor({
     // Without an update event: there is nothing new to save.
     editor.setEditable(!readOnly, false);
   }, [editor, readOnly]);
+
+  // A kept editor takes the attributes as they are now, such as a new `lang`.
+  const attributesNow = JSON.stringify(attributes);
+  useEffect(() => {
+    editor.setOptions({
+      editorProps: {
+        ...editor.options.editorProps,
+        attributes: JSON.parse(attributesNow),
+      },
+    });
+  }, [editor, attributesNow]);
 
   useEffect(() => {
     const change = () => autosave.change(toText(editor.getJSON()));

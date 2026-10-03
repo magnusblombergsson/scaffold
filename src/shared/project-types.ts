@@ -236,6 +236,12 @@ export type TrashItem =
 /** The languages Prose is spellchecked and typeset in. */
 export type ProseLanguage = 'sv-SE' | 'en-US';
 
+/** The languages the Author can choose for the Prose, in the order offered. */
+export const PROSE_LANGUAGES: { language: ProseLanguage; label: string }[] = [
+  { language: 'en-US', label: 'English' },
+  { language: 'sv-SE', label: 'Swedish' },
+];
+
 /** Reads a Project's `language`: Swedish when it says so, else English. */
 export function proseLanguage(language: string): ProseLanguage {
   return /^sv\b/i.test(language) ? 'sv-SE' : 'en-US';

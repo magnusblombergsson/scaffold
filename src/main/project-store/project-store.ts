@@ -1219,12 +1219,19 @@ export class ProjectStore {
     const units = await scanUnits(this.path, manifest.tree, this.deps.fs, {
       repair: false,
     });
-    const before = JSON.stringify([
-      this.manifest,
-      this.manuscript(),
-      this.listTrash(),
-    ]);
+    // The language has its own event; it isn't a change of structure.
+    const structure = () =>
+      JSON.stringify([
+        { ...this.manifest, language: null },
+        this.manuscript(),
+        this.listTrash(),
+      ]);
+    const before = structure();
+    const language = this.language;
     this.manifest = manifest;
+    if (this.language !== language) {
+      this.emit({ type: 'languageChanged', language: this.language });
+    }
     replaceAll(this.files, units.files);
     this.trash.clear();
     for (const [id, item] of units.trash) this.trash.set(id, item);
@@ -1239,11 +1246,7 @@ export class ProjectStore {
       for (const [id, entry] of units.entries) this.entries.set(id, entry);
     });
     const manuscript = this.manuscript();
-    if (
-      JSON.stringify([this.manifest, manuscript, this.listTrash()]) ===
-        before &&
-      dropped.length === 0
-    ) {
+    if (structure() === before && dropped.length === 0) {
       return;
     }
     // Its undo was made for a tree that is gone.
@@ -1515,6 +1518,15 @@ export class ProjectStore {
   /** The language the Prose is spellchecked and typeset in. */
   get language(): ProseLanguage {
     return proseLanguage(this.manifest.language);
+  }
+
+  /** Spellchecks and typesets the Prose in `language` from now on. */
+  setLanguage(language: ProseLanguage): Promise<void> {
+    return this.enqueueWrite(async () => {
+      if (this.language === language) return;
+      await this.writeManifest({ ...this.manifest, language });
+      this.emit({ type: 'languageChanged', language });
+    });
   }
 
   tree(): ProjectTree {

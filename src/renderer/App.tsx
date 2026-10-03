@@ -362,6 +362,8 @@ function ProjectView({
   const [dropped, setDropped] = useState<Dropped[]>(project.dropped);
   /** Set once a newer app has upgraded the Project, after which nothing is saved. */
   const [readOnly, setReadOnly] = useState(project.readOnly);
+  /** The language the Prose is spellchecked and typeset in; the Author may change it. */
+  const [language, setLanguage] = useState(project.language);
 
   /** The latest unit another computer changed; `count` starts its toast's time over. */
   const [reloaded, setReloaded] = useState<{ ref: UnitRef; count: number }>();
@@ -391,6 +393,10 @@ function ProjectView({
           setEntries(event.entries);
           // An Entry may have gone to Trash, or come out, as by a Proposal's undo.
           void refreshTrash();
+        } else if (event.type === 'languageChanged') {
+          // Prose editors are made anew in it; their edits reach main first.
+          flushPendingEdits();
+          setLanguage(event.language);
         } else if (event.type === 'readOnly') {
           // Main still takes edits for a moment: these are the last.
           flushPendingEdits();
@@ -652,7 +658,7 @@ function ProjectView({
                   <h2 className="centre-title">Project Outline</h2>
                   <OutlineNotes
                     unitId={PROJECT_OUTLINE}
-                    language={project.language}
+                    language={language}
                     withNotes={false}
                   />
                 </main>
@@ -663,7 +669,7 @@ function ProjectView({
                     key={`${openEntry.id}:${openEntry.type}`}
                     entry={openEntry}
                     entries={entries}
-                    language={project.language}
+                    language={language}
                     onType={(type) =>
                       change(
                         () => window.project.setEntryType(openEntry.id, type),
@@ -696,7 +702,7 @@ function ProjectView({
                   <h2 className="centre-title">{openChapter.title}</h2>
                   <OutlineNotes
                     unitId={openChapter.id}
-                    language={project.language}
+                    language={language}
                     withNotes
                   />
                 </main>
@@ -728,14 +734,16 @@ function ProjectView({
                     {outlineNotesOpen && (
                       <OutlineNotes
                         unitId={open.scene.id}
-                        language={project.language}
+                        language={language}
                         withNotes
                       />
                     )}
                   </section>
                   <SceneEditor
+                    // Its editor's typography is made for one language.
+                    key={language}
                     sceneId={open.scene.id}
-                    language={project.language}
+                    language={language}
                     focusAt={
                       jump?.sceneId === open.scene.id ? jump.cursor : undefined
                     }

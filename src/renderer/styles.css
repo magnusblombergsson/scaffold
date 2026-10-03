@@ -1226,6 +1226,32 @@ button.finding-quote:hover {
   align-self: flex-end;
 }
 
+.at-mention-options {
+  margin: 0;
+  padding: 0.25rem 0;
+  list-style: none;
+  max-height: 12rem;
+  overflow-y: auto;
+  background: var(--bg);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 4px 12px rgb(0 0 0 / 15%);
+}
+
+.at-mention-options [role='option'] {
+  padding: 0.25rem 0.6rem;
+  cursor: pointer;
+}
+
+.at-mention-options [aria-selected='true'] {
+  background: color-mix(in srgb, var(--fg) 10%, transparent);
+}
+
+.at-mention-where {
+  color: var(--muted);
+  font-size: 0.85em;
+}
+
 .proposal-card {
   margin: 0.5rem 0 0;
   padding: 0.5rem 0.6rem;

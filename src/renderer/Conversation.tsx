@@ -2,6 +2,8 @@ import {
   Fragment,
   useContext,
   useEffect,
+  useId,
+  useLayoutEffect,
   useRef,
   useState,
   type KeyboardEvent,
@@ -28,6 +30,12 @@ import type {
   ManuscriptScene,
 } from '../shared/project-types';
 import type { Changed } from '../shared/api';
+import {
+  atMentionAt,
+  atMentionOptions,
+  completeAtMention,
+  type AtMention,
+} from './at-mention';
 import type { MenuItem } from './Binder';
 import { replyText } from '../shared/proposal';
 import { describeTotal, describeUsage } from '../shared/usage';
@@ -496,21 +504,96 @@ function FocusChanges({
     ));
 }
 
-/** Where the Author writes the next message; Enter sends it. */
+/**
+ * Where the Author writes the next message; Enter sends it. Given the
+ * Manuscript, typing @ offers its Chapters and Scenes by title, to bring
+ * one into the question.
+ */
 export function Composer({
   conversation: { draft, setDraft, streaming, send },
   placeholder,
+  manuscript,
 }: {
   conversation: ConversationState;
   placeholder: string;
+  manuscript?: Manuscript;
 }) {
   const readOnly = useContext(ReadOnlyContext);
+  const textarea = useRef<HTMLTextAreaElement>(null);
+  const listId = useId();
+  const [mention, setMention] = useState<AtMention | null>(null);
+  /** The @ the list is closed for, by where it is: dismissed, or completed. */
+  const [dismissed, setDismissed] = useState<number | null>(null);
+  const [active, setActive] = useState(0);
+  /** Where the cursor goes once the draft holds a completed mention. */
+  const cursor = useRef<number | null>(null);
+
+  const options =
+    manuscript && mention && mention.from !== dismissed
+      ? atMentionOptions(mention.query, manuscript)
+      : [];
+  const listed = options.length > 0;
+  /** The option Enter picks; the list may have shrunk under it. */
+  const current = Math.min(active, options.length - 1);
+
+  useLayoutEffect(() => {
+    const at = cursor.current;
+    if (at === null || !textarea.current) return;
+    cursor.current = null;
+    textarea.current.setSelectionRange(at, at);
+  }, [draft]);
+
+  /** Follows the cursor into and out of an @-mention. */
+  function track(element: HTMLTextAreaElement) {
+    const { selectionStart, selectionEnd, value } = element;
+    const next =
+      selectionStart === selectionEnd
+        ? atMentionAt(value, selectionStart)
+        : null;
+    if (next?.from !== mention?.from) {
+      setActive(0);
+      setDismissed(null);
+    }
+    setMention(next);
+  }
+
+  function choose(title: string) {
+    if (!mention) return;
+    const completed = completeAtMention(draft, mention, title);
+    cursor.current = completed.cursor;
+    setDraft(completed.text);
+    // Enter now sends, even should a longer title start the same way.
+    setDismissed(mention.from);
+    textarea.current?.focus();
+  }
+
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    // Enter while an input method composes a word is the method's.
+    if (event.nativeEvent.isComposing) return;
+    if (listed) {
+      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        const step = event.key === 'ArrowDown' ? 1 : -1;
+        setActive((current + step + options.length) % options.length);
+        return;
+      }
+      if ((event.key === 'Enter' && !event.shiftKey) || event.key === 'Tab') {
+        event.preventDefault();
+        choose(options[current].title);
+        return;
+      }
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setDismissed(mention?.from ?? null);
+        return;
+      }
+    }
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
       void send();
     }
   }
+  const optionId = (index: number) => `${listId}-${index}`;
   return (
     <form
       className="composer"
@@ -520,14 +603,48 @@ export function Composer({
       }}
     >
       <textarea
+        ref={textarea}
         aria-label="Message"
+        aria-autocomplete={manuscript ? 'list' : undefined}
+        aria-controls={listed ? listId : undefined}
+        aria-activedescendant={listed ? optionId(current) : undefined}
         placeholder={placeholder}
         value={draft}
-        onChange={(event) => setDraft(event.target.value)}
+        onChange={(event) => {
+          setDraft(event.target.value);
+          track(event.target);
+        }}
+        onSelect={(event) => track(event.currentTarget)}
+        onBlur={() => setMention(null)}
         onKeyDown={onKeyDown}
         disabled={readOnly}
         rows={3}
       />
+      {listed && (
+        <ul
+          id={listId}
+          className="at-mention-options"
+          role="listbox"
+          aria-label="Chapters and Scenes"
+        >
+          {options.map((option, i) => (
+            <li
+              key={option.id}
+              id={optionId(i)}
+              role="option"
+              aria-selected={i === current}
+              // The textarea keeps the focus, and with it the cursor.
+              onMouseDown={(event) => {
+                event.preventDefault();
+                choose(option.title);
+              }}
+            >
+              <span className="at-mention-title">{option.title}</span>{' '}
+              <span className="at-mention-where">{option.where}</span>
+            </li>
+          ))}
+        </ul>
+      )}
       <button
         type="submit"
         disabled={readOnly || streaming !== null || draft.trim() === ''}

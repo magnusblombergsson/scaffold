@@ -53,6 +53,7 @@ export function SceneEditor({
       unitKey={`scene:${sceneId}`}
       text={markdown}
       extensions={[...proseExtensions(language), MentionHighlight]}
+      madeWith={language}
       toDoc={markdownToDoc}
       toText={docToMarkdown}
       save={(markdown) =>

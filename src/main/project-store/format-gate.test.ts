@@ -27,7 +27,7 @@ beforeEach(async () => {
 });
 afterEach(async () => {
   for (const store of opened.splice(0)) await store.close().catch(() => {});
-  await rm(dir, { recursive: true, force: true });
+  await rm(dir, { recursive: true, force: true, maxRetries: 5 });
 });
 
 async function open(

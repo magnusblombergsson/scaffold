@@ -298,3 +298,53 @@ test('the Author asks for a Review of the Chapter, sees its Findings in order, a
   ]);
   await app.close();
 });
+
+test('the Author picks another Scene for a question by typing @, and its Prose is sent', async () => {
+  const projectPath = path.join(tempDir(), 'My Novel');
+  anthropic.calls.push({ reply: ['Is the letter from her sister?'] });
+  const app = await launch(tempDir(), { anthropicUrl: anthropic.url });
+  await answerDialogs(app, projectPath);
+  const page = await app.firstWindow();
+  await page.getByRole('button', { name: 'New Project…' }).click();
+  await page
+    .getByLabel('Prose')
+    .pressSequentially('The letter came on Tuesday.');
+  await page
+    .getByRole('button', { name: 'Chapter actions: Chapter 1' })
+    .click();
+  await page.getByRole('menuitem', { name: 'New Scene', exact: true }).click();
+  await expect(page.getByLabel('Prose')).toBeFocused();
+  await page.keyboard.type('Anna burned it unread.');
+  const assistant = await addKey(page);
+
+  const message = assistant.getByRole('textbox', { name: 'Message' });
+  await message.pressSequentially('Does this follow from @sc');
+  const options = assistant.getByRole('listbox', {
+    name: 'Chapters and Scenes',
+  });
+  await expect(options.getByRole('option')).toHaveText([
+    'Scene 1 Chapter 1',
+    'Scene 2 Chapter 1',
+  ]);
+  // Enter picks the option, rather than sending.
+  await message.press('Enter');
+  await expect(message).toHaveValue('Does this follow from @Scene 1 ');
+  await expect(options).toBeHidden();
+  await message.pressSequentially('?');
+  await message.press('Enter');
+
+  const reply = assistant
+    .getByRole('log', { name: 'Messages' })
+    .getByRole('article', { name: 'Assistant' });
+  await expect(reply).toContainText('Is the letter from her sister?');
+  await reply.getByText('What the Assistant saw').click();
+  await expect(
+    reply
+      .getByRole('list', { name: 'What the Assistant saw' })
+      .getByRole('listitem'),
+  ).toContainText(['The Prose of “Scene 2”', 'The Prose of “Scene 1”']);
+  const sent = JSON.stringify(anthropic.sent[0]);
+  expect(sent).toContain('The letter came on Tuesday.');
+  expect(sent).toContain('Anna burned it unread.');
+  await app.close();
+});

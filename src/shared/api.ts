@@ -132,6 +132,12 @@ export type Upgrade = { host?: string };
  */
 export type ReadOnly = { type: 'readOnly' } & Upgrade;
 
+/** The Prose is now spellchecked and typeset in `language`. */
+export type LanguageChanged = {
+  type: 'languageChanged';
+  language: ProseLanguage;
+};
+
 /** What main tells a window about its Project as it happens. */
 export type ProjectEvent =
   | UnitSaveStatus
@@ -141,7 +147,8 @@ export type ProjectEvent =
   | EntriesChanged
   | ProposalsChanged
   | ConversationsChanged
-  | ReadOnly;
+  | ReadOnly
+  | LanguageChanged;
 
 /** Mirrors the main-process ProjectStore of this window's Project. */
 export interface ProjectApi {

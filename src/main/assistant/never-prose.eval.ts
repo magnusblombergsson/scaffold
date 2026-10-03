@@ -32,7 +32,7 @@ it.skipIf(!key)(
       console.log(`Review sheet: ${file}`);
       expect(results.filter((r) => r.error)).toEqual([]);
     } finally {
-      await rm(dir, { recursive: true, force: true });
+      await rm(dir, { recursive: true, force: true, maxRetries: 5 });
     }
   },
 );

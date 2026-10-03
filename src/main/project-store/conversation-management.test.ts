@@ -23,7 +23,7 @@ beforeEach(async () => {
   projectPath = path.join(dir, 'My Novel');
 });
 afterEach(async () => {
-  await rm(dir, { recursive: true, force: true });
+  await rm(dir, { recursive: true, force: true, maxRetries: 5 });
 });
 
 const entryRef = (id: string) => ({ kind: 'entry', id }) as const;

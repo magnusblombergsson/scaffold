@@ -6,23 +6,32 @@ import { EditorState, TextSelection } from '@tiptap/pm/state';
 // unit keeps its editor, and with it its history, while the Author works on
 // other units; an editor outlives the view that shows it.
 
-const editors = new Map<string, Editor>();
+const editors = new Map<string, { editor: Editor; madeWith: string }>();
 
 /**
  * The editor for a unit: the one from earlier in the session if it still
- * holds `text`, the unit's saved value, else a new one from `create`.
+ * holds `text`, the unit's saved value, and was made with the same
+ * `madeWith`, such as the Prose's language; else a new one from `create`.
  */
 export function unitEditor(
   key: string,
   text: string,
   create: () => Editor,
   textOf: (editor: Editor) => string,
+  madeWith = '',
 ): Editor {
   const kept = editors.get(key);
-  if (kept && !kept.isDestroyed && textOf(kept) === text) return kept;
-  kept?.destroy();
+  if (
+    kept &&
+    !kept.editor.isDestroyed &&
+    kept.madeWith === madeWith &&
+    textOf(kept.editor) === text
+  ) {
+    return kept.editor;
+  }
+  kept?.editor.destroy();
   const editor = create();
-  editors.set(key, editor);
+  editors.set(key, { editor, madeWith });
   return editor;
 }
 
@@ -103,6 +112,6 @@ function flatten(doc: PMNode): { text: string; ends: number[] } {
 
 /** Destroys every kept editor, as when the window shows another Project. */
 export function forgetUnitEditors(): void {
-  for (const editor of editors.values()) editor.destroy();
+  for (const { editor } of editors.values()) editor.destroy();
   editors.clear();
 }

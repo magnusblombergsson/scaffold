@@ -55,6 +55,23 @@ describe('editor undo per unit', () => {
     expect(changed.commands.undo()).toBe(false);
     expect(outline.isDestroyed).toBe(true);
   });
+
+  it('starts afresh when the editor is to be made otherwise, as in another language', () => {
+    const create = () =>
+      new Editor({
+        extensions: plainTextExtensions({ bullets: false }),
+        content: textToDoc('Prose'),
+      });
+    const textOf = (editor: Editor) => docToText(editor.getJSON());
+    const english = unitEditor('scene:a', 'Prose', create, textOf, 'en-US');
+
+    expect(unitEditor('scene:a', 'Prose', create, textOf, 'en-US')).toBe(
+      english,
+    );
+    const swedish = unitEditor('scene:a', 'Prose', create, textOf, 'sv-SE');
+    expect(swedish).not.toBe(english);
+    expect(english.isDestroyed).toBe(true);
+  });
 });
 
 describe('reloading a unit changed on another computer', () => {

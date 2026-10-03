@@ -28,6 +28,7 @@ import {
   type ImportConvention,
 } from '../shared/manuscript-import';
 import { isModelId, type ModelId } from '../shared/models';
+import { PROSE_LANGUAGES, type ProseLanguage } from '../shared/project-types';
 import { unitName } from '../shared/unit-name';
 import {
   loadAppSettings,
@@ -226,7 +227,11 @@ function attach(contents: WebContents, store: ProjectStore): void {
   unsubscribes.set(
     contents.id,
     store.subscribe((event) => {
-      if (!contents.isDestroyed()) contents.send(channel.projectEvent, event);
+      if (contents.isDestroyed()) return;
+      contents.send(channel.projectEvent, event);
+      if (event.type === 'languageChanged' || event.type === 'readOnly') {
+        updateMenu();
+      }
     }),
   );
   settings.recordOpened({
@@ -237,9 +242,18 @@ function attach(contents: WebContents, store: ProjectStore): void {
   rememberOpenProjects();
   updateMenu();
   void store.startSession();
-  // On macOS the OS chooses the spellchecker language.
-  if (process.platform !== 'darwin')
-    contents.session.setSpellCheckerLanguages([store.language]);
+  spellcheckIn(contents, store.language);
+}
+
+/**
+ * Spellchecks in `language` in the window's session. Windows share one
+ * session, so the window in front sets it again as it comes forward. On
+ * macOS the OS chooses the language.
+ */
+function spellcheckIn(contents: WebContents, language: ProseLanguage): void {
+  if (process.platform !== 'darwin') {
+    contents.session.setSpellCheckerLanguages([language]);
+  }
 }
 
 function rememberOpenProjects(): void {
@@ -551,6 +565,36 @@ function setApplicationMenu(): void {
             if (window instanceof BrowserWindow) void exportFrom(window);
           },
         },
+        {
+          id: 'language',
+          label: 'Prose Language',
+          enabled: false,
+          submenu: PROSE_LANGUAGES.map(({ language, label }) => ({
+            id: `language:${language}`,
+            label,
+            type: 'radio' as const,
+            click: (_item, window) => {
+              const store =
+                window instanceof BrowserWindow &&
+                stores.get(window.webContents.id);
+              if (!store) return;
+              store.setLanguage(language).catch(async (error: unknown) => {
+                console.error(
+                  `Can't set the language of ${store.path}:`,
+                  error,
+                );
+                updateMenu();
+                await dialog.showMessageBox(window, {
+                  type: 'warning',
+                  buttons: ['OK'],
+                  message: `The Prose language of ${store.displayName} can't be changed now.`,
+                  detail:
+                    error instanceof Error ? error.message : String(error),
+                });
+              });
+            },
+          })),
+        },
         { type: 'separator' },
         mac ? { role: 'close' } : { role: 'quit' },
       ],
@@ -562,11 +606,23 @@ function setApplicationMenu(): void {
   Menu.setApplicationMenu(Menu.buildFromTemplate(template));
 }
 
-/** Export is there for the window in front while it shows a Project. */
+/**
+ * Export is there for the window in front while it shows a Project, and
+ * Prose Language while that Project can be written. The window in front
+ * also sets the spellchecker's language for every window.
+ */
 function updateMenu(): void {
-  const item = Menu.getApplicationMenu()?.getMenuItemById('export');
+  const menu = Menu.getApplicationMenu();
   const window = BrowserWindow.getFocusedWindow();
-  if (item) item.enabled = !!window && stores.has(window.webContents.id);
+  const store = window && stores.get(window.webContents.id);
+  const exportItem = menu?.getMenuItemById('export');
+  if (exportItem) exportItem.enabled = !!store;
+  const language = menu?.getMenuItemById('language');
+  if (language) language.enabled = !!store && !store.readOnly();
+  if (!store) return;
+  const chosen = menu?.getMenuItemById(`language:${store.language}`);
+  if (chosen) chosen.checked = true;
+  spellcheckIn(window.webContents, store.language);
 }
 
 /** The real path of `target`, or `target` when it can't be resolved. */

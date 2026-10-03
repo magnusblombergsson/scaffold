@@ -219,8 +219,11 @@ function Conversations({
           <Composer
             conversation={conversation}
             placeholder={
-              sceneId ? 'Ask about this Scene…' : 'Ask the Assistant…'
+              sceneId
+                ? 'Ask about this Scene… Type @ to bring in another.'
+                : 'Ask the Assistant… Type @ to bring in a Scene or Chapter.'
             }
+            manuscript={names.manuscript}
           />
         </>
       ) : (
