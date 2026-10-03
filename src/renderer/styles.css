@@ -121,6 +121,35 @@ button.recent-open:hover {
   font-weight: 600;
 }
 
+.mode-switch {
+  display: flex;
+}
+
+.mode-switch button {
+  background: none;
+  border: 1px solid var(--line);
+  color: inherit;
+  padding: 1px 0.75rem;
+  cursor: pointer;
+}
+
+.mode-switch button + button {
+  border-left: none;
+}
+
+.mode-switch button:first-child {
+  border-radius: 4px 0 0 4px;
+}
+
+.mode-switch button:last-child {
+  border-radius: 0 4px 4px 0;
+}
+
+.mode-switch button[aria-pressed='true'] {
+  background: var(--line);
+  font-weight: 600;
+}
+
 .scene-title {
   color: var(--muted);
   flex: 1;
@@ -272,6 +301,18 @@ button.recent-open:hover {
   display: flex;
   flex: 1;
   min-height: 0;
+}
+
+/* One Mode's panes; another Mode's stay mounted, hidden. */
+.room {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+}
+
+.room[hidden] {
+  display: none;
 }
 
 .left-pane {
@@ -799,19 +840,19 @@ h2.binder-title > button[aria-current='true'],
   font-size: 0.9rem;
 }
 
-.mention-peek-entry + .mention-peek-entry {
+.entry-card + .entry-card {
   border-top: 1px solid var(--line);
   margin-top: 0.75rem;
   padding-top: 0.75rem;
 }
 
-.mention-peek-entry header {
+.entry-card header {
   display: grid;
   grid-template-columns: 1fr auto;
   align-items: center;
 }
 
-.mention-peek-type {
+.entry-card-type {
   grid-column: 1;
   color: var(--muted);
   font-size: 0.75rem;
@@ -819,13 +860,13 @@ h2.binder-title > button[aria-current='true'],
   letter-spacing: 0.05em;
 }
 
-.mention-peek-entry h2 {
+.entry-card h2 {
   grid-column: 1;
   font-size: 1.05rem;
   margin: 0;
 }
 
-.mention-peek-open {
+.entry-card-open {
   grid-column: 2;
   grid-row: 1 / span 2;
   background: none;
@@ -837,31 +878,31 @@ h2.binder-title > button[aria-current='true'],
   padding: 0.1rem 0.45rem;
 }
 
-.mention-peek-aliases {
+.entry-card-aliases {
   color: var(--muted);
   margin: 0.25rem 0 0;
 }
 
-.mention-peek-description {
+.entry-card-description {
   white-space: pre-wrap;
   margin: 0.5rem 0 0;
 }
 
-.mention-peek-entry dl {
+.entry-card dl {
   margin: 0.5rem 0 0;
 }
 
-.mention-peek-entry dl div {
+.entry-card dl div {
   display: grid;
   grid-template-columns: 7.5rem 1fr;
   gap: 0.5rem;
 }
 
-.mention-peek-entry dt {
+.entry-card dt {
   color: var(--muted);
 }
 
-.mention-peek-entry dd {
+.entry-card dd {
   margin: 0;
   white-space: pre-wrap;
 }
@@ -959,10 +1000,8 @@ h2.binder-title > button[aria-current='true'],
   display: flex;
   flex-direction: column;
   flex-shrink: 0;
-  width: 280px;
   overflow-y: auto;
   padding: 0 1rem;
-  border-left: 1px solid var(--line);
   font-size: 0.9rem;
 }
 
@@ -1286,4 +1325,79 @@ button.finding-quote:hover {
   font-size: 0.85em;
   text-decoration: underline;
   cursor: pointer;
+}
+
+.read-and-decide {
+  color: var(--muted);
+  margin: 0;
+}
+
+.brainstorm-list {
+  display: flex;
+  flex-direction: column;
+  padding: 0.5rem 0;
+}
+
+.brainstorm-new {
+  align-self: flex-start;
+  margin: 0 0.75rem 0.5rem;
+}
+
+.brainstorm-conversations {
+  list-style: none;
+  margin: 0;
+  padding: 0 0.5rem;
+}
+
+.brainstorm-conversations button {
+  display: block;
+  width: 100%;
+  padding: 0.3rem 0.5rem;
+}
+
+.brainstorm .conversations {
+  width: 100%;
+  max-width: 44rem;
+  margin: 0 auto;
+  padding: 0 1rem 1rem;
+  box-sizing: border-box;
+}
+
+.reference {
+  flex-shrink: 0;
+  overflow-y: auto;
+  font-size: 0.9rem;
+}
+
+.reference [role='tabpanel'] {
+  padding: 0.75rem;
+}
+
+.reference-entries .entry-card + .entry-card {
+  border-top: 1px solid var(--line);
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+}
+
+.reference-empty {
+  color: var(--muted);
+}
+
+.reference-skeleton h3 {
+  font-size: 0.95rem;
+  margin: 0.75rem 0 0.25rem;
+}
+
+.reference-skeleton h4 {
+  font-size: 0.9rem;
+  margin: 0.5rem 0 0.25rem 0.75rem;
+}
+
+.reference-skeleton section section .reference-outline {
+  margin-left: 0.75rem;
+}
+
+.reference-outline {
+  white-space: pre-wrap;
+  margin: 0;
 }

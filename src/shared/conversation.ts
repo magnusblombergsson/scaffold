@@ -9,6 +9,12 @@ import type { Usage } from './usage';
 export const MODES = ['brainstorm', 'interview', 'writing'] as const;
 export type Mode = (typeof MODES)[number];
 
+export const MODE_LABELS: Record<Mode, string> = {
+  brainstorm: 'Brainstorm',
+  interview: 'Interview',
+  writing: 'Writing',
+};
+
 /** A Conversation as the picker lists it. */
 export type ConversationSummary = {
   id: string;

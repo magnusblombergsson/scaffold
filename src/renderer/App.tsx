@@ -11,6 +11,7 @@ import type {
   Dropped,
   OpenedProject,
   OpenResult,
+  PanelWidths,
   Tip,
 } from '../shared/api';
 import {
@@ -25,15 +26,18 @@ import {
   type UnitRef,
   type UnitValue,
 } from '../shared/project-types';
+import { MODE_LABELS, type Mode } from '../shared/conversation';
 import { upgradedMessage } from '../shared/format-gate';
 import { capitalized, unitName } from '../shared/unit-name';
-import { AssistantPanel, type ShowProposal } from './AssistantPanel';
+import { AssistantPanel } from './AssistantPanel';
 import { Binder, type Selection } from './Binder';
+import { BrainstormRoom } from './BrainstormRoom';
+import { WINDOW_MODES, type ShowProposal } from './Conversation';
 import { ConflictList, ConflictResolver } from './Conflicts';
 import { EntryView, VISIBILITY_LABELS } from './EntryView';
 import { Notices } from './Notices';
 import { OutlineNotes } from './OutlineNotes';
-import { PanelResizer } from './PanelResizer';
+import { PanelResizer, type PaneSize } from './PanelResizer';
 import {
   onMentionClick,
   setMentionEntries,
@@ -123,7 +127,12 @@ export function App() {
   );
 }
 
-const DEFAULT_BINDER_WIDTH = 256;
+const DEFAULT_WIDTHS: Required<PanelWidths> = {
+  binder: 256,
+  assistant: 280,
+  conversations: 220,
+  reference: 300,
+};
 /** How long a structure change can be undone from its toast. */
 const UNDO_TOAST_MS = 10_000;
 const RELOADED_TOAST_MS = 5000;
@@ -157,9 +166,30 @@ function ProjectView({
     selected?.kind === 'chapter'
       ? manuscript.chapters.find((c) => c.id === selected.id)
       : undefined;
-  const [binderWidth, setBinderWidth] = useState(
-    project.view.panelWidths?.binder ?? DEFAULT_BINDER_WIDTH,
+  const [mode, setMode] = useState<Mode>('writing');
+  /**
+   * The Modes shown so far. Each stays mounted, hidden while another is
+   * shown, so that a reply streaming in, a draft or a Conversation open
+   * there is as the Author left it.
+   */
+  const [visited, setVisited] = useState<Set<Mode>>(() => new Set([mode]));
+  const [widths, setWidths] = useState<PanelWidths>(
+    project.view.panelWidths ?? {},
   );
+  const binderWidth = widths.binder ?? DEFAULT_WIDTHS.binder;
+  /** A pane's width, remembered once the Author lets go: main keeps them all as one setting. */
+  function pane(key: keyof PanelWidths): PaneSize {
+    const resize = (width: number, done: boolean) => {
+      const next = { ...widths, [key]: width };
+      setWidths(next);
+      if (done) window.shell.saveView({ panelWidths: next });
+    };
+    return {
+      width: widths[key] ?? DEFAULT_WIDTHS[key],
+      onResize: (width) => resize(width, false),
+      onResized: (width) => resize(width, true),
+    };
+  }
   const [outlineNotesOpen, setOutlineNotesOpen] = useState(
     project.view.outlineNotesOpen ?? true,
   );
@@ -224,6 +254,13 @@ function ProjectView({
   useEffect(() => {
     void window.shell.tips().then(setTips);
   }, []);
+
+  function switchMode(next: Mode) {
+    flushPendingEdits();
+    setPeek(null);
+    setMode(next);
+    setVisited((visited) => new Set(visited).add(next));
+  }
 
   function toggleOutlineNotes() {
     setOutlineNotesOpen(!outlineNotesOpen);
@@ -373,18 +410,31 @@ function ProjectView({
       <div className="project-view">
         <header>
           <span className="project-name">{project.displayName}</span>
+          <div role="group" aria-label="Mode" className="mode-switch">
+            {WINDOW_MODES.map((value) => (
+              <button
+                key={value}
+                aria-pressed={mode === value}
+                onClick={() => switchMode(value)}
+              >
+                {MODE_LABELS[value]}
+              </button>
+            ))}
+          </div>
           <span className="scene-title">
-            {resolvingConflict
-              ? 'Conflict'
-              : open
-                ? [open.chapter?.title ?? 'Unplaced', open.scene.title].join(
-                    ' · ',
-                  )
-                : openChapter
-                  ? openChapter.title
-                  : openEntry
-                    ? entryTitle(openEntry)
-                    : selected?.kind === 'project' && 'Project Outline'}
+            {mode !== 'writing'
+              ? ''
+              : resolvingConflict
+                ? 'Conflict'
+                : open
+                  ? [open.chapter?.title ?? 'Unplaced', open.scene.title].join(
+                      ' · ',
+                    )
+                  : openChapter
+                    ? openChapter.title
+                    : openEntry
+                      ? entryTitle(openEntry)
+                      : selected?.kind === 'project' && 'Project Outline'}
           </span>
           <SaveIndicator {...saveStatus} />
           <span className="header-actions">{headerActions}</span>
@@ -415,213 +465,244 @@ function ProjectView({
         />
         {error && <p role="alert">{error}</p>}
         <div className="project-body">
-          <aside className="left-pane" style={{ width: binderWidth }}>
-            <div role="tablist" className="tabs">
-              <button
-                role="tab"
-                aria-selected={tab === 'manuscript'}
-                id="manuscript-tab"
-                onClick={() => setTab('manuscript')}
-              >
-                Manuscript
-              </button>
-              <button
-                role="tab"
-                aria-selected={tab === 'bible'}
-                id="bible-tab"
-                onClick={() => setTab('bible')}
-              >
-                Story Bible
-              </button>
-              {(conflicts.length > 0 || tab === 'conflicts') && (
-                <button
-                  role="tab"
-                  aria-selected={tab === 'conflicts'}
-                  id="conflicts-tab"
-                  onClick={() => setTab('conflicts')}
-                >
-                  Conflicts
-                  {conflicts.length > 0 && (
-                    <span className="badge">{conflicts.length}</span>
+          {visited.has('brainstorm') && (
+            <div className="room" hidden={mode !== 'brainstorm'}>
+              <BrainstormRoom
+                active={mode === 'brainstorm'}
+                names={{ manuscript, entries }}
+                pane={pane}
+                onAddKey={onAddKey}
+                onOpenEntry={(id) => {
+                  switchMode('writing');
+                  setTab('bible');
+                  select({ kind: 'entry', id });
+                }}
+              />
+            </div>
+          )}
+          {visited.has('writing') && (
+            <div className="room" hidden={mode !== 'writing'}>
+              <aside className="left-pane" style={{ width: binderWidth }}>
+                <div role="tablist" className="tabs">
+                  <button
+                    role="tab"
+                    aria-selected={tab === 'manuscript'}
+                    id="manuscript-tab"
+                    onClick={() => setTab('manuscript')}
+                  >
+                    Manuscript
+                  </button>
+                  <button
+                    role="tab"
+                    aria-selected={tab === 'bible'}
+                    id="bible-tab"
+                    onClick={() => setTab('bible')}
+                  >
+                    Story Bible
+                  </button>
+                  {(conflicts.length > 0 || tab === 'conflicts') && (
+                    <button
+                      role="tab"
+                      aria-selected={tab === 'conflicts'}
+                      id="conflicts-tab"
+                      onClick={() => setTab('conflicts')}
+                    >
+                      Conflicts
+                      {conflicts.length > 0 && (
+                        <span className="badge">{conflicts.length}</span>
+                      )}
+                    </button>
                   )}
-                </button>
-              )}
-              <button
-                role="tab"
-                aria-selected={tab === 'trash'}
-                id="trash-tab"
-                onClick={() => setTab('trash')}
-              >
-                Trash{trash.length > 0 && ` (${trash.length})`}
-              </button>
-            </div>
-            <div role="tabpanel" aria-labelledby={`${tab}-tab`}>
-              {tab === 'manuscript' ? (
-                <Binder
-                  manuscript={manuscript}
-                  selected={selected}
-                  onSelect={select}
-                  conflicted={conflicted}
-                  onChange={change}
-                />
-              ) : tab === 'bible' ? (
-                <StoryBible
-                  entries={entries}
-                  openId={openEntry?.id ?? null}
-                  onOpen={(id) => select({ kind: 'entry', id })}
-                  onChange={change}
-                  highlight={highlight}
-                  onHighlight={(on) => {
-                    setHighlight(on);
-                    window.shell.setHighlightMentions(on);
-                  }}
-                />
-              ) : tab === 'conflicts' ? (
-                <ConflictList
-                  conflicts={conflicts}
-                  manuscript={manuscript}
-                  entries={entries}
-                  open={resolvingConflict ? resolving : null}
-                  onOpen={(ref) => {
-                    flushPendingEdits();
-                    setResolving(ref);
-                  }}
-                />
-              ) : (
-                <TrashView
-                  items={trash}
-                  onRestore={(item) =>
-                    change(
-                      () => window.project.restore(item.id),
-                      item.kind === 'version'
-                        ? `Restored ${trashTitle(item)}`
-                        : `Restored “${item.title}”`,
-                    )
-                  }
-                  onEmpty={emptyTrash}
-                />
-              )}
-            </div>
-          </aside>
-          <PanelResizer
-            label="Binder width"
-            width={binderWidth}
-            min={160}
-            max={600}
-            onResize={setBinderWidth}
-            onResized={(width) =>
-              window.shell.saveView({ panelWidths: { binder: width } })
-            }
-          />
-          {/* A new key per unit: leaving one unmounts its editors, which
+                  <button
+                    role="tab"
+                    aria-selected={tab === 'trash'}
+                    id="trash-tab"
+                    onClick={() => setTab('trash')}
+                  >
+                    Trash{trash.length > 0 && ` (${trash.length})`}
+                  </button>
+                </div>
+                <div role="tabpanel" aria-labelledby={`${tab}-tab`}>
+                  {tab === 'manuscript' ? (
+                    <Binder
+                      manuscript={manuscript}
+                      selected={selected}
+                      onSelect={select}
+                      conflicted={conflicted}
+                      onChange={change}
+                    />
+                  ) : tab === 'bible' ? (
+                    <StoryBible
+                      entries={entries}
+                      openId={openEntry?.id ?? null}
+                      onOpen={(id) => select({ kind: 'entry', id })}
+                      onChange={change}
+                      highlight={highlight}
+                      onHighlight={(on) => {
+                        setHighlight(on);
+                        window.shell.setHighlightMentions(on);
+                      }}
+                    />
+                  ) : tab === 'conflicts' ? (
+                    <ConflictList
+                      conflicts={conflicts}
+                      manuscript={manuscript}
+                      entries={entries}
+                      open={resolvingConflict ? resolving : null}
+                      onOpen={(ref) => {
+                        flushPendingEdits();
+                        setResolving(ref);
+                      }}
+                    />
+                  ) : (
+                    <TrashView
+                      items={trash}
+                      onRestore={(item) =>
+                        change(
+                          () => window.project.restore(item.id),
+                          item.kind === 'version'
+                            ? `Restored ${trashTitle(item)}`
+                            : `Restored “${item.title}”`,
+                        )
+                      }
+                      onEmpty={emptyTrash}
+                    />
+                  )}
+                </div>
+              </aside>
+              <PanelResizer
+                label="Binder width"
+                min={160}
+                max={600}
+                {...pane('binder')}
+              />
+              {/* A new key per unit: leaving one unmounts its editors, which
             flushes their pending edits. */}
-          {resolvingConflict ? (
-            <ConflictResolver
-              key={unitKey(resolvingConflict.ref)}
-              conflict={resolvingConflict}
-              manuscript={manuscript}
-              entries={entries}
-              onResolve={(kept) => resolve(resolvingConflict.ref, kept)}
-            />
-          ) : selected?.kind === 'project' ? (
-            <main className="centre" key={PROJECT_OUTLINE}>
-              <h2 className="centre-title">Project Outline</h2>
-              <OutlineNotes
-                unitId={PROJECT_OUTLINE}
-                language={project.language}
-                withNotes={false}
-              />
-            </main>
-          ) : selected?.kind === 'entry' ? (
-            openEntry ? (
-              <EntryView
-                // A type change rewrites its description and fields: read them anew.
-                key={`${openEntry.id}:${openEntry.type}`}
-                entry={openEntry}
-                entries={entries}
-                language={project.language}
-                onType={(type) =>
-                  change(
-                    () => window.project.setEntryType(openEntry.id, type),
-                    `Type changed to ${ENTRY_TYPE_LABELS[type]}`,
-                  )
-                }
-                onVisibility={(visibility) =>
-                  change(
-                    () =>
-                      window.project.setEntryVisibility(
-                        openEntry.id,
-                        visibility,
-                      ),
-                    `Visibility set to ${VISIBILITY_LABELS[visibility]}`,
-                  )
-                }
-                onShowProposal={(conversationId, proposalId) =>
-                  setShowProposal({
-                    conversationId,
-                    proposalId,
-                    count: ++shows.current,
-                  })
-                }
-              />
-            ) : (
-              <div className="editor empty">No Entry open</div>
-            )
-          ) : openChapter ? (
-            <main className="centre" key={openChapter.id}>
-              <h2 className="centre-title">{openChapter.title}</h2>
-              <OutlineNotes
-                unitId={openChapter.id}
-                language={project.language}
-                withNotes
-              />
-            </main>
-          ) : !open ? (
-            <div className="editor empty">No Scene open</div>
-          ) : open.scene.missing ? (
-            <div className="editor missing" role="status">
-              <p>
-                <strong>{open.scene.title}</strong> is missing, possibly not
-                synced yet. It opens here once its file has arrived.
-              </p>
-            </div>
-          ) : (
-            <main className="centre" key={open.scene.id}>
-              <section className="outline-notes" aria-label="Outline & Notes">
-                <button
-                  className="outline-notes-toggle"
-                  aria-expanded={outlineNotesOpen}
-                  onClick={toggleOutlineNotes}
-                >
-                  <span aria-hidden="true">{outlineNotesOpen ? '▾' : '▸'}</span>{' '}
-                  Outline & Notes
-                </button>
-                {outlineNotesOpen && (
+              {resolvingConflict ? (
+                <ConflictResolver
+                  key={unitKey(resolvingConflict.ref)}
+                  conflict={resolvingConflict}
+                  manuscript={manuscript}
+                  entries={entries}
+                  onResolve={(kept) => resolve(resolvingConflict.ref, kept)}
+                />
+              ) : selected?.kind === 'project' ? (
+                <main className="centre" key={PROJECT_OUTLINE}>
+                  <h2 className="centre-title">Project Outline</h2>
                   <OutlineNotes
-                    unitId={open.scene.id}
+                    unitId={PROJECT_OUTLINE}
+                    language={project.language}
+                    withNotes={false}
+                  />
+                </main>
+              ) : selected?.kind === 'entry' ? (
+                openEntry ? (
+                  <EntryView
+                    // A type change rewrites its description and fields: read them anew.
+                    key={`${openEntry.id}:${openEntry.type}`}
+                    entry={openEntry}
+                    entries={entries}
+                    language={project.language}
+                    onType={(type) =>
+                      change(
+                        () => window.project.setEntryType(openEntry.id, type),
+                        `Type changed to ${ENTRY_TYPE_LABELS[type]}`,
+                      )
+                    }
+                    onVisibility={(visibility) =>
+                      change(
+                        () =>
+                          window.project.setEntryVisibility(
+                            openEntry.id,
+                            visibility,
+                          ),
+                        `Visibility set to ${VISIBILITY_LABELS[visibility]}`,
+                      )
+                    }
+                    onShowProposal={(conversationId, proposalId) =>
+                      setShowProposal({
+                        conversationId,
+                        proposalId,
+                        count: ++shows.current,
+                      })
+                    }
+                  />
+                ) : (
+                  <div className="editor empty">No Entry open</div>
+                )
+              ) : openChapter ? (
+                <main className="centre" key={openChapter.id}>
+                  <h2 className="centre-title">{openChapter.title}</h2>
+                  <OutlineNotes
+                    unitId={openChapter.id}
                     language={project.language}
                     withNotes
                   />
-                )}
-              </section>
-              <SceneEditor
-                sceneId={open.scene.id}
-                language={project.language}
-                focusAt={
-                  jump?.sceneId === open.scene.id ? jump.cursor : undefined
-                }
-                quote={jump?.sceneId === open.scene.id ? jump.quote : undefined}
-                onCursor={reportCursor}
+                </main>
+              ) : !open ? (
+                <div className="editor empty">No Scene open</div>
+              ) : open.scene.missing ? (
+                <div className="editor missing" role="status">
+                  <p>
+                    <strong>{open.scene.title}</strong> is missing, possibly not
+                    synced yet. It opens here once its file has arrived.
+                  </p>
+                </div>
+              ) : (
+                <main className="centre" key={open.scene.id}>
+                  <section
+                    className="outline-notes"
+                    aria-label="Outline & Notes"
+                  >
+                    <button
+                      className="outline-notes-toggle"
+                      aria-expanded={outlineNotesOpen}
+                      onClick={toggleOutlineNotes}
+                    >
+                      <span aria-hidden="true">
+                        {outlineNotesOpen ? '▾' : '▸'}
+                      </span>{' '}
+                      Outline & Notes
+                    </button>
+                    {outlineNotesOpen && (
+                      <OutlineNotes
+                        unitId={open.scene.id}
+                        language={project.language}
+                        withNotes
+                      />
+                    )}
+                  </section>
+                  <SceneEditor
+                    sceneId={open.scene.id}
+                    language={project.language}
+                    focusAt={
+                      jump?.sceneId === open.scene.id ? jump.cursor : undefined
+                    }
+                    quote={
+                      jump?.sceneId === open.scene.id ? jump.quote : undefined
+                    }
+                    onCursor={reportCursor}
+                  />
+                </main>
+              )}
+              <PanelResizer
+                label="Assistant width"
+                panel="right"
+                {...pane('assistant')}
+                min={220}
+                max={640}
               />
-            </main>
+              <AssistantPanel
+                active={mode === 'writing'}
+                width={pane('assistant').width}
+                onAddKey={onAddKey}
+                sceneId={open && !open.scene.missing ? open.scene.id : null}
+                names={{ manuscript, entries }}
+                show={showProposal}
+                onQuote={showQuote}
+              />
+            </div>
           )}
-          <AssistantPanel
-            onAddKey={onAddKey}
-            sceneId={open && !open.scene.missing ? open.scene.id : null}
-            names={{ manuscript, entries }}
-            show={showProposal}
-            onQuote={showQuote}
-          />
         </div>
         {peek && (
           <MentionPeek

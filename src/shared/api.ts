@@ -206,8 +206,17 @@ export interface ProjectApi {
   emptyTrash(): Promise<boolean>;
 }
 
-/** Widths in CSS pixels of the panels the Author can resize. */
-export type PanelWidths = { binder?: number };
+/**
+ * Widths in CSS pixels of the panels the Author can resize: in Writing, the
+ * Binder and the Assistant panel; in the Brainstorm room, its Conversations
+ * and the reference.
+ */
+export type PanelWidths = {
+  binder?: number;
+  assistant?: number;
+  conversations?: number;
+  reference?: number;
+};
 
 /**
  * How the Author left a Project's window on this computer; `cursor` is where
