@@ -216,3 +216,85 @@ test('a reply cut short is kept as interrupted, and Retry adds a new turn', asyn
   expect(whole.interrupted).toBeUndefined();
   await app.close();
 });
+
+test('the Author asks for a Review of the Chapter, sees its Findings in order, and a quote opens the Scene at the line', async () => {
+  const projectPath = path.join(tempDir(), 'My Novel');
+  const finding = (json: object) =>
+    `\n\`\`\`finding\n${JSON.stringify(json)}\n\`\`\`\n`;
+  anthropic.calls.push({
+    reply: [
+      'Two things across the Scenes.',
+      finding({
+        type: 'missing',
+        quote: 'The letter came',
+        comment: 'Nobody reads the letter.',
+      }),
+      finding({
+        type: 'contradiction',
+        quote: 'waited on the quay',
+        comment: 'The Outline has her on the ferry.',
+        question: 'Which holds?',
+      }),
+    ],
+  });
+  const app = await launch(tempDir(), { anthropicUrl: anthropic.url });
+  await answerDialogs(app, projectPath);
+  const page = await app.firstWindow();
+  await page.getByRole('button', { name: 'New Project…' }).click();
+  await page
+    .getByLabel('Prose')
+    .pressSequentially('Anna came down early. She waited on the quay.');
+  await page
+    .getByRole('button', { name: 'Chapter actions: Chapter 1' })
+    .click();
+  await page.getByRole('menuitem', { name: 'New Scene', exact: true }).click();
+  await expect(page.getByLabel('Prose')).toBeFocused();
+  await page.keyboard.type('The letter came on Tuesday.');
+  const assistant = await addKey(page);
+
+  await assistant.getByRole('button', { name: 'Review Chapter' }).click();
+
+  const messages = assistant.getByRole('log', { name: 'Messages' });
+  await expect(messages.getByRole('article', { name: 'You' })).toHaveText(
+    'Review Chapter “Chapter 1”',
+  );
+  const findings = messages.getByRole('list', { name: 'Findings' });
+  await expect(findings.getByRole('listitem')).toHaveCount(2);
+  const [contradiction, missing] = await findings.getByRole('listitem').all();
+  await expect(contradiction).toContainText('Contradiction');
+  await expect(contradiction).toContainText(
+    'The Outline has her on the ferry.',
+  );
+  await expect(contradiction.locator('strong')).toHaveText('Which holds?');
+  await expect(missing).toContainText('Missing');
+  // Each Scene's Prose was sent, with what a Chapter Review is to do.
+  const sent = JSON.stringify(anthropic.sent[0]);
+  expect(sent).toContain('She waited on the quay.');
+  expect(sent).toContain('The letter came on Tuesday.');
+  expect(sent).toContain('Review the Chapter in focus');
+
+  // The quote opens Scene 1, with the quoted words selected.
+  await contradiction
+    .getByRole('button', { name: 'waited on the quay' })
+    .click();
+  await expect(
+    page.getByRole('button', { name: 'Scene 1', exact: true }),
+  ).toHaveAttribute('aria-current', 'true');
+  await expect(page.getByLabel('Prose')).toBeFocused();
+  await expect
+    .poll(() => page.evaluate(() => window.getSelection()?.toString()))
+    .toBe('waited on the quay');
+  await expect(page.getByLabel('Prose')).toHaveText(
+    'Anna came down early. She waited on the quay.',
+  );
+
+  // The Findings are logged in the reply, the Review in the ask.
+  await expect.poll(async () => (await logs(projectPath))[0].length).toBe(3);
+  const [[, asked, replied]] = await logs(projectPath);
+  expect(asked).toMatchObject({ command: 'review-chapter' });
+  expect(replied.findings.map((f: { type: string }) => f.type)).toEqual([
+    'contradiction',
+    'missing',
+  ]);
+  await app.close();
+});

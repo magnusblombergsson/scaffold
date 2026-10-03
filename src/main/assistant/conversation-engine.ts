@@ -4,9 +4,18 @@ import type {
   AssistantFailure,
   ConversationMessage,
   Mode,
+  Saw,
 } from '../../shared/conversation';
+import {
+  findingOf,
+  inOrder,
+  quotedIn,
+  reviewText,
+  type Finding,
+  type ReviewCommand,
+} from '../../shared/finding';
 import type { ModelId } from '../../shared/models';
-import { PROJECT_OUTLINE } from '../../shared/project-types';
+import { PROJECT_OUTLINE, unitText } from '../../shared/project-types';
 import {
   newEntryOf,
   outlineChangeOf,
@@ -63,11 +72,58 @@ export function createConversationEngine({
   }
 
   /**
+   * What the Author's message asking for a Review says. Refuses when there
+   * is no Scene in focus that the Assistant can read, or for a Chapter
+   * Review, when it is in no Chapter.
+   */
+  function reviewAsk(command: ReviewCommand, sceneId: string | null): string {
+    const manuscript = store.assistantView().manuscript();
+    if (!sceneId || !readableScene(manuscript, sceneId)) {
+      throw new Error('There is no Scene in focus to review');
+    }
+    const text = reviewText(command, sceneId, manuscript);
+    if (!text) throw new Error('The Scene in focus is in no Chapter');
+    return text;
+  }
+
+  /**
+   * Logs the Author's message, with the Scene in focus and the Review it
+   * asks for, if any, and has the Assistant answer it.
+   */
+  async function ask(
+    conversationId: string,
+    message: { text: string; command?: ReviewCommand },
+    sceneId: string | null,
+    onText: (text: string) => void,
+  ): Promise<AskResult> {
+    const { mode, messages: earlier } =
+      await store.readConversation(conversationId);
+    if (message.command && mode !== 'writing') {
+      throw new Error('Only a Writing Conversation has Reviews');
+    }
+    const authored: ConversationMessage = {
+      role: 'author',
+      text: message.text,
+      ...(message.command && { command: message.command }),
+      focus: focusOf(mode, sceneId),
+      at: clock.now(),
+    };
+    await store.appendMessage(conversationId, authored);
+    return answer(
+      conversationId,
+      mode,
+      [...earlier, authored],
+      authored.focus,
+      onText,
+    );
+  }
+
+  /**
    * Asks the model to answer the Conversation as logged, which ends with the
    * Author's message, with the context the Conversation's Mode gives the
    * Scene in `focus`. The reply is logged once it has come, or as
    * interrupted if the call fails partway; a call that fails before any
-   * reply logs nothing.
+   * reply logs nothing. A Review's reply holds Findings, never Proposals.
    */
   async function answer(
     conversationId: string,
@@ -77,10 +133,9 @@ export function createConversationEngine({
     onText: (text: string) => void,
   ): Promise<AskResult> {
     const chosen = model();
-    const context = await buildContext(
-      store.assistantView(),
-      defaultRequest(mode, focus[0] ?? null, messages),
-    );
+    const asked = defaultRequest(mode, focus[0] ?? null, messages);
+    const context = await buildContext(store.assistantView(), asked);
+    const reviewing = asked.mode === 'writing' && asked.command !== 'question';
     const request: ProviderRequest = {
       model: chosen,
       system: context.system,
@@ -108,6 +163,8 @@ export function createConversationEngine({
       if (text === '') return { reply: null, failure };
     }
 
+    const findings =
+      mode === 'writing' ? await findingsIn(text, context.saw) : [];
     const reply: ConversationMessage = {
       role: 'assistant',
       text: replyText(text),
@@ -117,13 +174,51 @@ export function createConversationEngine({
       ...(usage && { usage }),
       ...(failure && { interrupted: true as const }),
       saw: context.saw,
+      ...(findings.length > 0 && { findings }),
     };
     await store.appendMessage(conversationId, reply);
-    // A reply cut short isn't sent back to the model, so neither are its Proposals.
-    for (const proposal of failure ? [] : await proposalsIn(text)) {
+    // A reply cut short isn't sent back to the model, so neither are its
+    // Proposals; a Review asks before it proposes.
+    const proposing = !failure && !reviewing;
+    for (const proposal of proposing ? await proposalsIn(text) : []) {
       await store.appendProposal(conversationId, proposal);
     }
     return { reply, failure };
+  }
+
+  /**
+   * The Findings a reply makes, in the order a Review lists them, each with
+   * the Scene it quotes among those the Assistant saw: the one it names if
+   * the quote is there, else the one the quote is in, else the one it
+   * names, else the only one.
+   */
+  async function findingsIn(reply: string, saw: Saw): Promise<Finding[]> {
+    const findings = splitReply(reply).findings.flatMap(
+      (block) => findingOf(block) ?? [],
+    );
+    if (findings.length === 0) return [];
+    const view = store.assistantView();
+    const prose = new Map<string, string>();
+    for (const unit of saw.units) {
+      if (unit.kind === 'scene') {
+        prose.set(unit.id, unitText(await view.read(unit)));
+      }
+    }
+    const only = prose.size === 1 ? [...prose.keys()][0] : undefined;
+    return inOrder(
+      findings.map(({ sceneId: named, ...finding }) => {
+        const known = named && prose.has(named) ? named : undefined;
+        const { quote } = finding;
+        const quoting = quote
+          ? [...prose.keys()].filter((id) => quotedIn(prose.get(id)!, quote))
+          : [];
+        const sceneId =
+          (known && quoting.includes(known) ? known : quoting[0]) ??
+          known ??
+          only;
+        return { ...finding, ...(sceneId && { sceneId }) };
+      }),
+    );
   }
 
   /**
@@ -133,7 +228,7 @@ export function createConversationEngine({
    */
   async function proposalsIn(reply: string): Promise<Proposal[]> {
     const proposals: Proposal[] = [];
-    for (const block of splitReply(reply).blocks) {
+    for (const block of splitReply(reply).proposals) {
       const change = await changeOf(block);
       if (change) proposals.push({ id: randomUUID(), ...change });
     }
@@ -183,22 +278,23 @@ export function createConversationEngine({
     ): Promise<AskResult> {
       // What the Author typed last is on disk before the context is built.
       await store.flush();
-      const { mode, messages: earlier } =
-        await store.readConversation(conversationId);
-      const authored: ConversationMessage = {
-        role: 'author',
-        text: message,
-        focus: focusOf(mode, focus.sceneId),
-        at: clock.now(),
-      };
-      await store.appendMessage(conversationId, authored);
-      return answer(
-        conversationId,
-        mode,
-        [...earlier, authored],
-        authored.focus,
-        onText,
-      );
+      return ask(conversationId, { text: message }, focus.sceneId, onText);
+    },
+
+    /**
+     * Asks the Assistant in a Writing Conversation for a Review of the Scene
+     * in `focus`, or of its Chapter, as `askAssistant` asks; the reply holds
+     * the Review's Findings. Refuses when there is nothing to review.
+     */
+    async review(
+      conversationId: string,
+      command: ReviewCommand,
+      focus: Focus,
+      onText: (text: string) => void,
+    ): Promise<AskResult> {
+      await store.flush();
+      const text = reviewAsk(command, focus.sceneId);
+      return ask(conversationId, { text, command }, focus.sceneId, onText);
     },
 
     /**

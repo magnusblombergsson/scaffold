@@ -1,3 +1,4 @@
+import type { Finding, ReviewCommand } from './finding';
 import type { ProposalView } from './proposal';
 import type { Usage } from './usage';
 
@@ -29,7 +30,9 @@ export type Saw = { entries: string[]; units: SawUnit[]; messages: number };
 
 /**
  * One message in a Conversation: `focus` holds the ids of the Scenes in focus
- * when it was sent, which the Conversation isn't bound to. An Assistant turn
+ * when it was sent, which the Conversation isn't bound to. The Author's
+ * message says which Review it asked for, if any, as its `command`; the
+ * reply to it holds the Review's `findings`. An Assistant turn
  * also says which `model` answered and what it used, when that is known, and
  * is `interrupted` when the call failed partway and the reply is cut short,
  * and says what the Assistant `saw`, and the `proposals` it made in it.
@@ -37,6 +40,7 @@ export type Saw = { entries: string[]; units: SawUnit[]; messages: number };
 export type ConversationMessage = {
   role: 'author' | 'assistant';
   text: string;
+  command?: ReviewCommand;
   focus: string[];
   /** When it was sent, in ms since the epoch. */
   at: number;
@@ -44,6 +48,7 @@ export type ConversationMessage = {
   usage?: Usage;
   interrupted?: true;
   saw?: Saw;
+  findings?: Finding[];
   proposals?: ProposalView[];
 };
 

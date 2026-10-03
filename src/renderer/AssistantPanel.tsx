@@ -12,7 +12,17 @@ import type {
   ConversationMessage,
   ConversationSummary,
 } from '../shared/conversation';
-import type { EntrySummary, Manuscript } from '../shared/project-types';
+import {
+  FINDING_LABELS,
+  reviewText,
+  type Finding,
+  type ReviewCommand,
+} from '../shared/finding';
+import type {
+  EntrySummary,
+  Manuscript,
+  ManuscriptScene,
+} from '../shared/project-types';
 import { replyText } from '../shared/proposal';
 import { describeTotal, describeUsage } from '../shared/usage';
 import { NoKeyState, useKeyStatus } from './ApiKey';
@@ -43,12 +53,15 @@ export function AssistantPanel({
   sceneId,
   names,
   show,
+  onQuote,
 }: {
   onAddKey(): void;
   /** The Scene open in the editor, which a message sent now is about. */
   sceneId: string | null;
   names: Names;
   show: ShowProposal | null;
+  /** Opens a Scene with a Finding's quote of its Prose selected. */
+  onQuote(sceneId: string, quote: string): void;
 }) {
   const status = useKeyStatus();
   return (
@@ -61,6 +74,7 @@ export function AssistantPanel({
             names={names}
             show={show}
             onOpenSettings={onAddKey}
+            onQuote={onQuote}
           />
         ) : (
           <NoKeyState onAddKey={onAddKey} />
@@ -91,9 +105,20 @@ const FAILURES: Record<AssistantFailure, string> = {
   other: "The Assistant couldn't answer. Retry, or try again later.",
 };
 
+function sceneOf(
+  sceneId: string,
+  manuscript: Manuscript,
+): ManuscriptScene | undefined {
+  return [
+    ...manuscript.chapters.flatMap((c) => c.scenes),
+    ...manuscript.unplaced,
+  ].find((s) => s.id === sceneId);
+}
+
 /**
  * Writing Conversations: a picker to resume one, its messages, and where the
- * Author writes the next. A new one starts when its first message is sent.
+ * Author writes the next, or asks for a Review of the Scene open or of its
+ * Chapter. A new one starts when its first message is sent.
  * The Assistant's replies are plain text: nothing here puts them in the
  * Manuscript, though the Author can copy them as any text. A reply's
  * Proposals show as cards in it, where the Author decides them; a decision
@@ -105,11 +130,13 @@ function Conversations({
   names,
   show,
   onOpenSettings,
+  onQuote,
 }: {
   sceneId: string | null;
   names: Names;
   show: ShowProposal | null;
   onOpenSettings(): void;
+  onQuote(sceneId: string, quote: string): void;
 }) {
   const readOnly = useContext(ReadOnlyContext);
   const [list, setList] = useState<ConversationSummary[]>([]);
@@ -185,29 +212,58 @@ function Conversations({
     const message = draft.trim();
     if (message === '' || streaming !== null) return;
     await asking(async () => {
-      let conversation = current;
-      if (!conversation) {
-        const started = await window.assistant.startConversation(
-          'writing',
-          titleOf(message),
-        );
-        conversation = { ...started, messages: [] };
-        setList((list) => [started, ...list]);
-      }
-      const authored: ConversationMessage = {
-        role: 'author',
-        text: message,
-        focus: sceneId ? [sceneId] : [],
-        at: Date.now(),
-      };
-      const asked = conversation;
-      setCurrent({ ...asked, messages: [...asked.messages, authored] });
+      const asked = await showAsked({ text: message });
       setDraft('');
       await showResult(
-        asked.id,
-        window.assistant.ask(asked.id, message, sceneId, onText),
+        asked,
+        window.assistant.ask(asked, message, sceneId, onText),
       );
     });
+  }
+
+  async function review(command: ReviewCommand) {
+    const text = sceneId && reviewText(command, sceneId, names.manuscript);
+    if (!sceneId || !text || streaming !== null) return;
+    await asking(async () => {
+      const asked = await showAsked({ text, command });
+      await showResult(
+        asked,
+        window.assistant.review(asked, command, sceneId, onText),
+      );
+    });
+  }
+
+  /** Whether there is something open to review: a Scene, or its Chapter. */
+  function canReview(command: ReviewCommand): boolean {
+    return !!sceneId && !!reviewText(command, sceneId, names.manuscript);
+  }
+
+  /**
+   * Shows the Author's message in the Conversation it is asked in, which
+   * starts with it if new, while the Assistant answers; resolves with the
+   * Conversation's id.
+   */
+  async function showAsked(
+    message: Pick<ConversationMessage, 'text' | 'command'>,
+  ): Promise<string> {
+    let conversation = current;
+    if (!conversation) {
+      const started = await window.assistant.startConversation(
+        'writing',
+        titleOf(message.text),
+      );
+      conversation = { ...started, messages: [] };
+      setList((list) => [started, ...list]);
+    }
+    const authored: ConversationMessage = {
+      role: 'author',
+      ...message,
+      focus: sceneId ? [sceneId] : [],
+      at: Date.now(),
+    };
+    const { messages } = conversation;
+    setCurrent({ ...conversation, messages: [...messages, authored] });
+    return conversation.id;
   }
 
   async function retry() {
@@ -294,6 +350,7 @@ function Conversations({
             names={names}
             conversationId={current.id}
             shown={shown}
+            onQuote={onQuote}
           />
         ))}
         {streaming !== null && replyText(streaming) !== '' && (
@@ -322,6 +379,24 @@ function Conversations({
           {error}
         </p>
       )}
+      <div className="review-actions">
+        <button
+          onClick={() => void review('review-scene')}
+          disabled={
+            readOnly || streaming !== null || !canReview('review-scene')
+          }
+        >
+          Review Scene
+        </button>
+        <button
+          onClick={() => void review('review-chapter')}
+          disabled={
+            readOnly || streaming !== null || !canReview('review-chapter')
+          }
+        >
+          Review Chapter
+        </button>
+      </div>
       <form className="composer" onSubmit={send}>
         <textarea
           aria-label="Message"
@@ -344,15 +419,16 @@ function Conversations({
 }
 
 /**
- * A message; a reply shows the Proposals it made as cards, and ends with a
- * collapsible line saying what it used and cost, which opens to list what
- * the Assistant saw.
+ * A message; a reply shows the Findings it made as a list, and the Proposals
+ * as cards, and ends with a collapsible line saying what it used and cost,
+ * which opens to list what the Assistant saw.
  */
 function Message({
-  message: { role, text, model, usage, interrupted, saw, proposals },
+  message: { role, text, model, usage, interrupted, saw, findings, proposals },
   names,
   conversationId,
   shown,
+  onQuote,
 }: {
   message: Pick<ConversationMessage, 'role' | 'text'> &
     Partial<ConversationMessage>;
@@ -360,6 +436,7 @@ function Message({
   conversationId?: string;
   /** The Proposal the Author came to see, if any. */
   shown?: string | null;
+  onQuote?(sceneId: string, quote: string): void;
 }) {
   const used = model && usage && (
     <span className="message-usage" aria-label="Usage">
@@ -372,6 +449,18 @@ function Message({
       aria-label={role === 'author' ? 'You' : 'Assistant'}
     >
       {text && <div className="message-text">{text}</div>}
+      {findings && findings.length > 0 && (
+        <ol className="findings" aria-label="Findings">
+          {findings.map((finding, i) => (
+            <FindingItem
+              key={i}
+              finding={finding}
+              manuscript={names.manuscript}
+              onQuote={onQuote}
+            />
+          ))}
+        </ol>
+      )}
       {conversationId &&
         proposals?.map((proposal) => (
           <ProposalCard
@@ -395,5 +484,44 @@ function Message({
         used && <p className="message-used">{used}</p>
       )}
     </article>
+  );
+}
+
+/**
+ * One Finding of a Review: its type, comment, quote and question. The quote
+ * opens its Scene with it selected, while the Scene is there to open.
+ */
+function FindingItem({
+  finding: { type, comment, quote, sceneId, question },
+  manuscript,
+  onQuote,
+}: {
+  finding: Finding;
+  manuscript: Manuscript;
+  onQuote?(sceneId: string, quote: string): void;
+}) {
+  const scene = sceneId ? sceneOf(sceneId, manuscript) : undefined;
+  return (
+    <li className={`finding finding-${type}`}>
+      <span className="finding-type">{FINDING_LABELS[type]}</span>
+      <p className="finding-comment">{comment}</p>
+      {quote &&
+        (scene && !scene.missing && onQuote ? (
+          <button
+            className="finding-quote"
+            title={`Show in “${scene.title}”`}
+            onClick={() => onQuote(scene.id, quote)}
+          >
+            <q>{quote}</q>
+          </button>
+        ) : (
+          <q className="finding-quote">{quote}</q>
+        ))}
+      {question && (
+        <p className="finding-question">
+          <strong>{question}</strong>
+        </p>
+      )}
+    </li>
   );
 }

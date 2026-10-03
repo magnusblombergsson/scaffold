@@ -44,7 +44,7 @@ import { MentionPeek } from './MentionPeek';
 import { flushPendingEdits } from './pending-edits';
 import { ReadOnlyContext } from './read-only';
 import { SaveFailureBanner, SaveIndicator, useSaveStatus } from './SaveStatus';
-import { SceneEditor } from './SceneEditor';
+import { SceneEditor, type QuoteJump } from './SceneEditor';
 import { SettingsDialog } from './SettingsDialog';
 import { StartScreen } from './StartScreen';
 import { entryTitle, StoryBible } from './StoryBible';
@@ -164,9 +164,12 @@ function ProjectView({
     project.view.outlineNotesOpen ?? true,
   );
   const saveStatus = useSaveStatus();
-  /** Where to put the cursor in a Scene as it opens, as where the Author left it. */
+  /**
+   * Where to put the cursor in a Scene as it opens, as where the Author left
+   * it, or which quote of it to select, as a Finding's.
+   */
   const [jump, setJump] = useState<
-    { sceneId: string; cursor: number } | undefined
+    { sceneId: string; cursor?: number; quote?: QuoteJump } | undefined
   >(() => {
     const { lastSceneId, cursor } = project.view;
     return lastSceneId && cursor !== undefined
@@ -187,6 +190,16 @@ function ProjectView({
     setResolving(null);
     setSelected({ kind: 'scene', id: sceneId });
     setJump(cursor === undefined ? undefined : { sceneId, cursor });
+  }
+
+  const quotes = useRef(0);
+  /** Opens a Scene with a quote of its Prose selected, as a Finding's. */
+  function showQuote(sceneId: string, text: string) {
+    setTab('manuscript');
+    setResolving(null);
+    setPeek(null);
+    setSelected({ kind: 'scene', id: sceneId });
+    setJump({ sceneId, quote: { text, count: ++quotes.current } });
   }
 
   const cursorTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -597,6 +610,7 @@ function ProjectView({
                 focusAt={
                   jump?.sceneId === open.scene.id ? jump.cursor : undefined
                 }
+                quote={jump?.sceneId === open.scene.id ? jump.quote : undefined}
                 onCursor={reportCursor}
               />
             </main>
@@ -606,6 +620,7 @@ function ProjectView({
             sceneId={open && !open.scene.missing ? open.scene.id : null}
             names={{ manuscript, entries }}
             show={showProposal}
+            onQuote={showQuote}
           />
         </div>
         {peek && (

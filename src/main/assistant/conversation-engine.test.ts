@@ -1,10 +1,10 @@
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { instantClock } from '../project-store/clock';
 import { nodeFileSystem, type FileSystem } from '../project-store/file-system';
-import { createProject } from '../project-store/project-store';
+import { createProject, openProject } from '../project-store/project-store';
 import { createConversationEngine } from './conversation-engine';
 import { fakeProvider, type FakeReply } from './fake-provider';
 
@@ -548,5 +548,197 @@ describe('Proposals in a reply', () => {
     expect(skeleton.text).toContain(`Id: ${chapterId}`);
     expect(skeleton.text).toContain(`Id: ${sceneId}`);
     expect(skeleton.text).toContain('Id: project');
+  });
+});
+
+describe('Reviews', () => {
+  const finding = (json: object) =>
+    `\`\`\`finding\n${JSON.stringify(json)}\n\`\`\``;
+
+  /** A setUp with a second Scene in the first Chapter, both with Prose. */
+  async function withTwoScenes(reply: (n: number) => FakeReply) {
+    const setup = await setUp(reply);
+    const { store, chapterId, sceneId } = setup;
+    const { id: otherId } = await store.createScene(chapterId, 1, 'Letter');
+    await store.write(
+      { kind: 'scene', id: sceneId },
+      {
+        id: sceneId,
+        markdown: 'Anna waited on the *quay*.\n\n"Indeed," said Mira.',
+      },
+    );
+    await store.write(
+      { kind: 'scene', id: otherId },
+      { id: otherId, markdown: 'The letter came on Tuesday.' },
+    );
+    return { ...setup, otherId };
+  }
+
+  it('Review Scene logs the ask with its command, sends the Review context, and logs the Findings in order, each with the Scene it quotes', async () => {
+    const { store, engine, provider, sceneId, chapterId } = await withTwoScenes(
+      () => [
+        'Three things.\n',
+        finding({
+          type: 'voice',
+          scene: sceneId,
+          quote: '“Indeed,” said Mira.',
+          comment: 'Mira never says indeed.',
+          question: 'Is she putting it on?',
+        }),
+        finding({
+          type: 'contradiction',
+          quote: 'waited on the quay',
+          comment: 'The Outline has her on the ferry.',
+          question: 'Which holds?',
+        }),
+        finding({ type: 'not-yet-covered', comment: 'Mira never leaves.' }),
+      ],
+    );
+    const { id } = await store.startConversation('writing', 'Review');
+
+    const { reply } = await engine.review(
+      id,
+      'review-scene',
+      { sceneId },
+      () => {},
+    );
+
+    const [asked, replied] = (await store.readConversation(id)).messages;
+    expect(asked).toMatchObject({
+      role: 'author',
+      text: 'Review Scene “Scene 1”',
+      command: 'review-scene',
+      focus: [sceneId],
+    });
+    expect(replied).toEqual(reply);
+    expect(reply).toMatchObject({ text: 'Three things.' });
+    expect(reply!.findings).toEqual([
+      {
+        type: 'contradiction',
+        sceneId,
+        quote: 'waited on the quay',
+        comment: 'The Outline has her on the ferry.',
+        question: 'Which holds?',
+      },
+      {
+        type: 'voice',
+        sceneId,
+        quote: '“Indeed,” said Mira.',
+        comment: 'Mira never says indeed.',
+        question: 'Is she putting it on?',
+      },
+      { type: 'not-yet-covered', sceneId, comment: 'Mira never leaves.' },
+    ]);
+    const [request] = provider.requests;
+    expect(request.system[0].text).toMatch(/at most 7 Findings/);
+    expect(request.messages).toEqual([
+      {
+        role: 'user',
+        content: expect.stringMatching(
+          /^Review Scene “Scene 1”\n\nReview the Scene in focus/,
+        ),
+      },
+    ]);
+    expect(reply!.saw!.units).toContainEqual({
+      kind: 'outline',
+      id: chapterId,
+    });
+  });
+
+  it('Review Chapter sends every Scene of the Chapter, and ties each quote to the Scene it is in', async () => {
+    const { store, engine, sceneId, otherId } = await withTwoScenes(() => [
+      finding({
+        type: 'missing',
+        scene: sceneId,
+        quote: 'The letter came',
+        comment: 'Nobody reads it.',
+      }),
+      finding({
+        type: 'too-much',
+        scene: 'not-a-scene',
+        quote: 'nowhere in the Prose',
+        comment: 'Hm.',
+      }),
+    ]);
+    const { id } = await store.startConversation('writing', 'Review');
+
+    const { reply } = await engine.review(
+      id,
+      'review-chapter',
+      { sceneId },
+      () => {},
+    );
+
+    expect(reply!.saw!.units).toContainEqual({ kind: 'scene', id: otherId });
+    expect(reply!.findings).toEqual([
+      {
+        type: 'missing',
+        sceneId: otherId,
+        quote: 'The letter came',
+        comment: 'Nobody reads it.',
+      },
+      { type: 'too-much', quote: 'nowhere in the Prose', comment: 'Hm.' },
+    ]);
+    const [asked] = (await store.readConversation(id)).messages;
+    expect(asked.text).toBe('Review Chapter “Chapter 1”');
+  });
+
+  it('never makes Proposals in a Review, but may in the answer that follows it', async () => {
+    let annaId = '';
+    const proposal = () =>
+      `\`\`\`proposal\n${JSON.stringify({ entry: annaId, field: 'description', append: 'Brown eyes.' })}\n\`\`\``;
+    const { store, engine, sceneId } = await withTwoScenes((n) => [
+      n === 0 ? 'One thing.' : 'Then so.',
+      proposal(),
+    ]);
+    ({ id: annaId } = await store.createEntry('character', 'Anna'));
+    const { id } = await store.startConversation('writing', 'Review');
+
+    await engine.review(id, 'review-scene', { sceneId }, () => {});
+    await engine.askAssistant(id, 'The Prose is right.', { sceneId }, () => {});
+
+    const messages = (await store.readConversation(id)).messages;
+    expect(messages.map((m) => m.proposals?.length ?? 0)).toEqual([0, 0, 0, 1]);
+  });
+
+  it('a retry reviews again', async () => {
+    const { store, engine, provider, sceneId } = await withTwoScenes((n) =>
+      n === 0 ? { text: [], fail: 'offline' } : ['Fine.'],
+    );
+    const { id } = await store.startConversation('writing', 'Review');
+    await engine.review(id, 'review-chapter', { sceneId }, () => {});
+
+    await engine.retry(id, () => {});
+
+    expect(provider.requests[1]).toEqual(provider.requests[0]);
+  });
+
+  it('refuses a Review with no Scene in focus, or of the Chapter of an Unplaced Scene', async () => {
+    const { projectPath, store: first } = await setUp();
+    await first.close();
+    const unplaced = '0b9f4a52-3c1e-4d7a-9f5e-2a6c8b1d4e70';
+    await writeFile(
+      path.join(projectPath, 'scenes', `${unplaced}.md`),
+      `---\nid: ${unplaced}\nformat: 1\n---\nFrom the other computer.`,
+    );
+    const clock = instantClock(1_000);
+    const store = await openProject(projectPath, { fs: nodeFileSystem, clock });
+    const provider = fakeProvider(() => ['Hm.']);
+    const engine = createConversationEngine({
+      store,
+      provider,
+      model: () => 'claude-opus-5-5',
+      clock,
+    });
+    const { id } = await store.startConversation('writing', 'Review');
+
+    await expect(
+      engine.review(id, 'review-scene', { sceneId: null }, () => {}),
+    ).rejects.toThrow(/no Scene/);
+    await expect(
+      engine.review(id, 'review-chapter', { sceneId: unplaced }, () => {}),
+    ).rejects.toThrow(/no Chapter/);
+    expect(provider.requests).toHaveLength(0);
+    expect((await store.readConversation(id)).messages).toEqual([]);
   });
 });

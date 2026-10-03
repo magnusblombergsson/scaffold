@@ -9,6 +9,7 @@ import type {
   ValueOf,
   Visibility,
 } from './project-types';
+import type { ReviewCommand } from './finding';
 import type { ModelId } from './models';
 import type { PendingProposal, ProposedValue } from './proposal';
 
@@ -391,6 +392,17 @@ export interface AssistantApi {
     onText: (text: string) => void,
   ): Promise<AskResult>;
   /**
+   * Asks for a Review of the Scene open in the editor, or of its Chapter,
+   * as `ask` does; the reply holds the Review's Findings. Refused when no
+   * Scene is open, or for a Chapter Review, when it is in no Chapter.
+   */
+  review(
+    conversationId: string,
+    command: ReviewCommand,
+    sceneId: string | null,
+    onText: (text: string) => void,
+  ): Promise<AskResult>;
+  /**
    * Asks again after a failed call, for the Author's last message, as `ask`
    * does; the answer is a new turn.
    */
@@ -450,6 +462,7 @@ export const channel = {
   readConversation: 'assistant:readConversation',
   startConversation: 'assistant:startConversation',
   ask: 'assistant:ask',
+  review: 'assistant:review',
   retry: 'assistant:retry',
   acceptProposal: 'assistant:acceptProposal',
   rejectProposal: 'assistant:rejectProposal',

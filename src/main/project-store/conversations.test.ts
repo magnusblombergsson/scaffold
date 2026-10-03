@@ -155,6 +155,58 @@ describe('Conversation logs', () => {
     });
   });
 
+  it('logs a Review in the message that asked for it, and its Findings in the reply, and leaves out what can’t be read', async () => {
+    const { projectPath, store } = await newProject();
+    const sceneId = store.manuscript().chapters[0].scenes[0].id;
+    const { id } = await store.startConversation('writing', 'Review');
+    const findings = [
+      {
+        type: 'voice' as const,
+        sceneId,
+        quote: '“Indeed.”',
+        comment: 'Mira never says indeed.',
+        question: 'Is she putting it on?',
+      },
+    ];
+    await store.appendMessage(id, {
+      role: 'author',
+      text: 'Review Scene “Scene 1”',
+      command: 'review-scene',
+      focus: [sceneId],
+      at: 2_000,
+    });
+    await store.appendMessage(id, {
+      role: 'assistant',
+      text: 'One thing.',
+      focus: [sceneId],
+      at: 2_000,
+      findings,
+    });
+    await appendFile(
+      path.join(projectPath, 'conversations', `${id}.jsonl`),
+      `${JSON.stringify({ type: 'message', role: 'author', text: 'Review!', command: 'review-book', focus: [], at: 3_000 })}
+${JSON.stringify({ type: 'message', role: 'assistant', text: 'Odd.', focus: [], at: 3_000, findings: [{ type: 'typo' }] })}
+`,
+    );
+
+    const { messages } = await store.readConversation(id);
+
+    expect(messages[0].command).toBe('review-scene');
+    expect(messages[1].findings).toEqual(findings);
+    expect(messages[2]).toEqual({
+      role: 'author',
+      text: 'Review!',
+      focus: [],
+      at: 3_000,
+    });
+    expect(messages[3]).toEqual({
+      role: 'assistant',
+      text: 'Odd.',
+      focus: [],
+      at: 3_000,
+    });
+  });
+
   it('lists Conversations by scanning conversations/, latest first, also after reopening', async () => {
     const { projectPath, store, clock } = await newProject();
     const first = await store.startConversation('writing', 'First');

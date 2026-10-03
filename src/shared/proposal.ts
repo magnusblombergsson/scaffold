@@ -269,27 +269,36 @@ export function textValue(field: ProposalField, text: string): FieldValue {
   return text;
 }
 
-// How the Assistant writes a Proposal in its reply: a fenced `proposal` block
-// holding one JSON object, which the engine takes out of the text.
+// How the Assistant writes a Proposal or a Finding in its reply: a fenced
+// `proposal` or `finding` block holding one JSON object, which the engine
+// takes out of the text.
 
-const BLOCK = /```proposal[^\n]*\n([\s\S]*?)\n?```/g;
-const OPEN_BLOCK = /```proposal[\s\S]*$/;
+const BLOCK = /```(proposal|finding)[^\n]*\n([\s\S]*?)\n?```/g;
+const OPEN_BLOCK = /```(?:proposal|finding)[\s\S]*$/;
 
-/** A reply's text without its proposal blocks, and what each block held, in order. */
-export function splitReply(reply: string): { text: string; blocks: unknown[] } {
-  const blocks: unknown[] = [];
-  const text = reply.replace(BLOCK, (_, json: string) => {
+/**
+ * A reply's text without its blocks, and what each block held, in order:
+ * the proposal blocks as `proposals`, the finding blocks as `findings`.
+ */
+export function splitReply(reply: string): {
+  text: string;
+  proposals: unknown[];
+  findings: unknown[];
+} {
+  const proposals: unknown[] = [];
+  const findings: unknown[] = [];
+  const text = reply.replace(BLOCK, (_, kind: string, json: string) => {
     try {
-      blocks.push(JSON.parse(json));
+      (kind === 'finding' ? findings : proposals).push(JSON.parse(json));
     } catch {
-      // The Assistant wrote it badly: there is nothing to propose.
+      // The Assistant wrote it badly: there is nothing to take.
     }
     return '';
   });
-  return { text: text === reply ? text : tidy(text), blocks };
+  return { text: text === reply ? text : tidy(text), proposals, findings };
 }
 
-/** A reply's text as it streams in, without its proposal blocks, even one not yet finished. */
+/** A reply's text as it streams in, without its blocks, even one not yet finished. */
 export function replyText(reply: string): string {
   const { text } = splitReply(reply);
   const open = text.replace(OPEN_BLOCK, '');

@@ -1058,6 +1058,60 @@ p.message-used,
   color: #b3261e;
 }
 
+.review-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.findings {
+  margin: 0.4rem 0 0;
+  padding-left: 1.4rem;
+  white-space: normal;
+}
+
+.finding + .finding {
+  margin-top: 0.6rem;
+}
+
+.finding-type {
+  font-size: 0.75em;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+.finding-contradiction .finding-type {
+  color: #b3261e;
+}
+
+.finding-comment,
+.finding-question {
+  margin: 0.15rem 0 0;
+}
+
+.finding-quote {
+  display: block;
+  margin-top: 0.2rem;
+  padding: 0 0 0 0.5rem;
+  border: none;
+  border-left: 2px solid var(--line);
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-style: italic;
+  text-align: left;
+}
+
+button.finding-quote {
+  cursor: pointer;
+}
+
+button.finding-quote:hover {
+  border-left-color: var(--muted);
+  text-decoration: underline;
+}
+
 .composer {
   display: flex;
   flex-direction: column;

@@ -1,4 +1,5 @@
 import { Editor, type Extensions, type JSONContent } from '@tiptap/core';
+import type { Node } from '@tiptap/pm/model';
 import { EditorContent } from '@tiptap/react';
 import { useContext, useEffect, useState } from 'react';
 import {
@@ -30,6 +31,11 @@ type Props = {
   autofocus?: boolean;
   /** Where to put the cursor when it gets focus, instead of where it was. */
   focusAt?: number;
+  /**
+   * What to select when it gets focus, instead: a range found in the
+   * editor's content, if found; it is scrolled into view.
+   */
+  select?(doc: Node): { from: number; to: number } | null;
   /** Called with the cursor's position as the Author moves it. */
   onCursor?(position: number): void;
   className?: string;
@@ -53,6 +59,7 @@ export function UnitEditor({
   attributes,
   autofocus,
   focusAt,
+  select,
   onCursor,
   className,
 }: Props) {
@@ -121,9 +128,15 @@ export function UnitEditor({
   }, [editor, onCursor]);
 
   useEffect(() => {
+    if (!autofocus) return;
+    const range = select?.(editor.state.doc);
+    if (range) {
+      editor.chain().focus().setTextSelection(range).scrollIntoView().run();
+      return;
+    }
     // A kept editor's cursor stays where the Author left it.
-    if (autofocus) editor.commands.focus(focusAt ?? (created ? 'end' : null));
-  }, [editor, created, autofocus, focusAt]);
+    editor.commands.focus(focusAt ?? (created ? 'end' : null));
+  }, [editor, created, autofocus, focusAt, select]);
 
   return <EditorContent editor={editor} className={className} />;
 }

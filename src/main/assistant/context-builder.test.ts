@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ConversationMessage } from '../../shared/conversation';
+import { findingBlock } from '../../shared/finding';
 import { PROJECT_OUTLINE } from '../../shared/project-types';
 import { instantClock } from '../project-store/clock';
 import { nodeFileSystem } from '../project-store/file-system';
@@ -391,6 +392,23 @@ describe('Prose by Mode and command', () => {
     expect(sent(context)).not.toContain('Who sent it?');
   });
 
+  it('Writing · Review: names each Scene’s Prose by its Id, so a Finding can say where its quote is', async () => {
+    const { view, scenes } = await fixture();
+
+    const context = await buildContext(view, {
+      mode: 'writing',
+      command: 'review-chapter',
+      sceneId: scenes.letter,
+      messages: [message('author', 'Review Chapter “Arrival”')],
+    });
+
+    const focus = context.system[3].text;
+    expect(focus).toContain(`Id: ${scenes.harbour}\nAnnie waited on the quay.`);
+    expect(focus).toContain(
+      `Id: ${scenes.letter}\nThe letter came on Tuesday.`,
+    );
+  });
+
   it('Interview: the Prose of a Scene or Chapter in focus, and none otherwise', async () => {
     const { view, scenes, chapters, entries } = await fixture();
     const ask = (focus: InterviewFocus) =>
@@ -450,6 +468,115 @@ describe('order and caching', () => {
       { role: 'user', content: 'Second?' },
     ]);
     expect(context.saw.messages).toBe(2);
+  });
+
+  it('sends a Review the Author asked for as what to do, and the Findings of a reply back as the blocks they came in', async () => {
+    const { view, scenes } = await fixture();
+    const finding = {
+      type: 'missing' as const,
+      sceneId: scenes.harbour,
+      quote: 'Annie waited on the quay.',
+      comment: 'No ferry.',
+      question: 'Does it come?',
+    };
+
+    const context = await buildContext(view, {
+      mode: 'writing',
+      command: 'question',
+      sceneId: scenes.harbour,
+      messages: [
+        {
+          ...message('author', 'Review Scene “Harbour”'),
+          command: 'review-scene',
+        },
+        { ...message('assistant', 'One thing.'), findings: [finding] },
+        {
+          ...message('author', 'Review Chapter “Arrival”'),
+          command: 'review-chapter',
+        },
+      ],
+    });
+
+    const [asked, answered, again] = context.messages.map((m) => m.content);
+    expect(asked).toMatch(
+      /^Review Scene “Harbour”\n\nReview the Scene in focus/,
+    );
+    expect(answered).toBe(`One thing.\n\n${findingBlock(finding)}`);
+    expect(again).toMatch(
+      /^Review Chapter “Arrival”\n\nReview the Chapter in focus/,
+    );
+  });
+
+  it('starts each Review fresh: no earlier Findings are sent with it', async () => {
+    const { view, scenes } = await fixture();
+
+    const context = await buildContext(view, {
+      mode: 'writing',
+      command: 'review-scene',
+      sceneId: scenes.harbour,
+      messages: [
+        {
+          ...message('author', 'Review Scene “Harbour”'),
+          command: 'review-scene',
+        },
+        {
+          ...message('assistant', 'One thing.'),
+          findings: [{ type: 'missing', comment: 'No ferry.' }],
+        },
+        {
+          ...message('author', 'Review Scene “Harbour”'),
+          command: 'review-scene',
+        },
+      ],
+    });
+
+    expect(context.messages[1].content).toBe('One thing.');
+    expect(sent(context)).not.toContain('No ferry.');
+  });
+
+  it('answers a question that follows a Chapter Review, as for the rest of its Findings, with that Chapter', async () => {
+    const { view, scenes, chapters } = await fixture();
+    const review = {
+      ...message('author', 'Review Chapter “Arrival”'),
+      command: 'review-chapter' as const,
+      focus: [scenes.letter],
+    };
+
+    const context = await buildContext(view, {
+      mode: 'writing',
+      command: 'question',
+      sceneId: scenes.letter,
+      messages: [
+        review,
+        message('assistant', 'Two of nine.'),
+        message('author', 'And the rest?'),
+      ],
+    });
+
+    expect(context.saw.units).toEqual(
+      expect.arrayContaining([
+        { kind: 'notes', id: chapters.arrival },
+        { kind: 'scene', id: scenes.harbour },
+        { kind: 'scene', id: scenes.letter },
+      ]),
+    );
+    expect(context.messages[1].content).toBe('Two of nine.');
+    const later = await buildContext(view, {
+      mode: 'writing',
+      command: 'question',
+      sceneId: scenes.letter,
+      messages: [
+        review,
+        message('assistant', 'Two of nine.'),
+        message('author', 'And the rest?'),
+        message('assistant', 'Seven more.'),
+        message('author', 'Why the letter?'),
+      ],
+    });
+    expect(later.saw.units).not.toContainEqual({
+      kind: 'scene',
+      id: scenes.harbour,
+    });
   });
 
   it('puts the skeleton in Manuscript order, the story’s Outline first', async () => {

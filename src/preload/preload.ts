@@ -134,6 +134,16 @@ const assistant: AssistantApi = {
     streamReply(onText, (askId) =>
       ipcRenderer.invoke(channel.ask, askId, conversationId, message, sceneId),
     ),
+  review: (conversationId, command, sceneId, onText) =>
+    streamReply(onText, (askId) =>
+      ipcRenderer.invoke(
+        channel.review,
+        askId,
+        conversationId,
+        command,
+        sceneId,
+      ),
+    ),
   retry: (conversationId, onText) =>
     streamReply(onText, (askId) =>
       ipcRenderer.invoke(channel.retry, askId, conversationId),

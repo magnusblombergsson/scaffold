@@ -7,6 +7,11 @@ import {
   type Saw,
 } from '../../shared/conversation';
 import {
+  isFinding,
+  REVIEW_COMMANDS,
+  type ReviewCommand,
+} from '../../shared/finding';
+import {
   asNewEntry,
   isFieldValue,
   isProposalField,
@@ -282,20 +287,25 @@ function acceptedOf(
 }
 
 /**
- * The message an event holds; what is known of a turn's cost, and what the
- * Assistant saw, is kept if readable.
+ * The message an event holds; the Review it asked for, what is known of a
+ * turn's cost, what the Assistant saw and the Findings it made are kept if
+ * readable.
  */
 function messageOf(event: MessageEvent): ConversationMessage {
-  const { role, text, focus, at, model, usage, interrupted, saw } = event;
+  const { role, text, command, focus, at, model, usage, interrupted, saw } =
+    event;
+  const { findings } = event;
   return {
     role,
     text,
+    ...(REVIEW_COMMANDS.includes(command as ReviewCommand) && { command }),
     focus,
     at,
     ...(typeof model === 'string' && { model }),
     ...(isUsage(usage) && { usage }),
     ...(interrupted === true && { interrupted }),
     ...(isSaw(saw) && { saw }),
+    ...(Array.isArray(findings) && findings.every(isFinding) && { findings }),
   };
 }
 

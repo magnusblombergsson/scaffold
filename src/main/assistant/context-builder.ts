@@ -4,6 +4,7 @@ import type {
   Saw,
   SawUnit,
 } from '../../shared/conversation';
+import { findingBlock, type ReviewCommand } from '../../shared/finding';
 import { mentionMatcher } from '../../shared/mentions';
 import { proposalBlock, type ProposalView } from '../../shared/proposal';
 import {
@@ -22,14 +23,14 @@ import {
 } from '../../shared/project-types';
 import type { AssistantView } from '../project-store/project-store';
 import type { PromptBlock, PromptMessage } from './provider';
-import { MODE_PROMPTS } from './system-prompts';
+import { MODE_PROMPTS, REVIEW_ASKS } from './system-prompts';
 
 // The context builder (MVP spec §10): what the Assistant is sent for one
 // turn, built afresh every turn from the Project as it is now. It reads
 // through the Assistant's view, which has no private notes.
 
 /** What the Author asks for in Writing: a free question, or a Review. */
-export type Command = 'question' | 'review-scene' | 'review-chapter';
+export type Command = 'question' | ReviewCommand;
 
 /** What an Interview is about: one Entry, one Entry type, a Chapter or Scene, or open. */
 export type InterviewFocus =
@@ -89,9 +90,17 @@ export async function buildContext(
     { text: skeleton.text, cache: true },
   ];
   if (focus.length > 0) system.push({ text: focusBlock(focus) });
+  // Every Review starts fresh, without the Findings of earlier ones.
+  const reviewing =
+    request.mode === 'writing' && request.command !== 'question';
   const messages: PromptMessage[] = sent.map((m) => ({
     role: m.role === 'author' ? 'user' : 'assistant',
-    content: [m.text, ...(m.proposals ?? []).map(proposalText)]
+    content: [
+      m.text,
+      m.command && REVIEW_ASKS[m.command],
+      ...(reviewing ? [] : (m.findings ?? []).map(findingBlock)),
+      ...(m.proposals ?? []).map(proposalText),
+    ]
       .filter(Boolean)
       .join('\n\n'),
   }));
@@ -274,7 +283,7 @@ async function inFocus(
     }
     if (!place.scene.missing) {
       const of = place.chapter ? ` in Chapter “${place.chapter.title}”` : '';
-      await add({ kind: 'scene', id }, `Prose of ${name}${of}`);
+      await add({ kind: 'scene', id }, `Prose of ${name}${of}\nId: ${id}`);
     }
   }
   /** Each Scene's Prose in a Chapter, and with `context`, the Outlines and the Chapter's Notes. */
@@ -309,6 +318,16 @@ async function inFocus(
       await scene(sceneId, true);
     }
     if (command === 'question') {
+      // A question right after a Chapter Review, as for the rest of its
+      // Findings, is about that Chapter too.
+      const previous = request.messages
+        .slice(0, -1)
+        .findLast((m) => m.role === 'author');
+      if (previous?.command === 'review-chapter') {
+        const reviewed = previous.focus[0];
+        const id = reviewed && where.scenes.get(reviewed)?.chapter?.id;
+        if (id) await chapter(id, true);
+      }
       const asked = request.messages.at(-1)?.text ?? '';
       for (const id of atMentioned(asked, manuscript)) {
         if (where.chapters.has(id)) await chapter(id, true);
@@ -389,7 +408,10 @@ export function readableScene(
   return !!place && !place.scene.missing;
 }
 
-/** For a log that names the Mode: the request a Mode's turn makes by default. */
+/**
+ * For a log that names the Mode: the request a Mode's turn makes by default.
+ * In Writing, a Review when the Author's message asks for one.
+ */
 export function defaultRequest(
   mode: Mode,
   sceneId: string | null,
@@ -397,5 +419,6 @@ export function defaultRequest(
 ): ContextRequest {
   if (mode === 'brainstorm') return { mode, messages };
   if (mode === 'interview') return { mode, focus: { kind: 'open' }, messages };
-  return { mode, command: 'question', sceneId, messages };
+  const command = messages.findLast((m) => !m.interrupted)?.command;
+  return { mode, command: command ?? 'question', sceneId, messages };
 }

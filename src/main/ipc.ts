@@ -7,6 +7,7 @@ import {
 } from 'electron';
 import { channel, type AcceptOptions, type ProjectApi } from '../shared/api';
 import type { Mode } from '../shared/conversation';
+import type { ReviewCommand } from '../shared/finding';
 import { createConversationEngine } from './assistant/conversation-engine';
 import { claudeProvider } from './assistant/claude-provider';
 import { systemClock } from './project-store/clock';
@@ -127,6 +128,22 @@ export function registerAssistantIpc(): void {
       engineOf(event.sender).askAssistant(
         conversationId,
         message,
+        { sceneId },
+        replyTo(event.sender, askId),
+      ),
+  );
+  ipcMain.handle(
+    channel.review,
+    (
+      event,
+      askId: number,
+      conversationId: string,
+      command: ReviewCommand,
+      sceneId: string | null,
+    ) =>
+      engineOf(event.sender).review(
+        conversationId,
+        command,
         { sceneId },
         replyTo(event.sender, askId),
       ),
