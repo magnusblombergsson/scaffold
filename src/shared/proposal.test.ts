@@ -3,6 +3,9 @@ import type { EntryValue } from './project-types';
 import {
   fieldDiff,
   fieldOf,
+  newEntryOf,
+  outlineChangeOf,
+  proposalBlock,
   proposalOf,
   replyText,
   splitReply,
@@ -108,6 +111,7 @@ describe('proposalOf', () => {
         anna,
       ),
     ).toEqual({
+      kind: 'field',
       entryId: 'anna',
       field: 'description',
       base: 'Her sister.',
@@ -154,6 +158,93 @@ describe('proposalOf', () => {
     ]) {
       expect(proposalOf(block, anna)).toBeNull();
     }
+  });
+});
+
+describe('newEntryOf', () => {
+  it('takes a new Entry’s type, name and description, on one line', () => {
+    expect(
+      newEntryOf({
+        create: 'character',
+        name: ' Mira ',
+        description: 'Anna’s younger sister.\nShe stayed.',
+      }),
+    ).toEqual({
+      type: 'character',
+      name: 'Mira',
+      description: 'Anna’s younger sister. She stayed.',
+    });
+    expect(newEntryOf({ create: 'place', name: 'The harbour' })).toEqual({
+      type: 'place',
+      name: 'The harbour',
+      description: '',
+    });
+  });
+
+  it('takes nothing without a known type or a name', () => {
+    for (const block of [
+      { create: 'villain', name: 'Mira' },
+      { create: 'character', name: '  ' },
+      { create: 'character' },
+      { entry: 'anna', field: 'description', value: 'New.' },
+      null,
+    ]) {
+      expect(newEntryOf(block)).toBeNull();
+    }
+  });
+});
+
+describe('outlineChangeOf', () => {
+  it('replaces the whole Outline body, unless it is the same', () => {
+    expect(
+      outlineChangeOf(
+        { outline: 'harbour', value: '- She waits.\n- The ferry comes.' },
+        { id: 'harbour', body: '- She waits.', meta: {} },
+      ),
+    ).toEqual({
+      kind: 'outline',
+      outlineId: 'harbour',
+      base: '- She waits.',
+      proposed: '- She waits.\n- The ferry comes.',
+    });
+    expect(
+      outlineChangeOf(
+        { outline: 'harbour', value: '- She waits.' },
+        { id: 'harbour', body: '- She waits.', meta: {} },
+      ),
+    ).toBeNull();
+  });
+
+  it('takes nothing for another Outline, or without text', () => {
+    const outline = { id: 'harbour', body: '', meta: {} };
+    expect(
+      outlineChangeOf({ outline: 'wreck', value: '- x' }, outline),
+    ).toBeNull();
+    expect(
+      outlineChangeOf({ outline: 'harbour', value: 3 }, outline),
+    ).toBeNull();
+  });
+});
+
+describe('proposalBlock', () => {
+  it('writes each kind of Proposal as the Assistant would', () => {
+    expect(
+      proposalBlock({
+        kind: 'new-entry',
+        entryId: 'mira',
+        proposed: { type: 'character', name: 'Mira', description: 'Young.' },
+      }),
+    ).toBe(
+      '```proposal\n{"create":"character","name":"Mira","description":"Young."}\n```',
+    );
+    expect(
+      proposalBlock({
+        kind: 'outline',
+        outlineId: 'harbour',
+        base: '',
+        proposed: '- She waits.',
+      }),
+    ).toBe('```proposal\n{"outline":"harbour","value":"- She waits."}\n```');
   });
 });
 

@@ -126,6 +126,88 @@ test('the Assistant proposes changes to an Entry, and the Author accepts, edits 
   await app.close();
 });
 
+test('the Assistant proposes a new Entry and a Scene’s Outline, and the Author accepts them', async () => {
+  const projectPath = path.join(tempDir(), 'My Novel');
+  const app = await launch(tempDir(), { anthropicUrl: anthropic.url });
+  await answerDialogs(app, projectPath);
+  const page = await app.firstWindow();
+  await page.getByRole('button', { name: 'New Project…' }).click();
+  await expect(page.getByLabel('Prose')).toBeFocused();
+  await fill(page, 'Outline', '- She waits.');
+  await page.keyboard.press('ControlOrMeta+s');
+  await expect(page.locator('.save-status.confirmed')).toBeVisible();
+  const assistant = await addKey(page);
+  const { tree } = JSON.parse(
+    await readFile(path.join(projectPath, 'project.json'), 'utf8'),
+  ) as { tree: { chapters: { scenes: { id: string }[] }[] } };
+  const sceneId = tree.chapters[0].scenes[0].id;
+
+  anthropic.calls.push({
+    reply: [
+      'Then she needs an Entry, and the Scene an Outline.\n\n',
+      block({
+        create: 'character',
+        name: 'Mira',
+        description: 'Anna’s younger sister.',
+      }),
+      '\n',
+      block({ outline: sceneId, value: '- She waits.\n- Mira does not come.' }),
+    ],
+  });
+  await assistant
+    .getByRole('textbox', { name: 'Message' })
+    .fill('Anna waits for her sister Mira, who does not come.');
+  await assistant.getByRole('button', { name: 'Send' }).click();
+
+  const reply = assistant.getByRole('article', { name: 'Assistant' });
+  const mira = reply.getByRole('region', {
+    name: 'Proposal: New Character · Mira',
+  });
+  await expect(mira.getByLabel('Change')).toHaveText('Anna’s younger sister.');
+  const outline = reply.getByRole('region', {
+    name: 'Proposal: Scene “Scene 1” › Outline',
+  });
+  await expect(outline.getByRole('group', { name: 'Before' })).toContainText(
+    '- She waits.',
+  );
+  await expect(outline.getByRole('group', { name: 'Proposed' })).toContainText(
+    'Mira does not come.',
+  );
+
+  await mira.getByRole('button', { name: 'Edit…' }).click();
+  await mira
+    .getByRole('textbox', { name: 'Edited description' })
+    .fill('Anna’s younger sister, who stayed.');
+  await mira.getByRole('button', { name: 'Accept edited' }).click();
+  await expect(mira).toContainText('✓ Accepted (edited)');
+  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await expect(
+    page
+      .getByRole('navigation', { name: 'Story Bible' })
+      .getByRole('button', { name: 'Mira', exact: true }),
+  ).toBeVisible();
+
+  await outline.getByRole('button', { name: 'Accept' }).click();
+  await expect(outline).toContainText('✓ Accepted');
+  // The open Scene's Outline shows it.
+  await expect(page.getByLabel('Outline', { exact: true })).toContainText(
+    'Mira does not come.',
+  );
+  const [outlineFile] = await readdir(path.join(projectPath, 'outlines'));
+  expect(
+    await readFile(path.join(projectPath, 'outlines', outlineFile), 'utf8'),
+  ).toContain('- She waits.\n- Mira does not come.');
+
+  const events = (await logLines(projectPath)).map((e) => e.type);
+  expect(events.slice(-4)).toEqual([
+    'proposal.proposed',
+    'proposal.proposed',
+    'proposal.accepted',
+    'proposal.accepted',
+  ]);
+  await app.close();
+});
+
 test('a Proposal shown from an Entry opens at its card in the Conversation', async () => {
   const projectPath = path.join(tempDir(), 'My Novel');
   const app = await launch(tempDir(), { anthropicUrl: anthropic.url });

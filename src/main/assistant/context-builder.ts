@@ -223,13 +223,17 @@ async function outlineSkeleton(
     return body.trim() || '(No Outline.)';
   }
   const parts = [
-    'The Outline skeleton: the Outline of the whole story, then each Chapter and Scene in Manuscript order with its Outline. It holds no Prose.',
-    `## The story\n${await outline(PROJECT_OUTLINE)}`,
+    'The Outline skeleton: the Outline of the whole story, then each Chapter and Scene in Manuscript order with its Outline, each under its Id. It holds no Prose.',
+    `## The story\nId: ${PROJECT_OUTLINE}\n${await outline(PROJECT_OUTLINE)}`,
   ];
   for (const chapter of manuscript.chapters) {
-    parts.push(`## Chapter “${chapter.title}”\n${await outline(chapter.id)}`);
+    parts.push(
+      `## Chapter “${chapter.title}”\nId: ${chapter.id}\n${await outline(chapter.id)}`,
+    );
     for (const scene of chapter.scenes) {
-      parts.push(`### Scene “${scene.title}”\n${await outline(scene.id)}`);
+      parts.push(
+        `### Scene “${scene.title}”\nId: ${scene.id}\n${await outline(scene.id)}`,
+      );
     }
   }
   return { text: parts.join('\n\n'), texts };

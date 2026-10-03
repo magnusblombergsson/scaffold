@@ -54,6 +54,7 @@ async function proposed() {
     at: 1_000,
   });
   const proposal: Proposal = {
+    kind: 'field',
     id: 'p1',
     entryId: annaId,
     field: 'description',
@@ -103,9 +104,10 @@ describe('Proposals in a Conversation', () => {
       at: 1_000,
     });
     expect(await cardOf(store, conversationId)).toEqual({
+      kind: 'field',
       id: 'p1',
       entryId: annaId,
-      entryName: 'Anna',
+      name: 'Anna',
       field: 'description',
       base: 'Her sister.',
       proposed: 'Her sister.\nOlder by two years.',
@@ -256,7 +258,7 @@ describe('Proposals in a Conversation', () => {
     await store.trashEntry(annaId);
 
     expect(await cardOf(store, conversationId)).toMatchObject({
-      entryName: 'Anna',
+      name: 'Anna',
       state: { kind: 'pending', orphaned: 'trashed' },
     });
     await expect(store.acceptProposal(conversationId, 'p1')).rejects.toThrow(
@@ -271,6 +273,7 @@ describe('Proposals in a Conversation', () => {
   it('shows a Proposal for a field the Entry no longer has as orphaned', async () => {
     const { store, annaId, conversationId } = await proposed();
     await store.appendProposal(conversationId, {
+      kind: 'field',
       id: 'p2',
       entryId: annaId,
       field: 'voice.traits',
@@ -378,5 +381,407 @@ describe('Proposals in a Conversation', () => {
     const { messages } = await store.readConversation(conversationId);
     expect(messages[1].proposals?.map((p) => p.id)).toEqual(['p1']);
     await expect(store.acceptProposal(conversationId, 'p3')).rejects.toThrow();
+  });
+});
+
+/**
+ * A Project whose one Scene is “Harbour”, with an Outline, and a
+ * Conversation with a reply to hang Proposals on.
+ */
+async function withReply() {
+  const clock = instantClock(1_000);
+  const store = await createProject(projectPath, { fs: nodeFileSystem, clock });
+  const chapterId = store.tree().chapters[0].id;
+  const sceneId = store.tree().chapters[0].scenes[0].id;
+  await store.renameScene(sceneId, 'Harbour');
+  await store.write(
+    { kind: 'outline', id: sceneId },
+    { id: sceneId, body: '- She waits.', meta: { pov: 'Anna' } },
+  );
+  await store.flush();
+  const { id: conversationId } = await store.startConversation(
+    'brainstorm',
+    'Ideas',
+  );
+  for (const role of ['author', 'assistant'] as const) {
+    await store.appendMessage(conversationId, {
+      role,
+      text: 'Hm.',
+      focus: [],
+      at: 1_000,
+    });
+  }
+  return { store, chapterId, sceneId, conversationId };
+}
+
+/** Takes the last line off a log, as a crash before it was appended would have. */
+async function dropLastEvent(conversationId: string) {
+  const log = path.join(
+    projectPath,
+    'conversations',
+    `${conversationId}.jsonl`,
+  );
+  const lines = (await readFile(log, 'utf8')).split('\n').filter(Boolean);
+  await writeFile(log, `${lines.slice(0, -1).join('\n')}\n`);
+}
+
+describe('a Proposal to create an Entry', () => {
+  /** The id the new Entry gets, as the engine gives it. */
+  const MIRA = 'c0a8e8a2-5d4f-4a8e-9b1e-0f6a1c2d3e4f';
+  const mira: Proposal = {
+    kind: 'new-entry',
+    id: 'p1',
+    entryId: MIRA,
+    proposed: {
+      type: 'character',
+      name: 'Mira',
+      description: 'Anna’s younger sister.',
+    },
+  };
+
+  it('is logged with no base, and shown pending', async () => {
+    const { store, conversationId } = await withReply();
+
+    await store.appendProposal(conversationId, mira);
+
+    expect((await logLines(conversationId)).at(-1)).toEqual({
+      type: 'proposal.proposed',
+      id: 'p1',
+      target: { kind: 'new-entry', id: MIRA },
+      fields: {
+        type: { proposed: 'character' },
+        name: { proposed: 'Mira' },
+        description: { proposed: 'Anna’s younger sister.' },
+      },
+      at: 1_000,
+    });
+    expect(await cardOf(store, conversationId)).toEqual({
+      ...mira,
+      name: 'Mira',
+      state: { kind: 'pending', current: null, stale: false },
+    });
+    await store.close();
+  });
+
+  it('accepting creates the Entry, then logs what it wrote', async () => {
+    const { store, conversationId } = await withReply();
+    await store.appendProposal(conversationId, mira);
+    const events = eventsOf(store);
+
+    await store.acceptProposal(conversationId, 'p1');
+
+    expect(store.listEntries()).toEqual([
+      expect.objectContaining({ id: MIRA, type: 'character', name: 'Mira' }),
+    ]);
+    expect(await store.read(entryRef(MIRA))).toMatchObject({
+      description: 'Anna’s younger sister.',
+      visibility: 'mentioned',
+      fields: { role: null },
+    });
+    expect((await logLines(conversationId)).at(-1)).toEqual({
+      type: 'proposal.accepted',
+      id: 'p1',
+      fields: {
+        type: { wrote: 'character' },
+        name: { wrote: 'Mira' },
+        description: { wrote: 'Anna’s younger sister.' },
+      },
+      at: 1_000,
+    });
+    expect((await cardOf(store, conversationId))?.state).toEqual({
+      kind: 'accepted',
+      edited: false,
+    });
+    expect(events).toContainEqual(
+      expect.objectContaining({ type: 'entriesChanged' }),
+    );
+    expect(events).toContainEqual({ type: 'proposalsChanged' });
+    await store.close();
+  });
+
+  it('accepts it as the Author edited it, with the description on one line', async () => {
+    const { store, conversationId } = await withReply();
+    await store.appendProposal(conversationId, mira);
+
+    await store.acceptProposal(conversationId, 'p1', {
+      edited: {
+        type: 'place',
+        name: ' Mira’s house ',
+        description: 'Small.\nBlue door.',
+      },
+    });
+
+    expect(await store.read(entryRef(MIRA))).toMatchObject({
+      type: 'place',
+      name: 'Mira’s house',
+      description: 'Small. Blue door.',
+    });
+    expect((await cardOf(store, conversationId))?.state).toEqual({
+      kind: 'accepted',
+      edited: true,
+    });
+    await expect(
+      store.acceptProposal(conversationId, 'p1'),
+    ).rejects.toMatchObject({ reason: 'decided' });
+    await store.close();
+  });
+
+  it('refuses an edited Entry without a name', async () => {
+    const { store, conversationId } = await withReply();
+    await store.appendProposal(conversationId, mira);
+
+    await expect(
+      store.acceptProposal(conversationId, 'p1', {
+        edited: { type: 'character', name: ' ', description: '' },
+      }),
+    ).rejects.toThrow();
+    expect(store.listEntries()).toEqual([]);
+    await store.close();
+  });
+
+  it('rejecting creates nothing', async () => {
+    const { store, conversationId } = await withReply();
+    await store.appendProposal(conversationId, mira);
+
+    await store.rejectProposal(conversationId, 'p1');
+
+    expect(store.listEntries()).toEqual([]);
+    expect((await cardOf(store, conversationId))?.state).toEqual({
+      kind: 'rejected',
+    });
+    await store.close();
+  });
+
+  it('counts as applied when its Entry exists, as after a crash before the accept was logged', async () => {
+    const { store, conversationId } = await withReply();
+    await store.appendProposal(conversationId, mira);
+    await store.acceptProposal(conversationId, 'p1');
+    await store.close();
+    await dropLastEvent(conversationId);
+
+    const reopened = await openProject(projectPath, {
+      fs: nodeFileSystem,
+      clock: instantClock(),
+    });
+
+    expect((await cardOf(reopened, conversationId))?.state).toEqual({
+      kind: 'accepted',
+      edited: false,
+    });
+    await expect(
+      reopened.acceptProposal(conversationId, 'p1'),
+    ).rejects.toMatchObject({ reason: 'decided' });
+    expect(reopened.listEntries()).toHaveLength(1);
+    await reopened.close();
+  });
+
+  it('is not pending on any Entry', async () => {
+    const { store, conversationId } = await withReply();
+    await store.appendProposal(conversationId, mira);
+
+    expect(await store.pendingProposals(MIRA)).toEqual([]);
+    await store.close();
+  });
+});
+
+describe('a Proposal to replace an Outline', () => {
+  const outline = (
+    outlineId: string,
+  ): Extract<Proposal, { kind: 'outline' }> => ({
+    kind: 'outline',
+    id: 'p1',
+    outlineId,
+    base: '- She waits.',
+    proposed: '- She waits.\n- The ferry comes.',
+  });
+
+  it('is logged with the whole Outline body as base and proposed, and shown pending', async () => {
+    const { store, sceneId, conversationId } = await withReply();
+
+    await store.appendProposal(conversationId, outline(sceneId));
+
+    expect((await logLines(conversationId)).at(-1)).toEqual({
+      type: 'proposal.proposed',
+      id: 'p1',
+      target: { kind: 'outline', id: sceneId },
+      fields: {
+        body: {
+          base: '- She waits.',
+          proposed: '- She waits.\n- The ferry comes.',
+        },
+      },
+      at: 1_000,
+    });
+    expect(await cardOf(store, conversationId)).toEqual({
+      ...outline(sceneId),
+      name: 'Scene “Harbour”',
+      state: { kind: 'pending', current: '- She waits.', stale: false },
+    });
+    await store.close();
+  });
+
+  it('names a Chapter’s Outline and the story’s', async () => {
+    const { store, chapterId, conversationId } = await withReply();
+    await store.renameChapter(chapterId, 'Arrival');
+    await store.appendProposal(conversationId, {
+      ...outline(chapterId),
+      base: '',
+    });
+    await store.appendProposal(conversationId, {
+      ...outline('project'),
+      id: 'p2',
+      base: '',
+    });
+
+    const { messages } = await store.readConversation(conversationId);
+    expect(messages[1].proposals?.map((p) => p.name)).toEqual([
+      'Chapter “Arrival”',
+      'The story',
+    ]);
+    await store.close();
+  });
+
+  it('accepting writes the Outline first, keeping its metadata, then logs what it replaced and wrote', async () => {
+    const { store, sceneId, conversationId } = await withReply();
+    await store.appendProposal(conversationId, outline(sceneId));
+    const events = eventsOf(store);
+
+    await store.acceptProposal(conversationId, 'p1');
+
+    expect(await store.read({ kind: 'outline', id: sceneId })).toEqual({
+      id: sceneId,
+      body: '- She waits.\n- The ferry comes.',
+      meta: { pov: 'Anna' },
+    });
+    expect((await logLines(conversationId)).at(-1)).toEqual({
+      type: 'proposal.accepted',
+      id: 'p1',
+      fields: {
+        body: {
+          replaced: '- She waits.',
+          wrote: '- She waits.\n- The ferry comes.',
+        },
+      },
+      at: 1_000,
+    });
+    expect(events).toContainEqual({
+      type: 'unitReloaded',
+      ref: { kind: 'outline', id: sceneId },
+      value: expect.objectContaining({
+        body: '- She waits.\n- The ferry comes.',
+      }),
+      byProposal: true,
+    });
+    await store.close();
+  });
+
+  it('accepts an edited body, noting it was edited', async () => {
+    const { store, sceneId, conversationId } = await withReply();
+    await store.appendProposal(conversationId, outline(sceneId));
+
+    await store.acceptProposal(conversationId, 'p1', {
+      edited: '- She leaves.',
+    });
+
+    expect((await store.read({ kind: 'outline', id: sceneId })).body).toBe(
+      '- She leaves.',
+    );
+    expect((await cardOf(store, conversationId))?.state).toEqual({
+      kind: 'accepted',
+      edited: true,
+    });
+    await store.close();
+  });
+
+  it('shows one whose Outline changed since as stale, accepted only anyway', async () => {
+    const { store, sceneId, conversationId } = await withReply();
+    await store.appendProposal(conversationId, outline(sceneId));
+    await store.write(
+      { kind: 'outline', id: sceneId },
+      { id: sceneId, body: '- She runs.', meta: { pov: 'Anna' } },
+    );
+
+    expect((await cardOf(store, conversationId))?.state).toEqual({
+      kind: 'pending',
+      current: '- She runs.',
+      stale: true,
+    });
+    await expect(
+      store.acceptProposal(conversationId, 'p1'),
+    ).rejects.toMatchObject({ reason: 'stale' });
+
+    await store.acceptProposal(conversationId, 'p1', { anyway: true });
+    expect((await logLines(conversationId)).at(-1)).toMatchObject({
+      fields: { body: { replaced: '- She runs.' } },
+    });
+    await store.close();
+  });
+
+  it('shows one whose Scene is in Trash as orphaned, which can only be rejected', async () => {
+    const { store, chapterId, sceneId, conversationId } = await withReply();
+    await store.createScene(chapterId, 1);
+    await store.appendProposal(conversationId, outline(sceneId));
+    await store.trashScene(sceneId);
+
+    expect(await cardOf(store, conversationId)).toMatchObject({
+      name: 'Scene “Harbour”',
+      state: { kind: 'pending', orphaned: 'trashed' },
+    });
+    await expect(
+      store.acceptProposal(conversationId, 'p1'),
+    ).rejects.toMatchObject({ reason: 'orphaned' });
+    await store.rejectProposal(conversationId, 'p1');
+    expect((await cardOf(store, conversationId))?.state).toEqual({
+      kind: 'rejected',
+    });
+    await store.close();
+  });
+
+  it('counts as applied when the Outline holds its body, as after a crash before the accept was logged', async () => {
+    const { store, sceneId, conversationId } = await withReply();
+    await store.appendProposal(conversationId, outline(sceneId));
+    await store.acceptProposal(conversationId, 'p1');
+    await store.close();
+    await dropLastEvent(conversationId);
+
+    const reopened = await openProject(projectPath, {
+      fs: nodeFileSystem,
+      clock: instantClock(),
+    });
+
+    expect((await cardOf(reopened, conversationId))?.state).toEqual({
+      kind: 'accepted',
+      edited: false,
+    });
+    await expect(
+      reopened.acceptProposal(conversationId, 'p1'),
+    ).rejects.toMatchObject({ reason: 'decided' });
+    await reopened.close();
+  });
+
+  it('never targets Prose or Notes, whatever the log says', async () => {
+    const { store, sceneId, conversationId } = await withReply();
+    const log = path.join(
+      projectPath,
+      'conversations',
+      `${conversationId}.jsonl`,
+    );
+    for (const kind of ['scene', 'notes']) {
+      await writeFile(
+        log,
+        (await readFile(log, 'utf8')) +
+          `${JSON.stringify({
+            type: 'proposal.proposed',
+            id: kind,
+            target: { kind, id: sceneId },
+            fields: { body: { base: '', proposed: 'She ran.' } },
+            at: 1,
+          })}\n`,
+      );
+    }
+
+    const { messages } = await store.readConversation(conversationId);
+    expect(messages[1].proposals).toBeUndefined();
+    await store.close();
   });
 });

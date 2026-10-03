@@ -10,13 +10,13 @@ import type {
   Visibility,
 } from './project-types';
 import type { ModelId } from './models';
-import type { FieldValue, PendingProposal } from './proposal';
+import type { PendingProposal, ProposedValue } from './proposal';
 
 /**
  * How the Author accepts a Proposal: with the value they `edited` it to,
  * and `anyway` when they saw it was stale.
  */
-export type AcceptOptions = { edited?: FieldValue; anyway?: boolean };
+export type AcceptOptions = { edited?: ProposedValue; anyway?: boolean };
 import type {
   AskResult,
   Conversation,
@@ -400,7 +400,7 @@ export interface AssistantApi {
   ): Promise<AskResult>;
   /**
    * Accepts a pending Proposal, as proposed or as the Author edited it:
-   * main writes its Entry, then logs the accept. Refused for one already
+   * main writes its target, an Entry or Outline, then logs the accept. Refused for one already
    * decided, an orphaned one, a stale one unless accepted anyway, and in a
    * read-only Project.
    */

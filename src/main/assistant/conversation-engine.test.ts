@@ -387,8 +387,9 @@ describe('Proposals in a reply', () => {
     expect(replied.text).toBe('Then the Story Bible should say so.');
     expect(replied.proposals).toEqual([
       expect.objectContaining({
+        kind: 'field',
         entryId: annaId,
-        entryName: 'Anna',
+        name: 'Anna',
         field: 'description',
         base: 'Her sister.',
         proposed: 'Her sister.\nOlder.',
@@ -461,5 +462,91 @@ describe('Proposals in a reply', () => {
     expect(prompt.text).toMatch(/```proposal/);
     expect(prompt.text).toMatch(/never .*example lines/i);
     expect(bible.text).toContain(`Id: ${annaId}`);
+  });
+
+  it('turns a new Entry into a Proposal with no base, under an id of its own', async () => {
+    const { store, engine } = await setUp(() => [
+      'Then she needs an Entry.\n',
+      block({
+        create: 'character',
+        name: 'Mira',
+        description: 'Anna’s younger sister.',
+      }),
+      block({ create: 'villain', name: 'Nobody' }),
+    ]);
+    const { id } = await store.startConversation('brainstorm', 'Ideas');
+
+    await engine.askAssistant(
+      id,
+      'Anna has a sister.',
+      { sceneId: null },
+      () => {},
+    );
+
+    const [, replied] = (await store.readConversation(id)).messages;
+    expect(replied.proposals).toEqual([
+      expect.objectContaining({
+        kind: 'new-entry',
+        entryId: expect.stringMatching(/^[0-9a-f-]{36}$/),
+        proposed: {
+          type: 'character',
+          name: 'Mira',
+          description: 'Anna’s younger sister.',
+        },
+        name: 'Mira',
+        state: { kind: 'pending', current: null, stale: false },
+      }),
+    ]);
+    expect(store.listEntries()).toEqual([]);
+  });
+
+  it('turns a whole new Outline of a Chapter, Scene or the story into a Proposal, never Prose or Notes', async () => {
+    const { store, engine, chapterId, sceneId } = await setUp(() => [
+      'An Outline, then.\n',
+      block({ outline: sceneId, value: '- She waits.\n- The ferry comes.' }),
+      block({ outline: chapterId, value: '- She arrives.' }),
+      block({ outline: 'project', value: '- A woman leaves an island.' }),
+      block({ outline: 'nowhere', value: '- Lost.' }),
+      block({ scene: sceneId, value: 'She waited.' }),
+      block({ notes: sceneId, value: 'Remember the ferry.' }),
+    ]);
+    await store.write(
+      { kind: 'outline', id: sceneId },
+      { id: sceneId, body: '- She waits.', meta: {} },
+    );
+    const { id } = await store.startConversation('brainstorm', 'Ideas');
+
+    await engine.askAssistant(id, 'Outline it.', { sceneId: null }, () => {});
+
+    const [, replied] = (await store.readConversation(id)).messages;
+    expect(
+      replied.proposals?.map((p) =>
+        p.kind === 'outline' ? [p.outlineId, p.base, p.proposed] : p.kind,
+      ),
+    ).toEqual([
+      [sceneId, '- She waits.', '- She waits.\n- The ferry comes.'],
+      [chapterId, '', '- She arrives.'],
+      ['project', '', '- A woman leaves an island.'],
+    ]);
+    expect((await store.read({ kind: 'scene', id: sceneId })).markdown).toBe(
+      '',
+    );
+    expect((await store.read({ kind: 'notes', id: sceneId })).body).toBe('');
+  });
+
+  it('tells the Assistant how to propose a new Entry or an Outline, and which Outline is which', async () => {
+    const { store, engine, provider, chapterId, sceneId } = await setUp(() => [
+      'Hm.',
+    ]);
+    const { id } = await store.startConversation('brainstorm', 'Ideas');
+
+    await engine.askAssistant(id, 'Hm', { sceneId: null }, () => {});
+
+    const [prompt, , skeleton] = provider.requests[0].system;
+    expect(prompt.text).toMatch(/"create"/);
+    expect(prompt.text).toMatch(/"outline"/);
+    expect(skeleton.text).toContain(`Id: ${chapterId}`);
+    expect(skeleton.text).toContain(`Id: ${sceneId}`);
+    expect(skeleton.text).toContain('Id: project');
   });
 });

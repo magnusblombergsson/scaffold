@@ -1,4 +1,5 @@
 import {
+  ENTRY_TYPES,
   ROLE_LABELS,
   ROLES,
   STATUS_LABELS,
@@ -6,16 +7,18 @@ import {
   type EntryFields,
   type EntryType,
   type EntryValue,
+  type OutlineValue,
   type Role,
   type Senses,
   type ThreadStatus,
   type Voice,
 } from './project-types';
 
-// Proposals (MVP spec §7): changes to the Story Bible the Assistant suggests
-// in a reply, which take effect only when the Author accepts them. This
-// module knows which fields of an Entry a Proposal may change, and how the
-// Assistant writes one in its reply.
+// Proposals (MVP spec §7): changes to the Story Bible or an Outline the
+// Assistant suggests in a reply, which take effect only when the Author
+// accepts them: a change to one field of an Entry, a new Entry, or a whole
+// Outline. This module knows which fields of an Entry a Proposal may change,
+// and how the Assistant writes one in its reply.
 
 /**
  * The fields of an Entry a Proposal may change. Never its private notes, nor
@@ -60,22 +63,54 @@ export type FieldValue = string | string[] | null;
  * the field had then, its `base`, and the one proposed.
  */
 export type EntryFieldChange = {
+  kind: 'field';
   entryId: string;
   field: ProposalField;
   base: FieldValue;
   proposed: FieldValue;
 };
 
-/** A Proposal as logged: its id and the change. */
-export type Proposal = EntryFieldChange & { id: string };
+/** A new Entry as proposed: its type, name and a one-line description. */
+export type NewEntry = { type: EntryType; name: string; description: string };
 
 /**
- * Where a Proposal stands. A pending one is `stale` when its field no longer
- * holds the base, and `orphaned` when its Entry is in Trash, gone, or no
- * longer of a type with the field; then it can only be rejected. An accepted
- * one says whether the Author `edited` it first; one found already applied
- * on load, as after a crash between writing the Entry and logging the
- * accept, counts as accepted.
+ * A new Entry, which has no base; `entryId` is the id it gets when accepted,
+ * so that an Entry of that id shows it was.
+ */
+export type EntryCreation = {
+  kind: 'new-entry';
+  entryId: string;
+  proposed: NewEntry;
+};
+
+/**
+ * A whole Outline body in place of the one it had, its `base`: of a Chapter
+ * or Scene, or with the id `PROJECT_OUTLINE`, of the whole story.
+ */
+export type OutlineChange = {
+  kind: 'outline';
+  outlineId: string;
+  base: string;
+  proposed: string;
+};
+
+/** What a Proposal changes: a field of an Entry, a new Entry, or an Outline. */
+export type ProposalChange = EntryFieldChange | EntryCreation | OutlineChange;
+
+/** A Proposal as logged: its id and the change. */
+export type Proposal = ProposalChange & { id: string };
+
+/** What a Proposal writes: a field's value, a new Entry, or an Outline body. */
+export type ProposedValue = FieldValue | NewEntry;
+
+/**
+ * Where a Proposal stands. A pending one is `stale` when its target no
+ * longer holds the base, and `orphaned` when its Entry, Chapter or Scene is
+ * in Trash or gone, or the Entry is no longer of a type with the field; then
+ * it can only be rejected. A new Entry is never either, and its `current`
+ * value is null. An accepted one says whether the Author `edited` it first;
+ * one found already applied on load, as after a crash between writing the
+ * target and logging the accept, counts as accepted.
  */
 export type ProposalState =
   | { kind: 'pending'; current: FieldValue; stale: boolean }
@@ -83,16 +118,19 @@ export type ProposalState =
   | { kind: 'accepted'; edited: boolean }
   | { kind: 'rejected' };
 
-/** A Proposal as a card shows it: with its Entry's name now, and where it stands. */
+/**
+ * A Proposal as a card shows it: with the `name` of its target now, as in
+ * `Anna` or `Scene “Harbour”`, and where it stands.
+ */
 export type ProposalView = Proposal & {
-  entryName: string;
+  name: string;
   state: ProposalState;
 };
 
-/** A pending Proposal and the Conversation it is in. */
+/** A pending Proposal on a field of an Entry, and the Conversation it is in. */
 export type PendingProposal = {
   conversationId: string;
-  proposal: ProposalView;
+  proposal: Extract<ProposalView, { kind: 'field' }>;
 };
 
 const FIELDS_OF: Record<EntryType, ProposalField[]> = {
@@ -188,8 +226,8 @@ export function isFieldValue(
 }
 
 export function sameValue(
-  a: FieldValue | undefined,
-  b: FieldValue | undefined,
+  a: ProposedValue | undefined,
+  b: ProposedValue | undefined,
 ): boolean {
   return JSON.stringify(a) === JSON.stringify(b);
 }
@@ -282,16 +320,66 @@ export function proposalOf(
     proposed = item && !has ? [...base, item] : base;
   }
   if (!isFieldValue(field, proposed) || sameValue(proposed, base)) return null;
-  return { entryId: entry.id, field, base, proposed };
+  return { kind: 'field', entryId: entry.id, field, base, proposed };
+}
+
+/**
+ * The new Entry a block proposes, or null when it proposes none this app
+ * takes: a block names its type as `create`, its `name`, and a
+ * `description`, which is kept to one line.
+ */
+export function newEntryOf(block: unknown): NewEntry | null {
+  if (typeof block !== 'object' || block === null) return null;
+  const { create, name, description } = block as Record<string, unknown>;
+  return asNewEntry({
+    type: create,
+    name: typeof name === 'string' ? name.trim() : name,
+    description:
+      typeof description === 'string'
+        ? description.replace(/\s+/g, ' ').trim()
+        : '',
+  });
+}
+
+/** The value as a new Entry, with its keys in order, or null when it isn't one. */
+export function asNewEntry(value: unknown): NewEntry | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const { type, name, description } = value as Record<string, unknown>;
+  if (!ENTRY_TYPES.includes(type as EntryType)) return null;
+  if (typeof name !== 'string' || !name.trim()) return null;
+  if (typeof description !== 'string') return null;
+  return { type: type as EntryType, name, description };
+}
+
+/**
+ * The change a block proposes to `outline`, as it is now, or null when it
+ * proposes none: a block names the Outline by the id of its Chapter or
+ * Scene, or `PROJECT_OUTLINE`, and gives the whole new body as `value`.
+ */
+export function outlineChangeOf(
+  block: unknown,
+  outline: OutlineValue,
+): OutlineChange | null {
+  if (typeof block !== 'object' || block === null) return null;
+  const { outline: outlineId, value } = block as Record<string, unknown>;
+  if (outlineId !== outline.id || typeof value !== 'string') return null;
+  if (value === outline.body) return null;
+  return { kind: 'outline', outlineId, base: outline.body, proposed: value };
 }
 
 /** A Proposal as the Assistant would write it, for the Conversation sent back to it. */
-export function proposalBlock({
-  entryId,
-  field,
-  proposed,
-}: EntryFieldChange): string {
-  const json = JSON.stringify({ entry: entryId, field, value: proposed });
+export function proposalBlock(change: ProposalChange): string {
+  const json = JSON.stringify(
+    change.kind === 'field'
+      ? { entry: change.entryId, field: change.field, value: change.proposed }
+      : change.kind === 'new-entry'
+        ? {
+            create: change.proposed.type,
+            name: change.proposed.name,
+            description: change.proposed.description,
+          }
+        : { outline: change.outlineId, value: change.proposed },
+  );
   return `\`\`\`proposal\n${json}\n\`\`\``;
 }
 

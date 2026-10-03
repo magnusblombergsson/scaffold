@@ -24,7 +24,21 @@ Fields, and how to change them:
 - "status" (Plot Threads): "value" of "open" or "resolved".
 - "voice.traits" (Characters), "senses.smells", "senses.sight", "senses.sound", "senses.touch", "senses.atmosphere" (Places): "value", as keywords; or "append" keywords.
 
-Never propose example lines of a Voice, Prose, Notes, Outlines or private notes this way. Propose only what the Author has said; when a fact contradicts the Story Bible, ask which holds first.`;
+When the Author names a character, place, item, rule, plot thread or theme the Story Bible has no Entry for, you may propose a new Entry, with its type, its name and a one-line description in the Author's own facts:
+
+\`\`\`proposal
+{"create": "character", "name": "Mira", "description": "Anna's younger sister, who stayed on the island."}
+\`\`\`
+
+Types: "character", "place", "item", "world-rule", "plot-thread", "theme", "other".
+
+You may propose a whole new Outline for a Chapter or Scene, naming it by its Id in the Outline skeleton, or "project" for the Outline of the whole story. Write the whole body as bullets of what happens, who and why, never Prose; it replaces the Outline there is:
+
+\`\`\`proposal
+{"outline": "<Id>", "value": "- Anna waits for the ferry.\\n- Mira does not come."}
+\`\`\`
+
+Never propose example lines of a Voice, Prose, Notes or private notes. Propose only what the Author has said; when a fact contradicts the Story Bible, ask which holds first.`;
 
 export const WRITING_PROMPT = `You are the Assistant in a writing tool for creative fiction. You sit beside the editor and advise the Author, who is writing the Scene in focus. You ask, comment and suggest structure. You answer only when asked, and in the language the Author writes to you in.
 

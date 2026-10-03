@@ -1140,6 +1140,35 @@ p.message-used,
   margin-left: 0;
 }
 
+.proposal-sides {
+  display: grid;
+  grid-auto-columns: minmax(0, 1fr);
+  grid-auto-flow: column;
+  gap: 0.5rem;
+  margin-top: 0.3rem;
+}
+
+.proposal-side-label {
+  font-size: 0.8em;
+  color: var(--muted);
+}
+
+.proposal-side {
+  white-space: pre-wrap;
+}
+
+.proposal-edit-entry {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.4rem;
+}
+
+.proposal-edit-entry input {
+  flex: 1;
+  font: inherit;
+}
+
 .proposal-edit {
   width: 100%;
   box-sizing: border-box;

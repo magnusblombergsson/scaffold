@@ -1,9 +1,12 @@
 import { useContext, useState } from 'react';
 import {
+  ENTRY_TYPE_LABELS,
+  ENTRY_TYPES,
   ROLE_LABELS,
   ROLES,
   STATUS_LABELS,
   THREAD_STATUSES,
+  type EntryType,
 } from '../shared/project-types';
 import {
   FIELD_LABELS,
@@ -12,8 +15,10 @@ import {
   isChoiceField,
   textValue,
   type FieldValue,
+  type NewEntry,
   type ProposalField,
   type ProposalView,
+  type ProposedValue,
 } from '../shared/proposal';
 import { flushPendingEdits } from './pending-edits';
 import { ReadOnlyContext } from './read-only';
@@ -23,24 +28,45 @@ export function proposalCardId(proposalId: string): string {
   return `proposal-${proposalId}`;
 }
 
-/** A Proposal's header: `Entry › Field`. */
-export function proposalTitle({ entryName, field }: ProposalView): string {
-  return `${entryName} › ${FIELD_LABELS[field]}`;
+/** A Proposal's header: `Entry › Field`, `New <type> · <name>`, or `Scene “…” › Outline`. */
+export function proposalTitle(proposal: ProposalView): string {
+  if (proposal.kind === 'field') {
+    return `${proposal.name} › ${FIELD_LABELS[proposal.field]}`;
+  }
+  if (proposal.kind === 'new-entry') {
+    return `New ${ENTRY_TYPE_LABELS[proposal.proposed.type]} · ${proposal.name}`;
+  }
+  return `${proposal.name} › Outline`;
 }
 
-const ORPHANED = {
-  trashed: (name: string) => `${name} is in Trash.`,
-  gone: (name: string) => `${name} is no longer in the Story Bible.`,
-  field: (name: string, field: ProposalField) =>
-    `${name} has no ${FIELD_LABELS[field]} now.`,
-};
+/** Why a pending Proposal can only be rejected. */
+function orphanedText(
+  proposal: ProposalView,
+  orphaned: 'trashed' | 'gone' | 'field',
+): string {
+  const { name } = proposal;
+  if (orphaned === 'trashed') return `${name} is in Trash.`;
+  if (orphaned === 'field' && proposal.kind === 'field') {
+    return `${name} has no ${FIELD_LABELS[proposal.field]} now.`;
+  }
+  return proposal.kind === 'outline'
+    ? `${name} is no longer in the Manuscript.`
+    : `${name} is no longer in the Story Bible.`;
+}
 
 /**
- * A Proposal inline in the reply that made it: a diff of its field, and
- * Accept, Edit… and Reject while it is pending. A stale one shows the
- * field's current value too, in warning style; an orphaned one can only be
- * rejected. Decided, it collapses to a line. Nothing is decided in a
- * read-only Project.
+ * What the Author edits a proposed value as, until accepted or cancelled: a
+ * field's or an Outline's text, or a new Entry's type, name and description.
+ */
+type Draft = string | NewEntry;
+
+/**
+ * A Proposal inline in the reply that made it: what it changes, and Accept,
+ * Edit… and Reject while it is pending. A field shows a diff, an Outline its
+ * body before and after side by side, a new Entry its description. A stale
+ * one shows the target's current value too, in warning style; an orphaned
+ * one can only be rejected. Decided, it collapses to a line. Nothing is
+ * decided in a read-only Project.
  */
 export function ProposalCard({
   conversationId,
@@ -53,9 +79,8 @@ export function ProposalCard({
   highlighted?: boolean;
 }) {
   const readOnly = useContext(ReadOnlyContext);
-  const { id, field, base, proposed, entryName, state } = proposal;
-  /** The value being edited, as text, until accepted or cancelled. */
-  const [editing, setEditing] = useState<string | null>(null);
+  const { id, state } = proposal;
+  const [draft, setDraft] = useState<Draft | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const title = proposalTitle(proposal);
@@ -78,16 +103,17 @@ export function ProposalCard({
   }
 
   const orphaned = 'orphaned' in state ? state.orphaned : null;
+  const current = 'current' in state ? state.current : null;
   const stale = 'stale' in state && state.stale;
 
   async function decide(run: () => Promise<void>) {
-    // Edits typed into the Entry reach main before it is changed.
+    // Edits typed into the target reach main before it is changed.
     flushPendingEdits();
     setBusy(true);
     setError(null);
     try {
       await run();
-      setEditing(null);
+      setDraft(null);
     } catch (error) {
       setError((error as Error).message);
     } finally {
@@ -95,7 +121,7 @@ export function ProposalCard({
     }
   }
 
-  const accept = (edited?: FieldValue) =>
+  const accept = (edited?: ProposedValue) =>
     decide(() =>
       window.assistant.acceptProposal(conversationId, id, {
         edited,
@@ -105,6 +131,14 @@ export function ProposalCard({
     );
   const reject = () =>
     decide(() => window.assistant.rejectProposal(conversationId, id));
+
+  /** The value the Author edited, as the Proposal's target holds it. */
+  function editedValue(draft: Draft): ProposedValue {
+    if (proposal.kind === 'field' && typeof draft === 'string') {
+      return textValue(proposal.field, draft);
+    }
+    return draft;
+  }
 
   return (
     <section
@@ -121,42 +155,23 @@ export function ProposalCard({
       <header className="proposal-title">{title}</header>
       {orphaned ? (
         <p className="proposal-warning">
-          {ORPHANED[orphaned](entryName, field)} This Proposal can only be
-          rejected.
+          {orphanedText(proposal, orphaned)} This Proposal can only be rejected.
         </p>
-      ) : stale ? (
-        <>
-          <p className="proposal-warning">
-            {FIELD_LABELS[field]} has changed since this was proposed.
-          </p>
-          <dl className="proposal-values">
-            <dt>Now</dt>
-            <dd>{shown(field, state.current)}</dd>
-            <dt>Proposed against</dt>
-            <dd>
-              <del>{shown(field, base)}</del>
-            </dd>
-            <dt>Proposed</dt>
-            <dd>
-              <ins>{shown(field, proposed)}</ins>
-            </dd>
-          </dl>
-        </>
       ) : (
-        <p className="proposal-diff" aria-label="Change">
-          {fieldDiff(field, base, proposed).map((part, i) =>
-            part.kind === 'removed' ? (
-              <del key={i}>{part.text}</del>
-            ) : part.kind === 'added' ? (
-              <ins key={i}>{part.text}</ins>
-            ) : (
-              <span key={i}>{part.text}</span>
-            ),
+        <>
+          {stale && (
+            <p className="proposal-warning">
+              {proposal.kind === 'field'
+                ? FIELD_LABELS[proposal.field]
+                : 'The Outline'}{' '}
+              has changed since this was proposed.
+            </p>
           )}
-        </p>
+          <Change proposal={proposal} current={current} stale={stale} />
+        </>
       )}
-      {editing !== null && (
-        <EditValue field={field} text={editing} onChange={setEditing} />
+      {draft !== null && (
+        <EditValue proposal={proposal} draft={draft} onChange={setDraft} />
       )}
       {error && (
         <p className="proposal-error" role="alert">
@@ -164,15 +179,15 @@ export function ProposalCard({
         </p>
       )}
       <div className="proposal-actions">
-        {editing !== null ? (
+        {draft !== null ? (
           <>
             <button
-              onClick={() => void accept(textValue(field, editing))}
+              onClick={() => void accept(editedValue(draft))}
               disabled={readOnly || busy}
             >
               Accept edited
             </button>
-            <button onClick={() => setEditing(null)} disabled={busy}>
+            <button onClick={() => setDraft(null)} disabled={busy}>
               Cancel
             </button>
           </>
@@ -187,7 +202,7 @@ export function ProposalCard({
                   {stale ? 'Accept anyway' : 'Accept'}
                 </button>
                 <button
-                  onClick={() => setEditing(editText(field, proposed))}
+                  onClick={() => setDraft(draftOf(proposal))}
                   disabled={readOnly || busy}
                 >
                   Edit…
@@ -204,11 +219,97 @@ export function ProposalCard({
   );
 }
 
-/** A value as the Author edits it: a choice by its option, else as text. */
-function editText(field: ProposalField, value: FieldValue): string {
-  if (field === 'role') return value === null ? ROLES[0] : String(value);
-  if (field === 'status') return String(value);
-  return fieldText(field, value);
+/**
+ * What a pending Proposal changes. A field shows a diff, or when stale, its
+ * value now, the one proposed against and the one proposed; an Outline its
+ * base body, struck through, and the proposed one side by side, or when
+ * stale, its body now, the one proposed against and the one proposed; a new
+ * Entry its description.
+ */
+function Change({
+  proposal,
+  current,
+  stale,
+}: {
+  proposal: ProposalView;
+  current: FieldValue;
+  stale: boolean;
+}) {
+  if (proposal.kind === 'new-entry') {
+    return (
+      <p className="proposal-diff" aria-label="Change">
+        <ins>{proposal.proposed.description || '—'}</ins>
+      </p>
+    );
+  }
+  if (proposal.kind === 'outline') {
+    type Side = [label: string, body: string, mark: 'del' | 'ins' | null];
+    const proposed: Side = ['Proposed', proposal.proposed, 'ins'];
+    const sides: Side[] = stale
+      ? [
+          ['Now', current as string, null],
+          ['Proposed against', proposal.base, 'del'],
+          proposed,
+        ]
+      : [['Before', proposal.base, 'del'], proposed];
+    return (
+      <div className="proposal-sides">
+        {sides.map(([label, body, mark]) => (
+          <div key={label} role="group" aria-label={label}>
+            <div className="proposal-side-label">{label}</div>
+            <div className="proposal-side">
+              {mark === 'ins' ? (
+                <ins>{body || '—'}</ins>
+              ) : mark === 'del' ? (
+                <del>{body || '—'}</del>
+              ) : (
+                body || '—'
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    );
+  }
+  const { field, base, proposed } = proposal;
+  if (stale) {
+    return (
+      <dl className="proposal-values">
+        <dt>Now</dt>
+        <dd>{shown(field, current)}</dd>
+        <dt>Proposed against</dt>
+        <dd>
+          <del>{shown(field, base)}</del>
+        </dd>
+        <dt>Proposed</dt>
+        <dd>
+          <ins>{shown(field, proposed)}</ins>
+        </dd>
+      </dl>
+    );
+  }
+  return (
+    <p className="proposal-diff" aria-label="Change">
+      {fieldDiff(field, base, proposed).map((part, i) =>
+        part.kind === 'removed' ? (
+          <del key={i}>{part.text}</del>
+        ) : part.kind === 'added' ? (
+          <ins key={i}>{part.text}</ins>
+        ) : (
+          <span key={i}>{part.text}</span>
+        ),
+      )}
+    </p>
+  );
+}
+
+/** The proposed value as the Author starts editing it: a choice by its option, else as text. */
+function draftOf(proposal: ProposalView): Draft {
+  if (proposal.kind !== 'field') return proposal.proposed;
+  const { field, proposed } = proposal;
+  if (field === 'role') return proposed === null ? ROLES[0] : String(proposed);
+  if (field === 'status') return String(proposed);
+  return fieldText(field, proposed);
 }
 
 /** A value as text, or a dash when it is empty. */
@@ -216,25 +317,58 @@ function shown(field: ProposalField, value: FieldValue): string {
   return fieldText(field, value) || '—';
 }
 
-/** Where the Author edits the proposed value: a choice from its options, else text. */
+/**
+ * Where the Author edits the proposed value: a field's choice from its
+ * options or its text, an Outline's body, or a new Entry's type, name and
+ * description.
+ */
 function EditValue({
-  field,
-  text,
+  proposal,
+  draft,
   onChange,
 }: {
-  field: ProposalField;
-  text: string;
-  onChange(text: string): void;
+  proposal: ProposalView;
+  draft: Draft;
+  onChange(draft: Draft): void;
 }) {
-  if (isChoiceField(field)) {
+  if (typeof draft !== 'string') {
+    const set = (change: Partial<NewEntry>) =>
+      onChange({ ...draft, ...change });
+    return (
+      <div className="proposal-edit-entry">
+        <select
+          aria-label="Edited type"
+          value={draft.type}
+          onChange={(event) => set({ type: event.target.value as EntryType })}
+        >
+          {ENTRY_TYPES.map((type) => (
+            <option key={type} value={type}>
+              {ENTRY_TYPE_LABELS[type]}
+            </option>
+          ))}
+        </select>
+        <input
+          aria-label="Edited name"
+          value={draft.name}
+          onChange={(event) => set({ name: event.target.value })}
+        />
+        <TextValue
+          label="Edited description"
+          text={draft.description}
+          onChange={(description) => set({ description })}
+        />
+      </div>
+    );
+  }
+  if (proposal.kind === 'field' && isChoiceField(proposal.field)) {
     const options =
-      field === 'role'
+      proposal.field === 'role'
         ? ROLES.map((role) => [role, ROLE_LABELS[role]])
         : THREAD_STATUSES.map((status) => [status, STATUS_LABELS[status]]);
     return (
       <select
         aria-label="Edited value"
-        value={text}
+        value={draft}
         onChange={(event) => onChange(event.target.value)}
       >
         {options.map(([option, label]) => (
@@ -245,9 +379,22 @@ function EditValue({
       </select>
     );
   }
+  return <TextValue label="Edited value" text={draft} onChange={onChange} />;
+}
+
+/** A text the Author edits in a textarea that grows with it, up to eight rows. */
+function TextValue({
+  label,
+  text,
+  onChange,
+}: {
+  label: string;
+  text: string;
+  onChange(text: string): void;
+}) {
   return (
     <textarea
-      aria-label="Edited value"
+      aria-label={label}
       className="proposal-edit"
       value={text}
       onChange={(event) => onChange(event.target.value)}

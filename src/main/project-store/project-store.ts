@@ -51,17 +51,23 @@ import {
   revertEntryType,
 } from '../../shared/entry';
 import {
+  asNewEntry,
   FIELD_LABELS,
   fieldOf,
   isFieldValue,
   sameValue,
   withField,
+  type EntryCreation,
+  type EntryFieldChange,
   type FieldValue,
+  type OutlineChange,
   type PendingProposal,
   type Proposal,
+  type ProposalState,
   type ProposalView,
+  type ProposedValue,
 } from '../../shared/proposal';
-import { unitName } from '../../shared/unit-name';
+import { capitalized, unitName } from '../../shared/unit-name';
 import type {
   Conversation,
   ConversationMessage,
@@ -70,9 +76,11 @@ import type {
 } from '../../shared/conversation';
 import type { Clock } from './clock';
 import {
+  acceptedEvent,
   eventLine,
   headerLine,
   parseLog,
+  proposedEvent,
   type ConversationEvent,
   type LoggedConversation,
   type LoggedProposal,
@@ -98,6 +106,16 @@ type Manifest = {
   id: string;
   language: string;
   tree: ProjectTree;
+};
+
+/**
+ * What accepting a Proposal did: the value it replaced in its target, if
+ * any, the one it wrote, and the unit it changed, for an open view to show.
+ */
+type Accepted = {
+  replaced?: FieldValue;
+  wrote: ProposedValue;
+  reloaded?: { ref: UnitRef; value: UnitValue };
 };
 
 /** A unit the Assistant may read: anything but an Entry's private notes. */
@@ -1496,28 +1514,25 @@ export class ProjectStore {
   /** Creates an Entry of `type` with an empty description, seen when mentioned. */
   async createEntry(type: EntryType, name: string): Promise<Created> {
     const id = randomUUID();
-    const value: EntryValue = {
-      id,
-      type,
-      name,
-      aliases: [],
-      visibility: DEFAULT_VISIBILITY,
-      description: '',
-      fields: emptyFields(type),
-    };
+    const value = newEntryValue(id, type, name);
     const changed = await this.step(async () => {
-      await this.deps.fs.mkdir(path.join(this.path, UNIT_DIRS.entry));
-      await safeWrite(
-        this.deps.fs,
-        this.deps.clock,
-        unitPath(this.path, entryRef(id)),
-        entryFile(value),
-      );
-      this.setEntries(() => this.entries.set(id, entrySummary(value)));
+      await this.addEntry(value);
       // It may have a description by the time the Author undoes it.
       return () => this.moveEntryToTrash(id);
     });
     return { id, ...changed };
+  }
+
+  /** Writes a new Entry's file, then lists it in the Story Bible. */
+  private async addEntry(value: EntryValue): Promise<void> {
+    await this.deps.fs.mkdir(path.join(this.path, UNIT_DIRS.entry));
+    await safeWrite(
+      this.deps.fs,
+      this.deps.clock,
+      unitPath(this.path, entryRef(value.id)),
+      entryFile(value),
+    );
+    this.setEntries(() => this.entries.set(value.id, entrySummary(value)));
   }
 
   /** Moves an Entry to Trash; its private notes stay where they are until Trash is emptied. */
@@ -1565,15 +1580,22 @@ export class ProjectStore {
     });
   }
 
-  /**
-   * Writes `change` of an Entry's latest value, keeping what else was written
-   * to it, and waits until it is saved or has failed to be.
-   */
-  private async changeEntry(
+  /** `changeUnit` of an Entry. */
+  private changeEntry(
     entryId: string,
     change: (value: EntryValue) => EntryValue,
   ): Promise<{ before: EntryValue; after: EntryValue }> {
-    const ref = entryRef(entryId);
+    return this.changeUnit(entryRef(entryId), change);
+  }
+
+  /**
+   * Writes `change` of a unit's latest value, keeping what else was written
+   * to it, and waits until it is saved or has failed to be.
+   */
+  private async changeUnit<R extends UnitRef>(
+    ref: R,
+    change: (value: ValueOf<R>) => ValueOf<R>,
+  ): Promise<{ before: ValueOf<R>; after: ValueOf<R> }> {
     const before = await this.read(ref);
     const after = change(structuredClone(before));
     await this.write(ref, after);
@@ -2515,28 +2537,24 @@ export class ProjectStore {
 
   /** Appends a Proposal the Assistant made in the reply logged last. */
   appendProposal(id: string, proposal: Proposal): Promise<void> {
-    const { id: proposalId, entryId, field, base, proposed } = proposal;
     return this.inLog(id, async () => {
       await this.passFormatGate();
-      await this.appendEvent(id, {
-        type: 'proposal.proposed',
-        id: proposalId,
-        target: { kind: 'entry', id: entryId },
-        fields: { [field]: { base, proposed } },
-        at: this.deps.clock.now(),
-      });
+      await this.appendEvent(
+        id,
+        proposedEvent(proposal, this.deps.clock.now()),
+      );
       this.emit({ type: 'proposalsChanged' });
     });
   }
 
   /**
    * Accepts a pending Proposal, as proposed or as the Author `edited` it:
-   * writes the Entry first and waits until it is saved, then logs the accept
-   * with the value the field held and the one written. A stale Proposal is
-   * accepted only `anyway`, and then replaces what the field holds now.
-   * Refuses one already decided or found applied, one whose Entry is in
-   * Trash or has no such field now, and any once a newer app has upgraded
-   * the Project.
+   * writes its target first, an Entry or an Outline, and waits until it is
+   * saved, then logs the accept with the value the target held and the one
+   * written. A stale Proposal is accepted only `anyway`, and then replaces
+   * what the target holds now. Refuses one already decided or found
+   * applied, one whose target is in Trash or gone or whose Entry has no such
+   * field now, and any once a newer app has upgraded the Project.
    */
   acceptProposal(
     conversationId: string,
@@ -2545,57 +2563,135 @@ export class ProjectStore {
   ): Promise<void> {
     return this.inLog(conversationId, async () => {
       await this.passFormatGate();
-      const { entryId, field, base, proposed } = await this.undecided(
+      const proposal = await this.undecided(conversationId, proposalId);
+      const value = edited === undefined ? proposal.proposed : edited;
+      const { replaced, wrote, reloaded } =
+        proposal.kind === 'field'
+          ? await this.acceptField(proposal, value, anyway)
+          : proposal.kind === 'outline'
+            ? await this.acceptOutline(proposal, value, anyway)
+            : await this.acceptNewEntry(proposal, value);
+      await this.appendEvent(
         conversationId,
-        proposalId,
+        acceptedEvent(proposal, replaced, wrote, this.deps.clock.now()),
       );
-      const wrote = edited === undefined ? proposed : edited;
-      if (!isFieldValue(field, wrote)) {
-        throw new Error(`${FIELD_LABELS[field]} can't hold that value`);
+      if (reloaded) {
+        this.emit({ type: 'unitReloaded', ...reloaded, byProposal: true });
       }
-      if (!this.entries.has(entryId)) {
-        throw new ProjectError(
-          'orphaned',
-          this.inTrash(entryId)
-            ? 'Its Entry is in Trash'
-            : 'Its Entry is no longer in the Story Bible',
-        );
-      }
-      let replaced: FieldValue | undefined;
-      const { after } = await this.changeEntry(entryId, (value) => {
-        replaced = fieldOf(value, field);
-        if (replaced === undefined) {
-          throw new ProjectError(
-            'orphaned',
-            `${value.name} has no ${FIELD_LABELS[field]} now`,
-          );
-        }
-        if (!anyway && !sameValue(replaced, base)) {
-          throw new ProjectError(
-            'stale',
-            `${FIELD_LABELS[field]} has changed since this was proposed`,
-          );
-        }
-        return withField(value, field, wrote);
-      });
-      const ref = entryRef(entryId);
-      if (this.unsaved.has(unitKey(ref))) {
-        throw new Error(
-          `${after.name} couldn't be saved yet; it is tried again`,
-        );
-      }
-      await this.appendEvent(conversationId, {
-        type: 'proposal.accepted',
-        id: proposalId,
-        fields: { [field]: { replaced: replaced!, wrote } },
-        at: this.deps.clock.now(),
-      });
-      this.emit({ type: 'unitReloaded', ref, value: after, byProposal: true });
       this.emit({ type: 'proposalsChanged' });
     });
   }
 
-  /** Rejects a pending Proposal, stale or orphaned too; the Entry is left alone. */
+  /** Writes a field of an Entry, as `acceptProposal`. */
+  private async acceptField(
+    { entryId, field, base }: EntryFieldChange,
+    wrote: ProposedValue,
+    anyway: boolean,
+  ): Promise<Accepted> {
+    if (!isFieldValue(field, wrote)) {
+      throw new Error(`${FIELD_LABELS[field]} can't hold that value`);
+    }
+    if (!this.entries.has(entryId)) {
+      throw new ProjectError(
+        'orphaned',
+        this.inTrash(entryId)
+          ? 'Its Entry is in Trash'
+          : 'Its Entry is no longer in the Story Bible',
+      );
+    }
+    let replaced: FieldValue | undefined;
+    const ref = entryRef(entryId);
+    const { after } = await this.changeUnit(ref, (value) => {
+      replaced = fieldOf(value, field);
+      if (replaced === undefined) {
+        throw new ProjectError(
+          'orphaned',
+          `${value.name} has no ${FIELD_LABELS[field]} now`,
+        );
+      }
+      if (!anyway && !sameValue(replaced, base)) {
+        throw new ProjectError(
+          'stale',
+          `${FIELD_LABELS[field]} has changed since this was proposed`,
+        );
+      }
+      return withField(value, field, wrote);
+    });
+    this.refuseUnsaved(ref, after.name);
+    return {
+      replaced,
+      wrote,
+      reloaded: { ref, value: after },
+    };
+  }
+
+  /** Writes a whole Outline body, keeping its metadata, as `acceptProposal`. */
+  private async acceptOutline(
+    { outlineId, base }: OutlineChange,
+    wrote: ProposedValue,
+    anyway: boolean,
+  ): Promise<Accepted> {
+    if (typeof wrote !== 'string') {
+      throw new Error("An Outline can't hold that value");
+    }
+    const orphaned = this.outlineOrphaned(outlineId);
+    if (orphaned) {
+      throw new ProjectError(
+        'orphaned',
+        orphaned === 'trashed'
+          ? 'Its Chapter or Scene is in Trash'
+          : 'Its Chapter or Scene is no longer in the Manuscript',
+      );
+    }
+    let replaced = '';
+    const ref = outlineRef(outlineId);
+    const { after } = await this.changeUnit(ref, (value) => {
+      replaced = value.body;
+      if (!anyway && replaced !== base) {
+        throw new ProjectError(
+          'stale',
+          'The Outline has changed since this was proposed',
+        );
+      }
+      return { ...value, body: wrote };
+    });
+    this.refuseUnsaved(ref, unitName(ref, this.manuscript()));
+    return {
+      replaced,
+      wrote,
+      reloaded: { ref, value: after },
+    };
+  }
+
+  /** Creates a new Entry under the id the Proposal gave it, as `acceptProposal`. */
+  private async acceptNewEntry(
+    { entryId }: EntryCreation,
+    value: ProposedValue,
+  ): Promise<Accepted> {
+    const entry = asNewEntry(value);
+    if (!entry) throw new Error('A new Entry needs a type and a name');
+    // The Author's edit too: a name, and a description on one line.
+    const wrote = {
+      ...entry,
+      name: entry.name.trim(),
+      description: entry.description.replace(/\s+/g, ' ').trim(),
+    };
+    await this.addEntry(
+      newEntryValue(entryId, wrote.type, wrote.name, wrote.description),
+    );
+    return { wrote };
+  }
+
+  /** Refuses to go on while a unit written for a Proposal isn't saved. */
+  private refuseUnsaved(ref: UnitRef, name: string): void {
+    if (this.unsaved.has(unitKey(ref))) {
+      throw new Error(
+        `${capitalized(name)} couldn't be saved yet; it is tried again`,
+      );
+    }
+  }
+
+  /** Rejects a pending Proposal, stale or orphaned too; its target is left alone. */
   rejectProposal(conversationId: string, proposalId: string): Promise<void> {
     return this.inLog(conversationId, async () => {
       await this.passFormatGate();
@@ -2610,16 +2706,17 @@ export class ProjectStore {
   }
 
   /**
-   * The Proposals still pending on an Entry, in every Conversation, derived
-   * from the logs; one whose value the Entry already holds counts as applied.
+   * The Proposals still pending on a field of an Entry, in every
+   * Conversation, derived from the logs; one whose value the Entry already
+   * holds counts as applied.
    */
   async pendingProposals(entryId: string): Promise<PendingProposal[]> {
     const pending: PendingProposal[] = [];
     for (const log of await this.readLogs()) {
       for (const logged of log.proposals) {
-        if (logged.entryId !== entryId) continue;
+        if (logged.kind !== 'field' || logged.entryId !== entryId) continue;
         const proposal = await this.proposalView(logged);
-        if (proposal.state.kind === 'pending') {
+        if (proposal.kind === 'field' && proposal.state.kind === 'pending') {
           pending.push({ conversationId: log.id, proposal });
         }
       }
@@ -2648,42 +2745,97 @@ export class ProjectStore {
     return proposal;
   }
 
-  /** Where a Proposal stands now, against its Entry as it is. */
+  /** Where a Proposal stands now, against its target as it is. */
   private async proposalView(logged: LoggedProposal): Promise<ProposalView> {
     const { message: _, decision, ...proposal } = logged;
-    const { entryId, field, proposed } = proposal;
-    const trashed = this.trash.get(entryId);
-    const summary = this.entries.get(entryId);
-    const entryName =
-      summary?.name ?? (trashed?.kind === 'entry' ? trashed.name : 'An Entry');
-    const view = (state: ProposalView['state']): ProposalView => ({
+    const view = (state: ProposalState): ProposalView => ({
       ...proposal,
-      entryName,
+      name: this.proposalName(proposal),
       state,
     });
     if (decision.kind === 'rejected') return view(decision);
     if (decision.kind === 'accepted') {
       return view({
         kind: 'accepted',
-        edited: !sameValue(decision.wrote, proposed),
+        edited: !sameValue(decision.wrote, proposal.proposed),
       });
     }
-    if (!summary) {
-      return view({ kind: 'pending', orphaned: trashed ? 'trashed' : 'gone' });
+    return view(await this.undecidedState(proposal));
+  }
+
+  /**
+   * Where a Proposal the log leaves undecided stands: applied when its target
+   * already holds the proposed value, or its new Entry exists, as after a
+   * crash between writing the target and logging the accept.
+   */
+  private async undecidedState(proposal: Proposal): Promise<ProposalState> {
+    const applied: ProposalState = { kind: 'accepted', edited: false };
+    if (proposal.kind === 'new-entry') {
+      const { entryId } = proposal;
+      return this.entries.has(entryId) || this.trash.has(entryId)
+        ? applied
+        : { kind: 'pending', current: null, stale: false };
     }
-    const current = fieldOf(await this.read(entryRef(entryId)), field);
-    if (current === undefined) {
-      return view({ kind: 'pending', orphaned: 'field' });
+    let current: FieldValue | undefined;
+    if (proposal.kind === 'field') {
+      const { entryId, field } = proposal;
+      if (!this.entries.has(entryId)) {
+        const orphaned = this.trash.has(entryId) ? 'trashed' : 'gone';
+        return { kind: 'pending', orphaned };
+      }
+      current = fieldOf(await this.read(entryRef(entryId)), field);
+      if (current === undefined) return { kind: 'pending', orphaned: 'field' };
+    } else {
+      const orphaned = this.outlineOrphaned(proposal.outlineId);
+      if (orphaned) return { kind: 'pending', orphaned };
+      current = (await this.read(outlineRef(proposal.outlineId))).body;
     }
-    // Written, but the accept never logged, as after a crash between the two.
-    if (sameValue(current, proposed)) {
-      return view({ kind: 'accepted', edited: false });
-    }
-    return view({
+    if (sameValue(current, proposal.proposed)) return applied;
+    return {
       kind: 'pending',
       current,
       stale: !sameValue(current, proposal.base),
-    });
+    };
+  }
+
+  /** Whether an Outline's Chapter or Scene is in Trash or gone; the Project Outline never is. */
+  private outlineOrphaned(id: string): 'trashed' | 'gone' | null {
+    if (id === PROJECT_OUTLINE || this.isLive(id)) return null;
+    return this.inTrash(id) ? 'trashed' : 'gone';
+  }
+
+  /**
+   * What a Proposal's card names its target: the Entry, or the new one, by
+   * name, or an Outline's Chapter or Scene by title, or the story.
+   */
+  private proposalName(proposal: Proposal): string {
+    if (proposal.kind === 'new-entry') return proposal.proposed.name;
+    if (proposal.kind === 'field') {
+      const { entryId } = proposal;
+      const trashed = this.trash.get(entryId);
+      return (
+        this.entries.get(entryId)?.name ??
+        (trashed?.kind === 'entry' ? trashed.name : 'An Entry')
+      );
+    }
+    const { outlineId } = proposal;
+    if (outlineId === PROJECT_OUTLINE) return 'The story';
+    const { chapters, unplaced } = this.manuscript();
+    const trashed = [...this.trash.values()];
+    const chapter =
+      chapters.find((c) => c.id === outlineId) ??
+      trashed.find((t) => t.kind === 'chapter' && t.id === outlineId);
+    if (chapter && 'title' in chapter) return `Chapter “${chapter.title}”`;
+    const scene =
+      [...chapters.flatMap((c) => c.scenes), ...unplaced].find(
+        (s) => s.id === outlineId,
+      ) ??
+      trashed
+        .flatMap((t) =>
+          t.kind === 'scene' ? [t] : t.kind === 'chapter' ? t.scenes : [],
+        )
+        .find((s) => s.id === outlineId);
+    return scene ? `Scene “${scene.title}”` : 'An Outline';
   }
 
   /** Runs `run` once what was asked of a Conversation's log before is done: one at a time. */
@@ -3219,6 +3371,24 @@ function entryValue(id: string, { frontmatter, body }: UnitFile): EntryValue {
       : DEFAULT_VISIBILITY,
     description: body,
     fields: readEntryFields(entryType, frontmatter),
+  };
+}
+
+/** A new Entry, seen when mentioned, with the empty fields of its type. */
+function newEntryValue(
+  id: string,
+  type: EntryType,
+  name: string,
+  description = '',
+): EntryValue {
+  return {
+    id,
+    type,
+    name,
+    aliases: [],
+    visibility: DEFAULT_VISIBILITY,
+    description,
+    fields: emptyFields(type),
   };
 }
 

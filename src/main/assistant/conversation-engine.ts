@@ -6,11 +6,15 @@ import type {
   Mode,
 } from '../../shared/conversation';
 import type { ModelId } from '../../shared/models';
+import { PROJECT_OUTLINE } from '../../shared/project-types';
 import {
+  newEntryOf,
+  outlineChangeOf,
   proposalOf,
   replyText,
   splitReply,
   type Proposal,
+  type ProposalChange,
 } from '../../shared/proposal';
 import type { Usage } from '../../shared/usage';
 import type { Clock } from '../project-store/clock';
@@ -123,22 +127,46 @@ export function createConversationEngine({
   }
 
   /**
-   * The Proposals a reply makes, each against its Entry as it is now. A
-   * block that proposes nothing this app takes, such as a change to Prose or
-   * to a Voice's example lines, is left out.
+   * The Proposals a reply makes, each against its target as it is now. A
+   * block that proposes nothing this app takes, such as a change to Prose,
+   * Notes or a Voice's example lines, is left out.
    */
   async function proposalsIn(reply: string): Promise<Proposal[]> {
-    const view = store.assistantView();
     const proposals: Proposal[] = [];
     for (const block of splitReply(reply).blocks) {
-      const entryId = (block as { entry?: unknown } | null)?.entry;
-      const known = view.listEntries().some((e) => e.id === entryId);
-      if (!known) continue;
-      const entry = await view.read({ kind: 'entry', id: entryId as string });
-      const change = proposalOf(block, entry);
+      const change = await changeOf(block);
       if (change) proposals.push({ id: randomUUID(), ...change });
     }
     return proposals;
+  }
+
+  /**
+   * What a block proposes: a new Entry, under the id it will get; a whole
+   * Outline of a Chapter or Scene in the Project, or of the story; or a change
+   * to a field of an Entry in the Story Bible.
+   */
+  async function changeOf(block: unknown): Promise<ProposalChange | null> {
+    const view = store.assistantView();
+    const { entry: entryId, outline: outlineId } = (block ?? {}) as Record<
+      string,
+      unknown
+    >;
+    const proposed = newEntryOf(block);
+    if (proposed) return { kind: 'new-entry', entryId: randomUUID(), proposed };
+    if (typeof outlineId === 'string') {
+      const { chapters, unplaced } = view.manuscript();
+      const known =
+        outlineId === PROJECT_OUTLINE ||
+        [...chapters, ...chapters.flatMap((c) => c.scenes), ...unplaced].some(
+          (unit) => unit.id === outlineId,
+        );
+      if (!known) return null;
+      const outline = await view.read({ kind: 'outline', id: outlineId });
+      return outlineChangeOf(block, outline);
+    }
+    if (!view.listEntries().some((e) => e.id === entryId)) return null;
+    const entry = await view.read({ kind: 'entry', id: entryId as string });
+    return proposalOf(block, entry);
   }
 
   return {

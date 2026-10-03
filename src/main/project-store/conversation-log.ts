@@ -7,11 +7,13 @@ import {
   type Saw,
 } from '../../shared/conversation';
 import {
+  asNewEntry,
   isFieldValue,
   isProposalField,
   type FieldValue,
+  type NewEntry,
   type Proposal,
-  type ProposalField,
+  type ProposedValue,
 } from '../../shared/proposal';
 import type { Usage } from '../../shared/usage';
 
@@ -25,25 +27,26 @@ export type MessageEvent = { type: 'message' } & ConversationMessage;
 
 /**
  * A Proposal as logged: its target, and per field the value it had and the
- * one proposed. This app proposes changes to one field of an Entry.
+ * one proposed. This app proposes a change to one field of an Entry; a new
+ * Entry, by the id it will get, with its type, name and description and no
+ * base; or the whole Outline of a Chapter, a Scene or the story as its `body`.
  */
 export type ProposedEvent = {
   type: 'proposal.proposed';
   id: string;
-  target: { kind: 'entry'; id: string };
-  fields: Partial<
-    Record<ProposalField, { base: FieldValue; proposed: FieldValue }>
-  >;
+  target: { kind: 'entry' | 'new-entry' | 'outline'; id: string };
+  fields: Record<string, { base?: FieldValue; proposed: FieldValue }>;
   at: number;
 };
 
-/** An accept as logged: per field, the value it replaced and the one it wrote. */
+/**
+ * An accept as logged: per field, the value it replaced and the one it
+ * wrote; a new Entry replaced nothing.
+ */
 export type AcceptedEvent = {
   type: 'proposal.accepted';
   id: string;
-  fields: Partial<
-    Record<ProposalField, { replaced: FieldValue; wrote: FieldValue }>
-  >;
+  fields: Record<string, { replaced?: FieldValue; wrote: FieldValue }>;
   at: number;
 };
 
@@ -62,11 +65,12 @@ export type ConversationEvent =
 
 /**
  * What the log says of a Proposal: undecided, accepted with the value it
- * wrote, or rejected. An accept that was undone leaves it undecided again.
+ * replaced, if any, and the one it wrote, or rejected. An accept that was
+ * undone leaves it undecided again.
  */
 export type Decision =
   | { kind: 'pending' }
-  | { kind: 'accepted'; replaced: FieldValue; wrote: FieldValue }
+  | { kind: 'accepted'; replaced?: FieldValue; wrote: ProposedValue }
   | { kind: 'rejected' };
 
 /** A Proposal in a log: the message it came with, by index, and the latest decision on it. */
@@ -118,17 +122,8 @@ export function parseLog(log: string): LoggedConversation | null {
         });
       }
     } else if (known && event.type === 'proposal.accepted') {
-      const change = (event as Partial<AcceptedEvent>).fields?.[known.field];
-      if (
-        isFieldValue(known.field, change?.replaced) &&
-        isFieldValue(known.field, change.wrote)
-      ) {
-        known.decision = {
-          kind: 'accepted',
-          replaced: change.replaced,
-          wrote: change.wrote,
-        };
-      }
+      const accepted = acceptedOf(known, event as Partial<AcceptedEvent>);
+      if (accepted) known.decision = accepted;
     } else if (known && event.type === 'proposal.rejected') {
       known.decision = { kind: 'rejected' };
     } else if (known && event.type === 'proposal.undone') {
@@ -146,31 +141,134 @@ export function parseLog(log: string): LoggedConversation | null {
   };
 }
 
+/** The event that logs a Proposal the Assistant made. */
+export function proposedEvent(proposal: Proposal, at: number): ProposedEvent {
+  const { id } = proposal;
+  if (proposal.kind === 'field') {
+    const { entryId, field, base, proposed } = proposal;
+    return {
+      type: 'proposal.proposed',
+      id,
+      target: { kind: 'entry', id: entryId },
+      fields: { [field]: { base, proposed } },
+      at,
+    };
+  }
+  if (proposal.kind === 'new-entry') {
+    const { type, name, description } = proposal.proposed;
+    return {
+      type: 'proposal.proposed',
+      id,
+      target: { kind: 'new-entry', id: proposal.entryId },
+      fields: {
+        type: { proposed: type },
+        name: { proposed: name },
+        description: { proposed: description },
+      },
+      at,
+    };
+  }
+  const { outlineId, base, proposed } = proposal;
+  return {
+    type: 'proposal.proposed',
+    id,
+    target: { kind: 'outline', id: outlineId },
+    fields: { body: { base, proposed } },
+    at,
+  };
+}
+
+/**
+ * The event that logs an accept of `proposal`: what it replaced in its
+ * target, if anything, and what it `wrote`.
+ */
+export function acceptedEvent(
+  proposal: Proposal,
+  replaced: FieldValue | undefined,
+  wrote: ProposedValue,
+  at: number,
+): AcceptedEvent {
+  const { id } = proposal;
+  if (proposal.kind === 'new-entry') {
+    const { type, name, description } = wrote as NewEntry;
+    return {
+      type: 'proposal.accepted',
+      id,
+      fields: {
+        type: { wrote: type },
+        name: { wrote: name },
+        description: { wrote: description },
+      },
+      at,
+    };
+  }
+  const field = proposal.kind === 'field' ? proposal.field : 'body';
+  return {
+    type: 'proposal.accepted',
+    id,
+    fields: { [field]: { replaced: replaced!, wrote: wrote as FieldValue } },
+    at,
+  };
+}
+
 /**
  * The Proposal an event logs, if this app can take it: a change to one field
- * of an Entry that a Proposal may change, with values the field can hold.
+ * of an Entry that a Proposal may change, with values the field can hold; a
+ * new Entry of a known type with a name; or an Outline's whole body. Never
+ * Prose, Notes or private notes.
  */
 function loggedProposal(event: Partial<ProposedEvent>): Proposal | null {
   const { id, target, fields } = event;
-  if (typeof id !== 'string' || target?.kind !== 'entry') return null;
-  if (typeof target.id !== 'string' || !fields) return null;
-  const changed = Object.keys(fields);
-  const [field] = changed;
-  if (changed.length !== 1 || !isProposalField(field)) return null;
-  const change = fields[field];
-  if (
-    !isFieldValue(field, change?.base) ||
-    !isFieldValue(field, change.proposed)
-  ) {
+  if (typeof id !== 'string' || typeof target?.id !== 'string' || !fields) {
     return null;
   }
-  return {
-    id,
-    entryId: target.id,
-    field,
-    base: change.base,
-    proposed: change.proposed,
-  };
+  if (target.kind === 'new-entry') {
+    const proposed = asNewEntry({
+      type: fields.type?.proposed,
+      name: fields.name?.proposed,
+      description: fields.description?.proposed,
+    });
+    return proposed && { kind: 'new-entry', id, entryId: target.id, proposed };
+  }
+  const changed = Object.keys(fields);
+  const [field] = changed;
+  if (changed.length !== 1) return null;
+  const { base, proposed } = fields[field] ?? {};
+  if (target.kind === 'outline') {
+    if (field !== 'body') return null;
+    if (typeof base !== 'string' || typeof proposed !== 'string') return null;
+    return { kind: 'outline', id, outlineId: target.id, base, proposed };
+  }
+  if (target.kind !== 'entry' || !isProposalField(field)) return null;
+  if (!isFieldValue(field, base) || !isFieldValue(field, proposed)) {
+    return null;
+  }
+  return { kind: 'field', id, entryId: target.id, field, base, proposed };
+}
+
+/** The accept an event logs of `proposal`, if it can be read. */
+function acceptedOf(
+  proposal: Proposal,
+  event: Partial<AcceptedEvent>,
+): Decision | null {
+  const { fields } = event;
+  if (!fields) return null;
+  if (proposal.kind === 'new-entry') {
+    const wrote = asNewEntry({
+      type: fields.type?.wrote,
+      name: fields.name?.wrote,
+      description: fields.description?.wrote,
+    });
+    return wrote && { kind: 'accepted', wrote };
+  }
+  const field = proposal.kind === 'field' ? proposal.field : 'body';
+  const { replaced, wrote } = fields[field] ?? {};
+  const holds = (value: unknown): value is FieldValue =>
+    proposal.kind === 'field'
+      ? isFieldValue(proposal.field, value)
+      : typeof value === 'string';
+  if (!holds(replaced) || !holds(wrote)) return null;
+  return { kind: 'accepted', replaced, wrote };
 }
 
 /**
