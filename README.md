@@ -24,6 +24,7 @@ npm start
 | `npm start` | Run the app in development mode |
 | `npm test` | Unit tests (Vitest) |
 | `npm run test:e2e` | Build the app, then run the end-to-end tests (Playwright for Electron) |
+| `npm run eval:never-prose` | Ask Claude the never-Prose eval set in every Mode and write a review sheet (needs `ANTHROPIC_API_KEY`; see [docs/evals/never-prose](docs/evals/never-prose/README.md)) |
 | `npm run typecheck` | Type-check with `tsc` |
 | `npm run lint` / `npm run lint:fix` | Lint with oxlint and check formatting with oxfmt, or fix both |
 | `npm run package` | Build a runnable app into `out/` |

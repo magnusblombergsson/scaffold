@@ -20,7 +20,8 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:live": "vitest run --config vitest.live.config.mts",
-    "test:e2e": "electron-forge package && playwright test"
+    "test:e2e": "electron-forge package && playwright test",
+    "eval:never-prose": "vitest run --config vitest.eval.config.mts never-prose"
   },
   "devDependencies": {
     "@electron-forge/cli": "^8.0.1",
