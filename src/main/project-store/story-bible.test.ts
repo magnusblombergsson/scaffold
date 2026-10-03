@@ -581,3 +581,19 @@ describe('Entries on another computer', () => {
     await store.close();
   });
 });
+
+describe('the Assistant’s view', () => {
+  it('reads Entries, but has no private notes to read', async () => {
+    const { store } = await newProject();
+    const { id } = await store.createEntry('character', 'Anna');
+    await store.write(privateNotes(id), { id, body: 'She dies.' });
+    const view = store.assistantView();
+
+    expect((await view.read(entry(id))).name).toBe('Anna');
+    expect(view.listEntries().map((e) => e.name)).toEqual(['Anna']);
+    await expect(
+      // @ts-expect-error The view has no 'private' kind.
+      view.read(privateNotes(id)),
+    ).rejects.toThrow(/private/i);
+  });
+});

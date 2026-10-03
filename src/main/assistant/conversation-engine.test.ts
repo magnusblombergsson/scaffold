@@ -23,6 +23,7 @@ async function setUp(
   const projectPath = path.join(dir, 'My Novel');
   const clock = instantClock(1_000);
   const store = await createProject(projectPath, { fs: nodeFileSystem, clock });
+  const chapterId = store.manuscript().chapters[0].id;
   const sceneId = store.manuscript().chapters[0].scenes[0].id;
   const provider = fakeProvider((request, n) => reply(n));
   const engine = createConversationEngine({
@@ -31,12 +32,12 @@ async function setUp(
     model: () => 'claude-opus-5-5',
     clock,
   });
-  return { projectPath, store, clock, sceneId, provider, engine };
+  return { projectPath, store, clock, chapterId, sceneId, provider, engine };
 }
 
 describe('askAssistant', () => {
-  it('logs the message with the Scene in focus, streams the reply, and logs it', async () => {
-    const { store, sceneId, engine, clock } = await setUp();
+  it('logs the message with the Scene in focus, streams the reply, and logs it with what the Assistant saw', async () => {
+    const { store, chapterId, sceneId, engine, clock } = await setUp();
     const { id } = await store.startConversation('writing', 'Anna');
     const streamed: string[] = [];
 
@@ -55,6 +56,16 @@ describe('askAssistant', () => {
         focus: [sceneId],
         at: clock.now(),
         model: 'claude-opus-5-5',
+        saw: {
+          entries: [],
+          units: [
+            { kind: 'outline', id: chapterId },
+            { kind: 'outline', id: sceneId },
+            { kind: 'notes', id: sceneId },
+            { kind: 'scene', id: sceneId },
+          ],
+          messages: 0,
+        },
       },
       failure: null,
     });
@@ -88,7 +99,7 @@ describe('askAssistant', () => {
     });
   });
 
-  it('sends the Writing prompt, the Scene in focus and this Conversation only', async () => {
+  it('sends the Writing context for the Scene in focus and this Conversation only', async () => {
     const { store, sceneId, engine, provider } = await setUp((n) => [
       `Reply ${n}`,
     ]);
@@ -115,15 +126,66 @@ describe('askAssistant', () => {
 
     const request = provider.requests.at(-1)!;
     expect(request.model).toBe('claude-opus-5-5');
-    expect(request.system).toHaveLength(2);
-    expect(request.system[0]).toMatch(/You never write Prose/);
-    expect(request.system[1]).toContain('"Scene 1"');
-    expect(request.system[1]).toContain('Anna packed in the *rain*.');
+    expect(request.system).toHaveLength(4);
+    expect(request.system[0].text).toMatch(/advise the Author, who is writing/);
+    expect(request.system[0].text).toMatch(/You never write Prose/);
+    expect(request.system[3].text).toContain('Scene “Scene 1”');
+    expect(request.system[3].text).toContain('Anna packed in the *rain*.');
     expect(request.messages).toEqual([
       { role: 'user', content: 'Why does Anna leave?' },
-      { role: 'assistant', content: 'Reply 1' },
+      { role: 'assistant', content: 'Reply 1', cache: true },
       { role: 'user', content: 'And the rain?' },
     ]);
+    // The two earlier messages of this Conversation, not the other's.
+    const { messages } = await store.readConversation(id);
+    expect(messages.at(-1)?.saw?.messages).toBe(2);
+  });
+
+  it('sends the Story Bible as it is now, with the Entries mentioned in the Conversation', async () => {
+    const { store, sceneId, engine, provider } = await setUp();
+    const { id: anna } = await store.createEntry('character', 'Anna');
+    const value = await store.read({ kind: 'entry', id: anna });
+    await store.write(
+      { kind: 'entry', id: anna },
+      { ...value, description: 'Leaves the island.' },
+    );
+    await store.write(
+      { kind: 'private', id: anna },
+      { id: anna, body: 'She dies.' },
+    );
+    const { id } = await store.startConversation('writing', 'Anna');
+
+    await engine.askAssistant(
+      id,
+      'Why does Anna leave?',
+      { sceneId },
+      () => {},
+    );
+
+    const request = provider.requests[0];
+    expect(request.system[1].text).toContain('Leaves the island.');
+    expect(JSON.stringify(request)).not.toContain('She dies.');
+    expect((await store.readConversation(id)).messages[1].saw?.entries).toEqual(
+      [anna],
+    );
+  });
+
+  it('answers in the Mode of the Conversation: Brainstorm sends no Prose', async () => {
+    const { store, sceneId, engine, provider } = await setUp();
+    await store.write(
+      { kind: 'scene', id: sceneId },
+      { id: sceneId, markdown: 'Anna packed in the *rain*.' },
+    );
+    const { id } = await store.startConversation('brainstorm', 'Ideas');
+
+    await engine.askAssistant(id, 'What if it rains?', { sceneId }, () => {});
+
+    const request = provider.requests[0];
+    expect(request.system[0].text).toMatch(/In Brainstorm/);
+    expect(JSON.stringify(request)).not.toContain('packed in the');
+    const [authored, replied] = (await store.readConversation(id)).messages;
+    expect(authored.focus).toEqual([]);
+    expect(replied.saw?.units).toEqual([]);
   });
 
   it('flushes dirty units before the request is built', async () => {
@@ -192,8 +254,8 @@ describe('askAssistant', () => {
       [secondScene],
       [],
     ]);
-    expect(provider.requests[1].system[1]).toContain('"Two"');
-    expect(provider.requests[2].system).toHaveLength(1);
+    expect(provider.requests[1].system[3].text).toContain('Scene “Two”');
+    expect(provider.requests[2].system).toHaveLength(3);
   });
 
   it('logs no turn for a call that fails before any reply', async () => {

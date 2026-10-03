@@ -1012,8 +1012,27 @@ h2.binder-title > button[aria-current='true'],
   align-self: flex-start;
 }
 
+.message-saw {
+  margin: 0.3rem 0 0;
+  font-size: 0.8em;
+  color: var(--muted);
+}
+
+.message-saw summary {
+  cursor: pointer;
+}
+
+.message-saw summary .message-usage::before {
+  content: ' · ';
+}
+
+.message-saw ul {
+  margin: 0.3rem 0 0;
+  padding-left: 1.2rem;
+}
+
 .message-note,
-.message-usage,
+p.message-used,
 .conversation-usage {
   margin: 0.3rem 0 0;
   font-size: 0.8em;

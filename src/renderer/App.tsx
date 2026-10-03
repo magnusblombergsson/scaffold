@@ -592,6 +592,7 @@ function ProjectView({
           <AssistantPanel
             onAddKey={onAddKey}
             sceneId={open && !open.scene.missing ? open.scene.id : null}
+            names={{ manuscript, entries }}
           />
         </div>
         {peek && (

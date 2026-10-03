@@ -64,6 +64,19 @@ test('the Author asks about the Scene in focus, sees the reply stream in, and re
   await expect(assistant.getByLabel('Conversation usage')).toHaveText(
     '≈ 18k in (12k cached) · 900 out · ≈ $0.04',
   );
+  // The reply says what the Assistant saw, once opened.
+  const saw = reply.getByRole('list', { name: 'What the Assistant saw' });
+  await expect(saw).toBeHidden();
+  await reply.getByText('What the Assistant saw').click();
+  await expect(saw.getByRole('listitem')).toHaveText([
+    'Story Bible: no Entries',
+    'Outline skeleton',
+    'The Outline of “Chapter 1”',
+    'The Outline of “Scene 1”',
+    'The Notes on “Scene 1”',
+    'The Prose of “Scene 1”',
+    'No earlier messages',
+  ]);
   // Claude was asked with the stored key's model and the Scene in focus.
   expect(anthropic.sent[0]).toMatchObject({ model: 'claude-opus-5-5' });
   expect(JSON.stringify(anthropic.sent[0].system)).toContain(
@@ -86,6 +99,7 @@ test('the Author asks about the Scene in focus, sees the reply stream in, and re
     role: 'assistant',
     model: 'claude-opus-5-5',
     usage: { input: 18_000, cached: 12_000, written: 0, output: 900 },
+    saw: { entries: [], messages: 0 },
   });
   // Money is never stored.
   expect(JSON.stringify(replied)).not.toMatch(/\$|cost|usd/i);

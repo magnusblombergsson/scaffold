@@ -12,10 +12,15 @@ import type {
   ConversationMessage,
   ConversationSummary,
 } from '../shared/conversation';
+import type { EntrySummary, Manuscript } from '../shared/project-types';
 import { describeTotal, describeUsage } from '../shared/usage';
 import { NoKeyState, useKeyStatus } from './ApiKey';
 import { flushPendingEdits } from './pending-edits';
 import { ReadOnlyContext } from './read-only';
+import { sawList } from './saw-list';
+
+/** The Project as it is now, which names what the Assistant saw. */
+type Names = { manuscript: Manuscript; entries: EntrySummary[] };
 
 /**
  * The Assistant beside the editor. Without an API key it only asks for one;
@@ -24,10 +29,12 @@ import { ReadOnlyContext } from './read-only';
 export function AssistantPanel({
   onAddKey,
   sceneId,
+  names,
 }: {
   onAddKey(): void;
   /** The Scene open in the editor, which a message sent now is about. */
   sceneId: string | null;
+  names: Names;
 }) {
   const status = useKeyStatus();
   return (
@@ -35,7 +42,11 @@ export function AssistantPanel({
       <h2 className="assistant-heading">Assistant</h2>
       {status &&
         (status.masked ? (
-          <Conversations sceneId={sceneId} onOpenSettings={onAddKey} />
+          <Conversations
+            sceneId={sceneId}
+            names={names}
+            onOpenSettings={onAddKey}
+          />
         ) : (
           <NoKeyState onAddKey={onAddKey} />
         ))}
@@ -74,9 +85,11 @@ const FAILURES: Record<AssistantFailure, string> = {
  */
 function Conversations({
   sceneId,
+  names,
   onOpenSettings,
 }: {
   sceneId: string | null;
+  names: Names;
   onOpenSettings(): void;
 }) {
   const readOnly = useContext(ReadOnlyContext);
@@ -220,10 +233,13 @@ function Conversations({
           <p className="assistant-empty">No Conversations yet.</p>
         )}
         {current?.messages.map((m, i) => (
-          <Message key={i} message={m} />
+          <Message key={i} message={m} names={names} />
         ))}
         {streaming !== null && streaming !== '' && (
-          <Message message={{ role: 'assistant', text: streaming }} />
+          <Message
+            message={{ role: 'assistant', text: streaming }}
+            names={names}
+          />
         )}
         {failure && streaming === null && (
           <article className="message message-system" aria-label="System">
@@ -266,12 +282,23 @@ function Conversations({
   );
 }
 
+/**
+ * A message; a reply ends with a collapsible line saying what it used and
+ * cost, which opens to list what the Assistant saw.
+ */
 function Message({
-  message: { role, text, model, usage, interrupted },
+  message: { role, text, model, usage, interrupted, saw },
+  names,
 }: {
   message: Pick<ConversationMessage, 'role' | 'text'> &
     Partial<ConversationMessage>;
+  names: Names;
 }) {
+  const used = model && usage && (
+    <span className="message-usage" aria-label="Usage">
+      {describeUsage(model, usage)}
+    </span>
+  );
   return (
     <article
       className={`message message-${role}`}
@@ -279,10 +306,17 @@ function Message({
     >
       <div className="message-text">{text}</div>
       {interrupted && <p className="message-note">Interrupted</p>}
-      {model && usage && (
-        <p className="message-usage" aria-label="Usage">
-          {describeUsage(model, usage)}
-        </p>
+      {saw ? (
+        <details className="message-saw">
+          <summary>What the Assistant saw{used}</summary>
+          <ul aria-label="What the Assistant saw">
+            {sawList(saw, names.manuscript, names.entries).map((line, i) => (
+              <li key={i}>{line}</li>
+            ))}
+          </ul>
+        </details>
+      ) : (
+        used && <p className="message-used">{used}</p>
       )}
     </article>
   );

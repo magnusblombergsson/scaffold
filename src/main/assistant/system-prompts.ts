@@ -1,3 +1,5 @@
+import type { Mode } from '../../shared/conversation';
+
 // The Assistant's system prompts. The never-Prose rule is the same in every
 // Mode, with no override (MVP spec §4).
 
@@ -13,7 +15,17 @@ export const WRITING_PROMPT = `You are the Assistant in a writing tool for creat
 
 ${NEVER_PROSE_RULE}`;
 
-/** The block that gives the Assistant the Scene in focus. */
-export function sceneInFocus(title: string, markdown: string): string {
-  return `The Scene in focus, "${title}", as the Author has written it so far:\n\n${markdown === '' ? '(empty)' : markdown}`;
-}
+export const BRAINSTORM_PROMPT = `You are the Assistant in a writing tool for creative fiction. In Brainstorm you generate ideas freely with the Author: characters, places, turns of plot, structure. You answer in the language the Author writes to you in.
+
+${NEVER_PROSE_RULE}`;
+
+export const INTERVIEW_PROMPT = `You are the Assistant in a writing tool for creative fiction. In Interview you ask the Author questions to capture facts about the story's world, characters and plot, one question at a time, about what is missing within the focus the Author chose. You ask in the language the Author writes to you in.
+
+${NEVER_PROSE_RULE}`;
+
+/** The system prompt of each Mode. */
+export const MODE_PROMPTS: Record<Mode, string> = {
+  brainstorm: BRAINSTORM_PROMPT,
+  interview: INTERVIEW_PROMPT,
+  writing: WRITING_PROMPT,
+};

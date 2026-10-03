@@ -12,7 +12,7 @@ it.skipIf(!key)('streams a reply from Claude with what it used', async () => {
 
   for await (const event of provider.stream({
     model: 'claude-haiku-4-5',
-    system: ['Answer in one short sentence.'],
+    system: [{ text: 'Answer in one short sentence.' }],
     messages: [
       { role: 'user', content: 'What colour is the sky on a clear day?' },
     ],

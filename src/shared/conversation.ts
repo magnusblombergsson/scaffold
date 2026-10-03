@@ -16,11 +16,22 @@ export type ConversationSummary = {
   created: number;
 };
 
+/** A unit whose text the Assistant saw in focus: a Scene's Prose, or an Outline or Notes. */
+export type SawUnit = { kind: 'scene' | 'outline' | 'notes'; id: string };
+
+/**
+ * What the Assistant saw for a reply, by id: the Entries of the Story Bible
+ * it was sent, the units in focus, and how many earlier messages of the
+ * Conversation. The Outline skeleton is sent every time.
+ */
+export type Saw = { entries: string[]; units: SawUnit[]; messages: number };
+
 /**
  * One message in a Conversation: `focus` holds the ids of the Scenes in focus
  * when it was sent, which the Conversation isn't bound to. An Assistant turn
  * also says which `model` answered and what it used, when that is known, and
- * is `interrupted` when the call failed partway and the reply is cut short.
+ * is `interrupted` when the call failed partway and the reply is cut short,
+ * and says what the Assistant `saw`.
  */
 export type ConversationMessage = {
   role: 'author' | 'assistant';
@@ -31,6 +42,7 @@ export type ConversationMessage = {
   model?: string;
   usage?: Usage;
   interrupted?: true;
+  saw?: Saw;
 };
 
 /**

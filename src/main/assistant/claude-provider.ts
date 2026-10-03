@@ -6,6 +6,9 @@ import { ProviderError, type Provider, type ProviderEvent } from './provider';
 /** Room for thinking and a long answer; every model offered allows it. */
 const MAX_TOKENS = 32_000;
 
+/** A cache breakpoint: the next call within five minutes reads back all up to it. */
+const CACHE = { type: 'ephemeral', ttl: '5m' } as const;
+
 export type ClaudeProviderDeps = {
   /** The Author's key as it is now, so a replaced key applies from the next call. */
   apiKey: () => string | null;
@@ -34,10 +37,17 @@ export function claudeProvider({
         const stream = client.messages.stream({
           model: request.model,
           max_tokens: MAX_TOKENS,
-          system: request.system.map((text) => ({ type: 'text', text })),
-          messages: request.messages,
-          // Caches all that was sent, so the next turn reads it back.
-          cache_control: { type: 'ephemeral' },
+          system: request.system.map(({ text, cache }) => ({
+            type: 'text',
+            text,
+            ...(cache && { cache_control: CACHE }),
+          })),
+          messages: request.messages.map(({ role, content, cache }) => ({
+            role,
+            content: cache
+              ? [{ type: 'text', text: content, cache_control: CACHE }]
+              : content,
+          })),
         });
         for await (const event of stream) {
           if (event.type === 'message_start') {

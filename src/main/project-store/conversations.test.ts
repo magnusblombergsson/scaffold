@@ -122,6 +122,39 @@ describe('Conversation logs', () => {
     });
   });
 
+  it('logs what the Assistant saw by id, and leaves out a record of it that can’t be read', async () => {
+    const { projectPath, store } = await newProject();
+    const sceneId = store.manuscript().chapters[0].scenes[0].id;
+    const { id } = await store.startConversation('writing', 'Why Anna?');
+    const saw = {
+      entries: ['anna'],
+      units: [{ kind: 'scene' as const, id: sceneId }],
+      messages: 1,
+    };
+    await store.appendMessage(id, {
+      role: 'assistant',
+      text: 'Hm.',
+      focus: [],
+      at: 2_000,
+      saw,
+    });
+    await appendFile(
+      path.join(projectPath, 'conversations', `${id}.jsonl`),
+      `${JSON.stringify({ type: 'message', role: 'assistant', text: 'Odd.', focus: [], at: 3_000, saw: { entries: 'anna' } })}
+`,
+    );
+
+    const { messages } = await store.readConversation(id);
+
+    expect(messages[0].saw).toEqual(saw);
+    expect(messages[1]).toEqual({
+      role: 'assistant',
+      text: 'Odd.',
+      focus: [],
+      at: 3_000,
+    });
+  });
+
   it('lists Conversations by scanning conversations/, latest first, also after reopening', async () => {
     const { projectPath, store, clock } = await newProject();
     const first = await store.startConversation('writing', 'First');

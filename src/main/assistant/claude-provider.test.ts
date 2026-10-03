@@ -35,10 +35,13 @@ afterEach(async () => {
 
 const request: ProviderRequest = {
   model: 'claude-opus-5-5',
-  system: ['You never write Prose.', 'The Scene in focus.'],
+  system: [
+    { text: 'You never write Prose.', cache: true },
+    { text: 'The Scene in focus.' },
+  ],
   messages: [
     { role: 'user', content: 'Why does Anna leave?' },
-    { role: 'assistant', content: 'What does she fear?' },
+    { role: 'assistant', content: 'What does she fear?', cache: true },
     { role: 'user', content: 'The sea.' },
   ],
 };
@@ -140,7 +143,7 @@ describe('claudeProvider', () => {
     });
   });
 
-  it('sends the chosen model, the system prompt and the Conversation with the stored key, caching what was sent', async () => {
+  it('sends the chosen model, the system prompt and the Conversation with the stored key, with a breakpoint after each block marked for caching', async () => {
     answer = (response) =>
       sse(response, [messageStart, textStart, delta('Hm.'), ...replyEnd]);
 
@@ -152,12 +155,29 @@ describe('claudeProvider', () => {
       model: 'claude-opus-5-5',
       stream: true,
       system: [
-        { type: 'text', text: 'You never write Prose.' },
+        {
+          type: 'text',
+          text: 'You never write Prose.',
+          cache_control: { type: 'ephemeral', ttl: '5m' },
+        },
         { type: 'text', text: 'The Scene in focus.' },
       ],
-      messages: request.messages,
-      cache_control: { type: 'ephemeral' },
+      messages: [
+        { role: 'user', content: 'Why does Anna leave?' },
+        {
+          role: 'assistant',
+          content: [
+            {
+              type: 'text',
+              text: 'What does she fear?',
+              cache_control: { type: 'ephemeral', ttl: '5m' },
+            },
+          ],
+        },
+        { role: 'user', content: 'The sea.' },
+      ],
     });
+    expect(calls[0].body).not.toHaveProperty('cache_control');
   });
 
   it.each([

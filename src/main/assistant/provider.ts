@@ -5,13 +5,26 @@ import type { Usage } from '../../shared/usage';
 // The provider interface: how the Conversation engine talks to a model. The
 // Claude adapter implements it over @anthropic-ai/sdk; tests use the fake.
 
+/**
+ * A block of the system prompt; with `cache`, a cache breakpoint follows it,
+ * so the next call reads back all up to there.
+ */
+export type PromptBlock = { text: string; cache?: true };
+
+/** A message of the Conversation as sent; `cache` as for a `PromptBlock`. */
+export type PromptMessage = {
+  role: 'user' | 'assistant';
+  content: string;
+  cache?: true;
+};
+
 /** What is sent to the model, built in main; the renderer never builds it. */
 export type ProviderRequest = {
   model: ModelId;
   /** The system prompt's blocks, in order. */
-  system: string[];
+  system: PromptBlock[];
   /** The Conversation so far, ending with the Author's new message. */
-  messages: { role: 'user' | 'assistant'; content: string }[];
+  messages: PromptMessage[];
 };
 
 /**

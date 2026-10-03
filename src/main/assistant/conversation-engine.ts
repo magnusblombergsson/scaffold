@@ -2,14 +2,14 @@ import type {
   AskResult,
   AssistantFailure,
   ConversationMessage,
+  Mode,
 } from '../../shared/conversation';
 import type { ModelId } from '../../shared/models';
-import type { ManuscriptScene } from '../../shared/project-types';
 import type { Usage } from '../../shared/usage';
 import type { Clock } from '../project-store/clock';
 import type { ProjectStore } from '../project-store/project-store';
+import { buildContext, defaultRequest, readableScene } from './context-builder';
 import { ProviderError, type Provider, type ProviderRequest } from './provider';
-import { sceneInFocus, WRITING_PROMPT } from './system-prompts';
 
 /** What a message is about: the Scene open in the editor when it was sent, if any. */
 export type Focus = { sceneId: string | null };
@@ -17,7 +17,7 @@ export type Focus = { sceneId: string | null };
 export type EngineDeps = {
   store: Pick<
     ProjectStore,
-    'flush' | 'read' | 'manuscript' | 'readConversation' | 'appendMessage'
+    'flush' | 'assistantView' | 'readConversation' | 'appendMessage'
   >;
   provider: Provider;
   /** The model the next call uses, as chosen in Settings. */
@@ -35,45 +35,40 @@ export function createConversationEngine({
   model,
   clock,
 }: EngineDeps) {
-  /** The Scene in focus, if it is one the Assistant can read. */
-  async function sceneBlock(sceneId: string | null): Promise<string | null> {
-    if (!sceneId) return null;
-    const { chapters, unplaced } = store.manuscript();
-    const scenes: ManuscriptScene[] = [
-      ...chapters.flatMap((c) => c.scenes),
-      ...unplaced,
-    ];
-    const scene = scenes.find((s) => s.id === sceneId);
-    if (!scene || scene.missing) return null;
-    const { markdown } = await store.read({ kind: 'scene', id: sceneId });
-    return sceneInFocus(scene.title, markdown);
+  /**
+   * The Scene in focus as a message logs it: in a Writing Conversation, the
+   * Scene open, if the Assistant can read it.
+   */
+  function focusOf(mode: Mode, sceneId: string | null): string[] {
+    if (mode !== 'writing' || !sceneId) return [];
+    return readableScene(store.assistantView().manuscript(), sceneId)
+      ? [sceneId]
+      : [];
   }
 
   /**
    * Asks the model to answer the Conversation as logged, which ends with the
-   * Author's message, about the Scene `scene` describes. The reply is logged
-   * once it has come, or as interrupted if the call fails partway; a call that
-   * fails before any reply logs nothing.
+   * Author's message, with the context the Conversation's Mode gives the
+   * Scene in `focus`. The reply is logged once it has come, or as
+   * interrupted if the call fails partway; a call that fails before any
+   * reply logs nothing.
    */
   async function answer(
     conversationId: string,
+    mode: Mode,
     messages: ConversationMessage[],
-    scene: string | null,
     focus: string[],
     onText: (text: string) => void,
   ): Promise<AskResult> {
     const chosen = model();
+    const context = await buildContext(
+      store.assistantView(),
+      defaultRequest(mode, focus[0] ?? null, messages),
+    );
     const request: ProviderRequest = {
       model: chosen,
-      system: scene ? [WRITING_PROMPT, scene] : [WRITING_PROMPT],
-      // A reply cut short isn't sent back: the model would take it as one to
-      // continue, and a Retry answers the Author's message afresh.
-      messages: messages
-        .filter((m) => !m.interrupted)
-        .map((m) => ({
-          role: m.role === 'author' ? 'user' : 'assistant',
-          content: m.text,
-        })),
+      system: context.system,
+      messages: context.messages,
     };
     let text = '';
     let usage: Usage | undefined;
@@ -105,6 +100,7 @@ export function createConversationEngine({
       model: chosen,
       ...(usage && { usage }),
       ...(failure && { interrupted: true as const }),
+      saw: context.saw,
     };
     await store.appendMessage(conversationId, reply);
     return { reply, failure };
@@ -124,21 +120,20 @@ export function createConversationEngine({
     ): Promise<AskResult> {
       // What the Author typed last is on disk before the context is built.
       await store.flush();
-      const earlier = (await store.readConversation(conversationId)).messages;
-      const scene = await sceneBlock(focus.sceneId);
-      const focusIds = scene && focus.sceneId ? [focus.sceneId] : [];
+      const { mode, messages: earlier } =
+        await store.readConversation(conversationId);
       const authored: ConversationMessage = {
         role: 'author',
         text: message,
-        focus: focusIds,
+        focus: focusOf(mode, focus.sceneId),
         at: clock.now(),
       };
       await store.appendMessage(conversationId, authored);
       return answer(
         conversationId,
+        mode,
         [...earlier, authored],
-        scene,
-        focusIds,
+        authored.focus,
         onText,
       );
     },
@@ -153,17 +148,16 @@ export function createConversationEngine({
       onText: (text: string) => void,
     ): Promise<AskResult> {
       await store.flush();
-      const { messages } = await store.readConversation(conversationId);
+      const { mode, messages } = await store.readConversation(conversationId);
       const last = messages.findLast((m) => !m.interrupted);
       if (last?.role !== 'author') {
         throw new Error('There is no message waiting for an answer');
       }
-      const scene = await sceneBlock(last.focus[0] ?? null);
       return answer(
         conversationId,
+        mode,
         messages,
-        scene,
-        scene ? last.focus : [],
+        focusOf(mode, last.focus[0] ?? null),
         onText,
       );
     },

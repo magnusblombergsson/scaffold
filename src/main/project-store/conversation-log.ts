@@ -4,6 +4,7 @@ import {
   type ConversationMessage,
   type ConversationSummary,
   type Mode,
+  type Saw,
 } from '../../shared/conversation';
 import type { Usage } from '../../shared/usage';
 
@@ -48,9 +49,12 @@ export function parseLog(log: string): Conversation | null {
   return { id, mode, title, created, messages };
 }
 
-/** The message an event holds; what is known of a turn's cost is kept if readable. */
+/**
+ * The message an event holds; what is known of a turn's cost, and what the
+ * Assistant saw, is kept if readable.
+ */
 function messageOf(event: MessageEvent): ConversationMessage {
-  const { role, text, focus, at, model, usage, interrupted } = event;
+  const { role, text, focus, at, model, usage, interrupted, saw } = event;
   return {
     role,
     text,
@@ -59,7 +63,23 @@ function messageOf(event: MessageEvent): ConversationMessage {
     ...(typeof model === 'string' && { model }),
     ...(isUsage(usage) && { usage }),
     ...(interrupted === true && { interrupted }),
+    ...(isSaw(saw) && { saw }),
   };
+}
+
+function isSaw(value: unknown): value is Saw {
+  const saw = value as Partial<Saw> | null | undefined;
+  return (
+    Array.isArray(saw?.entries) &&
+    saw.entries.every((id) => typeof id === 'string') &&
+    Array.isArray(saw.units) &&
+    saw.units.every(
+      (unit) =>
+        ['scene', 'outline', 'notes'].includes(unit?.kind) &&
+        typeof unit.id === 'string',
+    ) &&
+    typeof saw.messages === 'number'
+  );
 }
 
 function isUsage(value: unknown): value is Usage {

@@ -81,6 +81,20 @@ type Manifest = {
   tree: ProjectTree;
 };
 
+/** A unit the Assistant may read: anything but an Entry's private notes. */
+export type AssistantRef = Exclude<UnitRef, { kind: 'private' }>;
+
+/**
+ * What the context builder reads a Project through: the Manuscript, the
+ * Story Bible and the units in `scenes/`, `outlines/`, `notes/` and `bible/`,
+ * never `private/`.
+ */
+export interface AssistantView {
+  manuscript(): Manuscript;
+  listEntries(): EntrySummary[];
+  read<R extends AssistantRef>(ref: R): Promise<ValueOf<R>>;
+}
+
 export class ProjectError extends Error {
   constructor(
     readonly reason:
@@ -2319,6 +2333,21 @@ export class ProjectStore {
         item.id === id ||
         (item.kind === 'chapter' && item.scenes.some((s) => s.id === id)),
     );
+  }
+
+  /** A narrower handle for building the Assistant's context; it has no private notes. */
+  assistantView(): AssistantView {
+    return {
+      manuscript: () => this.manuscript(),
+      listEntries: () => this.listEntries(),
+      read: async (ref) => {
+        // Refused at run time too, whatever a caller's types say.
+        if ((ref as UnitRef).kind === 'private') {
+          throw new Error("The Assistant never reads an Entry's private notes");
+        }
+        return this.read(ref);
+      },
+    };
   }
 
   /** Reads a unit; a value accepted by `write` is seen before it is on disk. */
