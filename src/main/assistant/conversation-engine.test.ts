@@ -6,7 +6,7 @@ import { instantClock } from '../project-store/clock';
 import { nodeFileSystem, type FileSystem } from '../project-store/file-system';
 import { createProject } from '../project-store/project-store';
 import { createConversationEngine } from './conversation-engine';
-import { fakeProvider } from './fake-provider';
+import { fakeProvider, type FakeReply } from './fake-provider';
 
 let dir: string;
 
@@ -17,7 +17,9 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true });
 });
 
-async function setUp(reply = (_n: number) => ['What does ', 'she fear?']) {
+async function setUp(
+  reply: (n: number) => FakeReply = () => ['What does ', 'she fear?'],
+) {
   const projectPath = path.join(dir, 'My Novel');
   const clock = instantClock(1_000);
   const store = await createProject(projectPath, { fs: nodeFileSystem, clock });
@@ -47,10 +49,14 @@ describe('askAssistant', () => {
 
     expect(streamed).toEqual(['What does ', 'she fear?']);
     expect(reply).toEqual({
-      role: 'assistant',
-      text: 'What does she fear?',
-      focus: [sceneId],
-      at: clock.now(),
+      reply: {
+        role: 'assistant',
+        text: 'What does she fear?',
+        focus: [sceneId],
+        at: clock.now(),
+        model: 'claude-opus-5-5',
+      },
+      failure: null,
     });
     expect((await store.readConversation(id)).messages).toEqual([
       {
@@ -59,8 +65,27 @@ describe('askAssistant', () => {
         focus: [sceneId],
         at: 1_000,
       },
-      reply,
+      reply.reply,
     ]);
+  });
+
+  it('logs the model and what the reply used', async () => {
+    const usage = { input: 18_000, cached: 12_000, written: 0, output: 900 };
+    const { store, sceneId, engine } = await setUp(() => ({
+      text: ['Hm.'],
+      usage,
+    }));
+    const { id } = await store.startConversation('writing', 'Anna');
+
+    await engine.askAssistant(id, 'Why?', { sceneId }, () => {});
+
+    const [, replied] = (await store.readConversation(id)).messages;
+    expect(replied).toMatchObject({
+      role: 'assistant',
+      text: 'Hm.',
+      model: 'claude-opus-5-5',
+      usage,
+    });
   });
 
   it('sends the Writing prompt, the Scene in focus and this Conversation only', async () => {
@@ -169,5 +194,95 @@ describe('askAssistant', () => {
     ]);
     expect(provider.requests[1].system[1]).toContain('"Two"');
     expect(provider.requests[2].system).toHaveLength(1);
+  });
+
+  it('logs no turn for a call that fails before any reply', async () => {
+    const { store, sceneId, engine } = await setUp(() => ({
+      text: [],
+      fail: 'key',
+    }));
+    const { id } = await store.startConversation('writing', 'Anna');
+
+    const result = await engine.askAssistant(id, 'Why?', { sceneId }, () => {});
+
+    expect(result).toEqual({ reply: null, failure: 'key' });
+    expect(
+      (await store.readConversation(id)).messages.map((m) => m.role),
+    ).toEqual(['author']);
+  });
+
+  it('keeps a reply cut short as an interrupted turn, with what it used', async () => {
+    const usage = { input: 2_000, cached: 0, written: 0, output: 3 };
+    const { store, sceneId, engine } = await setUp(() => ({
+      text: ['What does '],
+      usage,
+      fail: 'offline',
+    }));
+    const { id } = await store.startConversation('writing', 'Anna');
+
+    const result = await engine.askAssistant(id, 'Why?', { sceneId }, () => {});
+
+    expect(result.failure).toBe('offline');
+    expect(result.reply).toMatchObject({
+      text: 'What does ',
+      interrupted: true,
+      usage,
+    });
+    const [, replied] = (await store.readConversation(id)).messages;
+    expect(replied).toEqual(result.reply);
+  });
+});
+
+describe('retry', () => {
+  it('answers the Author’s last message again after a failure, about the Scene then in focus', async () => {
+    const { store, sceneId, engine, provider } = await setUp((n) =>
+      n === 0 ? { text: [], fail: 'rate-limit' } : ['Second ', 'try.'],
+    );
+    const { id } = await store.startConversation('writing', 'Anna');
+    await engine.askAssistant(id, 'Why?', { sceneId }, () => {});
+    const streamed: string[] = [];
+
+    const result = await engine.retry(id, (text) => streamed.push(text));
+
+    expect(streamed).toEqual(['Second ', 'try.']);
+    expect(result).toMatchObject({
+      reply: { text: 'Second try.', focus: [sceneId] },
+      failure: null,
+    });
+    expect(provider.requests[1]).toEqual(provider.requests[0]);
+    expect(
+      (await store.readConversation(id)).messages.map((m) => m.text),
+    ).toEqual(['Why?', 'Second try.']);
+  });
+
+  it('adds a new turn after an interrupted one, which isn’t sent to the model', async () => {
+    const { store, sceneId, engine, provider } = await setUp((n) =>
+      n === 0 ? { text: ['What does '], fail: 'offline' } : ['Whole reply.'],
+    );
+    const { id } = await store.startConversation('writing', 'Anna');
+    await engine.askAssistant(id, 'Why?', { sceneId }, () => {});
+
+    await engine.retry(id, () => {});
+
+    expect(provider.requests[1].messages).toEqual([
+      { role: 'user', content: 'Why?' },
+    ]);
+    const messages = (await store.readConversation(id)).messages;
+    expect(messages.map((m) => [m.text, m.interrupted ?? false])).toEqual([
+      ['Why?', false],
+      ['What does ', true],
+      ['Whole reply.', false],
+    ]);
+  });
+
+  it('refuses when no message waits for an answer', async () => {
+    const { store, sceneId, engine, provider } = await setUp();
+    const { id } = await store.startConversation('writing', 'Anna');
+    await engine.askAssistant(id, 'Why?', { sceneId }, () => {});
+
+    await expect(engine.retry(id, () => {})).rejects.toThrow(
+      /no message waiting/,
+    );
+    expect(provider.requests).toHaveLength(1);
   });
 });

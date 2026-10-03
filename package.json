@@ -19,6 +19,7 @@
     "lint:fix": "oxlint --fix && oxfmt --write",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:live": "vitest run --config vitest.live.config.mts",
     "test:e2e": "electron-forge package && playwright test"
   },
   "devDependencies": {

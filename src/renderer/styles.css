@@ -1012,6 +1012,29 @@ h2.binder-title > button[aria-current='true'],
   align-self: flex-start;
 }
 
+.message-note,
+.message-usage,
+.conversation-usage {
+  margin: 0.3rem 0 0;
+  font-size: 0.8em;
+  color: var(--muted);
+}
+
+.message-system {
+  align-self: stretch;
+  border: 1px solid #b3261e;
+}
+
+.message-system p {
+  margin: 0;
+}
+
+.message-actions {
+  display: flex;
+  gap: 0.5rem;
+  margin-top: 0.4rem;
+}
+
 .assistant-error {
   color: #b3261e;
 }

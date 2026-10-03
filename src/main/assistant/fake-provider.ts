@@ -1,11 +1,21 @@
-import type { Provider, ProviderRequest } from './provider';
+import type { AssistantFailure } from '../../shared/conversation';
+import type { Usage } from '../../shared/usage';
+import { ProviderError, type Provider, type ProviderRequest } from './provider';
 
 /**
- * A provider that never calls a model: it streams the pieces `reply` gives
+ * What the fake replies: the pieces of text it streams, then what the call
+ * used, if given; with `fail`, the call fails after the pieces.
+ */
+export type FakeReply =
+  | string[]
+  | { text: string[]; usage?: Usage; fail?: AssistantFailure };
+
+/**
+ * A provider that never calls a model: it streams the reply `reply` gives
  * for the `n`th request, counting from 0, and keeps every request it was sent.
  */
 export function fakeProvider(
-  reply: (request: ProviderRequest, n: number) => string[] = placeholderReply,
+  reply: (request: ProviderRequest, n: number) => FakeReply,
 ): Provider & { requests: ProviderRequest[] } {
   const requests: ProviderRequest[] = [];
   return {
@@ -13,19 +23,17 @@ export function fakeProvider(
     async *stream(request) {
       const n = requests.length;
       requests.push(structuredClone(request));
-      for (const text of reply(request, n)) {
+      const given = reply(request, n);
+      const { text, usage, fail } = Array.isArray(given)
+        ? { text: given }
+        : given;
+      if (usage) yield { type: 'usage', usage };
+      for (const piece of text) {
         // A real reply arrives over time, not all at once.
         await new Promise((resolve) => setTimeout(resolve, 0));
-        yield { type: 'text', text };
+        yield { type: 'text', text: piece };
       }
+      if (fail) throw new ProviderError(fail, `The call failed: ${fail}`);
     },
   };
-}
-
-/** What the app replies until the Claude adapter is in: no model is asked. */
-function placeholderReply(request: ProviderRequest): string[] {
-  const question = request.messages.at(-1)?.content ?? '';
-  return `This is a stand-in Assistant; no model was asked. You wrote ${question.length} characters. What do you want this Scene to do for the story?`.split(
-    /(?<= )/,
-  );
 }

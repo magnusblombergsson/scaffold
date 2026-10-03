@@ -6,10 +6,13 @@ import {
   type KeyboardEvent,
 } from 'react';
 import type {
+  AskResult,
+  AssistantFailure,
   Conversation,
   ConversationMessage,
   ConversationSummary,
 } from '../shared/conversation';
+import { describeTotal, describeUsage } from '../shared/usage';
 import { NoKeyState, useKeyStatus } from './ApiKey';
 import { flushPendingEdits } from './pending-edits';
 import { ReadOnlyContext } from './read-only';
@@ -32,7 +35,7 @@ export function AssistantPanel({
       <h2 className="assistant-heading">Assistant</h2>
       {status &&
         (status.masked ? (
-          <Conversations sceneId={sceneId} />
+          <Conversations sceneId={sceneId} onOpenSettings={onAddKey} />
         ) : (
           <NoKeyState onAddKey={onAddKey} />
         ))}
@@ -51,13 +54,31 @@ function titleOf(message: string): string {
     : line;
 }
 
+/** What the Author is told when the Assistant couldn't answer. */
+const FAILURES: Record<AssistantFailure, string> = {
+  key: "Anthropic didn't accept the API key. Check it in Settings, then retry.",
+  credit:
+    'Your Anthropic account is out of credit. Add credit in Anthropic Console, then retry.',
+  'rate-limit':
+    'Anthropic is getting too many calls from this key. Wait a moment, then retry.',
+  offline: "Can't reach Anthropic. Check the connection, then retry.",
+  other: "The Assistant couldn't answer. Retry, or try again later.",
+};
+
 /**
  * Writing Conversations: a picker to resume one, its messages, and where the
  * Author writes the next. A new one starts when its first message is sent.
  * The Assistant's replies are plain text: nothing here puts them in the
- * Manuscript, though the Author can copy them as any text.
+ * Manuscript, though the Author can copy them as any text. A failed call
+ * shows as a message of its own, with Retry; it isn't in the log.
  */
-function Conversations({ sceneId }: { sceneId: string | null }) {
+function Conversations({
+  sceneId,
+  onOpenSettings,
+}: {
+  sceneId: string | null;
+  onOpenSettings(): void;
+}) {
   const readOnly = useContext(ReadOnlyContext);
   const [list, setList] = useState<ConversationSummary[]>([]);
   /** The Conversation shown; null for a new one, not yet started. */
@@ -66,6 +87,8 @@ function Conversations({ sceneId }: { sceneId: string | null }) {
   /** The reply streaming in, while the Assistant answers. */
   const [streaming, setStreaming] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  /** Why the last call failed, until the Author asks again. */
+  const [failure, setFailure] = useState<AssistantFailure | null>(null);
   const messagesEnd = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
@@ -73,10 +96,11 @@ function Conversations({ sceneId }: { sceneId: string | null }) {
   }, []);
   useEffect(() => {
     messagesEnd.current?.scrollIntoView?.({ block: 'end' });
-  }, [current?.messages.length, streaming]);
+  }, [current?.messages.length, streaming, failure]);
 
   async function resume(id: string) {
     setError(null);
+    setFailure(null);
     if (id === '') {
       setCurrent(null);
       return;
@@ -92,12 +116,8 @@ function Conversations({ sceneId }: { sceneId: string | null }) {
     event.preventDefault();
     const message = draft.trim();
     if (message === '' || streaming !== null) return;
-    // What the Author typed last reaches main before the request is built.
-    flushPendingEdits();
-    setError(null);
-    setStreaming('');
-    let conversation = current;
-    try {
+    await asking(async () => {
+      let conversation = current;
       if (!conversation) {
         const started = await window.assistant.startConversation(
           'writing',
@@ -115,17 +135,59 @@ function Conversations({ sceneId }: { sceneId: string | null }) {
       const asked = conversation;
       setCurrent({ ...asked, messages: [...asked.messages, authored] });
       setDraft('');
-      await window.assistant.ask(asked.id, message, sceneId, (text) =>
-        setStreaming((so) => (so ?? '') + text),
+      await showResult(
+        asked.id,
+        window.assistant.ask(asked.id, message, sceneId, onText),
       );
-      // The log, not this window, says what was sent and when.
-      setCurrent(await window.assistant.readConversation(asked.id));
+    });
+  }
+
+  async function retry() {
+    const conversation = current;
+    if (!conversation || streaming !== null) return;
+    await asking(() =>
+      showResult(
+        conversation.id,
+        window.assistant.retry(conversation.id, onText),
+      ),
+    );
+  }
+
+  /** Runs `ask` while the Assistant answers, its reply streaming in meanwhile. */
+  async function asking(ask: () => Promise<void>) {
+    // What the Author typed last reaches main before the request is built.
+    flushPendingEdits();
+    setError(null);
+    setFailure(null);
+    setStreaming('');
+    try {
+      await ask();
     } catch (error) {
       setError(`The Assistant couldn't answer: ${(error as Error).message}`);
     } finally {
       setStreaming(null);
     }
   }
+
+  function onText(text: string) {
+    setStreaming((so) => (so ?? '') + text);
+  }
+
+  /** Shows the Conversation as logged once the call is over, and how it went. */
+  async function showResult(id: string, result: Promise<AskResult>) {
+    const { failure } = await result;
+    // The log, not this window, says what was sent and when.
+    setCurrent(await window.assistant.readConversation(id));
+    setFailure(failure);
+  }
+
+  const total = current
+    ? describeTotal(
+        current.messages.flatMap((m) =>
+          m.model && m.usage ? [{ model: m.model, usage: m.usage }] : [],
+        ),
+      )
+    : null;
 
   function onKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
     if (event.key === 'Enter' && !event.shiftKey) void send(event);
@@ -147,16 +209,34 @@ function Conversations({ sceneId }: { sceneId: string | null }) {
             </option>
           ))}
         </select>
+        {total && (
+          <p className="conversation-usage" aria-label="Conversation usage">
+            {total}
+          </p>
+        )}
       </div>
       <div className="messages" role="log" aria-label="Messages">
         {!current && list.length === 0 && (
           <p className="assistant-empty">No Conversations yet.</p>
         )}
         {current?.messages.map((m, i) => (
-          <Message key={i} role={m.role} text={m.text} />
+          <Message key={i} message={m} />
         ))}
         {streaming !== null && streaming !== '' && (
-          <Message role="assistant" text={streaming} />
+          <Message message={{ role: 'assistant', text: streaming }} />
+        )}
+        {failure && streaming === null && (
+          <article className="message message-system" aria-label="System">
+            <p>{FAILURES[failure]}</p>
+            <div className="message-actions">
+              <button onClick={() => void retry()} disabled={readOnly}>
+                Retry
+              </button>
+              {failure === 'key' && (
+                <button onClick={onOpenSettings}>Open Settings</button>
+              )}
+            </div>
+          </article>
         )}
         <div ref={messagesEnd} />
       </div>
@@ -187,18 +267,23 @@ function Conversations({ sceneId }: { sceneId: string | null }) {
 }
 
 function Message({
-  role,
-  text,
+  message: { role, text, model, usage, interrupted },
 }: {
-  role: ConversationMessage['role'];
-  text: string;
+  message: Pick<ConversationMessage, 'role' | 'text'> &
+    Partial<ConversationMessage>;
 }) {
   return (
     <article
       className={`message message-${role}`}
       aria-label={role === 'author' ? 'You' : 'Assistant'}
     >
-      {text}
+      <div className="message-text">{text}</div>
+      {interrupted && <p className="message-note">Interrupted</p>}
+      {model && usage && (
+        <p className="message-usage" aria-label="Usage">
+          {describeUsage(model, usage)}
+        </p>
+      )}
     </article>
   );
 }

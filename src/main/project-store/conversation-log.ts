@@ -5,6 +5,7 @@ import {
   type ConversationSummary,
   type Mode,
 } from '../../shared/conversation';
+import type { Usage } from '../../shared/usage';
 
 // The format of a Conversation log, `conversations/<id>.jsonl` (ADR 0003): a
 // header line, then one event per line. The file is only ever appended to.
@@ -41,19 +42,34 @@ export function parseLog(log: string): Conversation | null {
   if (!isHeader(header)) return null;
   const messages = rest.flatMap((line) => {
     const event = parseLine(line);
-    return isMessage(event)
-      ? [
-          {
-            role: event.role,
-            text: event.text,
-            focus: event.focus,
-            at: event.at,
-          },
-        ]
-      : [];
+    return isMessage(event) ? [messageOf(event)] : [];
   });
   const { id, mode, title, created } = header;
   return { id, mode, title, created, messages };
+}
+
+/** The message an event holds; what is known of a turn's cost is kept if readable. */
+function messageOf(event: MessageEvent): ConversationMessage {
+  const { role, text, focus, at, model, usage, interrupted } = event;
+  return {
+    role,
+    text,
+    focus,
+    at,
+    ...(typeof model === 'string' && { model }),
+    ...(isUsage(usage) && { usage }),
+    ...(interrupted === true && { interrupted }),
+  };
+}
+
+function isUsage(value: unknown): value is Usage {
+  const usage = value as Partial<Usage> | null | undefined;
+  return (
+    typeof usage?.input === 'number' &&
+    typeof usage.cached === 'number' &&
+    typeof usage.written === 'number' &&
+    typeof usage.output === 'number'
+  );
 }
 
 function parseLine(line: string | undefined): unknown {

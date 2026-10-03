@@ -11,8 +11,8 @@ import type {
 } from './project-types';
 import type { ModelId } from './models';
 import type {
+  AskResult,
   Conversation,
-  ConversationMessage,
   ConversationSummary,
   Mode,
 } from './conversation';
@@ -366,14 +366,22 @@ export interface AssistantApi {
   /**
    * Sends the Author's message with the Scene open in the editor, if any:
    * calls `onText` with each piece of the reply as it streams, and resolves
-   * with the whole reply once it is in the log.
+   * with how it went once the reply, if any, is in the log.
    */
   ask(
     conversationId: string,
     message: string,
     sceneId: string | null,
     onText: (text: string) => void,
-  ): Promise<ConversationMessage>;
+  ): Promise<AskResult>;
+  /**
+   * Asks again after a failed call, for the Author's last message, as `ask`
+   * does; the answer is a new turn.
+   */
+  retry(
+    conversationId: string,
+    onText: (text: string) => void,
+  ): Promise<AskResult>;
 }
 
 export const channel = {
@@ -406,6 +414,7 @@ export const channel = {
   readConversation: 'assistant:readConversation',
   startConversation: 'assistant:startConversation',
   ask: 'assistant:ask',
+  retry: 'assistant:retry',
   replyText: 'assistant:replyText',
 } as const;
 

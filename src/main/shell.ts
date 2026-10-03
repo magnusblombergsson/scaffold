@@ -63,6 +63,11 @@ export function assistantModel(): ModelId {
   return settings.model();
 }
 
+/** The API key the next call to the Assistant uses, if one was added. */
+export function assistantKey(): string | null {
+  return apiKey.key();
+}
+
 /** Loads the settings, then reopens the Projects open at quit, each in its window. */
 export async function startShell(): Promise<void> {
   settings = await loadAppSettings(

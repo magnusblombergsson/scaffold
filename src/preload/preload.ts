@@ -130,20 +130,31 @@ const assistant: AssistantApi = {
   readConversation: (id) => ipcRenderer.invoke(channel.readConversation, id),
   startConversation: (mode, title) =>
     ipcRenderer.invoke(channel.startConversation, mode, title),
-  ask(conversationId, message, sceneId, onText) {
-    const askId = ++asked;
-    const forward = (_event: unknown, id: number, text: string) => {
-      if (id === askId) onText(text);
-    };
-    // IPC keeps message order, so every piece arrives before the reply.
-    ipcRenderer.on(channel.replyText, forward);
-    return ipcRenderer
-      .invoke(channel.ask, askId, conversationId, message, sceneId)
-      .finally(() => {
-        ipcRenderer.off(channel.replyText, forward);
-      });
-  },
+  ask: (conversationId, message, sceneId, onText) =>
+    streamReply(onText, (askId) =>
+      ipcRenderer.invoke(channel.ask, askId, conversationId, message, sceneId),
+    ),
+  retry: (conversationId, onText) =>
+    streamReply(onText, (askId) =>
+      ipcRenderer.invoke(channel.retry, askId, conversationId),
+    ),
 };
+
+/** Makes the call `invoke` with an id, passing on the pieces of its reply. */
+function streamReply<T>(
+  onText: (text: string) => void,
+  invoke: (askId: number) => Promise<T>,
+): Promise<T> {
+  const askId = ++asked;
+  const forward = (_event: unknown, id: number, text: string) => {
+    if (id === askId) onText(text);
+  };
+  // IPC keeps message order, so every piece arrives before the reply.
+  ipcRenderer.on(channel.replyText, forward);
+  return invoke(askId).finally(() => {
+    ipcRenderer.off(channel.replyText, forward);
+  });
+}
 
 contextBridge.exposeInMainWorld('project', project);
 contextBridge.exposeInMainWorld('assistant', assistant);

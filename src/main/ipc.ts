@@ -8,10 +8,10 @@ import {
 import { channel, type ProjectApi } from '../shared/api';
 import type { Mode } from '../shared/conversation';
 import { createConversationEngine } from './assistant/conversation-engine';
-import { fakeProvider } from './assistant/fake-provider';
+import { claudeProvider } from './assistant/claude-provider';
 import { systemClock } from './project-store/clock';
 import type { ProjectStore } from './project-store/project-store';
-import { assistantModel, storeOf } from './shell';
+import { assistantKey, assistantModel, storeOf } from './shell';
 
 /**
  * Every method but `emptyTrash`, which asks the Author first, and
@@ -79,8 +79,28 @@ export function registerProjectIpc(): void {
   );
 }
 
-// No model is asked until the Claude adapter is in: a stand-in replies.
-const provider = fakeProvider();
+const provider = claudeProvider({
+  apiKey: assistantKey,
+  // End-to-end tests stand in for Anthropic.
+  baseURL: process.env.WRITING_TOOLS_ANTHROPIC_URL,
+});
+
+/** The engine for the Project of the window `sender` belongs to. */
+function engineOf(sender: WebContents) {
+  return createConversationEngine({
+    store: storeOfWindow(sender),
+    provider,
+    model: assistantModel,
+    clock: systemClock,
+  });
+}
+
+/** Streams each piece of the reply to `askId` to the window that asked. */
+function replyTo(sender: WebContents, askId: number) {
+  return (text: string) => {
+    if (!sender.isDestroyed()) sender.send(channel.replyText, askId, text);
+  };
+}
 
 /** Connects each window's `assistant` calls to the Conversations of its Project. */
 export function registerAssistantIpc(): void {
@@ -103,24 +123,21 @@ export function registerAssistantIpc(): void {
       conversationId: string,
       message: string,
       sceneId: string | null,
-    ) => {
-      const engine = createConversationEngine({
-        store: storeOfWindow(event.sender),
-        provider,
-        model: assistantModel,
-        clock: systemClock,
-      });
-      return engine.askAssistant(
+    ) =>
+      engineOf(event.sender).askAssistant(
         conversationId,
         message,
         { sceneId },
-        (text) => {
-          if (!event.sender.isDestroyed()) {
-            event.sender.send(channel.replyText, askId, text);
-          }
-        },
-      );
-    },
+        replyTo(event.sender, askId),
+      ),
+  );
+  ipcMain.handle(
+    channel.retry,
+    (event, askId: number, conversationId: string) =>
+      engineOf(event.sender).retry(
+        conversationId,
+        replyTo(event.sender, askId),
+      ),
   );
 }
 
