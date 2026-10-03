@@ -22,6 +22,7 @@ import type {
   AskResult,
   Conversation,
   ConversationSummary,
+  InterviewFocus,
   Mode,
 } from './conversation';
 
@@ -208,8 +209,8 @@ export interface ProjectApi {
 
 /**
  * Widths in CSS pixels of the panels the Author can resize: in Writing, the
- * Binder and the Assistant panel; in the Brainstorm room, its Conversations
- * and the reference.
+ * Binder and the Assistant panel; in the Brainstorm and Interview rooms,
+ * their Conversations and the reference.
  */
 export type PanelWidths = {
   binder?: number;
@@ -390,6 +391,14 @@ export interface AssistantApi {
   readConversation(id: string): Promise<Conversation>;
   startConversation(mode: Mode, title: string): Promise<ConversationSummary>;
   /**
+   * Sets an Interview's focus from its next message on, logged as an event.
+   * Refused for a Conversation of another Mode.
+   */
+  setInterviewFocus(
+    conversationId: string,
+    focus: InterviewFocus,
+  ): Promise<void>;
+  /**
    * Sends the Author's message with the Scene open in the editor, if any:
    * calls `onText` with each piece of the reply as it streams, and resolves
    * with how it went once the reply, if any, is in the log.
@@ -470,6 +479,7 @@ export const channel = {
   listConversations: 'assistant:listConversations',
   readConversation: 'assistant:readConversation',
   startConversation: 'assistant:startConversation',
+  setInterviewFocus: 'assistant:setInterviewFocus',
   ask: 'assistant:ask',
   review: 'assistant:review',
   retry: 'assistant:retry',

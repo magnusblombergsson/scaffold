@@ -417,16 +417,19 @@ export function EntryView({
 
 /**
  * The values Proposals pending on a field would give it, each with a way to
- * its card in the Conversation; they are not in the field until accepted.
+ * its card in the Conversation, where it can be shown; they are not in the
+ * field until accepted.
  */
-function Ghosts({
+export function Ghosts({
   field,
   pending,
   onShow,
+  showable = () => true,
 }: {
   field: ProposalField;
   pending: PendingProposal[];
   onShow(conversationId: string, proposalId: string): void;
+  showable?(conversationId: string): boolean;
 }) {
   const on = pending.filter((p) => p.proposal.field === field);
   if (on.length === 0) return null;
@@ -437,12 +440,14 @@ function Ghosts({
           <span className="ghost-text">
             {fieldText(field, proposal.proposed)}
           </span>
-          <button
-            className="link-button"
-            onClick={() => onShow(conversationId, proposal.id)}
-          >
-            Show in Conversation
-          </button>
+          {showable(conversationId) && (
+            <button
+              className="link-button"
+              onClick={() => onShow(conversationId, proposal.id)}
+            >
+              Show in Conversation
+            </button>
+          )}
         </li>
       ))}
     </ul>

@@ -295,6 +295,66 @@ describe('askAssistant', () => {
   });
 });
 
+describe('Interviews', () => {
+  it('asks about the focus the Interview was last set to, sending only that Scene’s Prose, and logs it in each message', async () => {
+    const { store, engine, provider, sceneId, chapterId } = await setUp();
+    await store.write(
+      { kind: 'scene', id: sceneId },
+      { id: sceneId, markdown: 'Anna packed in the rain.' },
+    );
+    const { id } = await store.startConversation('interview', 'Anna');
+
+    await engine.askAssistant(id, 'Ask me.', { sceneId }, () => {});
+    await store.setInterviewFocus(id, { kind: 'scene', id: sceneId });
+    await engine.askAssistant(id, 'Go on.', { sceneId: null }, () => {});
+    await store.setInterviewFocus(id, { kind: 'chapter', id: chapterId });
+    const { reply } = await engine.askAssistant(
+      id,
+      'And?',
+      { sceneId: null },
+      () => {},
+    );
+
+    const sent = provider.requests.map((r) =>
+      r.system.map((b) => b.text).join('\n'),
+    );
+    // The Scene open in the editor isn't the focus of an Interview.
+    expect(sent[0]).not.toContain('Anna packed in the rain.');
+    expect(sent[0]).toMatch(/focus, as the Author set it: open/);
+    expect(sent[1]).toContain('Anna packed in the rain.');
+    expect(sent[1]).toContain(`the Scene “Scene 1”, Id: ${sceneId}`);
+    expect(sent[2]).toContain(`the Chapter “Chapter 1”, Id: ${chapterId}`);
+    const { messages } = await store.readConversation(id);
+    expect(messages.map((m) => m.focus)).toEqual([
+      [],
+      [],
+      [sceneId],
+      [sceneId],
+      [chapterId],
+      [chapterId],
+    ]);
+    expect(reply?.saw?.units).toEqual([{ kind: 'scene', id: sceneId }]);
+  });
+
+  it('answers a retry about the focus as it is now', async () => {
+    const { store, engine, provider, sceneId } = await setUp((n) =>
+      n === 0 ? { text: [], fail: 'offline' } : ['Hm.'],
+    );
+    const { id } = await store.startConversation('interview', 'Anna');
+    await engine.askAssistant(id, 'Ask me.', { sceneId: null }, () => {});
+    await store.setInterviewFocus(id, { kind: 'scene', id: sceneId });
+
+    await engine.retry(id, () => {});
+
+    expect(JSON.stringify(provider.requests[1].system)).toContain(
+      `the Scene “Scene 1”, Id: ${sceneId}`,
+    );
+    expect((await store.readConversation(id)).messages.at(-1)?.focus).toEqual([
+      sceneId,
+    ]);
+  });
+});
+
 describe('retry', () => {
   it('answers the Author’s last message again after a failure, about the Scene then in focus', async () => {
     const { store, sceneId, engine, provider } = await setUp((n) =>

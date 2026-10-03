@@ -6,7 +6,7 @@ import {
   type WebContents,
 } from 'electron';
 import { channel, type AcceptOptions, type ProjectApi } from '../shared/api';
-import type { Mode } from '../shared/conversation';
+import type { InterviewFocus, Mode } from '../shared/conversation';
 import type { ReviewCommand } from '../shared/finding';
 import { createConversationEngine } from './assistant/conversation-engine';
 import { claudeProvider } from './assistant/claude-provider';
@@ -115,6 +115,11 @@ export function registerAssistantIpc(): void {
     channel.startConversation,
     (event, mode: Mode, title: string) =>
       storeOfWindow(event.sender).startConversation(mode, title),
+  );
+  ipcMain.handle(
+    channel.setInterviewFocus,
+    (event, conversationId: string, focus: InterviewFocus) =>
+      storeOfWindow(event.sender).setInterviewFocus(conversationId, focus),
   );
   ipcMain.handle(
     channel.ask,

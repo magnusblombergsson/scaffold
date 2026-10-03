@@ -1,8 +1,11 @@
 import {
+  isInterviewFocus,
   MODES,
   type Conversation,
   type ConversationMessage,
   type ConversationSummary,
+  type FocusChange,
+  type InterviewFocus,
   type Mode,
   type Saw,
 } from '../../shared/conversation';
@@ -68,9 +71,17 @@ export type UndoneEvent = {
   at: number;
 };
 
+/** The Author set an Interview's focus. */
+export type FocusChangedEvent = {
+  type: 'focusChanged';
+  focus: InterviewFocus;
+  at: number;
+};
+
 /** An event this app writes. */
 export type ConversationEvent =
   | MessageEvent
+  | FocusChangedEvent
   | ProposedEvent
   | AcceptedEvent
   | RejectedEvent
@@ -109,7 +120,7 @@ export function eventLine(log: string, event: ConversationEvent): string {
  * The Conversation a log holds, or null when its header is unreadable. Lines
  * that can't be read, as one a crash cut short, and events this app doesn't
  * know are skipped; they stay in the file. A Proposal belongs to the message
- * before it.
+ * before it. An Interview's focus is the one it was last set to.
  */
 export function parseLog(log: string): LoggedConversation | null {
   const [first, ...rest] = log.split('\n');
@@ -117,10 +128,16 @@ export function parseLog(log: string): LoggedConversation | null {
   if (!isHeader(header)) return null;
   const messages: ConversationMessage[] = [];
   const proposals = new Map<string, LoggedProposal>();
+  const focusChanges: FocusChange[] = [];
   for (const line of rest) {
     const event = parseLine(line) as { type?: unknown; id?: unknown } | null;
     if (isMessage(event)) {
       messages.push(messageOf(event));
+      continue;
+    }
+    if (isFocusChanged(event)) {
+      const { focus, at } = event;
+      focusChanges.push({ focus, at, before: messages.length });
       continue;
     }
     if (typeof event?.id !== 'string') continue;
@@ -151,6 +168,10 @@ export function parseLog(log: string): LoggedConversation | null {
     mode,
     title,
     created,
+    ...(focusChanges.length > 0 && {
+      focus: focusChanges.at(-1)!.focus,
+      focusChanges,
+    }),
     messages,
     proposals: [...proposals.values()],
   };
@@ -350,6 +371,15 @@ function isHeader(value: unknown): value is ConversationHeader {
     MODES.includes(header.mode as Mode) &&
     typeof header.title === 'string' &&
     typeof header.created === 'number'
+  );
+}
+
+function isFocusChanged(value: unknown): value is FocusChangedEvent {
+  const event = value as Partial<FocusChangedEvent> | null;
+  return (
+    event?.type === 'focusChanged' &&
+    isInterviewFocus(event.focus) &&
+    typeof event.at === 'number'
   );
 }
 

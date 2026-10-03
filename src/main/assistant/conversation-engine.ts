@@ -1,10 +1,12 @@
 import { randomUUID } from 'node:crypto';
-import type {
-  AskResult,
-  AssistantFailure,
-  ConversationMessage,
-  Mode,
-  Saw,
+import {
+  focusIds,
+  OPEN_FOCUS,
+  type AskResult,
+  type AssistantFailure,
+  type Conversation,
+  type ConversationMessage,
+  type Saw,
 } from '../../shared/conversation';
 import {
   findingOf,
@@ -61,10 +63,15 @@ export function createConversationEngine({
   clock,
 }: EngineDeps) {
   /**
-   * The Scene in focus as a message logs it: in a Writing Conversation, the
-   * Scene open, if the Assistant can read it.
+   * What a message is about, as it logs it: in a Writing Conversation, the
+   * Scene open, if the Assistant can read it; in an Interview, the Entry,
+   * Chapter or Scene in focus, if any.
    */
-  function focusOf(mode: Mode, sceneId: string | null): string[] {
+  function focusOf(
+    { mode, focus }: Pick<Conversation, 'mode' | 'focus'>,
+    sceneId: string | null,
+  ): string[] {
+    if (mode === 'interview') return focusIds(focus ?? OPEN_FOCUS);
     if (mode !== 'writing' || !sceneId) return [];
     return readableScene(store.assistantView().manuscript(), sceneId)
       ? [sceneId]
@@ -96,8 +103,8 @@ export function createConversationEngine({
     sceneId: string | null,
     onText: (text: string) => void,
   ): Promise<AskResult> {
-    const { mode, messages: earlier } =
-      await store.readConversation(conversationId);
+    const conversation = await store.readConversation(conversationId);
+    const { mode, messages: earlier } = conversation;
     if (message.command && mode !== 'writing') {
       throw new Error('Only a Writing Conversation has Reviews');
     }
@@ -105,13 +112,13 @@ export function createConversationEngine({
       role: 'author',
       text: message.text,
       ...(message.command && { command: message.command }),
-      focus: focusOf(mode, sceneId),
+      focus: focusOf(conversation, sceneId),
       at: clock.now(),
     };
     await store.appendMessage(conversationId, authored);
     return answer(
       conversationId,
-      mode,
+      conversation,
       [...earlier, authored],
       authored.focus,
       onText,
@@ -121,19 +128,24 @@ export function createConversationEngine({
   /**
    * Asks the model to answer the Conversation as logged, which ends with the
    * Author's message, with the context the Conversation's Mode gives the
-   * Scene in `focus`. The reply is logged once it has come, or as
-   * interrupted if the call fails partway; a call that fails before any
+   * Scene in `focus`, or in an Interview, the focus it was last set to.
+   * The reply is logged once it has come, or as interrupted if the call fails partway; a call that fails before any
    * reply logs nothing. A Review's reply holds Findings, never Proposals.
    */
   async function answer(
     conversationId: string,
-    mode: Mode,
+    { mode, focus: interviewFocus }: Pick<Conversation, 'mode' | 'focus'>,
     messages: ConversationMessage[],
     focus: string[],
     onText: (text: string) => void,
   ): Promise<AskResult> {
     const chosen = model();
-    const asked = defaultRequest(mode, focus[0] ?? null, messages);
+    const asked = defaultRequest(
+      mode,
+      focus[0] ?? null,
+      messages,
+      interviewFocus,
+    );
     const context = await buildContext(store.assistantView(), asked);
     const reviewing = asked.mode === 'writing' && asked.command !== 'question';
     const request: ProviderRequest = {
@@ -307,16 +319,16 @@ export function createConversationEngine({
       onText: (text: string) => void,
     ): Promise<AskResult> {
       await store.flush();
-      const { mode, messages } = await store.readConversation(conversationId);
-      const last = messages.findLast((m) => !m.interrupted);
+      const conversation = await store.readConversation(conversationId);
+      const last = conversation.messages.findLast((m) => !m.interrupted);
       if (last?.role !== 'author') {
         throw new Error('There is no message waiting for an answer');
       }
       return answer(
         conversationId,
-        mode,
-        messages,
-        focusOf(mode, last.focus[0] ?? null),
+        conversation,
+        conversation.messages,
+        focusOf(conversation, last.focus[0] ?? null),
         onText,
       );
     },

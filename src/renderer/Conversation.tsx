@@ -1,17 +1,20 @@
 import {
+  Fragment,
   useContext,
   useEffect,
   useRef,
   useState,
   type KeyboardEvent,
 } from 'react';
-import type {
-  AskResult,
-  AssistantFailure,
-  Conversation,
-  ConversationMessage,
-  ConversationSummary,
-  Mode,
+import {
+  OPEN_FOCUS,
+  type AskResult,
+  type AssistantFailure,
+  type Conversation,
+  type ConversationMessage,
+  type ConversationSummary,
+  type InterviewFocus,
+  type Mode,
 } from '../shared/conversation';
 import {
   FINDING_LABELS,
@@ -26,6 +29,7 @@ import type {
 } from '../shared/project-types';
 import { replyText } from '../shared/proposal';
 import { describeTotal, describeUsage } from '../shared/usage';
+import { focusLabel } from './interview-focus';
 import { proposalCardId, ProposalCard } from './ProposalCard';
 import { flushPendingEdits } from './pending-edits';
 import { ReadOnlyContext } from './read-only';
@@ -35,7 +39,11 @@ import { sawList } from './saw-list';
 // panel beside the editor, or in a Mode's room.
 
 /** The Modes the window has so far, in the order it shows them. */
-export const WINDOW_MODES = ['writing', 'brainstorm'] as const satisfies Mode[];
+export const WINDOW_MODES = [
+  'writing',
+  'brainstorm',
+  'interview',
+] as const satisfies Mode[];
 
 /** The Project as it is now, which names what the Assistant saw. */
 export type Names = { manuscript: Manuscript; entries: EntrySummary[] };
@@ -85,8 +93,8 @@ function sceneOf(
 /**
  * The Conversations of the Project, one of them open, and asking the
  * Assistant in it. A new one starts in `mode` when its first message is
- * sent, which is about the Scene `sceneId`, if any. `show` opens one at a
- * Proposal the Author asked to see. A
+ * sent, which is about the Scene `sceneId`, if any, or a new Interview
+ * about `focus`. `show` opens one at a Proposal the Author asked to see. A
  * decision made anywhere shows at once. A failed call is kept as `failure`,
  * for Retry; it isn't in the log.
  */
@@ -96,9 +104,11 @@ export function useConversation({
   names,
   active,
   show,
+  focus = OPEN_FOCUS,
 }: {
   mode: Mode;
   sceneId: string | null;
+  focus?: InterviewFocus;
   names: Names;
   /** Whether it is shown; it lists the Conversations anew each time it is. */
   active: boolean;
@@ -162,12 +172,13 @@ export function useConversation({
     }
   }
 
-  async function send() {
-    const message = draft.trim();
+  /** Sends the draft, or `text` the Author asked to send instead. */
+  async function send(text?: string) {
+    const message = (text ?? draft).trim();
     if (message === '' || streaming !== null) return;
     await asking(async () => {
       const asked = await showAsked({ text: message });
-      setDraft('');
+      if (text === undefined) setDraft('');
       await showResult(
         asked,
         window.assistant.ask(asked, message, sceneId, onText),
@@ -188,9 +199,27 @@ export function useConversation({
   }
 
   /**
+   * Sets the open Interview's focus from its next message on; a new one
+   * starts with the `focus` given.
+   */
+  async function changeFocus(next: InterviewFocus) {
+    const conversation = current;
+    if (!conversation || streaming !== null) return;
+    setError(null);
+    try {
+      await window.assistant.setInterviewFocus(conversation.id, next);
+      const changed = await window.assistant.readConversation(conversation.id);
+      if (currentId.current === changed.id) setCurrent(changed);
+      setList(await window.assistant.listConversations());
+    } catch (error) {
+      setError(`Can't change the focus: ${(error as Error).message}`);
+    }
+  }
+
+  /**
    * Shows the Author's message in the Conversation it is asked in, which
    * starts with it if new, while the Assistant answers; resolves with the
-   * Conversation's id.
+   * Conversation's id. A new Interview starts with its focus set.
    */
   async function showAsked(
     message: Pick<ConversationMessage, 'text' | 'command'>,
@@ -202,7 +231,16 @@ export function useConversation({
         titleOf(message.text),
       );
       conversation = { ...started, messages: [] };
-      setList((list) => [started, ...list]);
+      if (mode === 'interview') {
+        await window.assistant.setInterviewFocus(started.id, focus);
+        conversation = {
+          ...conversation,
+          focus,
+          focusChanges: [{ focus, at: Date.now(), before: 0 }],
+        };
+      }
+      const listed = conversation;
+      setList((list) => [listed, ...list]);
     }
     const authored: ConversationMessage = {
       role: 'author',
@@ -276,14 +314,16 @@ export function useConversation({
     send,
     review,
     retry,
+    changeFocus,
   };
 }
 
 export type ConversationState = ReturnType<typeof useConversation>;
 
 /**
- * The messages of the Conversation open, the reply streaming in, and a failed
- * call with Retry. The Assistant's replies are plain text: nothing here puts
+ * The messages of the Conversation open, each change of an Interview's focus
+ * between them, the reply streaming in, and a failed call with Retry. The
+ * Assistant's replies are plain text: nothing here puts
  * them in the Manuscript, though the Author can copy them as any text. A
  * reply's Proposals show as cards in it, where the Author decides them.
  */
@@ -318,15 +358,24 @@ export function MessageLog({
     <div className="messages" role="log" aria-label="Messages">
       {empty && !current && <p className="assistant-empty">{empty}</p>}
       {current?.messages.map((m, i) => (
-        <Message
-          key={i}
-          message={m}
-          names={names}
-          conversationId={current.id}
-          shown={shown}
-          onQuote={onQuote}
-        />
+        <Fragment key={i}>
+          <FocusChanges conversation={current} before={i} names={names} />
+          <Message
+            message={m}
+            names={names}
+            conversationId={current.id}
+            shown={shown}
+            onQuote={onQuote}
+          />
+        </Fragment>
       ))}
+      {current && (
+        <FocusChanges
+          conversation={current}
+          before={current.messages.length}
+          names={names}
+        />
+      )}
       {streaming !== null && replyText(streaming) !== '' && (
         <Message
           message={{ role: 'assistant', text: replyText(streaming) }}
@@ -349,6 +398,25 @@ export function MessageLog({
       <div ref={messagesEnd} />
     </div>
   );
+}
+
+/** Where an Interview's focus was set, before the message `before`. */
+function FocusChanges({
+  conversation: { focusChanges = [] },
+  before,
+  names,
+}: {
+  conversation: Conversation;
+  before: number;
+  names: Names;
+}) {
+  return focusChanges
+    .filter((change) => change.before === before)
+    .map((change, i) => (
+      <p key={i} className="focus-change" role="note">
+        Focus: {focusLabel(change.focus, names)}
+      </p>
+    ));
 }
 
 /** Where the Author writes the next message; Enter sends it. */

@@ -74,6 +74,7 @@ import type {
   Conversation,
   ConversationMessage,
   ConversationSummary,
+  InterviewFocus,
   Mode,
 } from '../../shared/conversation';
 import type { Clock } from './clock';
@@ -2479,7 +2480,13 @@ export class ProjectStore {
    */
   async listConversations(): Promise<ConversationSummary[]> {
     return (await this.readLogs())
-      .map(({ id, mode, title, created }) => ({ id, mode, title, created }))
+      .map(({ id, mode, title, created, focus }) => ({
+        id,
+        mode,
+        title,
+        created,
+        ...(focus && { focus }),
+      }))
       .sort((a, b) => b.created - a.created);
   }
 
@@ -2537,6 +2544,22 @@ export class ProjectStore {
     return this.inLog(id, async () => {
       await this.passFormatGate();
       await this.appendEvent(id, { type: 'message', ...logged });
+    });
+  }
+
+  /** Sets an Interview's focus from now on, logged as an event; only an Interview has one. */
+  setInterviewFocus(id: string, focus: InterviewFocus): Promise<void> {
+    return this.inLog(id, async () => {
+      await this.passFormatGate();
+      const { mode } = await this.readLogged(id);
+      if (mode !== 'interview') {
+        throw new Error('Only an Interview Conversation has a focus');
+      }
+      await this.appendEvent(id, {
+        type: 'focusChanged',
+        focus,
+        at: this.deps.clock.now(),
+      });
     });
   }
 

@@ -14,6 +14,7 @@ import {
 } from './Conversation';
 import { EntryCard } from './EntryCard';
 import { PanelResizer, type PaneSize } from './PanelResizer';
+import { RoomList } from './RoomList';
 
 /**
  * The Brainstorm room: its Conversations on the left, the one open in the
@@ -44,48 +45,26 @@ export function BrainstormRoom({
     names,
     active,
   });
-  const { list, current, error, streaming, total, resume } = conversation;
+  const { list, current, error, total } = conversation;
   const listed = list.filter((c) => c.mode === 'brainstorm');
   const listPane = pane('conversations');
   const referencePane = pane('reference');
 
   return (
     <>
-      <nav
-        className="left-pane brainstorm-list"
-        aria-label="Brainstorm Conversations"
-        style={{ width: listPane.width }}
-      >
-        <button
-          className="brainstorm-new"
-          onClick={() => void resume('')}
-          disabled={streaming !== null}
-          aria-current={current === null ? 'true' : undefined}
-        >
-          New Conversation
-        </button>
-        <ul className="brainstorm-conversations">
-          {listed.map((c) => (
-            <li key={c.id}>
-              <button
-                className="binder-title"
-                aria-current={c.id === current?.id ? 'true' : undefined}
-                onClick={() => void resume(c.id)}
-                disabled={streaming !== null}
-              >
-                {c.title}
-              </button>
-            </li>
-          ))}
-        </ul>
-      </nav>
+      <RoomList
+        label="Brainstorm Conversations"
+        width={listPane.width}
+        conversations={listed}
+        conversation={conversation}
+      />
       <PanelResizer
         label="Conversations width"
         {...listPane}
         min={160}
         max={480}
       />
-      <main className="centre brainstorm" aria-label="Brainstorm">
+      <main className="centre room-centre" aria-label="Brainstorm">
         <h2 className="centre-title">{current?.title ?? 'New Conversation'}</h2>
         {status &&
           (status.masked ? (

@@ -1,8 +1,10 @@
-import type {
-  ConversationMessage,
-  Mode,
-  Saw,
-  SawUnit,
+import {
+  OPEN_FOCUS,
+  type ConversationMessage,
+  type InterviewFocus,
+  type Mode,
+  type Saw,
+  type SawUnit,
 } from '../../shared/conversation';
 import { findingBlock, type ReviewCommand } from '../../shared/finding';
 import { mentionMatcher } from '../../shared/mentions';
@@ -15,7 +17,6 @@ import {
   unitKey,
   unitText,
   type EntrySummary,
-  type EntryType,
   type EntryValue,
   type Manuscript,
   type ManuscriptChapter,
@@ -32,13 +33,7 @@ import { MODE_PROMPTS, REVIEW_ASKS } from './system-prompts';
 /** What the Author asks for in Writing: a free question, or a Review. */
 export type Command = 'question' | ReviewCommand;
 
-/** What an Interview is about: one Entry, one Entry type, a Chapter or Scene, or open. */
-export type InterviewFocus =
-  | { kind: 'open' }
-  | { kind: 'entry'; id: string }
-  | { kind: 'entry-type'; type: EntryType }
-  | { kind: 'chapter'; id: string }
-  | { kind: 'scene'; id: string };
+export type { InterviewFocus };
 
 /**
  * One turn: the Conversation's Mode and what it is about, and its messages
@@ -89,6 +84,9 @@ export async function buildContext(
     { text: bible.text },
     { text: skeleton.text, cache: true },
   ];
+  if (request.mode === 'interview') {
+    system.push({ text: interviewFocusText(view, manuscript, request.focus) });
+  }
   if (focus.length > 0) system.push({ text: focusBlock(focus) });
   // Every Review starts fresh, without the Findings of earlier ones.
   const reviewing =
@@ -338,6 +336,45 @@ async function inFocus(
   return [...units.values()];
 }
 
+/**
+ * What an Interview is about, by name and id as the Project has it now. An
+ * Entry the Assistant never sees isn't named, nor one no longer there.
+ */
+function interviewFocusText(
+  view: AssistantView,
+  manuscript: Manuscript,
+  focus: InterviewFocus,
+): string {
+  const heading = 'The Interview’s focus, as the Author set it:';
+  const gone =
+    'which is no longer in the Project. Tell the Author, and suggest a new focus.';
+  const where = placesOf(manuscript);
+  switch (focus.kind) {
+    case 'open':
+      return `${heading} open. Choose the gap in the Story Bible or the Outlines most worth filling now. When you choose a gap, first say which gap you chose and why, then ask.`;
+    case 'entry': {
+      const entry = view.listEntries().find((e) => e.id === focus.id);
+      if (!entry) return `${heading} an Entry ${gone}`;
+      if (entry.visibility === 'never') {
+        return `${heading} an Entry the Author has kept from you. Say you can't see it, and suggest the Author lets you see it or picks another focus.`;
+      }
+      return `${heading} the Entry “${entry.name}” (${ENTRY_TYPE_LABELS[entry.type]}), Id: ${entry.id}. Ask about what it lacks.`;
+    }
+    case 'entry-type':
+      return `${heading} every ${ENTRY_TYPE_LABELS[focus.type]} in the Story Bible, and any the story names that has no Entry yet. Ask about what they lack.`;
+    case 'chapter': {
+      const chapter = where.chapters.get(focus.id);
+      if (!chapter) return `${heading} a Chapter ${gone}`;
+      return `${heading} the Chapter “${chapter.title}”, Id: ${chapter.id}. Interview out its Outline: what happens, who and why.`;
+    }
+    case 'scene': {
+      const place = where.scenes.get(focus.id);
+      if (!place) return `${heading} a Scene ${gone}`;
+      return `${heading} the Scene “${place.scene.title}”, Id: ${focus.id}. Interview out its Outline: what happens, who and why.`;
+    }
+  }
+}
+
 function focusBlock(units: UnitInFocus[]): string {
   return [
     'In focus: the Author’s own Prose, with the Outlines and Notes that go with it. Quote it; never rewrite it.',
@@ -409,16 +446,18 @@ export function readableScene(
 }
 
 /**
- * For a log that names the Mode: the request a Mode's turn makes by default.
- * In Writing, a Review when the Author's message asks for one.
+ * For a log that names the Mode: the request a Mode's turn makes. In
+ * Writing, a Review when the Author's message asks for one; in an Interview,
+ * about the focus it was last set to.
  */
 export function defaultRequest(
   mode: Mode,
   sceneId: string | null,
   messages: ConversationMessage[],
+  interviewFocus: InterviewFocus = OPEN_FOCUS,
 ): ContextRequest {
   if (mode === 'brainstorm') return { mode, messages };
-  if (mode === 'interview') return { mode, focus: { kind: 'open' }, messages };
+  if (mode === 'interview') return { mode, focus: interviewFocus, messages };
   const command = messages.findLast((m) => !m.interrupted)?.command;
   return { mode, command: command ?? 'question', sceneId, messages };
 }

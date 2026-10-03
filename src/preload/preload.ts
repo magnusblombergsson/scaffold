@@ -130,6 +130,8 @@ const assistant: AssistantApi = {
   readConversation: (id) => ipcRenderer.invoke(channel.readConversation, id),
   startConversation: (mode, title) =>
     ipcRenderer.invoke(channel.startConversation, mode, title),
+  setInterviewFocus: (conversationId, focus) =>
+    ipcRenderer.invoke(channel.setInterviewFocus, conversationId, focus),
   ask: (conversationId, message, sceneId, onText) =>
     streamReply(onText, (askId) =>
       ipcRenderer.invoke(channel.ask, askId, conversationId, message, sceneId),

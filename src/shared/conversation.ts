@@ -1,4 +1,5 @@
 import type { Finding, ReviewCommand } from './finding';
+import { ENTRY_TYPES, type EntryType } from './project-types';
 import type { ProposalView } from './proposal';
 import type { Usage } from './usage';
 
@@ -15,13 +16,54 @@ export const MODE_LABELS: Record<Mode, string> = {
   writing: 'Writing',
 };
 
-/** A Conversation as the picker lists it. */
+/** What an Interview is about: one Entry, one Entry type, a Chapter or Scene, or open. */
+export type InterviewFocus =
+  | { kind: 'open' }
+  | { kind: 'entry'; id: string }
+  | { kind: 'entry-type'; type: EntryType }
+  | { kind: 'chapter'; id: string }
+  | { kind: 'scene'; id: string };
+
+export const OPEN_FOCUS: InterviewFocus = { kind: 'open' };
+
+export function isInterviewFocus(value: unknown): value is InterviewFocus {
+  const focus = value as Partial<Record<string, unknown>> | null | undefined;
+  switch (focus?.kind) {
+    case 'open':
+      return true;
+    case 'entry-type':
+      return ENTRY_TYPES.includes(focus.type as EntryType);
+    case 'entry':
+    case 'chapter':
+    case 'scene':
+      return typeof focus.id === 'string';
+    default:
+      return false;
+  }
+}
+
+/** The ids of the Entry, Chapter or Scene an Interview's focus is, if any. */
+export function focusIds(focus: InterviewFocus): string[] {
+  return focus.kind === 'open' || focus.kind === 'entry-type' ? [] : [focus.id];
+}
+
+/**
+ * The Author set an Interview's focus: `before` is the index of the message
+ * it comes before, which is the number of messages before it.
+ */
+export type FocusChange = { focus: InterviewFocus; at: number; before: number };
+
+/**
+ * A Conversation as the picker lists it; an Interview has the `focus` it was
+ * last set to, if any.
+ */
 export type ConversationSummary = {
   id: string;
   mode: Mode;
   title: string;
   /** When the Author started it, in ms since the epoch. */
   created: number;
+  focus?: InterviewFocus;
 };
 
 /** A unit whose text the Assistant saw in focus: a Scene's Prose, or an Outline or Notes. */
@@ -80,6 +122,8 @@ export type AskResult = {
   failure: AssistantFailure | null;
 };
 
+/** A Conversation's messages, and in an Interview, each time its focus was set. */
 export type Conversation = ConversationSummary & {
   messages: ConversationMessage[];
+  focusChanges?: FocusChange[];
 };

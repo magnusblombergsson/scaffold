@@ -438,6 +438,74 @@ describe('Prose by Mode and command', () => {
   });
 });
 
+describe('Interview focus', () => {
+  const ask = (
+    view: Awaited<ReturnType<typeof fixture>>['view'],
+    focus: InterviewFocus,
+  ) =>
+    buildContext(view, {
+      mode: 'interview',
+      focus,
+      messages: [message('author', 'Go on.')],
+    });
+  const focusText = (context: Awaited<ReturnType<typeof buildContext>>) =>
+    context.system.find((b) => b.text.startsWith('The Interview’s focus'))
+      ?.text;
+
+  it('tells the Assistant what the Interview is about, after the skeleton and before the Prose', async () => {
+    const { view, scenes, chapters, entries } = await fixture();
+
+    const entry = await ask(view, { kind: 'entry', id: entries.anna });
+    expect(focusText(entry)).toContain(
+      `the Entry “Anna” (Character), Id: ${entries.anna}`,
+    );
+    expect(entry.system[3].text).toBe(focusText(entry));
+
+    expect(
+      focusText(await ask(view, { kind: 'entry-type', type: 'character' })),
+    ).toContain('every Character');
+    expect(
+      focusText(await ask(view, { kind: 'chapter', id: chapters.arrival })),
+    ).toContain(`the Chapter “Arrival”, Id: ${chapters.arrival}`);
+    const scene = await ask(view, { kind: 'scene', id: scenes.harbour });
+    expect(focusText(scene)).toContain(
+      `the Scene “Harbour”, Id: ${scenes.harbour}`,
+    );
+    expect(scene.system[3].text).toBe(focusText(scene));
+    expect(scene.system[4].text).toContain('Annie waited on the quay.');
+  });
+
+  it('with open focus, asks the Assistant to say first which gap it chose and why', async () => {
+    const { view } = await fixture();
+
+    const text = focusText(await ask(view, { kind: 'open' }));
+
+    expect(text).toMatch(/open/);
+    expect(text).toMatch(/first say which gap you chose and why/i);
+  });
+
+  it('names a focus no longer in the Project as gone, without its contents', async () => {
+    const { store, view, entries } = await fixture();
+    await store.trashEntry(entries.pact);
+
+    const text = focusText(
+      await ask(view, { kind: 'entry', id: entries.pact }),
+    );
+
+    expect(text).toMatch(/no longer/);
+    expect(text).not.toContain('The Pact');
+  });
+
+  it('never names an Entry in focus that the Assistant never sees', async () => {
+    const { view, entries } = await fixture();
+
+    const context = await ask(view, { kind: 'entry', id: entries.pact });
+
+    expect(sent(context)).not.toContain('The Pact');
+    expect(focusText(context)).toMatch(/kept from you/);
+  });
+});
+
 describe('order and caching', () => {
   it('sends prompt, Story Bible, skeleton and Prose in focus, then the earlier messages and the new one, with breakpoints after the skeleton and the earlier messages', async () => {
     const { view, scenes } = await fixture();

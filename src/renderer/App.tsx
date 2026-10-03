@@ -35,6 +35,7 @@ import { BrainstormRoom } from './BrainstormRoom';
 import { WINDOW_MODES, type ShowProposal } from './Conversation';
 import { ConflictList, ConflictResolver } from './Conflicts';
 import { EntryView, VISIBILITY_LABELS } from './EntryView';
+import { InterviewRoom } from './InterviewRoom';
 import { Notices } from './Notices';
 import { OutlineNotes } from './OutlineNotes';
 import { PanelResizer, type PaneSize } from './PanelResizer';
@@ -262,6 +263,13 @@ function ProjectView({
     setVisited((visited) => new Set(visited).add(next));
   }
 
+  /** Opens an Entry in Writing, from a room. */
+  function openEntryInWriting(id: string) {
+    switchMode('writing');
+    setTab('bible');
+    select({ kind: 'entry', id });
+  }
+
   function toggleOutlineNotes() {
     setOutlineNotesOpen(!outlineNotesOpen);
     window.shell.saveView({ outlineNotesOpen: !outlineNotesOpen });
@@ -472,11 +480,18 @@ function ProjectView({
                 names={{ manuscript, entries }}
                 pane={pane}
                 onAddKey={onAddKey}
-                onOpenEntry={(id) => {
-                  switchMode('writing');
-                  setTab('bible');
-                  select({ kind: 'entry', id });
-                }}
+                onOpenEntry={openEntryInWriting}
+              />
+            </div>
+          )}
+          {visited.has('interview') && (
+            <div className="room" hidden={mode !== 'interview'}>
+              <InterviewRoom
+                active={mode === 'interview'}
+                names={{ manuscript, entries }}
+                pane={pane}
+                onAddKey={onAddKey}
+                onOpenEntry={openEntryInWriting}
               />
             </div>
           )}

@@ -255,4 +255,63 @@ ${JSON.stringify({ type: 'message', role: 'assistant', text: 'Odd.', focus: [], 
       '',
     ]);
   });
+  it('logs each change of an Interview’s focus as an event, between the messages it came between', async () => {
+    const { projectPath, store, clock } = await newProject();
+    const chapterId = store.manuscript().chapters[0].id;
+    const { id } = await store.startConversation('interview', 'Anna');
+
+    await store.setInterviewFocus(id, { kind: 'entry-type', type: 'place' });
+    await store.appendMessage(id, {
+      role: 'author',
+      text: 'Ask me.',
+      focus: [],
+      at: 2_000,
+    });
+    await clock.sleep(1_000);
+    await store.setInterviewFocus(id, { kind: 'chapter', id: chapterId });
+
+    expect((await logLines(projectPath, id)).slice(1)).toEqual([
+      {
+        type: 'focusChanged',
+        focus: { kind: 'entry-type', type: 'place' },
+        at: 1_000,
+      },
+      expect.objectContaining({ type: 'message' }),
+      {
+        type: 'focusChanged',
+        focus: { kind: 'chapter', id: chapterId },
+        at: 2_000,
+      },
+    ]);
+    const conversation = await store.readConversation(id);
+    expect(conversation.focus).toEqual({ kind: 'chapter', id: chapterId });
+    expect(conversation.focusChanges).toEqual([
+      { focus: { kind: 'entry-type', type: 'place' }, at: 1_000, before: 0 },
+      { focus: { kind: 'chapter', id: chapterId }, at: 2_000, before: 1 },
+    ]);
+    expect(await store.listConversations()).toEqual([
+      expect.objectContaining({
+        id,
+        focus: { kind: 'chapter', id: chapterId },
+      }),
+    ]);
+  });
+
+  it('sets a focus only in an Interview, and skips a focus it can’t read', async () => {
+    const { projectPath, store } = await newProject();
+    const writing = await store.startConversation('writing', 'Why Anna?');
+    const { id } = await store.startConversation('interview', 'Anna');
+    await appendFile(
+      path.join(projectPath, 'conversations', `${id}.jsonl`),
+      `${JSON.stringify({ type: 'focusChanged', focus: { kind: 'entry-type', type: 'villain' }, at: 2_000 })}
+`,
+    );
+
+    await expect(
+      store.setInterviewFocus(writing.id, { kind: 'open' }),
+    ).rejects.toThrow(/Interview/);
+    const conversation = await store.readConversation(id);
+    expect(conversation).not.toHaveProperty('focus');
+    expect(conversation).not.toHaveProperty('focusChanges');
+  });
 });
