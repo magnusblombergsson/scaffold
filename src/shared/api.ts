@@ -233,6 +233,11 @@ export interface ProjectApi {
   resolveConflict<R extends UnitRef>(ref: R, kept: ValueOf<R>): Promise<void>;
   /** Asks the Author to confirm, then deletes Trash for good; false if not. */
   emptyTrash(): Promise<boolean>;
+  /**
+   * Spellchecks and typesets the Prose in `language` from now on, a Project
+   * setting. False when it can't be saved, which main has told the Author.
+   */
+  setLanguage(language: ProseLanguage): Promise<boolean>;
 }
 
 /**

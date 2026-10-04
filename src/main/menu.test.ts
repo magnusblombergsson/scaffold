@@ -6,7 +6,7 @@ import { menuTemplate, type MenuState } from './menu';
 const noProject: MenuState = { mac: false, project: null, recent: [] };
 const writable: MenuState = {
   ...noProject,
-  project: { readOnly: false, language: 'en-US' },
+  project: { readOnly: false },
 };
 
 function build(state: MenuState) {
@@ -14,7 +14,6 @@ function build(state: MenuState) {
   const template = menuTemplate(state, {
     send: (command) => sent.push(command),
     export: () => {},
-    setLanguage: () => {},
   });
   return { template, sent };
 }
@@ -68,7 +67,6 @@ describe('menuTemplate', () => {
       'Open Recent',
       'Import…',
       'Export…',
-      'Prose Language',
       undefined,
     ]);
     expect(item(file, 'New Project…').accelerator).toBe('CmdOrCtrl+Shift+N');
@@ -136,7 +134,7 @@ describe('menuTemplate', () => {
   it('can insert nothing without a Project, or in a read-only one', () => {
     for (const state of [
       noProject,
-      { ...writable, project: { readOnly: true, language: 'en-US' as const } },
+      { ...writable, project: { readOnly: true } },
     ]) {
       const insert = menu(build(state).template, 'Insert');
       expect(
@@ -159,7 +157,33 @@ describe('menuTemplate', () => {
     expect(labels(mac[0].submenu as MenuItemConstructorOptions[])).toContain(
       'Settings…',
     );
-    expect(mac.find((entry) => entry.label === 'Tools')).toBeUndefined();
+    expect(labels(menu(mac, 'Tools'))).toEqual(['Project Settings…']);
+  });
+
+  it('opens Project Settings from Tools with Ctrl+Shift+, on every platform, only with a Project', () => {
+    for (const mac of [false, true]) {
+      const { template, sent } = build({ ...writable, mac });
+      const projectSettings = item(
+        menu(template, 'Tools'),
+        'Project Settings…',
+      );
+      expect(projectSettings.accelerator).toBe('CmdOrCtrl+Shift+,');
+      expect(projectSettings.enabled).toBe(true);
+      click(projectSettings);
+      expect(sent).toEqual([{ type: 'projectSettings' }]);
+    }
+    const tools = menu(build(noProject).template, 'Tools');
+    expect(item(tools, 'Project Settings…').enabled).toBe(false);
+  });
+
+  it('keeps Project Settings open to a read-only Project, to see its values', () => {
+    const { template } = build({
+      ...writable,
+      project: { readOnly: true },
+    });
+    expect(item(menu(template, 'Tools'), 'Project Settings…').enabled).toBe(
+      true,
+    );
   });
 
   it('opens the cheat sheet from Help, with or without a Project, showing Ctrl+/ that the window takes', () => {

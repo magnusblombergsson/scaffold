@@ -13,6 +13,7 @@ import {
 } from '../shared/api';
 import type { InterviewFocus, Mode } from '../shared/conversation';
 import type { ReviewCommand } from '../shared/finding';
+import { PROSE_LANGUAGES, type ProseLanguage } from '../shared/project-types';
 import { createConversationEngine } from './assistant/conversation-engine';
 import { claudeProvider } from './assistant/claude-provider';
 import { systemClock } from './project-store/clock';
@@ -21,10 +22,14 @@ import { assistantKey, assistantModel, storeOf } from './shell';
 import { trashConversationQuestion } from './trash-question';
 
 /**
- * Every method but `emptyTrash`, which asks the Author first, and
- * `subscribe`, whose events the shell sends to the window.
+ * Every method but `emptyTrash`, which asks the Author first, `setLanguage`,
+ * which may warn them, and `subscribe`, whose events the shell sends to the
+ * window.
  */
-type StoreMethod = Exclude<keyof ProjectApi, 'emptyTrash' | 'subscribe'>;
+type StoreMethod = Exclude<
+  keyof ProjectApi,
+  'emptyTrash' | 'setLanguage' | 'subscribe'
+>;
 
 type Handlers = {
   [K in StoreMethod]: (
@@ -85,6 +90,11 @@ export function registerProjectIpc(): void {
   }
   ipcMain.handle(channel.project('emptyTrash'), (event) =>
     emptyTrash(event.sender, storeOfWindow(event.sender)),
+  );
+  ipcMain.handle(
+    channel.project('setLanguage'),
+    (event, language: ProseLanguage) =>
+      setLanguage(event.sender, storeOfWindow(event.sender), language),
   );
 }
 
@@ -264,4 +274,32 @@ async function emptyTrash(
   if (response !== 0) return false;
   await store.emptyTrash();
   return true;
+}
+
+/** Sets the Prose language, warning the Author when it can't be saved. */
+async function setLanguage(
+  sender: WebContents,
+  store: ProjectStore,
+  language: ProseLanguage,
+): Promise<boolean> {
+  if (!PROSE_LANGUAGES.some((offered) => offered.language === language)) {
+    return false;
+  }
+  try {
+    await store.setLanguage(language);
+    return true;
+  } catch (error) {
+    console.error(`Can't set the language of ${store.path}:`, error);
+    const options = {
+      type: 'warning' as const,
+      buttons: ['OK'],
+      message: `The Prose language of ${store.displayName} can't be changed now.`,
+      detail: error instanceof Error ? error.message : String(error),
+    };
+    const window = BrowserWindow.fromWebContents(sender);
+    await (window
+      ? dialog.showMessageBox(window, options)
+      : dialog.showMessageBox(options));
+    return false;
+  }
 }

@@ -48,6 +48,7 @@ import { Notices } from './Notices';
 import { OutlineNotes } from './OutlineNotes';
 import { usePaneCycle } from './pane-focus';
 import { PanelResizer, type PaneSize } from './PanelResizer';
+import { ProjectSettingsDialog } from './ProjectSettingsDialog';
 import {
   onMentionClick,
   setMentionEntries,
@@ -448,6 +449,7 @@ function ProjectView({
   const [readOnly, setReadOnly] = useState(project.readOnly);
   /** The language the Prose is spellchecked and typeset in; the Author may change it. */
   const [language, setLanguage] = useState(project.language);
+  const [projectSettingsOpen, setProjectSettingsOpen] = useState(false);
 
   /** The latest unit another computer changed; `count` starts its toast's time over. */
   const [reloaded, setReloaded] = useState<{ ref: UnitRef; count: number }>();
@@ -581,6 +583,10 @@ function ProjectView({
   function run(command: Command): boolean {
     if (command.type === 'mode') {
       switchMode(command.mode);
+      return true;
+    }
+    if (command.type === 'projectSettings') {
+      setProjectSettingsOpen(true);
       return true;
     }
     if (
@@ -1060,6 +1066,14 @@ function ProjectView({
               select({ kind: 'entry', id });
             }}
             onClose={closePeek}
+          />
+        )}
+        {projectSettingsOpen && (
+          <ProjectSettingsDialog
+            displayName={project.displayName}
+            language={language}
+            readOnly={readOnly !== null}
+            onClose={() => setProjectSettingsOpen(false)}
           />
         )}
         <div className="toasts">

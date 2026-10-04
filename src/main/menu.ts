@@ -4,19 +4,14 @@ import type {
   MenuItemConstructorOptions,
 } from 'electron';
 import { MODE_LABELS } from '../shared/conversation';
-import {
-  ENTRY_TYPE_LABELS,
-  ENTRY_TYPES,
-  PROSE_LANGUAGES,
-  type ProseLanguage,
-} from '../shared/project-types';
+import { ENTRY_TYPE_LABELS, ENTRY_TYPES } from '../shared/project-types';
 import { SHORTCUTS, type Command } from '../shared/shortcuts';
 
 /** What the menus show for the window in front. */
 export type MenuState = {
   mac: boolean;
   /** The Project the window in front shows, if any. */
-  project: { readOnly: boolean; language: ProseLanguage } | null;
+  project: { readOnly: boolean } | null;
   /** Latest first. */
   recent: { path: string; displayName: string }[];
 };
@@ -26,7 +21,6 @@ export type MenuActions = {
   /** Hands a command to the window, which knows what is current in it. */
   send(command: Command, window: BaseWindow | undefined): void;
   export(window: BaseWindow | undefined): void;
-  setLanguage(language: ProseLanguage, window: BaseWindow | undefined): void;
 };
 
 /**
@@ -58,6 +52,13 @@ export function menuTemplate(
     label: 'Settings…',
     accelerator: SHORTCUTS.settings,
     ...sending({ type: 'settings' }),
+  };
+  // Open to a read-only Project too, which shows its values.
+  const projectSettings: MenuItemConstructorOptions = {
+    label: 'Project Settings…',
+    accelerator: SHORTCUTS.projectSettings,
+    enabled: !!project,
+    ...sending({ type: 'projectSettings' }),
   };
 
   return [
@@ -110,18 +111,6 @@ export function menuTemplate(
           label: 'Export…',
           enabled: !!project,
           click: (_item, window) => actions.export(window),
-        },
-        {
-          id: 'language',
-          label: 'Prose Language',
-          enabled: writable,
-          submenu: PROSE_LANGUAGES.map(({ language, label }) => ({
-            id: `language:${language}`,
-            label,
-            type: 'radio' as const,
-            checked: project?.language === language,
-            click: (_item, window) => actions.setLanguage(language, window),
-          })),
         },
         { type: 'separator' },
         mac ? { role: 'close' } : { role: 'quit' },
@@ -188,9 +177,11 @@ export function menuTemplate(
         },
       ],
     },
-    // On macOS Settings… is in the app menu, which leaves Tools empty until
-    // Project Settings… joins it.
-    ...(mac ? [] : [{ label: 'Tools', submenu: [settings] }]),
+    // On macOS Settings… is in the app menu.
+    {
+      label: 'Tools',
+      submenu: mac ? [projectSettings] : [settings, projectSettings],
+    },
     { role: 'windowMenu' },
     {
       label: 'Help',

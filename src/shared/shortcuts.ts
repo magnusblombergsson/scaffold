@@ -12,6 +12,7 @@ export type Command = (
   | { type: 'openRecent'; path: string }
   | { type: 'import' }
   | { type: 'settings' }
+  | { type: 'projectSettings' }
   /** The Keyboard Shortcuts cheat sheet. */
   | { type: 'shortcuts' }
   | { type: 'mode'; mode: Mode }
@@ -32,6 +33,7 @@ export const SHORTCUTS = {
   newProject: 'CmdOrCtrl+Shift+N',
   openProject: 'CmdOrCtrl+O',
   settings: 'CmdOrCtrl+,',
+  projectSettings: 'CmdOrCtrl+Shift+,',
   writing: 'CmdOrCtrl+1',
   brainstorm: 'CmdOrCtrl+2',
   interview: 'CmdOrCtrl+3',
@@ -196,6 +198,7 @@ export const CHEAT_SHEET: {
       { keys: [SHORTCUTS.newProject], action: 'New Project' },
       { keys: [SHORTCUTS.openProject], action: 'Open Project' },
       { keys: [SHORTCUTS.settings], action: 'Settings' },
+      { keys: [SHORTCUTS.projectSettings], action: 'Project Settings' },
       { keys: [SHORTCUTS.shortcuts], action: 'Keyboard Shortcuts' },
     ],
   },

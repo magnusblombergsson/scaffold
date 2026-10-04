@@ -244,6 +244,7 @@ function attach(contents: WebContents, store: ProjectStore): void {
     store.subscribe((event) => {
       if (contents.isDestroyed()) return;
       contents.send(channel.projectEvent, event);
+      // Which also spellchecks in the new language.
       if (event.type === 'languageChanged' || event.type === 'readOnly') {
         updateMenu();
       }
@@ -566,9 +567,7 @@ function setApplicationMenu(): void {
   const store = window && stores.get(window.webContents.id);
   const state: MenuState = {
     mac: process.platform === 'darwin',
-    project: store
-      ? { readOnly: store.readOnly() !== null, language: store.language }
-      : null,
+    project: store ? { readOnly: store.readOnly() !== null } : null,
     recent: settings
       .recent()
       .map(({ path, displayName }) => ({ path, displayName })),
@@ -589,22 +588,6 @@ function setApplicationMenu(): void {
         },
         export: (window) => {
           if (window instanceof BrowserWindow) void exportFrom(window);
-        },
-        setLanguage: (language, window) => {
-          const store =
-            window instanceof BrowserWindow &&
-            stores.get(window.webContents.id);
-          if (!store) return;
-          store.setLanguage(language).catch(async (error: unknown) => {
-            console.error(`Can't set the language of ${store.path}:`, error);
-            updateMenu();
-            await dialog.showMessageBox(window, {
-              type: 'warning',
-              buttons: ['OK'],
-              message: `The Prose language of ${store.displayName} can't be changed now.`,
-              detail: error instanceof Error ? error.message : String(error),
-            });
-          });
         },
       }),
     ),

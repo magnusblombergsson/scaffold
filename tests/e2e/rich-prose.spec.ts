@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { answerDialogs, chooseProseLanguage, launch, useTempDir } from './app';
+import { answerDialogs, chooseMenu, launch, useTempDir } from './app';
 
 const tempDir = useTempDir();
 
@@ -74,10 +74,13 @@ test('a Project made Swedish is spellchecked and typeset in Swedish, after a res
   await page.keyboard.type(`"Late," she said.`);
   await expect(prose).toHaveAttribute('lang', 'en-US');
 
-  await chooseProseLanguage(first, 'Swedish');
-
+  await chooseMenu(first, ['Tools', 'Project Settings…']);
+  const settings = page.getByRole('dialog');
+  await settings.getByLabel('Prose language').selectOption('Swedish');
+  await settings.getByRole('button', { name: 'Close' }).click();
+  await expect(settings).toBeHidden();
   // The Scene's editor is made anew in Swedish, where the cursor was.
-  const swedish = page.getByLabel('Prose');
+  const swedish = page.getByRole('main').getByLabel('Prose');
   await expect(swedish).toHaveAttribute('lang', 'sv-SE');
   await expect(swedish).toBeFocused();
   await page.keyboard.press('Enter');

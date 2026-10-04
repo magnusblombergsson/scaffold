@@ -1222,6 +1222,10 @@ h2.binder-title > button:hover::after {
   white-space: nowrap;
 }
 
+.setting select {
+  margin-left: 0.5rem;
+}
+
 .settings-close button + button {
   margin-left: 0.5rem;
 }

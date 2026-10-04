@@ -54,6 +54,8 @@ const project: ProjectApi = {
   undo: (step) => ipcRenderer.invoke(channel.project('undo'), step),
   listTrash: () => ipcRenderer.invoke(channel.project('listTrash')),
   emptyTrash: () => ipcRenderer.invoke(channel.project('emptyTrash')),
+  setLanguage: (language) =>
+    ipcRenderer.invoke(channel.project('setLanguage'), language),
   listConflicts: () => ipcRenderer.invoke(channel.project('listConflicts')),
   readConflictVersion: (ref, versionId) =>
     ipcRenderer.invoke(channel.project('readConflictVersion'), ref, versionId),
