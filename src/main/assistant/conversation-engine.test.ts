@@ -15,7 +15,7 @@ import type { ProviderRequest } from './provider';
 let dir: string;
 
 beforeEach(async () => {
-  dir = await mkdtemp(path.join(tmpdir(), 'writing-tools-'));
+  dir = await mkdtemp(path.join(tmpdir(), 'scaffold-'));
 });
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true, maxRetries: 5 });

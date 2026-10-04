@@ -91,7 +91,7 @@ export function registerProjectIpc(): void {
 const provider = claudeProvider({
   apiKey: assistantKey,
   // End-to-end tests stand in for Anthropic.
-  baseURL: process.env.WRITING_TOOLS_ANTHROPIC_URL,
+  baseURL: process.env.SCAFFOLD_ANTHROPIC_URL,
 });
 
 /** The engine for the Project of the window `sender` belongs to. */

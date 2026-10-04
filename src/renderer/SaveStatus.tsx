@@ -114,7 +114,7 @@ export function SaveFailureBanner({
         </p>
       ))}
       <p className="save-failures-detail">
-        Your changes are kept, and Writing Tools keeps trying to save them. It
+        Your changes are kept, and Scaffold keeps trying to save them. It
         can't close until it has.
       </p>
     </div>

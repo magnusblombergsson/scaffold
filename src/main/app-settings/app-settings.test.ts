@@ -24,7 +24,7 @@ const deps = () => ({
 const load = () => loadAppSettings(file, deps());
 
 beforeEach(async () => {
-  dir = await mkdtemp(path.join(tmpdir(), 'writing-tools-settings-'));
+  dir = await mkdtemp(path.join(tmpdir(), 'scaffold-settings-'));
   file = path.join(dir, 'settings.json');
 });
 afterEach(async () => {

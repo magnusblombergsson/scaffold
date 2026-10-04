@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import path from 'node:path';
@@ -58,7 +58,7 @@ test('the first launch welcomes the Author, who can skip it for good', async () 
   const page = await first.firstWindow();
 
   await expect(
-    page.getByRole('heading', { name: 'Welcome to Writing Tools' }),
+    page.getByRole('heading', { name: 'Welcome to Scaffold' }),
   ).toBeVisible();
   await expect(
     page.getByRole('link', { name: 'Anthropic Console' }),
@@ -80,8 +80,36 @@ test('the first launch welcomes the Author, who can skip it for good', async () 
   await expect(
     again.getByRole('button', { name: 'New Project…' }),
   ).toBeVisible();
-  await expect(again.getByText('Welcome to Writing Tools')).toHaveCount(0);
+  await expect(again.getByText('Welcome to Scaffold')).toHaveCount(0);
   await second.close();
+});
+
+test("a saved key that can't be decrypted brings back the welcome, which asks for it again", async () => {
+  // As a key copied from Writing Tools may be, encrypted under its old name.
+  await mkdir(userData(), { recursive: true });
+  await writeFile(
+    path.join(userData(), 'api-key.json'),
+    JSON.stringify({
+      version: 1,
+      encrypted: Buffer.from('not ours').toString('base64'),
+    }),
+  );
+  const app = await launch(tempDir(), { anthropicUrl });
+  const page = await app.firstWindow();
+
+  await expect(
+    page.getByRole('heading', { name: 'Welcome to Scaffold' }),
+  ).toBeVisible();
+  await expect(
+    page.getByText("Your saved API key couldn't be read"),
+  ).toBeVisible();
+
+  await page.getByRole('button', { name: 'Add API key' }).click();
+  await enterKey(page, KEY, 'Check and save');
+  await expect(
+    page.getByRole('button', { name: 'New Project…' }),
+  ).toBeVisible();
+  await app.close();
 });
 
 test('a key added at the welcome is checked, kept encrypted, and only ever shown masked', async () => {

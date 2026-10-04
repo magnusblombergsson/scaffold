@@ -14,7 +14,7 @@ export const root = path.resolve(__dirname, '../..');
 export function useTempDir(): () => string {
   let dir: string;
   test.beforeEach(async () => {
-    dir = await mkdtemp(path.join(tmpdir(), 'writing-tools-e2e-'));
+    dir = await mkdtemp(path.join(tmpdir(), 'scaffold-e2e-'));
   });
   test.afterEach(async () => {
     await rm(dir, { recursive: true, force: true, maxRetries: 5 });
@@ -65,10 +65,10 @@ export function appEnv(
   const { ELECTRON_RUN_AS_NODE: _, ...env } = process.env;
   return {
     ...(env as Record<string, string>),
-    WRITING_TOOLS_USER_DATA: userData,
+    SCAFFOLD_USER_DATA: userData,
     // Never the real Anthropic: a port nothing listens on, unless a test
     // runs a fake one.
-    WRITING_TOOLS_ANTHROPIC_URL: anthropicUrl ?? 'http://127.0.0.1:9',
+    SCAFFOLD_ANTHROPIC_URL: anthropicUrl ?? 'http://127.0.0.1:9',
   };
 }
 

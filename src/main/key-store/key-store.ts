@@ -7,7 +7,7 @@ import type {
 } from '../../shared/api';
 import type { Clock } from '../project-store/clock';
 import type { FileSystem } from '../project-store/file-system';
-import { safeWrite } from '../project-store/safe-write';
+import { safeWrite, setAside } from '../project-store/safe-write';
 
 /** How the key is encrypted on disk: Electron's `safeStorage`, behind a port. */
 export type Encryption = {
@@ -44,20 +44,23 @@ export function maskKey(key: string): string {
   return `${prefix}…${rest.length >= 12 ? rest.slice(-4) : ''}`;
 }
 
-/** Reads the key kept in `file`, if any; one that can't be read counts as none. */
+/**
+ * Reads the key kept in `file`, if any. One that can't be read or decrypted,
+ * as a key copied from the app's old name may not be, counts as none and is
+ * unreadable. Its file stays, as a keychain locked now may open later.
+ */
 export async function loadKeyStore(
   file: string,
   deps: KeyStoreDeps,
 ): Promise<KeyStore> {
-  let kept: KeptKey | null = null;
+  if (!(await deps.fs.exists(file))) return new KeyStore(file, null, deps);
   try {
-    if (await deps.fs.exists(file)) {
-      kept = readKeyFile(await deps.fs.readFile(file), deps.encryption);
-    }
+    const kept = readKeyFile(await deps.fs.readFile(file), deps.encryption);
+    return new KeyStore(file, kept, deps);
   } catch (error) {
     console.error("Can't read the API key:", error);
+    return new KeyStore(file, null, deps, true);
   }
-  return new KeyStore(file, kept, deps);
 }
 
 type KeptKey = { key: string; keeping: KeyKeeping };
@@ -85,7 +88,26 @@ export class KeyStore {
     private readonly file: string,
     private kept: KeptKey | null,
     private readonly deps: KeyStoreDeps,
+    private hasUnreadable = false,
   ) {}
+
+  /**
+   * Whether a saved key couldn't be read at launch, and the Author hasn't
+   * added or removed one since: they are asked for it again.
+   */
+  unreadable(): boolean {
+    return this.hasUnreadable;
+  }
+
+  /**
+   * The Author went on without adding the key again: its file is set aside
+   * as `api-key.corrupt-<ts>.json`, so they aren't asked at every launch.
+   */
+  async setAsideUnreadable(): Promise<void> {
+    if (!this.hasUnreadable) return;
+    this.hasUnreadable = false;
+    await setAside(this.deps.fs, this.deps.clock, this.file);
+  }
 
   /** The key for the next call to Claude. */
   key(): string | null {
@@ -131,6 +153,7 @@ export class KeyStore {
       );
     }
     this.kept = { key, keeping };
+    this.hasUnreadable = false;
     return { check, status: this.status() };
   }
 
@@ -142,6 +165,7 @@ export class KeyStore {
   async removeKey(): Promise<KeyStatus> {
     await this.deleteFile();
     this.kept = null;
+    this.hasUnreadable = false;
     return this.status();
   }
 

@@ -15,7 +15,7 @@ let projectPath: string;
 const opened: ProjectStore[] = [];
 
 beforeEach(async () => {
-  dir = await mkdtemp(path.join(tmpdir(), 'writing-tools-'));
+  dir = await mkdtemp(path.join(tmpdir(), 'scaffold-'));
   projectPath = path.join(dir, 'My Novel');
 });
 afterEach(async () => {

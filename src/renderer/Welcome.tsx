@@ -1,12 +1,19 @@
 import { useState } from 'react';
-import type { KeyResult } from '../shared/api';
+import type { KeyResult, WelcomeReason } from '../shared/api';
 import { GetKeyHint, KeyForm, KeyMessage, useKeyStatus } from './ApiKey';
 
 /**
- * The first launch: the Author adds an API key for the Assistant or skips,
- * and everything but the Assistant works without one.
+ * The first launch, or a launch whose saved key couldn't be read: the Author
+ * adds an API key for the Assistant or skips, and everything but the
+ * Assistant works without one.
  */
-export function Welcome({ onDone }: { onDone(): void }) {
+export function Welcome({
+  reason,
+  onDone,
+}: {
+  reason: WelcomeReason;
+  onDone(): void;
+}) {
   const status = useKeyStatus();
   const [adding, setAdding] = useState(false);
   /** A key kept with a warning, or until the app quits, which the Author reads before going on. */
@@ -19,7 +26,12 @@ export function Welcome({ onDone }: { onDone(): void }) {
 
   return (
     <main className="welcome">
-      <h1>Welcome to Writing Tools</h1>
+      <h1>Welcome to Scaffold</h1>
+      {reason === 'keyUnreadable' && (
+        <p>
+          Your saved API key couldn't be read, so the Assistant needs it again.
+        </p>
+      )}
       <p>
         The Assistant uses Claude with your own Anthropic API key.{' '}
         <GetKeyHint />

@@ -21,6 +21,7 @@ import type {
   ProjectView,
   RecentProject,
   Tip,
+  WelcomeReason,
 } from '../shared/api';
 import { channel } from '../shared/api';
 import {
@@ -105,7 +106,7 @@ export async function startShell(): Promise<void> {
       encryption: safeStorageEncryption,
       // End-to-end tests stand in for Anthropic.
       check: anthropicKeyCheck({
-        baseURL: process.env.WRITING_TOOLS_ANTHROPIC_URL,
+        baseURL: process.env.SCAFFOLD_ANTHROPIC_URL,
       }),
     },
   );
@@ -158,7 +159,7 @@ function createWindow(store: ProjectStore | null): BrowserWindow {
     width: 1000,
     height: 700,
     ...(store && onScreen(settings.project(store.id).windowBounds)),
-    title: 'Writing Tools',
+    title: 'Scaffold',
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
     },
@@ -496,12 +497,18 @@ export function registerShellIpc(): void {
 
 /** Settings for every Project on this computer: the welcome, the API key and the model. */
 export function registerSettingsIpc(): void {
-  ipcMain.handle(
-    channel.showWelcome,
-    () => !settings.welcomed() && apiKey.key() === null,
-  );
+  ipcMain.handle(channel.showWelcome, (): WelcomeReason | null => {
+    if (apiKey.key() !== null) return null;
+    if (apiKey.unreadable()) return 'keyUnreadable';
+    return settings.welcomed() ? null : 'firstLaunch';
+  });
 
-  ipcMain.on(channel.dismissWelcome, () => settings.setWelcomed());
+  ipcMain.on(channel.dismissWelcome, () => {
+    settings.setWelcomed();
+    apiKey
+      .setAsideUnreadable()
+      .catch((error) => console.error("Can't set the API key aside:", error));
+  });
 
   ipcMain.handle(channel.keyStatus, () => apiKey.status());
 
@@ -820,7 +827,7 @@ function warnUnsaved(window: BrowserWindow): void {
     message: `${store.displayName} has changes that aren't saved yet`,
     detail: [
       ...failures,
-      'Writing Tools stays open so that nothing is lost, and keeps trying to save. Close it again once the problem is fixed.',
+      'Scaffold stays open so that nothing is lost, and keeps trying to save. Close it again once the problem is fixed.',
     ].join('\n\n'),
   });
 }

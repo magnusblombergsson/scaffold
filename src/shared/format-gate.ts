@@ -6,7 +6,7 @@ export function newerFormatMessage(
   format: number,
   reads: number,
 ): string {
-  return `${projectName} was saved by a newer version of Writing Tools (format ${format}; this app reads up to ${reads}). Update the app to open it.`;
+  return `${projectName} was saved by a newer version of Scaffold (format ${format}; this app reads up to ${reads}). Update the app to open it.`;
 }
 
 /** `host` is the computer whose newer app upgraded it, when known. */

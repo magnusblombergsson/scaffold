@@ -6,7 +6,7 @@ export function keyResultMessage({ check, status }: KeyResult): {
   text: string;
 } {
   const untilQuit = status.kept === 'untilQuit';
-  const kept = untilQuit ? 'Key kept until Writing Tools quits' : 'Key saved';
+  const kept = untilQuit ? 'Key kept until Scaffold quits' : 'Key saved';
   switch (check) {
     case 'ok':
       return { warning: false, text: `${kept}.` };
@@ -23,7 +23,7 @@ export function keyResultMessage({ check, status }: KeyResult): {
     case 'unreachable':
       return {
         warning: true,
-        text: `Can't reach Anthropic, so the key wasn't checked. ${untilQuit ? "It's kept until Writing Tools quits" : "It's saved"}; if it doesn't work, the Assistant will say so.`,
+        text: `Can't reach Anthropic, so the key wasn't checked. ${untilQuit ? "It's kept until Scaffold quits" : "It's saved"}; if it doesn't work, the Assistant will say so.`,
       };
   }
 }

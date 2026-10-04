@@ -83,7 +83,7 @@ export function KeyForm({
               checked={!unencrypted}
               onChange={() => setUnencrypted(false)}
             />
-            Keep it until Writing Tools quits
+            Keep it until Scaffold quits
           </label>
           <label>
             <input

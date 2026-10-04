@@ -25,7 +25,7 @@ export function StartScreen({ actions, error, onOpen }: Props) {
 
   return (
     <main className="start">
-      <h1>Writing Tools</h1>
+      <h1>Scaffold</h1>
       <div className="start-actions">{actions}</div>
       {error && <p role="alert">{error}</p>}
       {recent.length > 0 && (

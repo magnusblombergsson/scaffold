@@ -14,6 +14,7 @@ import type {
   OpenResult,
   PanelWidths,
   Tip,
+  WelcomeReason,
 } from '../shared/api';
 import {
   ENTRY_TYPE_LABELS,
@@ -66,7 +67,7 @@ export function App() {
   const [project, setProject] = useState<OpenedProject | null>();
   const [error, setError] = useState<string | null>(null);
   /** Undefined until main says whether to welcome the Author. */
-  const [welcome, setWelcome] = useState<boolean>();
+  const [welcome, setWelcome] = useState<WelcomeReason | null>();
   /** Open while set; `addKey` opens it at the form for adding a key. */
   const [settingsDialog, setSettingsDialog] = useState<{
     addKey: boolean;
@@ -144,7 +145,7 @@ export function App() {
           onAddKey={addKey}
         />
       ) : welcome ? (
-        <Welcome onDone={() => setWelcome(false)} />
+        <Welcome reason={welcome} onDone={() => setWelcome(null)} />
       ) : (
         <StartScreen actions={startButtons} error={error} onOpen={open} />
       )}

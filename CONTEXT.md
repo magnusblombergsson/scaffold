@@ -1,4 +1,4 @@
-# Writing Tools
+# Scaffold
 
 A writing environment for creative fiction: an editor with an AI Assistant alongside that advises the Author but never writes their Prose.
 

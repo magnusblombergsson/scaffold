@@ -50,7 +50,7 @@ test('a Project upgraded elsewhere goes read-only with a banner, and a newer one
   const start = await again.firstWindow();
   await start.getByRole('button', { name: /My Novel/ }).click();
   await expect(start.getByRole('alert')).toHaveText(
-    'My Novel was saved by a newer version of Writing Tools (format 2; this app reads up to 1). Update the app to open it.',
+    'My Novel was saved by a newer version of Scaffold (format 2; this app reads up to 1). Update the app to open it.',
   );
   await again.close();
 });
