@@ -1,0 +1,713 @@
+/*
+ * PROTOTYPE (throwaway): the looks for "Visual refresh" (#66).
+ * Every rule is scoped by <html data-proto-variant>; 0 adds nothing but the
+ * forced theme, so it is the MVP as it is. data-proto-dark is set by the
+ * switcher from System / Light / Dark.
+ *
+ * "Action buttons" = buttons with no class and no role (New Scene, Review
+ * Scene, Accept, Dismiss, …) plus the binder's add buttons and menus.
+ * "Primary" = Review Scene/Chapter, Send, Accept.
+ * "Editable" = every TipTap field except the Prose itself, plus inputs.
+ */
+
+/* ---------- Forced theme, for every look including 0 ---------- */
+
+html[data-proto-dark='false'] {
+  color-scheme: light;
+  --bg: #fbfaf7;
+  --fg: #222;
+  --muted: #777;
+  --line: #e2dfd8;
+}
+
+html[data-proto-dark='true'] {
+  color-scheme: dark;
+  --bg: #1d1d1f;
+  --fg: #e8e6e1;
+  --muted: #999;
+  --line: #3a3a3c;
+}
+
+/* ---------- The switcher itself (not part of any look) ---------- */
+
+.proto-switcher {
+  position: fixed;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-radius: 999px;
+  background: #111;
+  color: #fff;
+  font:
+    12px/1.2 system-ui,
+    sans-serif;
+  box-shadow:
+    0 0 0 2px #ff3d7f,
+    0 6px 20px rgb(0 0 0 / 35%);
+}
+
+.proto-switcher button {
+  all: unset;
+  cursor: pointer;
+  padding: 4px 9px;
+  border-radius: 999px;
+  color: #ddd;
+}
+
+.proto-switcher button:hover {
+  background: #333;
+}
+
+.proto-switcher button[aria-pressed='true'] {
+  background: #ff3d7f;
+  color: #fff;
+}
+
+.proto-switcher-label {
+  min-width: 13rem;
+  text-align: center;
+}
+
+.proto-switcher-label b {
+  color: #ff3d7f;
+}
+
+.proto-switcher-sep {
+  width: 1px;
+  align-self: stretch;
+  margin: 2px 4px;
+  background: #444;
+}
+
+/* ================================================================
+ * A. Tinted panes, soft wells
+ * Side panes and the header sit on a tint, the centre is the lightest
+ * (darkest is the panes in dark mode too). Buttons are soft filled
+ * chips; primary ones take the accent. Dropdowns look like the chips.
+ * Editable fields are always a faint filled well; read-only text is
+ * never on a fill. Focus adds an accent ring.
+ * ================================================================ */
+
+html[data-proto-variant='A'] {
+  --bg: #fdfcfa;
+  --pane: #f2f0eb;
+  --line: #e4e1da;
+  --chip: rgb(0 0 0 / 6%);
+  --chip-hover: rgb(0 0 0 / 10%);
+  --well: rgb(60 50 30 / 5%);
+  --well-hover: rgb(60 50 30 / 8%);
+  --accent: #36679e;
+  --accent-fg: #fff;
+  --accent-soft: rgb(54 103 158 / 30%);
+
+  &[data-proto-dark='true'] {
+    --bg: #242427;
+    --pane: #1a1a1c;
+    --line: #333336;
+    --chip: rgb(255 255 255 / 8%);
+    --chip-hover: rgb(255 255 255 / 13%);
+    --well: rgb(255 255 255 / 4.5%);
+    --well-hover: rgb(255 255 255 / 7%);
+    --accent: #6c9fd8;
+    --accent-fg: #0d1824;
+    --accent-soft: rgb(108 159 216 / 35%);
+  }
+
+  .project-view header,
+  .left-pane,
+  .assistant-panel,
+  .reference {
+    background: var(--pane);
+  }
+
+  .panel-resizer {
+    background-color: transparent;
+  }
+
+  .panel-resizer:hover,
+  .panel-resizer:focus-visible {
+    background-color: var(--accent-soft);
+  }
+
+  /* Buttons */
+  button:not([class], [role]):not(.mode-switch *, .binder-title *),
+  .binder-add,
+  .room-new,
+  .trash-empty-button,
+  .menu-button {
+    font: inherit;
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: inherit;
+    background: var(--chip);
+    border: none;
+    border-radius: 6px;
+    padding: 0.3rem 0.8rem;
+    cursor: pointer;
+
+    &:hover:not(:disabled) {
+      background: var(--chip-hover);
+    }
+
+    &:disabled {
+      opacity: 0.45;
+      cursor: default;
+    }
+  }
+
+  .menu-button {
+    padding: 0.1rem 0.45rem;
+    background: transparent;
+  }
+
+  .review-actions button:not([class]),
+  .composer button[type='submit'],
+  .proposal-actions button:first-child {
+    background: var(--accent);
+    color: var(--accent-fg);
+
+    &:hover:not(:disabled) {
+      background: var(--accent);
+      filter: brightness(1.08);
+    }
+  }
+
+  .mode-switch {
+    background: var(--chip);
+    border-radius: 7px;
+    padding: 2px;
+  }
+
+  .mode-switch button {
+    border: none;
+    border-radius: 5px !important;
+    padding: 2px 0.8rem;
+  }
+
+  .mode-switch button[aria-pressed='true'] {
+    background: var(--bg);
+    box-shadow: 0 1px 2px rgb(0 0 0 / 15%);
+  }
+
+  /* Dropdowns */
+  select {
+    appearance: none;
+    font: inherit;
+    font-size: 0.85rem;
+    color: inherit;
+    background-color: var(--chip);
+    background-image:
+      linear-gradient(45deg, transparent 50%, currentColor 50%),
+      linear-gradient(135deg, currentColor 50%, transparent 50%);
+    background-position:
+      calc(100% - 14px) 55%,
+      calc(100% - 9px) 55%;
+    background-size: 5px 5px;
+    background-repeat: no-repeat;
+    border: none;
+    border-radius: 6px;
+    padding: 0.3rem 1.8rem 0.3rem 0.65rem;
+    cursor: pointer;
+
+    &:hover {
+      background-color: var(--chip-hover);
+    }
+
+    &:focus-visible {
+      outline: 2px solid var(--accent-soft);
+    }
+  }
+
+  select option {
+    background: var(--bg);
+  }
+
+  /* Editable fields */
+  [contenteditable='true']:not(.prose),
+  .composer textarea,
+  .binder-rename,
+  .proposal-edit,
+  .proposal-edit-entry input,
+  .key-form input:not([type]) {
+    background: var(--well);
+    border: none;
+    border-radius: 6px;
+    padding: 0.45rem 0.65rem;
+    transition:
+      background 0.12s,
+      box-shadow 0.12s;
+
+    &:hover {
+      background: var(--well-hover);
+    }
+
+    &:focus,
+    &.ProseMirror-focused {
+      background: var(--bg);
+      box-shadow: 0 0 0 2px var(--accent-soft);
+      outline: none;
+    }
+  }
+
+  .composer textarea {
+    color: inherit;
+    background: var(--bg);
+  }
+
+  .plain-text.short {
+    min-height: 0;
+  }
+
+  /* Titles that rename on double-click */
+  .binder-title > button:hover::after,
+  button.binder-title:hover::after {
+    content: ' ✎';
+    color: var(--muted);
+    font-weight: normal;
+  }
+}
+
+/* ================================================================
+ * B. Paper on a desk
+ * Everything outside the work is the "desk"; the centre pane is a sheet
+ * lifted off it, so the place to write is unmistakable. No pane lines:
+ * gaps and the shadow separate them. Buttons are outlined pills;
+ * primary ones are bolder in the accent. Dropdowns are underlined.
+ * Editable fields carry a dashed rule on their left that turns solid in
+ * the accent on hover and focus; the field's label gets a pencil.
+ * ================================================================ */
+
+html[data-proto-variant='B'] {
+  --desk: #e9e6df;
+  --bg: #e9e6df;
+  --sheet: #fffefb;
+  --line: #d8d4cb;
+  --pill-line: #b9b4a9;
+  --rule: #c9c3b6;
+  --accent: #2e6b4e;
+  --accent-tint: rgb(46 107 78 / 6%);
+
+  &[data-proto-dark='true'] {
+    --desk: #151517;
+    --bg: #151517;
+    --sheet: #252528;
+    --line: #2c2c30;
+    --pill-line: #55555c;
+    --rule: #4a4a50;
+    --accent: #79c29e;
+    --accent-tint: rgb(121 194 158 / 8%);
+  }
+
+  .project-view header {
+    border-bottom: none;
+  }
+
+  .project-body {
+    padding: 0 0.5rem 0.5rem;
+  }
+
+  .centre {
+    background: var(--sheet);
+    border-radius: 6px;
+    box-shadow:
+      0 1px 2px rgb(0 0 0 / 8%),
+      0 4px 14px rgb(0 0 0 / 7%);
+    overflow: hidden;
+  }
+
+  .outline-notes {
+    border-bottom-color: var(--line);
+  }
+
+  .panel-resizer {
+    width: 9px;
+    margin: 0;
+    border: none;
+    background: transparent;
+  }
+
+  .panel-resizer:hover,
+  .panel-resizer:focus-visible {
+    background: var(--pill-line);
+    background-clip: content-box;
+    padding: 0 3px;
+  }
+
+  /* Buttons */
+  button:not([class], [role]):not(.mode-switch *, .binder-title *),
+  .binder-add,
+  .room-new,
+  .trash-empty-button {
+    font: inherit;
+    font-size: 0.85rem;
+    color: inherit;
+    background: transparent;
+    border: 1px solid var(--pill-line);
+    border-radius: 999px;
+    padding: 0.2rem 0.9rem;
+    cursor: pointer;
+
+    &:hover:not(:disabled) {
+      border-color: var(--fg);
+    }
+
+    &:disabled {
+      opacity: 0.4;
+      cursor: default;
+    }
+  }
+
+  .binder-add,
+  .room-new {
+    border-style: dashed;
+  }
+
+  .menu-button {
+    background: transparent;
+    border: none;
+    color: var(--muted);
+    cursor: pointer;
+  }
+
+  .review-actions button:not([class]),
+  .composer button[type='submit'],
+  .proposal-actions button:first-child {
+    border: 1.5px solid var(--accent);
+    color: var(--accent);
+    font-weight: 600;
+
+    &:hover:not(:disabled) {
+      border-color: var(--accent);
+      background: var(--accent-tint);
+    }
+  }
+
+  .mode-switch button {
+    border: none !important;
+    border-radius: 999px !important;
+    padding: 2px 0.9rem;
+  }
+
+  .mode-switch button[aria-pressed='true'] {
+    background: var(--sheet);
+    box-shadow: 0 1px 3px rgb(0 0 0 / 15%);
+  }
+
+  /* Dropdowns */
+  select {
+    appearance: none;
+    font: inherit;
+    font-size: 0.85rem;
+    color: inherit;
+    background-color: transparent;
+    background-image:
+      linear-gradient(45deg, transparent 50%, currentColor 50%),
+      linear-gradient(135deg, currentColor 50%, transparent 50%);
+    background-position:
+      calc(100% - 10px) 55%,
+      calc(100% - 5px) 55%;
+    background-size: 5px 5px;
+    background-repeat: no-repeat;
+    border: none;
+    border-bottom: 1.5px solid var(--pill-line);
+    border-radius: 0;
+    padding: 0.2rem 1.4rem 0.2rem 0.1rem;
+    cursor: pointer;
+
+    &:hover,
+    &:focus-visible {
+      border-bottom-color: var(--accent);
+      outline: none;
+    }
+  }
+
+  select option {
+    background: var(--sheet);
+  }
+
+  /* Editable fields */
+  [contenteditable='true']:not(.prose),
+  .binder-rename,
+  .proposal-edit,
+  .proposal-edit-entry input,
+  .key-form input:not([type]) {
+    border: none;
+    border-left: 2px dashed var(--rule);
+    border-radius: 0;
+    padding: 0.2rem 0 0.2rem 0.7rem;
+    background: transparent;
+    transition:
+      border-color 0.12s,
+      background 0.12s;
+
+    &:hover {
+      border-left-color: var(--accent);
+      border-left-style: solid;
+    }
+
+    &:focus,
+    &.ProseMirror-focused {
+      border-left: 2px solid var(--accent);
+      background: var(--accent-tint);
+      outline: none;
+    }
+  }
+
+  .composer textarea {
+    color: inherit;
+    background: var(--sheet);
+    border: 1px solid var(--pill-line);
+    border-radius: 10px;
+    padding: 0.5rem 0.7rem;
+
+    &:focus {
+      outline: none;
+      border-color: var(--accent);
+    }
+  }
+
+  .plain-text-field:hover h3::after,
+  .plain-text-field:focus-within h3::after,
+  .entry-field-group:focus-within > h4::after {
+    content: ' ✎';
+    color: var(--accent);
+  }
+
+  .plain-text-field:focus-within h3 {
+    color: var(--accent);
+  }
+
+  .plain-text.short {
+    min-height: 0;
+  }
+
+  .binder-title > button:hover::after,
+  button.binder-title:hover::after {
+    content: ' ✎';
+    color: var(--accent);
+    font-weight: normal;
+  }
+
+  .binder-project[aria-current='true'],
+  .binder-title > button[aria-current='true'],
+  button.binder-title[aria-current='true'] {
+    background: var(--sheet);
+    border-radius: 4px;
+  }
+}
+
+/* ================================================================
+ * C. Desktop form
+ * Classic application chrome: the header and side panes are cool grey
+ * with clear lines, the centre is the brightest (in dark mode the panes
+ * are lighter than the centre, like an IDE). Buttons are bordered
+ * rectangles with a slight lift; primary ones fill with the accent.
+ * Dropdowns match the buttons. Every editable field is an explicit
+ * bordered input box; anything without a box is read-only.
+ * ================================================================ */
+
+html[data-proto-variant='C'] {
+  --bg: #ffffff;
+  --pane: #eef0f3;
+  --head: #e3e6ea;
+  --line: #d3d7dd;
+  --control: #ffffff;
+  --control-line: #c3c8d0;
+  --control-hover: #f6f7f9;
+  --input: #ffffff;
+  --input-line: #cfd4db;
+  --accent: #4b52c9;
+  --accent-fg: #fff;
+  --accent-ring: rgb(75 82 201 / 28%);
+
+  &[data-proto-dark='true'] {
+    --bg: #1b1c1f;
+    --pane: #24262a;
+    --head: #2b2e33;
+    --line: #383b41;
+    --control: #33363c;
+    --control-line: #464a52;
+    --control-hover: #3b3f46;
+    --input: #141518;
+    --input-line: #43474f;
+    --accent: #8a90f2;
+    --accent-fg: #101125;
+    --accent-ring: rgb(138 144 242 / 35%);
+  }
+
+  .project-view header {
+    background: var(--head);
+    border-bottom-color: var(--line);
+  }
+
+  .left-pane,
+  .assistant-panel,
+  .reference {
+    background: var(--pane);
+  }
+
+  .left-pane {
+    border-right: 1px solid var(--line);
+  }
+
+  .assistant-panel,
+  .reference {
+    border-left: 1px solid var(--line);
+  }
+
+  .panel-resizer {
+    background-color: transparent;
+  }
+
+  /* Buttons */
+  button:not([class], [role]):not(.mode-switch *, .binder-title *),
+  .binder-add,
+  .room-new,
+  .trash-empty-button {
+    font: inherit;
+    font-size: 0.85rem;
+    color: inherit;
+    background: var(--control);
+    border: 1px solid var(--control-line);
+    border-radius: 4px;
+    padding: 0.25rem 0.75rem;
+    box-shadow: 0 1px 1px rgb(0 0 0 / 7%);
+    cursor: pointer;
+
+    &:hover:not(:disabled) {
+      background: var(--control-hover);
+    }
+
+    &:active:not(:disabled) {
+      box-shadow: none;
+      transform: translateY(1px);
+    }
+
+    &:disabled {
+      opacity: 0.5;
+      cursor: default;
+      box-shadow: none;
+    }
+  }
+
+  .menu-button {
+    background: transparent;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    color: inherit;
+    cursor: pointer;
+
+    &:hover {
+      border-color: var(--control-line);
+      background: var(--control);
+    }
+  }
+
+  .review-actions button:not([class]),
+  .composer button[type='submit'],
+  .proposal-actions button:first-child {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-fg);
+    font-weight: 600;
+
+    &:hover:not(:disabled) {
+      background: var(--accent);
+      filter: brightness(1.08);
+    }
+  }
+
+  .mode-switch button {
+    background: var(--control);
+    border-color: var(--control-line);
+    padding: 2px 0.85rem;
+  }
+
+  .mode-switch button[aria-pressed='true'] {
+    background: var(--accent);
+    border-color: var(--accent);
+    color: var(--accent-fg);
+  }
+
+  /* Dropdowns */
+  select {
+    appearance: none;
+    font: inherit;
+    font-size: 0.85rem;
+    color: inherit;
+    background-color: var(--control);
+    background-image:
+      linear-gradient(45deg, transparent 50%, currentColor 50%),
+      linear-gradient(135deg, currentColor 50%, transparent 50%);
+    background-position:
+      calc(100% - 14px) 55%,
+      calc(100% - 9px) 55%;
+    background-size: 5px 5px;
+    background-repeat: no-repeat;
+    border: 1px solid var(--control-line);
+    border-radius: 4px;
+    padding: 0.25rem 1.8rem 0.25rem 0.6rem;
+    box-shadow: 0 1px 1px rgb(0 0 0 / 7%);
+    cursor: pointer;
+
+    &:focus-visible {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-ring);
+    }
+  }
+
+  select option {
+    background: var(--control);
+  }
+
+  /* Editable fields */
+  [contenteditable='true']:not(.prose),
+  .composer textarea,
+  .binder-rename,
+  .proposal-edit,
+  .proposal-edit-entry input,
+  .key-form input:not([type]) {
+    color: inherit;
+    background: var(--input);
+    border: 1px solid var(--input-line);
+    border-radius: 4px;
+    padding: 0.4rem 0.6rem;
+    box-shadow: inset 0 1px 2px rgb(0 0 0 / 5%);
+
+    &:hover {
+      border-color: var(--control-line);
+    }
+
+    &:focus,
+    &.ProseMirror-focused {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-ring);
+    }
+  }
+
+  .plain-text.short {
+    min-height: 0;
+  }
+
+  .binder-title > button:hover::after,
+  button.binder-title:hover::after {
+    content: ' ✎';
+    color: var(--muted);
+    font-weight: normal;
+  }
+
+  .binder-project[aria-current='true'],
+  .binder-title > button[aria-current='true'],
+  button.binder-title[aria-current='true'] {
+    background: var(--accent);
+    color: var(--accent-fg);
+    border-radius: 3px;
+  }
+}
