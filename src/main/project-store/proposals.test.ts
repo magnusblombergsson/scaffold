@@ -824,6 +824,43 @@ describe('undoing an accepted Proposal', () => {
     expect(events).toContainEqual({ type: 'proposalsChanged' });
   });
 
+  it('accepts and undoes a Role note or Appearance, stored in the Entry file', async () => {
+    const { store, annaId, conversationId } = await proposed();
+    const anna = await store.read(entryRef(annaId));
+    await store.write(entryRef(annaId), {
+      ...anna,
+      fields: { ...anna.fields, roleNote: 'sister' },
+    });
+    const file = path.join(projectPath, 'bible', `${annaId}.md`);
+    for (const proposal of [
+      { field: 'roleNote', base: 'sister', proposed: 'love interest' },
+      { field: 'appearance', base: '', proposed: 'Tall, grey-eyed.' },
+    ] as const) {
+      const id = `p-${proposal.field}`;
+      await store.appendProposal(conversationId, {
+        kind: 'field',
+        id,
+        entryId: annaId,
+        ...proposal,
+      });
+
+      await store.acceptProposal(conversationId, id);
+      expect((await store.read(entryRef(annaId))).fields[proposal.field]).toBe(
+        proposal.proposed,
+      );
+      await store.flush();
+      expect(await readFile(file, 'utf8')).toContain(
+        `${proposal.field}: ${proposal.proposed}\n`,
+      );
+
+      await store.undoProposal(conversationId, id);
+      expect((await store.read(entryRef(annaId))).fields[proposal.field]).toBe(
+        proposal.base,
+      );
+    }
+    await store.close();
+  });
+
   it('can be undone in a later session, and accepted again', async () => {
     const { store, annaId, conversationId } = await proposed();
     await store.acceptProposal(conversationId, 'p1');

@@ -98,11 +98,14 @@ export const STATUS_LABELS: Record<ThreadStatus, string> = {
 };
 
 /**
- * An Entry's type-specific fields: a Character has `role` and `voice`, a
- * Place `senses` and a Plot Thread `status`; the other types have none.
+ * An Entry's type-specific fields: a Character has `role`, with a short
+ * `roleNote` beside it, `appearance` and `voice`, a Place `senses` and a
+ * Plot Thread `status`; the other types have none.
  */
 export type EntryFields = {
   role?: Role | null;
+  roleNote?: string;
+  appearance?: string;
   voice?: Voice;
   senses?: Senses;
   status?: ThreadStatus;

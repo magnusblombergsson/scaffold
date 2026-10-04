@@ -28,6 +28,8 @@ export const PROPOSAL_FIELDS = [
   'description',
   'aliases',
   'role',
+  'roleNote',
+  'appearance',
   'status',
   'voice.traits',
   'voice.says',
@@ -44,6 +46,8 @@ export const FIELD_LABELS: Record<ProposalField, string> = {
   description: 'Description',
   aliases: 'Aliases',
   role: 'Role',
+  roleNote: 'Role note',
+  appearance: 'Appearance',
   status: 'Status',
   'voice.traits': 'Voice traits',
   'voice.says': 'Says',
@@ -155,6 +159,8 @@ const FIELDS_OF: Record<EntryType, ProposalField[]> = {
     'description',
     'aliases',
     'role',
+    'roleNote',
+    'appearance',
     'voice.traits',
     'voice.says',
     'voice.neverSays',
@@ -202,6 +208,9 @@ export function fieldOf(
   if (field === 'aliases') return entry.aliases;
   if (field === 'role') return fields.role ?? null;
   if (field === 'status') return fields.status ?? 'open';
+  if (field === 'roleNote' || field === 'appearance') {
+    return fields[field] ?? '';
+  }
   const [group, key] = field.split('.') as ['voice' | 'senses', string];
   return (fields[group] as Record<string, FieldValue> | undefined)?.[key];
 }
@@ -218,7 +227,9 @@ export function withField(
   const fields: EntryFields = { ...entry.fields };
   if (field === 'role') fields.role = value as Role | null;
   else if (field === 'status') fields.status = value as ThreadStatus;
-  else if (field.startsWith('voice.')) {
+  else if (field === 'roleNote' || field === 'appearance') {
+    fields[field] = value as string;
+  } else if (field.startsWith('voice.')) {
     const key = field.slice('voice.'.length) as keyof Voice;
     fields.voice = { ...fields.voice!, [key]: value };
   } else {
@@ -315,8 +326,8 @@ function tidy(text: string): string {
  * proposes nothing this app takes: another Entry, a field its type lacks or
  * a Proposal may not change, a value the field can't hold, or no change.
  * A block names the Entry by id and the field, and either a `value` to set,
- * text to `append` (a description gets it on a line of its own), or an item
- * to `add` to a list.
+ * text to `append` (a description or an Appearance gets it on a line of
+ * its own), or an item to `add` to a list.
  */
 export function proposalOf(
   block: unknown,
@@ -336,7 +347,8 @@ export function proposalOf(
   let proposed: unknown = value;
   if (typeof append === 'string' && typeof base === 'string') {
     const text = append.trim();
-    const separator = field === 'description' ? '\n' : ', ';
+    const separator =
+      field === 'description' || field === 'appearance' ? '\n' : ', ';
     proposed = base.trim() ? `${base.trimEnd()}${separator}${text}` : text;
   } else if (typeof add === 'string' && Array.isArray(base)) {
     const item = add.trim();

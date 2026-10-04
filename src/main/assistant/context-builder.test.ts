@@ -700,44 +700,117 @@ describe('order and caching', () => {
   });
 });
 
+/**
+ * A request in each Mode: Brainstorm, Interview in each kind of focus, and
+ * each Writing command on each Scene and on none, naming every Entry.
+ */
+function everyRequest({
+  scenes,
+  chapters,
+  entries,
+}: Awaited<ReturnType<typeof fixture>>): ContextRequest[] {
+  const messages = [
+    message(
+      'author',
+      'Anna, Annie, Mira, The Pact, Harbour master, kista, Ferry, @Harbour @Storm',
+    ),
+  ];
+  const foci: InterviewFocus[] = [
+    { kind: 'open' },
+    { kind: 'entry', id: entries.anna },
+    { kind: 'entry-type', type: 'character' },
+    { kind: 'chapter', id: chapters.arrival },
+    { kind: 'scene', id: scenes.wreck },
+  ];
+  const commands: Command[] = ['question', 'review-scene', 'review-chapter'];
+  return [
+    { mode: 'brainstorm', messages },
+    ...foci.map(
+      (focus): ContextRequest => ({ mode: 'interview', focus, messages }),
+    ),
+    ...commands.flatMap((command) =>
+      [scenes.harbour, scenes.letter, scenes.wreck, null].map(
+        (sceneId): ContextRequest => ({
+          mode: 'writing',
+          command,
+          sceneId,
+          messages,
+        }),
+      ),
+    ),
+  ];
+}
+
 describe('private notes', () => {
   it('never reach the context, in any Mode and focus', async () => {
-    const { view, scenes, chapters, entries } = await fixture();
-    const messages = [
-      message(
-        'author',
-        'Anna, Annie, Mira, The Pact, Harbour master, kista, Ferry, @Harbour @Storm',
-      ),
-    ];
-    const foci: InterviewFocus[] = [
-      { kind: 'open' },
-      { kind: 'entry', id: entries.anna },
-      { kind: 'entry-type', type: 'character' },
-      { kind: 'chapter', id: chapters.arrival },
-      { kind: 'scene', id: scenes.wreck },
-    ];
-    const commands: Command[] = ['question', 'review-scene', 'review-chapter'];
-    const requests: ContextRequest[] = [
-      { mode: 'brainstorm', messages },
-      ...foci.map(
-        (focus): ContextRequest => ({ mode: 'interview', focus, messages }),
-      ),
-      ...commands.flatMap((command) =>
-        [scenes.harbour, scenes.letter, scenes.wreck, null].map(
-          (sceneId): ContextRequest => ({
-            mode: 'writing',
-            command,
-            sceneId,
-            messages,
-          }),
-        ),
-      ),
-    ];
+    const project = await fixture();
 
-    for (const request of requests) {
-      const text = sent(await buildContext(view, request));
+    for (const request of everyRequest(project)) {
+      const text = sent(await buildContext(project.view, request));
       expect(text).toContain('Her sister.');
       expect(text).not.toContain(SENTINEL);
     }
+  });
+});
+
+describe('Role note and Appearance', () => {
+  it('reach the context with the Entry, in every Mode and focus', async () => {
+    const project = await fixture();
+    const { store, entries } = project;
+    const mira = await store.read({ kind: 'entry', id: entries.mira });
+    await store.write(
+      { kind: 'entry', id: entries.mira },
+      {
+        ...mira,
+        fields: {
+          ...mira.fields,
+          role: 'supporting',
+          roleNote: 'the one who stayed',
+          appearance: 'Freckled, always in oilskins.',
+        },
+      },
+    );
+
+    for (const request of everyRequest(project)) {
+      const text = sent(await buildContext(project.view, request));
+      expect(text).toContain('Role: Supporting · the one who stayed');
+      expect(text).toContain('Appearance: Freckled, always in oilskins.');
+    }
+  });
+
+  it('may be proposed in every Mode, and are on the Interview’s Character checklist', async () => {
+    const project = await fixture();
+
+    for (const request of everyRequest(project)) {
+      const { system } = await buildContext(project.view, request);
+      const prompt = system.map((b) => b.text).join('\n');
+      expect(prompt).toContain('- "roleNote" (Characters)');
+      expect(prompt).toContain('- "appearance" (Characters)');
+      const checklist = /^- Character: .*$/m.exec(prompt)?.[0];
+      if (request.mode === 'interview') {
+        expect(checklist).toContain('Role note');
+        expect(checklist).toContain('Appearance');
+      } else {
+        expect(checklist).toBeUndefined();
+      }
+    }
+  });
+
+  it('sends a Role note without a Role on its own', async () => {
+    const { store, view, entries } = await fixture();
+    const mira = await store.read({ kind: 'entry', id: entries.mira });
+    await store.write(
+      { kind: 'entry', id: entries.mira },
+      { ...mira, fields: { ...mira.fields, roleNote: 'the one who stayed' } },
+    );
+
+    const text = sent(
+      await buildContext(view, {
+        mode: 'brainstorm',
+        messages: [message('author', 'Hm.')],
+      }),
+    );
+
+    expect(text).toContain('\nRole: the one who stayed\n');
   });
 });

@@ -8,12 +8,12 @@ import {
   type SawUnit,
 } from '../../shared/conversation';
 import { findingBlock, type ReviewCommand } from '../../shared/finding';
+import { roleText } from '../../shared/entry';
 import { mentionMatcher } from '../../shared/mentions';
 import { proposalBlock, type ProposalView } from '../../shared/proposal';
 import {
   ENTRY_TYPE_LABELS,
   PROJECT_OUTLINE,
-  ROLE_LABELS,
   STATUS_LABELS,
   unitKey,
   unitText,
@@ -225,10 +225,12 @@ function entryText(entry: EntryValue): string {
   if (entry.aliases.length > 0) {
     lines.push(`Also called: ${entry.aliases.join(', ')}`);
   }
-  const { role, voice, senses, status } = entry.fields;
-  if (role) lines.push(`Role: ${ROLE_LABELS[role]}`);
+  const { role, roleNote, appearance, voice, senses, status } = entry.fields;
+  const roles = roleText(role, roleNote);
+  if (roles) lines.push(`Role: ${roles}`);
   if (status) lines.push(`Status: ${STATUS_LABELS[status]}`);
   lines.push(entry.description.trim() || '(No description.)');
+  if (appearance?.trim()) lines.push(`Appearance: ${appearance.trim()}`);
   if (voice) {
     const said = [
       ['Voice', voice.traits.trim()],

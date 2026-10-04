@@ -176,6 +176,40 @@ describe('proposalOf', () => {
     ).toBe('tar, diesel');
   });
 
+  it('replaces a Character’s Role note or Appearance, which no other type has', () => {
+    const withNote = {
+      ...anna,
+      fields: { ...anna.fields, roleNote: 'sister' },
+    };
+    expect(
+      proposalOf(
+        { entry: 'anna', field: 'roleNote', value: 'love interest' },
+        withNote,
+      ),
+    ).toEqual({
+      kind: 'field',
+      entryId: 'anna',
+      field: 'roleNote',
+      base: 'sister',
+      proposed: 'love interest',
+    });
+    expect(
+      proposalOf(
+        { entry: 'anna', field: 'appearance', value: 'Tall, grey-eyed.' },
+        anna,
+      ),
+    ).toMatchObject({ base: '', proposed: 'Tall, grey-eyed.' });
+    expect(withField(anna, 'appearance', 'Tall.').fields.appearance).toBe(
+      'Tall.',
+    );
+    expect(
+      proposalOf(
+        { entry: 'harbour', field: 'appearance', value: 'Grey.' },
+        harbour,
+      ),
+    ).toBeNull();
+  });
+
   it('never targets Voice example lines, private notes, a field the type lacks, or another Entry', () => {
     for (const block of [
       { entry: 'anna', field: 'voice.examples', add: 'Go home.' },

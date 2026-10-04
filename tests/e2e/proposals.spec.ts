@@ -232,6 +232,10 @@ test('the Author undoes accepted Proposals from their cards, while their targets
       block({ entry: annaId, field: 'description', append: 'Older.' }),
       '\n',
       block({ create: 'character', name: 'Mira', description: 'Her sister.' }),
+      '\n',
+      block({ entry: annaId, field: 'roleNote', value: 'love interest' }),
+      '\n',
+      block({ entry: annaId, field: 'appearance', value: 'Tall.' }),
     ],
   });
   await assistant
@@ -290,6 +294,28 @@ test('the Author undoes accepted Proposals from their cards, while their targets
     'proposal.accepted',
     'proposal.undone',
   ]);
+
+  // A Role note and an Appearance, as Replace Proposals.
+  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await page
+    .getByRole('navigation', { name: 'Story Bible' })
+    .getByRole('button', { name: 'Anna', exact: true })
+    .click();
+  for (const [label, value] of [
+    ['Role note', 'love interest'],
+    ['Appearance', 'Tall.'],
+  ]) {
+    const card = reply.getByRole('region', {
+      name: `Proposal: Anna › ${label}`,
+    });
+    const field = page.getByLabel(label, { exact: true });
+    await card.getByRole('button', { name: 'Accept' }).click();
+    await expect(card).toContainText('✓ Accepted');
+    await expect(field).toHaveText(value);
+    await card.getByRole('button', { name: 'Undo' }).click();
+    await expect(card.getByRole('button', { name: 'Accept' })).toBeVisible();
+    await expect(field).toHaveText('');
+  }
   await app.close();
 });
 

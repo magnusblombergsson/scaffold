@@ -1,5 +1,6 @@
 import {
   ROLE_LABELS,
+  type Role,
   STATUS_LABELS,
   type EntryFields,
   type EntrySummary,
@@ -13,6 +14,8 @@ export function emptyFields(type: EntryType): EntryFields {
     case 'character':
       return {
         role: null,
+        roleNote: '',
+        appearance: '',
         voice: { traits: '', says: [], neverSays: [], examples: [] },
       };
     case 'place':
@@ -71,13 +74,35 @@ export function revertEntryType(
   };
 }
 
+/**
+ * A Character's Role and Role note together, as in “Protagonist · love
+ * interest”; either alone, or empty without both.
+ */
+export function roleText(
+  role: Role | null | undefined,
+  roleNote: string | undefined,
+): string {
+  return [role ? ROLE_LABELS[role] : '', roleNote?.trim() ?? '']
+    .filter(Boolean)
+    .join(' · ');
+}
+
 /** The fields as lines of text, as a type change appends them. */
-function fieldLines({ role, voice, senses, status }: EntryFields): string[] {
+function fieldLines({
+  role,
+  roleNote,
+  appearance,
+  voice,
+  senses,
+  status,
+}: EntryFields): string[] {
   const lines: string[] = [];
   const add = (label: string, text: string) => {
     if (text.trim()) lines.push(`${label}: ${text}`);
   };
   if (role) add('Role', ROLE_LABELS[role]);
+  add('Role note', roleNote ?? '');
+  add('Appearance', appearance ?? '');
   if (voice) {
     add('Voice traits', voice.traits);
     add('Says', voice.says.join(', '));

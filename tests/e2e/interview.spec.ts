@@ -85,7 +85,7 @@ test('the Author is interviewed about a focus they pick and change, and sees the
   await expect(room.getByRole('note')).toHaveText('Focus: Anna');
 
   // The pending Proposal shows as a ghost value on its field.
-  const role = inFocus.getByRole('region', { name: 'Role' });
+  const role = inFocus.getByRole('region', { name: 'Role', exact: true });
   await expect(role.getByRole('list', { name: 'Proposed Role' })).toHaveText(
     /Protagonist/,
   );

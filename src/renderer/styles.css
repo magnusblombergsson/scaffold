@@ -1388,7 +1388,15 @@ h2.binder-title > button:hover::after {
   gap: 0.5rem;
 }
 
-.entry-field-group h4 {
+/* A Character's Role, with its Role note just under it. */
+.entry-role {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.entry-field-group h4,
+.entry-role h4 {
   font-size: 0.8rem;
   font-weight: 600;
   margin: 0;

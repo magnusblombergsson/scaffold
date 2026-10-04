@@ -57,6 +57,10 @@ const nameOf = (value: UnitValue) => (value as EntryValue).name;
 const aliasesOf = (value: UnitValue) =>
   (value as EntryValue).aliases.join('\n');
 const descriptionOf = (value: UnitValue) => (value as EntryValue).description;
+const roleNoteOf = (value: UnitValue) =>
+  (value as EntryValue).fields.roleNote ?? '';
+const appearanceOf = (value: UnitValue) =>
+  (value as EntryValue).fields.appearance ?? '';
 
 /** A text field of an Entry's type, and its text in a value of the Entry. */
 type TypeField<K extends string> = {
@@ -323,21 +327,58 @@ export function EntryView({
       </section>
       {entry.type === 'character' && (
         <>
-          <fieldset className="entry-choice">
-            <legend>Role</legend>
-            {ROLES.map((role) => (
-              <label key={role}>
-                <input
-                  type="radio"
-                  name={`role-${entryId}`}
-                  checked={choices.role === role}
-                  onChange={() => choose({ role })}
-                />
-                {ROLE_LABELS[role]}
-              </label>
-            ))}
-            {ghosts('role')}
-          </fieldset>
+          <div className="entry-role">
+            <fieldset className="entry-choice">
+              <legend>Role</legend>
+              {ROLES.map((role) => (
+                <label key={role}>
+                  <input
+                    type="radio"
+                    name={`role-${entryId}`}
+                    checked={choices.role === role}
+                    onChange={() => choose({ role })}
+                  />
+                  {ROLE_LABELS[role]}
+                </label>
+              ))}
+              {ghosts('role')}
+            </fieldset>
+            <section className="plain-text-field">
+              <h4>Role note</h4>
+              <UnitEditor
+                unitKey={`${entryKey}:roleNote`}
+                field={{ unitKey: entryKey, text: roleNoteOf }}
+                text={roleNoteOf(entry)}
+                extensions={singleLineExtensions()}
+                toDoc={textToDoc}
+                toText={docToText}
+                save={(roleNote) =>
+                  saveFields((fields) => ({ ...fields, roleNote }))
+                }
+                attributes={attributes('Role note', 'plain-text short')}
+              />
+              <p className="field-hint">
+                A few words beside the Role, such as “love interest”
+              </p>
+              {ghosts('roleNote')}
+            </section>
+          </div>
+          <section className="plain-text-field">
+            <h3>Appearance</h3>
+            <UnitEditor
+              unitKey={`${entryKey}:appearance`}
+              field={{ unitKey: entryKey, text: appearanceOf }}
+              text={appearanceOf(entry)}
+              extensions={plainTextExtensions({ bullets: false })}
+              toDoc={textToDoc}
+              toText={docToText}
+              save={(appearance) =>
+                saveFields((fields) => ({ ...fields, appearance }))
+              }
+              attributes={attributes('Appearance')}
+            />
+            {ghosts('appearance')}
+          </section>
           <section className="entry-field-group" aria-label="Voice">
             <h3>Voice</h3>
             {VOICE_FIELDS.map(({ key, label, hint, text }) => (

@@ -1,26 +1,155 @@
-import { emptyFields } from '../../shared/entry';
-import {
-  ENTRY_TYPES,
-  ROLES,
-  THREAD_STATUSES,
-  type EntryFields,
-  type EntryType,
-  type Role,
-  type Senses,
-  type ThreadStatus,
+import { parse, stringify } from 'yaml';
+import type {
+  EntryFields,
+  EntryType,
+  EntryValue,
+  Role,
+  Senses,
+  ThreadStatus,
+  Visibility,
 } from '../../shared/project-types';
 
-// How an Entry's type-specific fields sit in the frontmatter of
-// `bible/<id>.md`: `role`, `roleNote`, `appearance`, `voice` and
-// `senses`, each left out while it has no value, and `status`, always
-// written for a Plot Thread. As everywhere, what this app doesn't know is
-// kept.
+// How the MVP app (format 1, as released at f91ca2e) reads and rewrites an
+// Entry's file, frozen so that format tests can check what an MVP app still
+// open on another computer does with what this app writes (ADR 0006). Copied
+// as it was, joined into one module, with the MVP's constants; never change
+// it to match this app.
+
+type UnknownKeys = Record<string, unknown>;
+type UnitFile = { frontmatter: Record<string, unknown>; body: string };
+
+const FORMAT = 1;
+const ENTRY_TYPES = [
+  'character',
+  'place',
+  'item',
+  'world-rule',
+  'plot-thread',
+  'theme',
+  'other',
+];
+const VISIBILITIES = ['always', 'mentioned', 'never'];
+const DEFAULT_VISIBILITY: Visibility = 'mentioned';
+const ROLES = ['protagonist', 'supporting', 'mentioned'];
+const THREAD_STATUSES = ['open', 'resolved'];
+
+/** An Entry from the text of its file, as the MVP reads it. */
+export function mvpReadEntry(id: string, text: string): EntryValue {
+  return entryValue(id, parseUnitFile(text));
+}
+
+/** The text the MVP writes for `value`, an Entry whose file held `previousText`. */
+export function mvpWriteEntry(value: EntryValue, previousText: string): string {
+  return entryFile(value, parseUnitFile(previousText).frontmatter);
+}
+
+const FRONTMATTER = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
+
+function parseUnitFile(text: string): UnitFile {
+  const match = FRONTMATTER.exec(text);
+  if (!match) return { frontmatter: {}, body: text };
+  return {
+    frontmatter: (parse(match[1]) as Record<string, unknown>) ?? {},
+    body: text.slice(match[0].length),
+  };
+}
+
+function formatUnitFile({ frontmatter, body }: UnitFile): string {
+  return `---\n${stringify(frontmatter)}---\n${body}`;
+}
+
+/**
+ * A unit's frontmatter as this app writes it: its id and this app's format,
+ * then the keys of `previous`, the frontmatter it had, that this app doesn't
+ * know, so that a newer app's are never lost (the tolerant reader).
+ */
+function frontmatterOf(id: string, previous: UnknownKeys = {}): UnknownKeys {
+  const { id: _id, format: _format, ...unknown } = previous;
+  return { id, format: FORMAT, ...unknown };
+}
+
+/**
+ * `bible/<id>.md`: the Entry's fields in frontmatter, its description as the
+ * body. A type or visibility this app doesn't know, as a newer app may
+ * write, reads as its default and is kept while the value is still that
+ * default (the tolerant reader); so are type-specific fields this app
+ * doesn't know.
+ */
+function entryFile(value: EntryValue, previous: UnknownKeys = {}): string {
+  const {
+    type: previousType,
+    name: _name,
+    aliases: _aliases,
+    visibility: previousVisibility,
+    ...unknown
+  } = previous;
+  const { id, name, aliases, description } = value;
+  const keepsType =
+    value.type === 'other' && !ENTRY_TYPES.includes(previousType as EntryType);
+  const type = keepsType ? (previousType ?? value.type) : value.type;
+  const visibility =
+    value.visibility === DEFAULT_VISIBILITY &&
+    !VISIBILITIES.includes(previousVisibility as Visibility)
+      ? (previousVisibility ?? value.visibility)
+      : value.visibility;
+  const { id: _, format, ...rest } = frontmatterOf(id, unknown);
+  const fields = entryFieldsFrontmatter(
+    value.type,
+    value.fields,
+    keepsType ? value.type : previousType,
+    rest,
+  );
+  return formatUnitFile({
+    frontmatter: { id, format, type, name, aliases, visibility, ...fields },
+    body: description,
+  });
+}
+
+/** An Entry from its file; a field that is missing or not understood reads as its default. */
+function entryValue(id: string, { frontmatter, body }: UnitFile): EntryValue {
+  const { type, name, aliases, visibility } = frontmatter;
+  const entryType = ENTRY_TYPES.includes(type as EntryType)
+    ? (type as EntryType)
+    : 'other';
+  return {
+    id,
+    type: entryType,
+    name: typeof name === 'string' ? name : '',
+    aliases: Array.isArray(aliases)
+      ? aliases.filter((alias) => typeof alias === 'string')
+      : [],
+    visibility: VISIBILITIES.includes(visibility as Visibility)
+      ? (visibility as Visibility)
+      : DEFAULT_VISIBILITY,
+    description: body,
+    fields: readEntryFields(entryType, frontmatter),
+  };
+}
+
+/** The fields an Entry of `type` starts with: empty, and a Plot Thread open. */
+function emptyFields(type: EntryType): EntryFields {
+  switch (type) {
+    case 'character':
+      return {
+        role: null,
+        voice: { traits: '', says: [], neverSays: [], examples: [] },
+      };
+    case 'place':
+      return {
+        senses: { smells: '', sight: '', sound: '', touch: '', atmosphere: '' },
+      };
+    case 'plot-thread':
+      return { status: 'open' };
+    default:
+      return {};
+  }
+}
 
 type Frontmatter = Record<string, unknown>;
 
 /** The frontmatter key each type's fields are stored under. */
 const FIELD_KEYS: Record<EntryType, readonly (keyof EntryFields)[]> = {
-  character: ['role', 'roleNote', 'appearance', 'voice'],
+  character: ['role', 'voice'],
   place: ['senses'],
   item: [],
   'world-rule': [],
@@ -29,8 +158,6 @@ const FIELD_KEYS: Record<EntryType, readonly (keyof EntryFields)[]> = {
   other: [],
 };
 
-/** The free-text fields. */
-const TEXT_KEYS = ['roleNote', 'appearance'] as const;
 const VOICE_KEYS = ['traits', 'says', 'neverSays', 'examples'] as const;
 const SENSE_KEYS = ['smells', 'sight', 'sound', 'touch', 'atmosphere'] as const;
 
@@ -38,7 +165,7 @@ const SENSE_KEYS = ['smells', 'sight', 'sound', 'touch', 'atmosphere'] as const;
  * The fields of an Entry of `type` from its frontmatter; one that is missing
  * or not understood reads as empty, and a Status as open.
  */
-export function readEntryFields(
+function readEntryFields(
   type: EntryType,
   frontmatter: Frontmatter,
 ): EntryFields {
@@ -47,9 +174,6 @@ export function readEntryFields(
     fields.role = ROLES.includes(frontmatter.role as Role)
       ? (frontmatter.role as Role)
       : null;
-  }
-  for (const key of TEXT_KEYS) {
-    if (fields[key] !== undefined) fields[key] = text(frontmatter[key]);
   }
   if (fields.voice) {
     const voice = asObject(frontmatter.voice);
@@ -83,7 +207,7 @@ export function readEntryFields(
  * field key is kept, as are keys this app doesn't know inside a field, and
  * a Role or Status it doesn't know while this one has the default.
  */
-export function entryFieldsFrontmatter(
+function entryFieldsFrontmatter(
   type: EntryType,
   fields: EntryFields,
   previousType: unknown,
@@ -103,13 +227,6 @@ export function entryFieldsFrontmatter(
         ? previous.role
         : undefined);
     if (role) written.role = role;
-  }
-  for (const key of TEXT_KEYS) {
-    if (!own.has(key)) continue;
-    const value =
-      fields[key] ||
-      (typeof previous[key] === 'string' ? undefined : previous[key]);
-    if (value) written[key] = value;
   }
   if (own.has('voice')) {
     setIfAny(
@@ -155,9 +272,6 @@ function notUnderstood(key: keyof EntryFields, value: unknown): unknown {
   }
   if (key === 'status') {
     return THREAD_STATUSES.includes(value as ThreadStatus) ? undefined : value;
-  }
-  if (key === 'roleNote' || key === 'appearance') {
-    return typeof value === 'string' ? undefined : value;
   }
   const unknown = nested(
     undefined,

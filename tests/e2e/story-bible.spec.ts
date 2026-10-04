@@ -178,6 +178,20 @@ test('a Character, a Place and a Plot Thread show and save their own fields', as
     .getByRole('group', { name: 'Role' })
     .getByLabel('Protagonist')
     .check();
+  // Role note and Appearance come before the Voice, with the editable cue.
+  await expect(page.locator('.entry-view h3, .entry-view h4')).toContainText([
+    'Role note',
+    'Appearance',
+    'Voice',
+  ]);
+  for (const label of ['Role note', 'Appearance']) {
+    await expect(page.getByLabel(label, { exact: true })).toHaveCSS(
+      'border-left-style',
+      'dashed',
+    );
+  }
+  await fill(page, 'Role note', 'love interest');
+  await fill(page, 'Appearance', 'Tall, a scar over one eye.');
   const voice = page.getByRole('region', { name: 'Voice' });
   await expect(voice.getByText('only you write these')).toBeVisible();
   await fill(page, 'Traits', 'clipped, dry');
@@ -186,9 +200,11 @@ test('a Character, a Place and a Plot Thread show and save their own fields', as
   await fill(page, 'Example lines', 'Aye, and the tide with it.');
   await save(page);
   const file = await bibleFile(projectPath);
-  expect(file).toContain('role: protagonist\n');
   expect(file).toContain(
     [
+      'role: protagonist',
+      'roleNote: love interest',
+      'appearance: Tall, a scar over one eye.',
       'voice:',
       '  traits: clipped, dry',
       '  says:',
@@ -213,6 +229,12 @@ test('a Character, a Place and a Plot Thread show and save their own fields', as
   await expect(
     page.getByRole('group', { name: 'Role' }).getByLabel('Protagonist'),
   ).toBeChecked();
+  await expect(page.getByLabel('Role note', { exact: true })).toHaveText(
+    'love interest',
+  );
+  await expect(page.getByLabel('Appearance', { exact: true })).toHaveText(
+    'Tall, a scar over one eye.',
+  );
   await expect(page.getByLabel('Says', { exact: true })).toHaveText(
     'ayeright then',
   );

@@ -1,6 +1,6 @@
+import { roleText } from '../shared/entry';
 import {
   ENTRY_TYPE_LABELS,
-  ROLE_LABELS,
   STATUS_LABELS,
   type EntryValue,
 } from '../shared/project-types';
@@ -56,9 +56,10 @@ export function EntryCard({
 
 /** An Entry's type-specific fields that have a value, labelled. */
 function cardFields({ fields }: EntryValue): [string, string][] {
-  const { role, voice, senses, status } = fields;
+  const { role, roleNote, appearance, voice, senses, status } = fields;
   const pairs: [string, string][] = [
-    ['Role', role ? ROLE_LABELS[role] : ''],
+    ['Role', roleText(role, roleNote)],
+    ['Appearance', appearance ?? ''],
     ['Voice traits', voice?.traits ?? ''],
     ['Says', voice?.says.join(', ') ?? ''],
     ['Never says', voice?.neverSays.join(', ') ?? ''],

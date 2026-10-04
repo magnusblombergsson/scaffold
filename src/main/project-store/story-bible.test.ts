@@ -42,6 +42,8 @@ describe('Story Bible Entries', () => {
       description: '',
       fields: {
         role: null,
+        roleNote: '',
+        appearance: '',
         voice: { traits: '', says: [], neverSays: [], examples: [] },
       },
     });
@@ -123,6 +125,8 @@ describe('Story Bible Entries', () => {
 
     expect(await fieldsOf('character')).toEqual({
       role: null,
+      roleNote: '',
+      appearance: '',
       voice: { traits: '', says: [], neverSays: [], examples: [] },
     });
     expect(await fieldsOf('place')).toEqual({
@@ -195,6 +199,41 @@ describe('Story Bible Entries', () => {
         (await store.read(entry(id))).fields,
       );
     }
+  });
+
+  it('stores a Character’s Role note and Appearance as roleNote and appearance, before the Voice', async () => {
+    const { projectPath, store } = await newProject();
+    const { id } = await store.createEntry('character', 'Anna');
+    const value = await store.read(entry(id));
+    await store.write(entry(id), {
+      ...value,
+      fields: {
+        role: 'protagonist',
+        roleNote: 'love interest',
+        appearance: 'Tall, a scar over one eye.',
+        voice: { traits: 'dry', says: [], neverSays: [], examples: [] },
+      },
+    });
+    await store.close();
+
+    expect(
+      await readFile(path.join(projectPath, 'bible', `${id}.md`), 'utf8'),
+    ).toContain(
+      [
+        'role: protagonist',
+        'roleNote: love interest',
+        'appearance: Tall, a scar over one eye.',
+        'voice:',
+        '  traits: dry',
+        '---',
+      ].join('\n'),
+    );
+    const reopened = await openProject(projectPath, deps());
+    expect((await reopened.read(entry(id))).fields).toMatchObject({
+      roleNote: 'love interest',
+      appearance: 'Tall, a scar over one eye.',
+    });
+    await reopened.close();
   });
 
   it('reads empty private notes for an Entry that has none yet', async () => {
@@ -410,6 +449,8 @@ describe('Changing an Entry’s type', () => {
       description: 'A ferry pilot.',
       fields: {
         role: 'supporting',
+        roleNote: 'rival',
+        appearance: 'Weathered.',
         voice: { traits: 'dry', says: [], neverSays: [], examples: [] },
       },
     });
@@ -423,7 +464,8 @@ describe('Changing an Entry’s type', () => {
 
     expect(await store.read(entry(id))).toMatchObject({
       type: 'place',
-      description: 'A ferry pilot.\n\nRole: Supporting\nVoice traits: dry',
+      description:
+        'A ferry pilot.\n\nRole: Supporting\nRole note: rival\nAppearance: Weathered.\nVoice traits: dry',
       fields: {
         senses: { smells: '', sight: '', sound: '', touch: '', atmosphere: '' },
       },
@@ -435,6 +477,8 @@ describe('Changing an Entry’s type', () => {
     );
     expect(file).toContain('type: place\n');
     expect(file).not.toContain('role:');
+    expect(file).not.toContain('roleNote:');
+    expect(file).not.toContain('appearance:');
     expect(file).not.toContain('voice:');
     await store.close();
   });
@@ -458,6 +502,8 @@ describe('Changing an Entry’s type', () => {
       description: 'Now: A ferry pilot.\n\nStatus: Resolved',
       fields: {
         role: 'supporting',
+        roleNote: 'rival',
+        appearance: 'Weathered.',
         voice: { traits: 'dry', says: [], neverSays: [], examples: [] },
       },
     });
