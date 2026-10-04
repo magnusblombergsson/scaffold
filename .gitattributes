@@ -1,2 +1,6 @@
+# Text files are LF everywhere, as the formatter writes them, whatever
+# core.autocrlf says on this computer.
+* text=auto eol=lf
+
 # Project fixtures are compared byte for byte: never convert their line endings.
 tests/fixtures/** -text
