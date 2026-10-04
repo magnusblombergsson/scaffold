@@ -39,6 +39,7 @@ import { Binder, type Selection } from './Binder';
 import { BrainstormRoom } from './BrainstormRoom';
 import { WINDOW_MODES, type ShowProposal } from './Conversation';
 import { ConflictList, ConflictResolver } from './Conflicts';
+import { ChapterCorkboard, ProjectCorkboard } from './Corkboard';
 import { EntryTypePicker } from './EntryTypePicker';
 import { EntryView, VISIBILITY_LABELS } from './EntryView';
 import { ImportDialog } from './ImportDialog';
@@ -907,11 +908,11 @@ function ProjectView({
                 />
               ) : selected?.kind === 'project' ? (
                 <main className="centre" key={PROJECT_OUTLINE}>
-                  <h2 className="centre-title">Project Outline</h2>
-                  <OutlineNotes
-                    unitId={PROJECT_OUTLINE}
+                  <ProjectCorkboard
+                    manuscript={manuscript}
                     language={language}
-                    withNotes={false}
+                    onOpenScene={(id) => select({ kind: 'scene', id })}
+                    onOpenChapter={(id) => select({ kind: 'chapter', id })}
                   />
                 </main>
               ) : selected?.kind === 'entry' ? (
@@ -956,11 +957,10 @@ function ProjectView({
                 )
               ) : openChapter ? (
                 <main className="centre" key={openChapter.id}>
-                  <h2 className="centre-title">{openChapter.title}</h2>
-                  <OutlineNotes
-                    unitId={openChapter.id}
+                  <ChapterCorkboard
+                    chapter={openChapter}
                     language={language}
-                    withNotes
+                    onOpenScene={(id) => select({ kind: 'scene', id })}
                   />
                 </main>
               ) : !open ? (
