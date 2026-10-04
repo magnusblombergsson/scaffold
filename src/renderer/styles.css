@@ -422,9 +422,28 @@ button.recent-open:hover {
   padding: 0 1rem;
 }
 
+/* Along the bottom, on the desk like the header: the save state, then the counts. */
+.status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0 1rem 0.35rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.counts {
+  cursor: default;
+}
+
+.counts-scope {
+  font-weight: 600;
+}
+
 .save-status {
   color: var(--muted);
-  font-size: 0.85rem;
   transition: color 0.2s;
 }
 
@@ -740,7 +759,8 @@ h2.binder-title > button:hover::after {
 
 .toasts {
   position: fixed;
-  bottom: 1rem;
+  /* Above the status bar. */
+  bottom: 2.25rem;
   left: 50%;
   transform: translateX(-50%);
   display: flex;

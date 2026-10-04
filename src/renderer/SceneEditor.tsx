@@ -1,5 +1,5 @@
 import type { Node } from '@tiptap/pm/model';
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import type { ProseLanguage } from '../shared/project-types';
 import { findQuote } from './find-quote';
 import { MentionHighlight } from './mention-highlight';
@@ -16,7 +16,8 @@ export type QuoteJump = { text: string; count: number };
 /**
  * Loads a Scene's Prose, then hands it to the editor. `focusAt` puts the
  * cursor there, `quote` selects the quote where it is, and `onCursor` hears
- * where the Author moves it.
+ * where the Author moves it. `onProse` hears the Prose as it changes, and
+ * `onSelection` the text selected in it.
  */
 export function SceneEditor({
   sceneId,
@@ -24,17 +25,26 @@ export function SceneEditor({
   focusAt,
   quote,
   onCursor,
+  onProse,
+  onSelection,
 }: {
   sceneId: string;
   language: ProseLanguage;
   focusAt?: number;
   quote?: QuoteJump;
   onCursor?(position: number): void;
+  onProse?(sceneId: string, markdown: string): void;
+  onSelection?(text: string): void;
 }) {
   const [markdown, setMarkdown] = useState<string | null>(null);
   const select = useMemo(
     () => quote && ((doc: Node) => findQuote(doc, quote.text)),
     [quote],
+  );
+
+  const onText = useCallback(
+    (markdown: string) => onProse?.(sceneId, markdown),
+    [onProse, sceneId],
   );
 
   useEffect(() => {
@@ -73,6 +83,8 @@ export function SceneEditor({
       focusAt={focusAt}
       select={select}
       onCursor={onCursor}
+      onText={onProse && onText}
+      onSelection={onSelection}
       className="editor"
     />
   );

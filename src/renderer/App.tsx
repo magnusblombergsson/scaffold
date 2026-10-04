@@ -52,15 +52,17 @@ import {
 import { MentionPeek } from './MentionPeek';
 import { flushPendingEdits } from './pending-edits';
 import { ReadOnlyContext } from './read-only';
-import { SaveFailureBanner, SaveIndicator, useSaveStatus } from './SaveStatus';
+import { SaveFailureBanner, useSaveStatus } from './SaveStatus';
 import { SceneEditor, type QuoteJump } from './SceneEditor';
 import { SettingsDialog } from './SettingsDialog';
 import { StartScreen } from './StartScreen';
+import { StatusBar, useSceneCounts } from './StatusBar';
 import { entryTitle, StoryBible } from './StoryBible';
 import { trashTitle, TrashView } from './TrashView';
 import { Toast } from './Toast';
 import { forgetUnitEditors } from './unit-editors';
 import { Welcome } from './Welcome';
+import { countText, statusCounts, type Counts } from './word-count';
 
 export function App() {
   /** Undefined until main says what this window shows. */
@@ -233,6 +235,13 @@ function ProjectView({
     project.view.outlineNotesOpen ?? true,
   );
   const saveStatus = useSaveStatus();
+  const { scenes: sceneCounts, setProse } = useSceneCounts(manuscript);
+  /** What is selected in the open Scene's Prose, counted. */
+  const [selectionCounts, setSelectionCounts] = useState<Counts | null>(null);
+  const onSelection = useCallback(
+    (text: string) => setSelectionCounts(countText(text)),
+    [],
+  );
   /**
    * Where to put the cursor in a Scene as it opens, as where the Author left
    * it, or which quote of it to select, as a Finding's.
@@ -495,7 +504,6 @@ function ProjectView({
                       ? entryTitle(openEntry)
                       : selected?.kind === 'project' && 'Project Outline'}
           </span>
-          <SaveIndicator {...saveStatus} />
           <span className="header-actions">{headerActions}</span>
         </header>
         {readOnly && (
@@ -753,6 +761,8 @@ function ProjectView({
                       jump?.sceneId === open.scene.id ? jump.quote : undefined
                     }
                     onCursor={reportCursor}
+                    onProse={setProse}
+                    onSelection={onSelection}
                   />
                 </main>
               )}
@@ -776,6 +786,22 @@ function ProjectView({
             </div>
           )}
         </div>
+        <StatusBar
+          saveStatus={saveStatus}
+          {...statusCounts({
+            manuscript,
+            scenes: sceneCounts,
+            open:
+              mode !== 'writing' || resolvingConflict
+                ? null
+                : open
+                  ? { kind: 'scene', id: open.scene.id }
+                  : openChapter
+                    ? { kind: 'chapter', id: openChapter.id }
+                    : null,
+            selection: mode === 'writing' ? selectionCounts : null,
+          })}
+        />
         {peek && (
           <MentionPeek
             peek={peek}

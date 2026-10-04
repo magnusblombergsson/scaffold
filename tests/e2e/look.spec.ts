@@ -18,11 +18,13 @@ const LOOK = {
     desk: 'rgb(233, 230, 223)',
     sheet: 'rgb(255, 254, 251)',
     accent: 'rgb(46, 107, 78)',
+    muted: 'rgb(115, 111, 104)',
   },
   dark: {
     desk: 'rgb(21, 21, 23)',
     sheet: 'rgb(37, 37, 40)',
     accent: 'rgb(121, 194, 158)',
+    muted: 'rgb(154, 154, 159)',
   },
 };
 
@@ -94,6 +96,11 @@ for (const theme of ['light', 'dark'] as const) {
         'border-bottom-width',
         '0px',
       );
+      // The status bar is on the desk too, quiet.
+      const statusBar = page.locator('.status-bar');
+      await expect(statusBar).toHaveCSS('background-color', 'rgba(0, 0, 0, 0)');
+      await expect(statusBar).toHaveCSS('border-top-width', '0px');
+      await expect(statusBar.locator('.counts')).toHaveCSS('color', look.muted);
       const centre = page.locator('.room:not([hidden]) .centre');
       await expect(centre).toHaveCSS('background-color', look.sheet);
       expect(await style(centre, 'box-shadow')).not.toBe('none');

@@ -12,6 +12,7 @@ import {
   type ImportConvention,
   type SceneSplit,
 } from '../shared/manuscript-import';
+import { countOf } from './word-count';
 
 /** How many words of a Scene's opening the preview shows. */
 const OPENING_WORDS = 12;
@@ -108,8 +109,8 @@ export function ImportDialog({
         </label>
       </div>
       <p className="import-summary" aria-live="polite">
-        {count(chapters.length, 'Chapter')}, {count(sceneCount, 'Scene')},{' '}
-        {count(words, 'word')}
+        {countOf(chapters.length, 'Chapter')}, {countOf(sceneCount, 'Scene')},{' '}
+        {countOf(words, 'word')}
       </p>
       <ol className="import-preview" aria-label="Chapters and Scenes">
         {chapters.map((chapter, i) => (
@@ -120,7 +121,7 @@ export function ImportDialog({
                 <li key={j}>
                   <span className="import-scene">{scene.title}</span>{' '}
                   <span className="import-words">
-                    {count(wordCount(scene.paragraphs), 'word')}
+                    {countOf(wordCount(scene.paragraphs), 'word')}
                   </span>
                   <span className="import-opening">
                     {opening(scene.paragraphs.map(plainText).join(' '))}
@@ -137,10 +138,6 @@ export function ImportDialog({
       </div>
     </dialog>
   );
-}
-
-function count(n: number, noun: string): string {
-  return `${n.toLocaleString()} ${noun}${n === 1 ? '' : 's'}`;
 }
 
 function opening(text: string): string {
