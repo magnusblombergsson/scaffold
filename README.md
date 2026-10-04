@@ -29,6 +29,7 @@ npm start
 | `npm run lint` / `npm run lint:fix` | Lint with oxlint and check formatting with oxfmt, or fix both |
 | `npm run package` | Build a runnable app into `out/` |
 | `npm run make` | Build installers |
+| `npm run icons` | Render the app icons in `assets/icon` (.ico, .icns, .png) from the two SVG drawings there |
 
 ## How it fits together
 

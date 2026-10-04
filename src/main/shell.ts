@@ -160,6 +160,7 @@ function createWindow(store: ProjectStore | null): BrowserWindow {
     height: 700,
     ...(store && onScreen(settings.project(store.id).windowBounds)),
     title: 'Scaffold',
+    ...linuxIcon(),
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
     },
@@ -190,6 +191,19 @@ function createWindow(store: ProjectStore | null): BrowserWindow {
     );
   }
   return window;
+}
+
+/**
+ * Linux takes the window icon from here. Windows uses the .exe's icon and
+ * macOS the bundle's, both set when packaging.
+ */
+function linuxIcon(): { icon?: string } {
+  if (process.platform !== 'linux') return {};
+  return {
+    icon: app.isPackaged
+      ? path.join(process.resourcesPath, 'icon.png')
+      : path.join(app.getAppPath(), 'assets/icon/icon.png'),
+  };
 }
 
 /** Keeps the position only if some of the window would be on a screen. */

@@ -17,6 +17,12 @@ import path from 'node:path';
  */
 const NATIVE_MODULES = ['@parcel/watcher'];
 
+/** Rendered from the SVGs beside them by `npm run icons`. */
+const ICON = 'assets/icon/icon';
+/** Squirrel shows this in Add/Remove Programs, so it must be online. */
+const ICON_URL =
+  'https://raw.githubusercontent.com/magnusblombergsson/scaffold/main/assets/icon/icon.ico';
+
 async function copyWithDependencies(
   names: string[],
   buildPath: string,
@@ -49,6 +55,10 @@ const config: ForgeConfig = {
   packagerConfig: {
     // Native binaries can't be loaded from inside the archive.
     asar: { unpack: '**/*.node' },
+    // Packager picks .ico or .icns by platform.
+    icon: ICON,
+    // The Linux window icon, read from the resources folder (see shell.ts).
+    extraResource: [`${ICON}.png`],
   },
   hooks: {
     packageAfterCopy: (_config, buildPath) =>
@@ -56,10 +66,10 @@ const config: ForgeConfig = {
   },
   rebuildConfig: {},
   makers: [
-    new MakerSquirrel({}),
+    new MakerSquirrel({ setupIcon: `${ICON}.ico`, iconUrl: ICON_URL }),
     new MakerZIP({}, ['darwin']),
-    new MakerRpm({}),
-    new MakerDeb({}),
+    new MakerRpm({ options: { icon: `${ICON}.png` } }),
+    new MakerDeb({ options: { icon: `${ICON}.png` } }),
   ],
   plugins: [
     new VitePlugin({
