@@ -38,8 +38,8 @@ type Props = {
 /** What is being renamed: a Chapter or Scene id. */
 type Renaming = string | null;
 
-const SCENE = 'application/x-writing-tools-scene';
-const CHAPTER = 'application/x-writing-tools-chapter';
+const SCENE = 'application/x-scaffold-scene';
+const CHAPTER = 'application/x-scaffold-chapter';
 
 /** The Manuscript tab: Chapters and their Scenes, then any Unplaced Scenes. */
 export function Binder({

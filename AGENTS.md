@@ -2,7 +2,7 @@
 
 ### Issue tracker
 
-Issues are tracked in GitHub Issues for magnusblombergsson/writing-tools, using the `gh` CLI. See `docs/agents/issue-tracker.md`.
+Issues are tracked in GitHub Issues for magnusblombergsson/scaffold, using the `gh` CLI. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
