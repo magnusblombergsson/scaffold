@@ -1,5 +1,5 @@
 import type { Node } from '@tiptap/pm/model';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { entryCollisions } from '../shared/entry';
 import {
   FIELD_LABELS,
@@ -133,8 +133,11 @@ export function EntryView({
   /** Every Entry in the Story Bible, to warn of names they share. */
   entries: EntrySummary[];
   language: ProseLanguage;
-  /** Puts focus in the Name with it selected, as for an Entry just made. */
-  focusName?: boolean;
+  /**
+   * Puts focus in the Name with it selected, as for an Entry just made; each
+   * new number asks again.
+   */
+  focusName?: number;
   onType(type: EntryType): void;
   onVisibility(visibility: Visibility): void;
   /** Opens a pending Proposal's Conversation at its card. */
@@ -148,6 +151,11 @@ export function EntryView({
   const [choices, setChoices] = useState<EntryFields>({});
   const [pending, setPending] = useState<PendingProposal[]>([]);
   const entryKey = unitKey({ kind: 'entry', id: entryId });
+  // A new selection for each ask, so that the Name takes focus again.
+  const selectName = useMemo(
+    () => (focusName ? (doc: Node) => selectAll(doc) : undefined),
+    [focusName],
+  );
 
   useEffect(() => {
     let current = true;
@@ -257,8 +265,8 @@ export function EntryView({
         toText={docToText}
         save={(name) => save({ name })}
         attributes={attributes('Name', 'plain-text entry-name')}
-        autofocus={focusName}
-        select={focusName ? selectAll : undefined}
+        autofocus={!!focusName}
+        select={selectName}
       />
       <section className="plain-text-field">
         <h3>Aliases</h3>

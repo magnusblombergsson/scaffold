@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { commandForKey, shortcutText } from './shortcuts';
+import {
+  CHEAT_SHEET,
+  commandForKey,
+  SHORTCUTS,
+  shortcutText,
+} from './shortcuts';
 
 const key = (
   key: string,
@@ -65,6 +70,18 @@ describe('commandForKey', () => {
     });
   });
 
+  it('opens the cheat sheet with Ctrl+/, also where / takes Shift, as Shift+7 on Swedish keyboards', () => {
+    expect(commandForKey(key('/', { ctrlKey: true }), false)).toEqual({
+      type: 'shortcuts',
+    });
+    expect(
+      commandForKey(key('/', { ctrlKey: true, shiftKey: true }), false),
+    ).toEqual({ type: 'shortcuts' });
+    expect(
+      commandForKey(key('/', { ctrlKey: true, altKey: true }), false),
+    ).toBeNull();
+  });
+
   it('never takes Ctrl+Alt with a letter or digit, which is AltGr on Windows', () => {
     expect(
       commandForKey(key('e', { ctrlKey: true, altKey: true }), false),
@@ -101,5 +118,50 @@ describe('shortcutText', () => {
     );
     expect(shortcutText('CmdOrCtrl+Shift+Enter', true)).toBe('⌘+Shift+Enter');
     expect(shortcutText('CmdOrCtrl+Alt+Enter', true)).toBe('⌘+Option+Enter');
+  });
+});
+
+describe('CHEAT_SHEET', () => {
+  const listed = CHEAT_SHEET.flatMap((group) =>
+    group.shortcuts.flatMap((s) => s.keys),
+  );
+
+  it('lists every shortcut the menus and the window take', () => {
+    for (const accelerator of Object.values(SHORTCUTS)) {
+      expect(listed).toContain(accelerator);
+    }
+  });
+
+  it('lists the keys of the Binder and Story Bible list, the item menus and the panes', () => {
+    for (const keys of [
+      'Up',
+      'Down',
+      'Enter',
+      'Left',
+      'Right',
+      'Home',
+      'End',
+      'F2',
+      'Alt+Up',
+      'Alt+Down',
+      'CmdOrCtrl+Z',
+      'Shift+F10',
+      'Menu',
+      'Escape',
+      'F6',
+      'Shift+F6',
+    ]) {
+      expect(listed).toContain(keys);
+    }
+  });
+});
+
+describe('shortcutText for arrows', () => {
+  it('writes arrow keys as arrows, and every Alt as Option on macOS', () => {
+    expect(shortcutText('Alt+Up', false)).toBe('Alt+↑');
+    expect(shortcutText('Alt+Down', true)).toBe('Option+↓');
+    expect(shortcutText('CmdOrCtrl+Shift+Alt+Enter', true)).toBe(
+      '⌘+Shift+Option+Enter',
+    );
   });
 });

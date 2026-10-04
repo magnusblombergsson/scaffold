@@ -30,9 +30,9 @@ export type MenuActions = {
 };
 
 /**
- * The menu bar. The window takes the shortcuts of Mode and Insert itself, so
- * that they work inside an editor and only where they apply; the menus only
- * show them.
+ * The menu bar. The window takes the shortcuts of Mode and Insert, and
+ * Ctrl+/, itself, so that they work inside an editor and only where they
+ * apply; the menus only show them.
  */
 export function menuTemplate(
   { mac, project, recent }: MenuState,
@@ -196,11 +196,10 @@ export function menuTemplate(
       label: 'Help',
       role: 'help',
       submenu: [
-        // The cheat sheet comes with the Binder and Story Bible keys.
         {
           label: 'Keyboard Shortcuts',
-          accelerator: SHORTCUTS.shortcuts,
-          enabled: false,
+          ...windowKey(SHORTCUTS.shortcuts),
+          ...sending({ type: 'shortcuts' }),
         },
       ],
     },

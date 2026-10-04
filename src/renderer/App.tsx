@@ -46,6 +46,7 @@ import { chapterInsertion, sceneInsertion, type Current } from './insertion';
 import { InterviewRoom } from './InterviewRoom';
 import { Notices } from './Notices';
 import { OutlineNotes } from './OutlineNotes';
+import { usePaneCycle } from './pane-focus';
 import { PanelResizer, type PaneSize } from './PanelResizer';
 import {
   onMentionClick,
@@ -60,6 +61,7 @@ import { ReadOnlyContext } from './read-only';
 import { SaveFailureBanner, useSaveStatus } from './SaveStatus';
 import { SceneEditor, type QuoteJump } from './SceneEditor';
 import { SettingsDialog } from './SettingsDialog';
+import { ShortcutsDialog } from './ShortcutsDialog';
 import { StartScreen } from './StartScreen';
 import { StatusBar, useSceneCounts } from './StatusBar';
 import { entryTitle, StoryBible } from './StoryBible';
@@ -81,6 +83,8 @@ export function App() {
   } | null>(null);
   const openSettings = () => setSettingsDialog({ addKey: false });
   const addKey = useCallback(() => setSettingsDialog({ addKey: true }), []);
+  /** Whether the Keyboard Shortcuts cheat sheet is open. */
+  const [shortcutsOpen, setShortcutsOpen] = useState(false);
   /** The file being imported, while the Author previews its split. */
   const [importing, setImporting] = useState<ImportFile | null>(null);
 
@@ -96,9 +100,23 @@ export function App() {
           void open(() => window.shell.openRecent(command.path));
         else if (command.type === 'import') void chooseImport();
         else if (command.type === 'settings') openSettings();
+        else if (command.type === 'shortcuts') setShortcutsOpen(true);
       }),
     [],
   );
+  // Ctrl+/ on every screen; the Help menu only shows it.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
+      if (commandForKey(event, MAC)?.type !== 'shortcuts') return;
+      // Not over another dialog, as Settings.
+      if (document.querySelector('dialog[open]')) return;
+      event.preventDefault();
+      setShortcutsOpen(true);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
   useEffect(() => {
     void window.shell.currentProject().then(setProject);
     void window.settings.showWelcome().then(setWelcome);
@@ -191,6 +209,9 @@ export function App() {
           addKey={settingsDialog.addKey}
           onClose={() => setSettingsDialog(null)}
         />
+      )}
+      {shortcutsOpen && (
+        <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />
       )}
     </>
   );
@@ -349,9 +370,9 @@ function ProjectView({
     window.shell.saveView({ outlineNotesOpen: !outlineNotesOpen });
   }
 
-  const [tab, setTab] = useState<
-    'manuscript' | 'bible' | 'conflicts' | 'trash'
-  >('manuscript');
+  const [tab, setTab] = useState<Tab>('manuscript');
+  const writingRoom = useRef<HTMLDivElement>(null);
+  usePaneCycle(writingRoom, mode === 'writing');
   const [entries, setEntries] = useState<EntrySummary[]>([]);
   useEffect(() => {
     void window.project.listEntries().then(setEntries);
@@ -375,9 +396,26 @@ function ProjectView({
       ? entries.find((e) => e.id === selected.id)
       : undefined;
   const [trash, setTrash] = useState<TrashItem[]>([]);
-  /** The latest structure change, while it can still be undone. */
+  /** The latest structure change, while its toast offers to undo it. */
   const [latest, setLatest] = useState<{ message: string; step: number }>();
   const closeToast = useCallback(() => setLatest(undefined), []);
+  /**
+   * The step Ctrl+Z in the Binder or Story Bible list undoes: the latest
+   * structure change, while main can still undo it, its toast gone or not.
+   */
+  const undoable = useRef<number>(undefined);
+  /** Sets the latest structure change, or undefined once it can't be undone. */
+  const changeLatest = useCallback(
+    (change: { message: string; step: number } | undefined) => {
+      undoable.current = change?.step;
+      setLatest(change);
+    },
+    [],
+  );
+  /** Ctrl+Z in a list: the latest structure change, as its toast's Undo. No redo. */
+  async function undoLatest() {
+    if (undoable.current !== undefined) await undo(undoable.current);
+  }
 
   const refreshTrash = useCallback(
     () => window.project.listTrash().then(setTrash),
@@ -393,6 +431,15 @@ function ProjectView({
   const resolvingConflict =
     resolving && conflicts.find((c) => unitKey(c.ref) === unitKey(resolving));
   const conflicted = new Set(conflicts.map((c) => c.ref.id));
+  /** The left pane's tabs; Conflicts shows while there are any, or it is open. */
+  const tabs: Tab[] = [
+    'manuscript',
+    'bible',
+    ...(conflicts.length > 0 || tab === 'conflicts'
+      ? (['conflicts'] as const)
+      : []),
+    'trash',
+  ];
   useEffect(() => {
     void window.project.listConflicts().then(setConflicts);
   }, []);
@@ -417,7 +464,7 @@ function ProjectView({
           const lost = event.dropped;
           if (lost) setDropped((dropped) => [...dropped, ...lost]);
           // Main can no longer undo it.
-          setLatest(undefined);
+          changeLatest(undefined);
           void refreshTrash();
         } else if (event.type === 'unitReloaded' && !event.byProposal) {
           setReloaded({ ref: event.ref, count: ++reloads.current });
@@ -439,10 +486,10 @@ function ProjectView({
           flushPendingEdits();
           setReadOnly({ ...(event.host && { host: event.host }) });
           // Main can no longer undo it.
-          setLatest(undefined);
+          changeLatest(undefined);
         }
       }),
-    [refreshTrash],
+    [refreshTrash, changeLatest],
   );
 
   /** Runs a structure operation, and offers to undo it; null when the Author cancelled it. */
@@ -456,7 +503,7 @@ function ProjectView({
       const result = await operation();
       if (!result) return;
       setManuscript(result.manuscript);
-      setLatest({ message, step: result.step });
+      changeLatest({ message, step: result.step });
       onError(null);
     } catch (error) {
       onError(`Can't make that change: ${(error as Error).message}`);
@@ -480,8 +527,17 @@ function ProjectView({
 
   /** The Chapter or Scene whose title the Binder is editing, if any. */
   const [renaming, setRenaming] = useState<string | null>(null);
-  /** The Entry whose Name gets focus as it opens, as one just made. */
-  const [focusName, setFocusName] = useState<string | null>(null);
+  /**
+   * The Entry whose Name gets focus as it opens, as one just made or by F2;
+   * `count` asks again for an Entry already open.
+   */
+  const [focusName, setFocusName] = useState<{
+    id: string;
+    count: number;
+  } | null>(null);
+  const nameFocuses = useRef(0);
+  const focusNameOf = (id: string) =>
+    setFocusName({ id, count: ++nameFocuses.current });
   /** Whether the menu of Entry types to make one from is open. */
   const [pickingEntryType, setPickingEntryType] = useState(false);
 
@@ -514,7 +570,7 @@ function ProjectView({
     if (!id) return;
     setTab('bible');
     select({ kind: 'entry', id });
-    setFocusName(id);
+    focusNameOf(id);
   }
 
   /**
@@ -595,7 +651,7 @@ function ProjectView({
 
   async function undo(step: number) {
     flushPendingEdits();
-    setLatest(undefined);
+    changeLatest(undefined);
     try {
       setManuscript(await window.project.undo(step));
       onError(null);
@@ -624,7 +680,7 @@ function ProjectView({
   async function emptyTrash() {
     if (await window.project.emptyTrash()) {
       // Nothing before it can be undone.
-      setLatest(undefined);
+      changeLatest(undefined);
       await refreshTrash();
     }
   }
@@ -713,12 +769,24 @@ function ProjectView({
             </div>
           )}
           {visited.has('writing') && (
-            <div className="room" hidden={mode !== 'writing'}>
+            <div className="room" hidden={mode !== 'writing'} ref={writingRoom}>
               <aside className="left-pane" style={{ width: binderWidth }}>
-                <div role="tablist" className="tabs">
+                <div
+                  role="tablist"
+                  aria-label="Left pane"
+                  className="tabs"
+                  onKeyDown={(event) => {
+                    const next = tabAfter(event.key, tab, tabs);
+                    if (!next) return;
+                    event.preventDefault();
+                    setTab(next);
+                    document.getElementById(`${next}-tab`)?.focus();
+                  }}
+                >
                   <button
                     role="tab"
                     aria-selected={tab === 'manuscript'}
+                    tabIndex={tab === 'manuscript' ? 0 : -1}
                     id="manuscript-tab"
                     onClick={() => setTab('manuscript')}
                   >
@@ -727,15 +795,17 @@ function ProjectView({
                   <button
                     role="tab"
                     aria-selected={tab === 'bible'}
+                    tabIndex={tab === 'bible' ? 0 : -1}
                     id="bible-tab"
                     onClick={() => setTab('bible')}
                   >
                     Story Bible
                   </button>
-                  {(conflicts.length > 0 || tab === 'conflicts') && (
+                  {tabs.includes('conflicts') && (
                     <button
                       role="tab"
                       aria-selected={tab === 'conflicts'}
+                      tabIndex={tab === 'conflicts' ? 0 : -1}
                       id="conflicts-tab"
                       onClick={() => setTab('conflicts')}
                     >
@@ -748,6 +818,7 @@ function ProjectView({
                   <button
                     role="tab"
                     aria-selected={tab === 'trash'}
+                    tabIndex={tab === 'trash' ? 0 : -1}
                     id="trash-tab"
                     onClick={() => setTab('trash')}
                   >
@@ -764,6 +835,7 @@ function ProjectView({
                       onChange={change}
                       renaming={renaming}
                       onRename={setRenaming}
+                      onUndo={undoLatest}
                     />
                   ) : tab === 'bible' ? (
                     <StoryBible
@@ -771,8 +843,13 @@ function ProjectView({
                       openId={openEntry?.id ?? null}
                       conflicted={conflicted}
                       onOpen={(id) => select({ kind: 'entry', id })}
+                      onRename={(id) => {
+                        select({ kind: 'entry', id });
+                        focusNameOf(id);
+                      }}
                       onCreate={(type) => void createEntry(type)}
                       onChange={change}
+                      onUndo={undoLatest}
                       highlight={highlight}
                       onHighlight={(on) => {
                         setHighlight(on);
@@ -839,7 +916,11 @@ function ProjectView({
                     entry={openEntry}
                     entries={entries}
                     language={language}
-                    focusName={focusName === openEntry.id}
+                    focusName={
+                      focusName?.id === openEntry.id
+                        ? focusName.count
+                        : undefined
+                    }
                     onType={(type) =>
                       change(
                         () => window.project.setEntryType(openEntry.id, type),
@@ -1003,6 +1084,19 @@ function ProjectView({
       </div>
     </ReadOnlyContext.Provider>
   );
+}
+
+/** The left pane's tabs in Writing. */
+type Tab = 'manuscript' | 'bible' | 'conflicts' | 'trash';
+
+/** The tab ← / →, Home or End switches to from `tab`, round the ends; null for other keys. */
+function tabAfter(key: string, tab: Tab, tabs: Tab[]): Tab | null {
+  const at = tabs.indexOf(tab);
+  if (key === 'ArrowLeft') return tabs.at(at - 1) ?? null;
+  if (key === 'ArrowRight') return tabs[(at + 1) % tabs.length];
+  if (key === 'Home') return tabs[0];
+  if (key === 'End') return tabs.at(-1) ?? null;
+  return null;
 }
 
 function allScenes(

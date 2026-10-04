@@ -1238,6 +1238,46 @@ h2.binder-title > button:hover::after {
   font-size: 0.85rem;
 }
 
+.shortcuts {
+  width: min(36rem, 90vw);
+  max-height: 85vh;
+}
+
+.shortcuts-group {
+  width: 100%;
+  margin-top: 1rem;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.shortcuts-group caption {
+  text-align: left;
+  font-weight: 600;
+  padding-bottom: 0.25rem;
+}
+
+.shortcuts-group th,
+.shortcuts-group td {
+  padding: 0.25rem 0;
+  border-top: 1px solid var(--line);
+  vertical-align: baseline;
+  text-align: left;
+}
+
+.shortcuts-group th {
+  width: 12rem;
+  padding-right: 1rem;
+  font-weight: normal;
+  white-space: nowrap;
+}
+
+.shortcuts-group kbd {
+  font-family: inherit;
+  padding: 0 0.3rem;
+  border: 1px solid var(--pill-line);
+  border-radius: 4px;
+}
+
 .settings-close {
   display: flex;
   justify-content: flex-end;

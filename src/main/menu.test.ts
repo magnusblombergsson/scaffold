@@ -162,8 +162,13 @@ describe('menuTemplate', () => {
     expect(mac.find((entry) => entry.label === 'Tools')).toBeUndefined();
   });
 
-  it('has a Keyboard Shortcuts placeholder in Help', () => {
-    const help = menu(build(writable).template, 'Help');
-    expect(item(help, 'Keyboard Shortcuts').enabled).toBe(false);
+  it('opens the cheat sheet from Help, with or without a Project, showing Ctrl+/ that the window takes', () => {
+    const { template, sent } = build(noProject);
+    const shortcuts = item(menu(template, 'Help'), 'Keyboard Shortcuts');
+    expect(shortcuts.accelerator).toBe('CmdOrCtrl+/');
+    expect(shortcuts.registerAccelerator).toBe(false);
+    expect(shortcuts.enabled).not.toBe(false);
+    click(shortcuts, true);
+    expect(sent).toEqual([{ type: 'shortcuts', byKey: true }]);
   });
 });
