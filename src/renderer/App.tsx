@@ -41,6 +41,13 @@ import { ImportDialog } from './ImportDialog';
 import { InterviewRoom } from './InterviewRoom';
 import { Notices } from './Notices';
 import { OutlineNotes } from './OutlineNotes';
+import {
+  AccordionOverview,
+  BoardOverview,
+  DocumentOverview,
+  OverviewBeside,
+} from './prototype-outline-overviews/Overviews';
+import { useOverviewVariant } from './prototype-outline-overviews/OverviewSwitcher';
 import { PanelResizer, type PaneSize } from './PanelResizer';
 import {
   onMentionClick,
@@ -364,6 +371,21 @@ function ProjectView({
   const [readOnly, setReadOnly] = useState(project.readOnly);
   /** The language the Prose is spellchecked and typeset in; the Author may change it. */
   const [language, setLanguage] = useState(project.language);
+  // PROTOTYPE (throwaway): Outline overviews (#67).
+  const overview = useOverviewVariant();
+  const [besideOpen, setBesideOpen] = useState(false);
+  const overviewProps = {
+    manuscript,
+    language,
+    onOpenScene: (id: string) => select({ kind: 'scene', id }),
+    onOpenChapter: (id: string) => select({ kind: 'chapter', id }),
+  };
+  const Overview =
+    overview === 'A'
+      ? DocumentOverview
+      : overview === 'B'
+        ? AccordionOverview
+        : BoardOverview;
 
   /** The latest unit another computer changed; `count` starts its toast's time over. */
   const [reloaded, setReloaded] = useState<{ ref: UnitRef; count: number }>();
@@ -654,6 +676,10 @@ function ProjectView({
                   entries={entries}
                   onResolve={(kept) => resolve(resolvingConflict.ref, kept)}
                 />
+              ) : selected?.kind === 'project' && overview !== '0' ? (
+                <main className="centre" key={PROJECT_OUTLINE}>
+                  <Overview {...overviewProps} scope={{ kind: 'project' }} />
+                </main>
               ) : selected?.kind === 'project' ? (
                 <main className="centre" key={PROJECT_OUTLINE}>
                   <h2 className="centre-title">Project Outline</h2>
@@ -698,6 +724,13 @@ function ProjectView({
                 ) : (
                   <div className="editor empty">No Entry open</div>
                 )
+              ) : openChapter && overview !== '0' ? (
+                <main className="centre" key={openChapter.id}>
+                  <Overview
+                    {...overviewProps}
+                    scope={{ kind: 'chapter', id: openChapter.id }}
+                  />
+                </main>
               ) : openChapter ? (
                 <main className="centre" key={openChapter.id}>
                   <h2 className="centre-title">{openChapter.title}</h2>
@@ -717,43 +750,89 @@ function ProjectView({
                   </p>
                 </div>
               ) : (
-                <main className="centre" key={open.scene.id}>
-                  <section
-                    className="outline-notes"
-                    aria-label="Outline & Notes"
-                  >
-                    <button
-                      className="outline-notes-toggle"
-                      aria-expanded={outlineNotesOpen}
-                      onClick={toggleOutlineNotes}
+                <>
+                  {overview === 'B' && besideOpen && (
+                    <OverviewBeside
+                      {...overviewProps}
+                      writingSceneId={open.scene.id}
+                      chapterId={open.chapter?.id ?? null}
+                      onClose={() => setBesideOpen(false)}
+                    />
+                  )}
+                  <main className="centre" key={open.scene.id}>
+                    <section
+                      className="outline-notes"
+                      aria-label="Outline & Notes"
                     >
-                      <span aria-hidden="true">
-                        {outlineNotesOpen ? '▾' : '▸'}
-                      </span>{' '}
-                      Outline & Notes
-                    </button>
-                    {outlineNotesOpen && (
-                      <OutlineNotes
-                        unitId={open.scene.id}
-                        language={language}
-                        withNotes
-                      />
-                    )}
-                  </section>
-                  <SceneEditor
-                    // Its editor's typography is made for one language.
-                    key={language}
-                    sceneId={open.scene.id}
-                    language={language}
-                    focusAt={
-                      jump?.sceneId === open.scene.id ? jump.cursor : undefined
-                    }
-                    quote={
-                      jump?.sceneId === open.scene.id ? jump.quote : undefined
-                    }
-                    onCursor={reportCursor}
-                  />
-                </main>
+                      <div className="ov-scene-bar">
+                        <button
+                          className="outline-notes-toggle"
+                          aria-expanded={outlineNotesOpen}
+                          onClick={toggleOutlineNotes}
+                        >
+                          <span aria-hidden="true">
+                            {outlineNotesOpen ? '▾' : '▸'}
+                          </span>{' '}
+                          Outline & Notes
+                        </button>
+                        {overview !== '0' && (
+                          <span className="ov-scene-links">
+                            {overview === 'B' ? (
+                              <button
+                                aria-pressed={besideOpen}
+                                onClick={() => setBesideOpen(!besideOpen)}
+                              >
+                                ☰ Overview
+                              </button>
+                            ) : (
+                              <>
+                                {open.chapter && (
+                                  <button
+                                    onClick={() =>
+                                      select({
+                                        kind: 'chapter',
+                                        id: open.chapter!.id,
+                                      })
+                                    }
+                                  >
+                                    Chapter overview
+                                  </button>
+                                )}
+                                <button
+                                  onClick={() => select({ kind: 'project' })}
+                                >
+                                  Project overview
+                                </button>
+                              </>
+                            )}
+                          </span>
+                        )}
+                      </div>
+                      {outlineNotesOpen && (
+                        <OutlineNotes
+                          unitId={open.scene.id}
+                          language={language}
+                          withNotes
+                        />
+                      )}
+                    </section>
+                    <SceneEditor
+                      // Its editor's typography is made for one language.
+                      key={language}
+                      sceneId={open.scene.id}
+                      language={language}
+                      focusAt={
+                        jump?.sceneId === open.scene.id
+                          ? jump.cursor
+                          : undefined
+                      }
+                      quote={
+                        jump?.sceneId === open.scene.id ? jump.quote : undefined
+                      }
+                      onCursor={reportCursor}
+                    />
+                  </main>
+                </>
               )}
               <PanelResizer
                 label="Assistant width"

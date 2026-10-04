@@ -1,0 +1,413 @@
+/*
+ * PROTOTYPE (throwaway): layouts for "Outline overviews in Writing" (#67).
+ * Built on look B's tokens (--sheet, --desk, --accent, --rule, …) from
+ * ../prototype-visual-refresh/variants.css.
+ */
+
+/* ---------- Shared ---------- */
+
+.ov-root {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 1.5rem 3rem;
+}
+
+.ov-root .centre-title {
+  padding: 1.25rem 0 0.75rem;
+}
+
+/* OutlineNotes inside an overview grows with its text, never scrolls. */
+.ov-root .outline-notes-fields {
+  max-height: none;
+  padding: 0;
+  overflow: visible;
+}
+
+.ov-root .plain-text {
+  min-height: 2em;
+}
+
+.ov-link {
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-align: left;
+
+  &:hover {
+    color: var(--accent);
+    text-decoration: underline;
+  }
+}
+
+.ov-unit-title {
+  font-weight: 600;
+}
+
+.ov-section-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin: 2rem 0 0.5rem;
+}
+
+.ov-count {
+  font-weight: normal;
+}
+
+.ov-heading-actions {
+  margin-left: auto;
+  display: flex;
+  gap: 0.4rem;
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.ov-empty {
+  color: var(--muted);
+  font-style: italic;
+}
+
+.ov-disclose,
+.ov-lane-toggle {
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+
+  &:hover {
+    color: var(--accent);
+  }
+}
+
+/* ---------- A. Document ---------- */
+
+.ov-doc {
+  max-width: 56rem;
+  margin: 0 auto;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.ov-doc-own {
+  padding-bottom: 0.5rem;
+}
+
+.ov-doc-unit {
+  padding: 1rem 0;
+  border-top: 1px solid var(--line);
+}
+
+.ov-doc-unit > .ov-link {
+  display: block;
+  margin-bottom: 0.5rem;
+}
+
+.ov-unit-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  margin-bottom: 0.5rem;
+}
+
+.ov-doc-nested {
+  margin: 0.75rem 0 0 1.25rem;
+  padding-left: 1rem;
+  border-left: 3px solid var(--line);
+
+  .ov-doc-unit {
+    padding: 0.75rem 0;
+  }
+
+  .ov-doc-unit:first-child {
+    border-top: none;
+  }
+}
+
+/* ---------- B. Accordion ---------- */
+
+.ov-acc {
+  max-width: 56rem;
+  margin: 0 auto;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.ov-acc-row {
+  border-top: 1px solid var(--line);
+}
+
+.ov-acc-children .ov-acc-row {
+  margin-left: 1.5rem;
+}
+
+.ov-acc-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  padding: 0.45rem 0;
+  min-width: 0;
+}
+
+.ov-acc-toggle {
+  flex-shrink: 0;
+  width: 1.2rem;
+  font: inherit;
+  color: var(--muted);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+
+  &:disabled {
+    opacity: 0.3;
+    cursor: default;
+  }
+}
+
+.ov-acc-head .ov-link,
+.ov-acc-head .ov-unit-title {
+  flex-shrink: 0;
+  max-width: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ov-acc-scene .ov-acc-head .ov-link {
+  font-weight: normal;
+}
+
+.ov-acc-preview {
+  flex: 1;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 0.9rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.ov-acc-body {
+  padding: 0 0 0.9rem 1.7rem;
+}
+
+.ov-acc-row[data-open='true'] > .ov-acc-head .ov-link,
+.ov-acc-row[data-open='true'] > .ov-acc-head .ov-unit-title {
+  color: var(--accent);
+}
+
+.ov-acc-row[data-writing='true'] > .ov-acc-head {
+  background: var(--accent-tint);
+  border-radius: 4px;
+}
+
+.ov-badge {
+  font-size: 0.75rem;
+  color: var(--accent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* The column beside the Prose. */
+.ov-beside {
+  width: 22rem;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  margin-right: 0.5rem;
+}
+
+.ov-beside-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.4rem 0.25rem;
+}
+
+.ov-close {
+  font-size: 1.1rem;
+  color: var(--muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+}
+
+.ov-compact {
+  padding: 0 0.5rem 2rem 0.25rem;
+
+  .outline-notes-fields {
+    grid-template-columns: 1fr;
+    gap: 0.4rem;
+  }
+
+  .ov-acc-children .ov-acc-row {
+    margin-left: 1rem;
+  }
+
+  .ov-acc-body {
+    padding-left: 1.2rem;
+  }
+
+  .ov-acc-preview {
+    display: block;
+    flex-basis: 100%;
+  }
+
+  .ov-acc-head {
+    flex-wrap: wrap;
+    row-gap: 0;
+  }
+
+  .ov-acc-preview {
+    padding-left: 1.7rem;
+    font-size: 0.82rem;
+  }
+
+  .ov-acc-head .ov-link,
+  .ov-acc-head .ov-unit-title {
+    max-width: calc(100% - 2rem);
+  }
+}
+
+/* The Scene's own Outline & Notes row gets the overview buttons. */
+.ov-scene-bar {
+  display: flex;
+  align-items: center;
+}
+
+.ov-scene-bar .ov-scene-links {
+  margin-left: auto;
+  padding-right: 0.75rem;
+  display: flex;
+  gap: 0.75rem;
+}
+
+.ov-scene-links button {
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--muted);
+  background: none;
+  border: none;
+  cursor: pointer;
+
+  &:hover,
+  &[aria-pressed='true'] {
+    color: var(--accent);
+  }
+}
+
+/* ---------- C. Corkboard ---------- */
+
+.ov-board .centre-title {
+  padding-bottom: 1rem;
+}
+
+.ov-card {
+  background: var(--sheet);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: 0 1px 3px rgb(0 0 0 / 8%);
+  padding: 0.7rem 0.9rem 0.8rem;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+
+  header {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+  }
+
+  .outline-notes-fields {
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+  }
+
+  .plain-text-field + .plain-text-field {
+    border-top: 1px dotted var(--line);
+    padding-top: 0.4rem;
+  }
+
+  .plain-text-field:nth-child(2) .plain-text {
+    font-size: 0.85rem;
+    color: var(--muted);
+  }
+}
+
+.ov-card-tint {
+  background: color-mix(in srgb, var(--accent) 5%, var(--sheet));
+}
+
+.ov-card-wide .outline-notes-fields {
+  grid-template-columns: 1fr 1fr;
+}
+
+.ov-card-num {
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.ov-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: 0.9rem;
+  margin-top: 1.25rem;
+}
+
+.ov-lane {
+  margin-bottom: 1rem;
+}
+
+.ov-lane-cards {
+  display: flex;
+  gap: 0.75rem;
+  overflow-x: auto;
+  padding: 0.25rem 0.1rem 0.6rem;
+  align-items: flex-start;
+
+  .ov-card {
+    flex: 0 0 16rem;
+  }
+
+  .ov-card-tint {
+    flex-basis: 20rem;
+  }
+}
+
+.ov-lane-toggle {
+  flex-shrink: 0;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  border: 1px dashed var(--pill-line) !important;
+  border-radius: 6px !important;
+  padding: 0 0.5rem !important;
+
+  span {
+    writing-mode: vertical-rl;
+  }
+}
+
+/* The Project Outline has no Notes: let it take the full width. */
+.ov-root .outline-notes-fields:has(> :only-child) {
+  grid-template-columns: 1fr;
+}
