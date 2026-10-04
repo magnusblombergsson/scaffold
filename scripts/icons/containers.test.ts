@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { encodeIcns, encodeIco } from './containers';
+import { encodeIcns, encodeIco } from './containers.ts';
 
 const bytes = (...values: number[]) => Buffer.from(values);
 

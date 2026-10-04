@@ -2,7 +2,7 @@ import { Resvg } from '@resvg/resvg-js';
 import { encodeIcns, encodeIco, type SizedPng } from './containers.ts';
 
 /** Below 32 px the full drawing blurs; the small one is pixel-aligned. */
-const SMALL_UP_TO = 24;
+const SMALL_DRAWING_UP_TO = 24;
 const ICO_SIZES = [16, 24, 32, 48, 64, 128, 256];
 const ICNS_SIZES = [16, 32, 64, 128, 256, 512, 1024];
 const LINUX_SIZE = 512;
@@ -25,7 +25,10 @@ export function renderIcons(drawings: { full: string; small: string }): {
   return {
     ico: encodeIco(
       ICO_SIZES.map((size) =>
-        render(size <= SMALL_UP_TO ? drawings.small : drawings.full, size),
+        render(
+          size <= SMALL_DRAWING_UP_TO ? drawings.small : drawings.full,
+          size,
+        ),
       ),
     ),
     icns: encodeIcns(ICNS_SIZES.map((size) => render(appleGrid, size))),

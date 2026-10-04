@@ -1,6 +1,6 @@
 import { inflateSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
-import { renderIcons } from './render-icons';
+import { renderIcons } from './render-icons.ts';
 
 // Stand-ins that fill the whole canvas, so the first pixel tells them apart.
 const full = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512">
