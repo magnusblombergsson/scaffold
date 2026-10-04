@@ -63,6 +63,10 @@ _Avoid_: Memory, knowledge base, lore, wiki
 One typed item in the Story Bible — a Character, Place, Item, World Rule, Plot Thread, Theme, or Other — with a name, aliases, a free-text description, private notes the Assistant never sees, an optional image the Assistant never sees, and a few optional type-specific fields.
 _Avoid_: Card, note, record
 
+**Image prompt**:
+A description of an Entry, written by the Assistant on request from what the Entry says it looks and feels like, for the Author to paste into an image generator elsewhere. It describes only: no narration, dialogue or story moment, so it is not Prose. It isn't kept.
+_Avoid_: Image description, caption
+
 **Peek**:
 A short, read-only look at the Entries a highlighted name refers to, opened by clicking the name, or a Proposal's title in Brainstorm and Interview. Long text is cut off until the Author asks to read more.
 _Avoid_: Popup, tooltip, preview
