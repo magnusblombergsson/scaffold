@@ -1112,8 +1112,17 @@ export class ProjectStore {
     void this.checkForChanges();
   }
 
-  /** Records how the Author leaves the Project; a new Scene is written at once. */
-  updateSession(view: ProjectView): void {
+  /**
+   * Records how the Author leaves the Project; a new Scene is written at
+   * once. The Overview pane's state stays on this computer, out of the marker.
+   */
+  updateSession(change: ProjectView): void {
+    const view = { ...change };
+    delete view.overviewOpen;
+    if (view.panelWidths) {
+      view.panelWidths = { ...view.panelWidths };
+      delete view.panelWidths.overview;
+    }
     const sceneChanged =
       view.lastSceneId !== undefined &&
       view.lastSceneId !== this.view.lastSceneId;

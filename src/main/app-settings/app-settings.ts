@@ -33,6 +33,8 @@ export type ProjectSettings = {
   /** Where the cursor was in the last Scene. */
   cursor?: number;
   outlineNotesOpen?: boolean;
+  /** Whether the Overview pane beside the Prose is open. */
+  overviewOpen?: boolean;
   dismissedTips?: Tip[];
 };
 
@@ -138,6 +140,7 @@ function parseProjectSettings(raw: JsonObject): ProjectSettings & JsonObject {
   if (typeof settings.outlineNotesOpen !== 'boolean') {
     delete settings.outlineNotesOpen;
   }
+  if (typeof settings.overviewOpen !== 'boolean') delete settings.overviewOpen;
   return settings;
 }
 

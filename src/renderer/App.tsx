@@ -47,6 +47,7 @@ import { chapterInsertion, sceneInsertion, type Current } from './insertion';
 import { InterviewRoom } from './InterviewRoom';
 import { Notices } from './Notices';
 import { OutlineNotes } from './OutlineNotes';
+import { OverviewPane } from './OverviewPane';
 import { usePaneCycle } from './pane-focus';
 import { PanelResizer, type PaneSize } from './PanelResizer';
 import { ProjectSettingsDialog } from './ProjectSettingsDialog';
@@ -221,6 +222,7 @@ export function App() {
 
 const DEFAULT_WIDTHS: Required<PanelWidths> = {
   binder: 256,
+  overview: 300,
   assistant: 280,
   conversations: 220,
   reference: 300,
@@ -282,6 +284,10 @@ function ProjectView({
   }
   const [outlineNotesOpen, setOutlineNotesOpen] = useState(
     project.view.outlineNotesOpen ?? true,
+  );
+  /** Whether the Overview pane is open beside the Prose, while a Scene is. */
+  const [overviewOpen, setOverviewOpen] = useState(
+    project.view.overviewOpen ?? false,
   );
   const saveStatus = useSaveStatus();
   const { scenes: sceneCounts, setProse } = useSceneCounts(manuscript);
@@ -370,6 +376,11 @@ function ProjectView({
   function toggleOutlineNotes() {
     setOutlineNotesOpen(!outlineNotesOpen);
     window.shell.saveView({ outlineNotesOpen: !outlineNotesOpen });
+  }
+
+  function toggleOverview() {
+    setOverviewOpen(!overviewOpen);
+    window.shell.saveView({ overviewOpen: !overviewOpen });
   }
 
   const [tab, setTab] = useState<Tab>('manuscript');
@@ -896,6 +907,32 @@ function ProjectView({
                 max={600}
                 {...pane('binder')}
               />
+              {overviewOpen &&
+                !resolvingConflict &&
+                open &&
+                !open.scene.missing && (
+                  <>
+                    <OverviewPane
+                      manuscript={manuscript}
+                      language={language}
+                      writing={{
+                        sceneId: open.scene.id,
+                        chapterId: open.chapter?.id ?? null,
+                      }}
+                      width={pane('overview').width}
+                      onOpenScene={(id) => select({ kind: 'scene', id })}
+                      onOpenChapter={(id) => select({ kind: 'chapter', id })}
+                      onOpenProject={() => select({ kind: 'project' })}
+                      onClose={toggleOverview}
+                    />
+                    <PanelResizer
+                      label="Overview width"
+                      min={200}
+                      max={600}
+                      {...pane('overview')}
+                    />
+                  </>
+                )}
               {/* A new key per unit: leaving one unmounts its editors, which
             flushes their pending edits. */}
               {resolvingConflict ? (
@@ -978,16 +1015,25 @@ function ProjectView({
                     className="outline-notes"
                     aria-label="Outline & Notes"
                   >
-                    <button
-                      className="outline-notes-toggle"
-                      aria-expanded={outlineNotesOpen}
-                      onClick={toggleOutlineNotes}
-                    >
-                      <span aria-hidden="true">
-                        {outlineNotesOpen ? '▾' : '▸'}
-                      </span>{' '}
-                      Outline & Notes
-                    </button>
+                    <div className="outline-notes-bar">
+                      <button
+                        className="outline-notes-toggle"
+                        aria-expanded={outlineNotesOpen}
+                        onClick={toggleOutlineNotes}
+                      >
+                        <span aria-hidden="true">
+                          {outlineNotesOpen ? '▾' : '▸'}
+                        </span>{' '}
+                        Outline & Notes
+                      </button>
+                      <button
+                        className="overview-button"
+                        aria-pressed={overviewOpen}
+                        onClick={toggleOverview}
+                      >
+                        <span aria-hidden="true">☰</span> Overview
+                      </button>
+                    </div>
                     {outlineNotesOpen && (
                       <OutlineNotes
                         unitId={open.scene.id}

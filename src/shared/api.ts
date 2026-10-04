@@ -242,11 +242,12 @@ export interface ProjectApi {
 
 /**
  * Widths in CSS pixels of the panels the Author can resize: in Writing, the
- * Binder and the Assistant panel; in the Brainstorm and Interview rooms,
- * their Conversations and the reference.
+ * Binder, the Overview pane and the Assistant panel; in the Brainstorm and
+ * Interview rooms, their Conversations and the reference.
  */
 export type PanelWidths = {
   binder?: number;
+  overview?: number;
   assistant?: number;
   conversations?: number;
   reference?: number;
@@ -254,14 +255,16 @@ export type PanelWidths = {
 
 /**
  * How the Author left a Project's window on this computer; `cursor` is where
- * it was in the last Scene, and `outlineNotesOpen` says whether the Outline &
- * Notes box above the Prose is open.
+ * it was in the last Scene, `outlineNotesOpen` says whether the Outline &
+ * Notes box above the Prose is open, and `overviewOpen` whether the Overview
+ * pane beside it is. The Overview pane's state is never kept in the Project.
  */
 export type ProjectView = {
   lastSceneId?: string;
   cursor?: number;
   panelWidths?: PanelWidths;
   outlineNotesOpen?: boolean;
+  overviewOpen?: boolean;
 };
 
 /**

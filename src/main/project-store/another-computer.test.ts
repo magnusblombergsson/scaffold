@@ -440,7 +440,9 @@ describe('session markers', () => {
       lastSceneId: sceneId,
       cursor: 12,
       outlineNotesOpen: false,
-      panelWidths: { binder: 300 },
+      panelWidths: { binder: 300, overview: 320 },
+      // The Overview pane's state stays on this computer.
+      overviewOpen: true,
     });
     await store.close();
 

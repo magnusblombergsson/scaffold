@@ -1,7 +1,7 @@
 import { useEffect, useRef, type RefObject } from 'react';
 
 /** Writing's panes, in the order F6 goes through them. */
-const PANES = ['left', 'centre', 'assistant'] as const;
+const PANES = ['left', 'overview', 'centre', 'assistant'] as const;
 type Pane = (typeof PANES)[number];
 
 const FOCUSABLE =
@@ -9,7 +9,8 @@ const FOCUSABLE =
 
 /**
  * F6 and Shift+F6 in Writing: focus goes to the next or previous pane, the
- * left pane, the editor and the Assistant, round and round. A pane gets
+ * left pane, the Overview pane while it is open, the editor and the
+ * Assistant, round and round. A pane gets
  * focus back where the Author left it; the first time, at its highlighted
  * row, its Prose or its message box. `room` holds the panes side by side,
  * between their resizers.
@@ -34,9 +35,11 @@ export function usePaneCycle(
       if (!child || child.classList.contains('panel-resizer')) return null;
       return child.classList.contains('left-pane')
         ? 'left'
-        : child.classList.contains('assistant-panel')
-          ? 'assistant'
-          : 'centre';
+        : child.classList.contains('overview-pane')
+          ? 'overview'
+          : child.classList.contains('assistant-panel')
+            ? 'assistant'
+            : 'centre';
     };
     const paneElement = (pane: Pane) =>
       [...element.children].find(

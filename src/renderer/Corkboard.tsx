@@ -7,9 +7,7 @@ import {
   type ProseLanguage,
 } from '../shared/project-types';
 import { OutlineNotes } from './OutlineNotes';
-
-/** The lane of Scenes that have no place in the Manuscript's order. */
-const UNPLACED = 'unplaced';
+import { UNPLACED } from './overview';
 
 /**
  * A Chapter as index cards: its own Outline and Notes in a wide card, then
