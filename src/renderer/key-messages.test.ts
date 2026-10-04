@@ -48,12 +48,12 @@ describe('keyResultMessage', () => {
 
   it('says a key kept until the app quits is not saved', () => {
     expect(keyResultMessage({ check: 'ok', status: untilQuit }).text).toBe(
-      'Key kept until Writing Tools quits.',
+      'Key kept until Scaffold quits.',
     );
     expect(
       keyResultMessage({ check: 'unreachable', status: untilQuit }).text,
     ).toBe(
-      "Can't reach Anthropic, so the key wasn't checked. It's kept until Writing Tools quits; if it doesn't work, the Assistant will say so.",
+      "Can't reach Anthropic, so the key wasn't checked. It's kept until Scaffold quits; if it doesn't work, the Assistant will say so.",
     );
   });
 });

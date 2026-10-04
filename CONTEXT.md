@@ -1,4 +1,4 @@
-# Writing Tools
+# Scaffold
 
 A writing environment for creative fiction: an editor with an AI Assistant alongside that advises the Author but never writes their Prose.
 
@@ -35,6 +35,14 @@ _Avoid_: Section, passage
 The view of the Manuscript's Chapters and Scenes in order, where the Author opens, arranges and titles them.
 _Avoid_: Outline (that is the structural description), tree, navigator, sidebar
 
+**Corkboard**:
+The view in Writing mode of the Project Outline or a Chapter as index cards, each with its Outline and Notes editable in place. A Chapter's Corkboard shows its Scenes as cards; the Project's shows each Chapter as a lane that opens to its Scenes.
+_Avoid_: Board, grid, overview (that is the pane)
+
+**Overview pane**:
+A pane beside the Prose in Writing mode that lists the Chapter or the whole Project one row per unit, so the Author keeps the whole story in view while writing a Scene. A row opens to edit its Outline and Notes.
+_Avoid_: Outline skeleton (that is Brainstorm's read-only view), navigator, sidebar
+
 **Unplaced Scene**:
 A Scene that exists in the Project but has no place in the Manuscript's order and isn't in Trash, such as one written on another computer or left by an interrupted change. It stays after the Chapters until the Author places it.
 _Avoid_: Orphan, stray, lost Scene
@@ -52,15 +60,27 @@ The Author-visible, Author-editable body of knowledge about a story: characters,
 _Avoid_: Memory, knowledge base, lore, wiki
 
 **Entry**:
-One typed item in the Story Bible — a Character, Place, Item, World Rule, Plot Thread, Theme, or Other — with a name, aliases, a free-text description, private notes the Assistant never sees, and a few optional type-specific fields.
+One typed item in the Story Bible — a Character, Place, Item, World Rule, Plot Thread, Theme, or Other — with a name, aliases, a free-text description, private notes the Assistant never sees, an optional image the Assistant never sees, and a few optional type-specific fields.
 _Avoid_: Card, note, record
+
+**Image prompt**:
+A description of an Entry, written by the Assistant on request from what the Entry says it looks and feels like, for the Author to paste into an image generator elsewhere. It describes only: no narration, dialogue or story moment, so it is not Prose. It isn't kept.
+_Avoid_: Image description, caption
+
+**Peek**:
+A short, read-only look at the Entries a highlighted name refers to, opened by clicking the name, or a Proposal's title in Brainstorm and Interview. Long text is cut off until the Author asks to read more.
+_Avoid_: Popup, tooltip, preview
+
+**Pinned note**:
+A Peek the Author has pinned in Writing so it stays while they write: it floats over the page, can be dragged aside, folded to its title and unpinned, and stays where it was left for the Project until unpinned.
+_Avoid_: Sticky, pin (as a noun), floating window
 
 **Voice**:
 A character's way of speaking, described in its Entry as traits (register, rhythm, tics), words the character uses and never uses, and short example lines written by the Author. The Assistant compares dialogue in the Prose against it and may propose trait descriptions, but never example lines.
 _Avoid_: Tone, style (when meaning a character's speech)
 
 **Proposal**:
-A change to the Story Bible or an Outline suggested by the Assistant during a Conversation; it takes effect only when the Author accepts it, optionally after editing it. A Proposal is stale when its target has changed since it was made. An accepted Proposal can be undone while its target still holds the accepted values; it then becomes pending again. Proposals never touch Prose, Notes, or private notes.
+A change to the Story Bible or an Outline suggested by the Assistant during a Conversation; it takes effect only when the Author accepts it, optionally after editing it. A Proposal to a field or Outline either replaces its text, appends text to it, or adds an item to a list; an append or add lands on whatever the target holds when accepted. The Author may also append a replacing Proposal's text instead of replacing. A replacing Proposal is stale when its target has changed since it was made. An accepted Proposal can be undone while its target still holds the accepted values; it then becomes pending again. A reply the Assistant didn't finish (cut short, failed partway, or empty) makes no Proposals. Proposals never touch Prose, Notes, or private notes.
 _Avoid_: Suggestion (when meaning a Story Bible change), auto-save
 
 **Outline**:
@@ -86,6 +106,32 @@ _Avoid_: Open (when meaning a manuscript file), convert
 **Conflict**:
 Two or more versions of one Scene, Outline, Notes or Entry, saved on different computers or at the same moment, kept side by side until the Author chooses one or merges them; the others go to Trash. A diverged Conversation is not a Conflict: it becomes a second Conversation.
 _Avoid_: Conflicted copy, sync error, merge conflict
+
+**Project setting**:
+A choice the Author makes for one Project, such as its Prose language, saved with the Project so it is the same on every computer. Where a window or pane sat on this computer is remembered, not a Project setting.
+_Avoid_: Preference, option
+
+**Setting**:
+A choice that holds for the whole app on this computer, whichever Project is open, such as a Provider's credential or Model shortlist.
+_Avoid_: Preference, Project setting (when meaning these)
+
+### The Assistant's models
+
+**Model**:
+The AI model a Conversation's Assistant runs on, reached through one Provider. A Conversation may switch Model between messages; each reply records the Model that wrote it.
+_Avoid_: Engine, LLM, AI (when meaning the model)
+
+**Provider**:
+The service a Model is reached through: Anthropic, OpenRouter, or LM Studio on the Author's own computer.
+_Avoid_: Vendor, backend, API
+
+**Model shortlist**:
+The Models the Author has chosen, per Provider, to have on offer when picking a Conversation's Model.
+_Avoid_: Favourites, model list
+
+**Untested**:
+Said of a Model that hasn't been checked against the rule that the Assistant never writes Prose. The rule still applies; the mark only warns that the Model may slip.
+_Avoid_: Unsupported, unsafe
 
 ### Modes
 

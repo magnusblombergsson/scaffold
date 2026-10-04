@@ -22,7 +22,7 @@ let projectPath: string;
 const opened: ProjectStore[] = [];
 
 beforeEach(async () => {
-  dir = await mkdtemp(path.join(tmpdir(), 'writing-tools-'));
+  dir = await mkdtemp(path.join(tmpdir(), 'scaffold-'));
   projectPath = path.join(dir, 'My Novel');
 });
 afterEach(async () => {
@@ -250,7 +250,7 @@ describe('opening a newer Project', () => {
     expect(failure).toBeInstanceOf(ProjectError);
     expect((failure as ProjectError).reason).toBe('newer-format');
     expect((failure as ProjectError).message).toBe(
-      'My Novel was saved by a newer version of Writing Tools (format 2; this app reads up to 1). Update the app to open it.',
+      'My Novel was saved by a newer version of Scaffold (format 2; this app reads up to 1). Update the app to open it.',
     );
     expect(await readFile(manifestPath(), 'utf8')).toBe(before);
     expect(

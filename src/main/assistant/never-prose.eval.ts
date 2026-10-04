@@ -17,7 +17,7 @@ it.skipIf(!key)(
   'writes a review sheet of the never-Prose eval set',
   async () => {
     if (!isModelId(model)) throw new Error(`Unknown model: ${model}`);
-    const dir = await mkdtemp(path.join(tmpdir(), 'writing-tools-eval-'));
+    const dir = await mkdtemp(path.join(tmpdir(), 'scaffold-eval-'));
     try {
       const results = await runNeverProseEval({
         provider: claudeProvider({ apiKey: () => key ?? null }),

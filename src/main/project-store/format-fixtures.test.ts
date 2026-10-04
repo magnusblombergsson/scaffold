@@ -28,7 +28,7 @@ const UNIT_DIRS: Record<string, UnitRef['kind']> = {
 let dir: string;
 
 beforeEach(async () => {
-  dir = await mkdtemp(path.join(tmpdir(), 'writing-tools-'));
+  dir = await mkdtemp(path.join(tmpdir(), 'scaffold-'));
 });
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true, maxRetries: 5 });

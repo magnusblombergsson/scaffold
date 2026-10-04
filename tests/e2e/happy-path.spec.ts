@@ -30,14 +30,14 @@ test('the MVP hangs together: welcome, key, Project, Prose, Review Scene, a Prop
   // First run, without a key: the welcome, where one is added. The
   // fake Anthropic takes any key.
   await expect(
-    page.getByRole('heading', { name: 'Welcome to Writing Tools' }),
+    page.getByRole('heading', { name: 'Welcome to Scaffold' }),
   ).toBeVisible();
   await page.getByRole('button', { name: 'Add API key' }).click();
   await page
     .getByRole('textbox', { name: 'API key' })
     .fill('sk-ant-api03-good-abcd');
   await page.getByRole('button', { name: 'Check and save' }).click();
-  await expect(page.getByText('Welcome to Writing Tools')).toHaveCount(0);
+  await expect(page.getByText('Welcome to Scaffold')).toHaveCount(0);
 
   // A new Project, and Prose in its first Scene.
   await answerDialogs(app, projectPath);

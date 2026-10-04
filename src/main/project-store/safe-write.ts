@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import path from 'node:path';
 import type { Clock } from './clock';
 import type { FileSystem } from './file-system';
 
@@ -61,4 +62,21 @@ export function writeFailureReason(error: unknown): string {
   if (code && code in REASONS) return REASONS[code];
   // A message would name the file's path, which the renderer never sees.
   return `the disk or sync client refused it${code ? ` (${code})` : ''}`;
+}
+
+/**
+ * Moves a file the app can't read out of its way, as `<name>.corrupt-<ts>.json`
+ * beside it, so the Author can still recover it by hand.
+ */
+export async function setAside(
+  fs: FileSystem,
+  clock: Clock,
+  file: string,
+): Promise<void> {
+  const aside = path.join(
+    path.dirname(file),
+    `${path.basename(file, '.json')}.corrupt-${clock.now()}.json`,
+  );
+  await fs.rename(file, aside);
+  console.error(`Unreadable ${path.basename(file)} set aside as ${aside}`);
 }

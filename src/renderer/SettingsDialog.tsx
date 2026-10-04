@@ -6,7 +6,7 @@ import { GetKeyHint, KeyForm, KeyMessage, useKeyStatus } from './ApiKey';
 const KEPT_LABELS: Record<KeyKeeping, string> = {
   encrypted: 'Saved encrypted on this computer',
   unencrypted: 'Saved unencrypted on this computer',
-  untilQuit: 'Kept until Writing Tools quits',
+  untilQuit: 'Kept until Scaffold quits',
 };
 
 /**

@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -38,7 +38,7 @@ const load = (encryption = fakeEncryption()) =>
   });
 
 beforeEach(async () => {
-  dir = await mkdtemp(path.join(tmpdir(), 'writing-tools-key-'));
+  dir = await mkdtemp(path.join(tmpdir(), 'scaffold-key-'));
   file = path.join(dir, 'api-key.json');
 });
 afterEach(async () => {
@@ -189,5 +189,66 @@ describe('KeyStore', () => {
       },
     };
     expect((await load(broken)).key()).toBeNull();
+  });
+
+  describe("a saved key it can't read", () => {
+    const broken: Encryption = {
+      ...fakeEncryption(),
+      decrypt: () => {
+        throw new Error('Wrong keychain');
+      },
+    };
+
+    beforeEach(async () => {
+      await (await load()).setKey(KEY, { unencrypted: false });
+    });
+
+    it('is unreadable, and stays where it is for the next launch', async () => {
+      const keys = await load(broken);
+
+      expect(keys.key()).toBeNull();
+      expect(keys.unreadable()).toBe(true);
+      expect(await readdir(dir)).toEqual(['api-key.json']);
+      // A keychain locked at launch may open later.
+      expect((await load()).key()).toBe(KEY);
+    });
+
+    it('is no longer unreadable once the Author adds a key', async () => {
+      const keys = await load(broken);
+      await keys.setKey(OTHER, { unencrypted: false });
+      expect(keys.unreadable()).toBe(false);
+    });
+
+    it('is no longer unreadable once the Author removes the key', async () => {
+      const keys = await load(broken);
+      await keys.removeKey();
+      expect(keys.unreadable()).toBe(false);
+    });
+
+    it('is set aside once the Author skips adding one', async () => {
+      const keys = await load(broken);
+      await keys.setAsideUnreadable();
+
+      expect(keys.unreadable()).toBe(false);
+      expect(await readdir(dir)).toEqual([
+        expect.stringMatching(/^api-key\.corrupt-\d+\.json$/),
+      ]);
+      expect((await load(broken)).unreadable()).toBe(false);
+    });
+
+    it('is unreadable when the file is not a key file too', async () => {
+      await writeFile(file, 'not json');
+      expect((await load()).unreadable()).toBe(true);
+    });
+  });
+
+  it('has nothing unreadable when no key was saved, or one was read', async () => {
+    const keys = await load();
+    expect(keys.unreadable()).toBe(false);
+    await keys.setAsideUnreadable();
+    await keys.setKey(KEY, { unencrypted: false });
+    await keys.setAsideUnreadable();
+    expect(await readdir(dir)).toEqual(['api-key.json']);
+    expect((await load()).unreadable()).toBe(false);
   });
 });

@@ -2,7 +2,7 @@ import path from 'node:path';
 import type { Clock } from '../project-store/clock';
 import type { FileSystem } from '../project-store/file-system';
 import type { ProjectLookup } from '../project-store/project-store';
-import { safeWrite } from '../project-store/safe-write';
+import { safeWrite, setAside } from '../project-store/safe-write';
 import type { PanelWidths, Tip } from '../../shared/api';
 import { DEFAULT_MODEL, isModelId, type ModelId } from '../../shared/models';
 
@@ -69,12 +69,7 @@ export async function loadAppSettings(
   }
   const data = parseSettings(await deps.fs.readFile(file));
   if (!data) {
-    const aside = path.join(
-      path.dirname(file),
-      `settings.corrupt-${deps.clock.now()}.json`,
-    );
-    await deps.fs.rename(file, aside);
-    console.error(`Unreadable settings set aside as ${aside}`);
+    await setAside(deps.fs, deps.clock, file);
     return new AppSettings(file, defaults(), deps);
   }
   return new AppSettings(file, data, deps);

@@ -337,13 +337,16 @@ export type KeyOptions = { unencrypted: boolean };
 /** A key the Author entered: what checking it said, and the key kept now. */
 export type KeyResult = { check: KeyCheck; status: KeyStatus };
 
+/** Why the Author is welcomed: the first launch, or a saved key that couldn't be read. */
+export type WelcomeReason = 'firstLaunch' | 'keyUnreadable';
+
 /** Settings that hold on this computer for every Project. */
 export interface SettingsApi {
   /**
-   * Whether to welcome the Author, as on the first launch; false once they
-   * have added a key or skipped.
+   * Why to welcome the Author, if at all; none once they have added a key or
+   * skipped.
    */
-  showWelcome(): Promise<boolean>;
+  showWelcome(): Promise<WelcomeReason | null>;
   dismissWelcome(): void;
   keyStatus(): Promise<KeyStatus>;
   /**

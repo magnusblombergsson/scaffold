@@ -1,6 +1,6 @@
 {
-  "name": "writing-tools",
-  "productName": "Writing Tools",
+  "name": "scaffold",
+  "productName": "Scaffold",
   "version": "1.0.0",
   "private": true,
   "description": "A writing environment for creative fiction with an AI Assistant that never writes Prose",
