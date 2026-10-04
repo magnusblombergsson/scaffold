@@ -1,0 +1,368 @@
+/* PROTOTYPE (throwaway): the shortened peek card and its pinned forms (#68). */
+
+/* ---------- the shortened card ---------- */
+
+.pk-card {
+  font-size: 0.9rem;
+  line-height: 1.45;
+}
+
+.pk-card + .pk-card {
+  border-top: 1px solid var(--line);
+  margin-top: 0.85rem;
+  padding-top: 0.85rem;
+}
+
+.pk-head {
+  display: flex;
+  gap: 0.65rem;
+  align-items: flex-start;
+}
+
+.pk-thumb {
+  width: 3.4rem;
+  height: 3.4rem;
+  object-fit: cover;
+  border-radius: 6px;
+  flex-shrink: 0;
+}
+
+.pk-thumb.pk-wide {
+  width: 4.6rem;
+}
+
+.pk-image {
+  display: block;
+  width: 100%;
+  max-height: 14rem;
+  object-fit: cover;
+  border-radius: 6px;
+  margin-bottom: 0.65rem;
+}
+
+.pk-image:not(.pk-wide) {
+  width: 9rem;
+  height: 9rem;
+}
+
+.pk-subhead {
+  display: flex;
+  gap: 0.65rem;
+  align-items: center;
+  margin-top: 0.15rem;
+}
+
+.pk-titles {
+  flex: 1;
+  min-width: 0;
+}
+
+.pk-type {
+  color: var(--muted);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.pk-card h2 {
+  font-size: 1.05rem;
+  margin: 0;
+}
+
+.pk-role {
+  margin: 0.1rem 0 0;
+  color: var(--accent, var(--fg));
+  font-size: 0.85rem;
+}
+
+.pk-actions {
+  display: flex;
+  gap: 0.2rem;
+  flex-shrink: 0;
+}
+
+.pk-icon {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--muted);
+  min-width: 1.8rem;
+  height: 1.8rem;
+  padding: 0 0.35rem;
+  cursor: pointer;
+  font-size: 0.9rem;
+  line-height: 1;
+}
+
+.pk-icon:hover {
+  border-color: var(--pill-line, var(--line));
+  color: var(--fg);
+}
+
+.pk-pin {
+  filter: grayscale(1);
+  opacity: 0.6;
+}
+
+.pk-pin:hover,
+.pk-pin[aria-pressed='true'] {
+  filter: none;
+  opacity: 1;
+}
+
+.pk-pin[aria-pressed='true'] {
+  border-color: var(--accent, var(--line));
+}
+
+.pk-aliases {
+  color: var(--muted);
+  margin: 0.35rem 0 0;
+  font-size: 0.85rem;
+}
+
+.pk-description {
+  white-space: pre-wrap;
+  margin: 0.45rem 0 0;
+}
+
+.pk-fields {
+  margin: 0.5rem 0 0;
+}
+
+.pk-fields div {
+  margin-top: 0.35rem;
+}
+
+.pk-fields dt {
+  color: var(--muted);
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.pk-fields dd {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.pk-card:not(.pk-expanded) .pk-description {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  overflow: hidden;
+}
+
+.pk-card:not(.pk-expanded) .pk-fields dd {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+}
+
+.pk-more {
+  background: none;
+  border: none;
+  padding: 0;
+  margin-top: 0.5rem;
+  color: var(--accent, var(--fg));
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* ---------- the popover ---------- */
+
+.pk-popover {
+  position: fixed;
+  z-index: 20;
+  box-sizing: border-box;
+  max-height: 65vh;
+  overflow-y: auto;
+  padding: 0.85rem;
+  background: var(--sheet, var(--bg));
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 8px 28px rgb(0 0 0 / 18%);
+}
+
+/* ---------- A: docked into the Overview column ---------- */
+
+.pk-column {
+  width: 22rem;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  margin-right: 0.5rem;
+}
+
+.pk-column-overview {
+  flex: 1 1 50%;
+  min-height: 8rem;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.pk-column-overview > .ov-beside {
+  width: auto;
+  flex: 1;
+  margin-right: 0;
+}
+
+.pk-column-pins {
+  flex: 0 1 auto;
+  max-height: 55%;
+  overflow-y: auto;
+  border-top: 1px solid var(--line);
+  padding: 0.25rem 0.25rem 0.75rem;
+}
+
+.pk-column-pins.pk-alone {
+  max-height: none;
+  flex: 1;
+  border-top: none;
+}
+
+.pk-column-title {
+  font-size: 0.72rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  margin: 0.5rem 0.25rem 0.35rem;
+}
+
+.pk-docked {
+  background: var(--sheet, var(--bg));
+  border-radius: 8px;
+  padding: 0.35rem 0.65rem 0.65rem;
+  margin-bottom: 0.5rem;
+}
+
+.pk-docked-bar {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+}
+
+.pk-docked-toggle {
+  flex: 1;
+  text-align: left;
+  background: none;
+  border: none;
+  padding: 0.25rem 0;
+  color: var(--fg);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* ---------- B: floating notes ---------- */
+
+.pk-float {
+  position: fixed;
+  z-index: 15;
+  box-sizing: border-box;
+  background: var(--sheet, var(--bg));
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  box-shadow: 0 10px 30px rgb(0 0 0 / 22%);
+  display: flex;
+  flex-direction: column;
+  max-height: 55vh;
+}
+
+.pk-float-handle {
+  display: flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.3rem 0.4rem 0.3rem 0.6rem;
+  cursor: grab;
+  user-select: none;
+  border-bottom: 1px solid var(--line);
+  touch-action: none;
+}
+
+.pk-folded .pk-float-handle {
+  border-bottom: none;
+}
+
+.pk-float-handle:active {
+  cursor: grabbing;
+}
+
+.pk-grip {
+  color: var(--muted);
+  margin-right: 0.3rem;
+}
+
+.pk-float-name {
+  flex: 1;
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pk-float-body {
+  overflow-y: auto;
+  padding: 0.65rem 0.85rem 0.85rem;
+}
+
+/* ---------- C: tabbed column right of the Prose ---------- */
+
+.pk-right {
+  width: 17rem;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  margin-left: 0.5rem;
+}
+
+.pk-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem;
+  padding: 0.4rem 0.25rem;
+}
+
+.pk-tab {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--pill-line, var(--line));
+  border-radius: 999px;
+  font-size: 0.82rem;
+}
+
+.pk-tab[aria-selected='true'] {
+  border-color: var(--accent, var(--fg));
+  background: var(--accent-tint, transparent);
+}
+
+.pk-tab button {
+  background: none;
+  border: none;
+  color: var(--fg);
+  cursor: pointer;
+  font: inherit;
+  padding: 0.2rem 0.15rem 0.2rem 0.6rem;
+}
+
+.pk-tab .pk-tab-x {
+  color: var(--muted);
+  padding: 0.2rem 0.5rem 0.2rem 0.25rem;
+}
+
+.pk-right-body {
+  flex: 1;
+  overflow-y: auto;
+  background: var(--sheet, var(--bg));
+  border-radius: 8px;
+  padding: 0.85rem;
+  margin-bottom: 0.5rem;
+}

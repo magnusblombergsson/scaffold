@@ -47,7 +47,14 @@ import {
   DocumentOverview,
   OverviewBeside,
 } from './prototype-outline-overviews/Overviews';
-import { useOverviewVariant } from './prototype-outline-overviews/OverviewSwitcher';
+import {
+  DockedColumn,
+  FloatingNotes,
+  PeekPopover,
+  TabbedColumn,
+  type Pin,
+} from './prototype-story-bible-peek/Peek';
+import { usePeekVariant } from './prototype-story-bible-peek/PeekSwitcher';
 import { PanelResizer, type PaneSize } from './PanelResizer';
 import {
   onMentionClick,
@@ -371,9 +378,25 @@ function ProjectView({
   const [readOnly, setReadOnly] = useState(project.readOnly);
   /** The language the Prose is spellchecked and typeset in; the Author may change it. */
   const [language, setLanguage] = useState(project.language);
-  // PROTOTYPE (throwaway): Outline overviews (#67).
-  const overview = useOverviewVariant();
+  // PROTOTYPE (throwaway): Outline overviews (#67), as decided: the
+  // Corkboard, and the Overview pane beside the Prose.
+  const overview: string = 'C';
   const [besideOpen, setBesideOpen] = useState(false);
+  // PROTOTYPE (throwaway): Story Bible peek pins (#68).
+  const peekVariant = usePeekVariant();
+  const [pins, setPins] = useState<Pin[]>([]);
+  const [activePin, setActivePin] = useState<string | null>(null);
+  const unpin = (id: string) =>
+    setPins((all) => all.filter((pin) => pin.id !== id));
+  const togglePin = (id: string, at: { x: number; y: number }) => {
+    if (pins.some((pin) => pin.id === id)) return unpin(id);
+    setPins((all) => [...all, { id, ...at }]);
+    setActivePin(id);
+  };
+  const peekOpen = (id: string) => {
+    setTab('bible');
+    select({ kind: 'entry', id });
+  };
   const overviewProps = {
     manuscript,
     language,
@@ -751,14 +774,27 @@ function ProjectView({
                 </div>
               ) : (
                 <>
-                  {overview === 'B' && besideOpen && (
-                    <OverviewBeside
-                      {...overviewProps}
-                      writingSceneId={open.scene.id}
-                      chapterId={open.chapter?.id ?? null}
-                      onClose={() => setBesideOpen(false)}
-                    />
-                  )}
+                  {(() => {
+                    // PROTOTYPE (throwaway): the peek pins (#68).
+                    const beside = besideOpen ? (
+                      <OverviewBeside
+                        {...overviewProps}
+                        writingSceneId={open!.scene.id}
+                        chapterId={open!.chapter?.id ?? null}
+                        onClose={() => setBesideOpen(false)}
+                      />
+                    ) : null;
+                    return peekVariant === 'A' ? (
+                      <DockedColumn
+                        overview={beside}
+                        pins={pins}
+                        onUnpin={unpin}
+                        onOpen={peekOpen}
+                      />
+                    ) : (
+                      beside
+                    );
+                  })()}
                   <main className="centre" key={open.scene.id}>
                     <section
                       className="outline-notes"
@@ -777,34 +813,12 @@ function ProjectView({
                         </button>
                         {overview !== '0' && (
                           <span className="ov-scene-links">
-                            {overview === 'B' ? (
-                              <button
-                                aria-pressed={besideOpen}
-                                onClick={() => setBesideOpen(!besideOpen)}
-                              >
-                                ☰ Overview
-                              </button>
-                            ) : (
-                              <>
-                                {open.chapter && (
-                                  <button
-                                    onClick={() =>
-                                      select({
-                                        kind: 'chapter',
-                                        id: open.chapter!.id,
-                                      })
-                                    }
-                                  >
-                                    Chapter overview
-                                  </button>
-                                )}
-                                <button
-                                  onClick={() => select({ kind: 'project' })}
-                                >
-                                  Project overview
-                                </button>
-                              </>
-                            )}
+                            <button
+                              aria-pressed={besideOpen}
+                              onClick={() => setBesideOpen(!besideOpen)}
+                            >
+                              ☰ Overview
+                            </button>
                           </span>
                         )}
                       </div>
@@ -834,6 +848,15 @@ function ProjectView({
                   </main>
                 </>
               )}
+              {peekVariant === 'C' && (
+                <TabbedColumn
+                  pins={pins}
+                  active={activePin}
+                  onActivate={setActivePin}
+                  onUnpin={unpin}
+                  onOpen={peekOpen}
+                />
+              )}
               <PanelResizer
                 label="Assistant width"
                 panel="right"
@@ -854,14 +877,28 @@ function ProjectView({
             </div>
           )}
         </div>
-        {peek && (
-          <MentionPeek
+        {peek && peekVariant === '0' && (
+          <MentionPeek peek={peek} onOpen={peekOpen} onClose={closePeek} />
+        )}
+        {peek && peekVariant !== '0' && (
+          <PeekPopover
             peek={peek}
-            onOpen={(id) => {
-              setTab('bible');
-              select({ kind: 'entry', id });
-            }}
+            pinnedIds={pins.map((pin) => pin.id)}
+            onTogglePin={togglePin}
+            onOpen={peekOpen}
             onClose={closePeek}
+          />
+        )}
+        {peekVariant === 'B' && mode === 'writing' && (
+          <FloatingNotes
+            pins={pins}
+            onMove={(id, x, y) =>
+              setPins((all) =>
+                all.map((pin) => (pin.id === id ? { id, x, y } : pin)),
+              )
+            }
+            onUnpin={unpin}
+            onOpen={peekOpen}
           />
         )}
         <div className="toasts">
