@@ -35,6 +35,14 @@ _Avoid_: Section, passage
 The view of the Manuscript's Chapters and Scenes in order, where the Author opens, arranges and titles them.
 _Avoid_: Outline (that is the structural description), tree, navigator, sidebar
 
+**Corkboard**:
+The view in Writing mode of the Project Outline or a Chapter as index cards, each with its Outline and Notes editable in place. A Chapter's Corkboard shows its Scenes as cards; the Project's shows each Chapter as a lane that opens to its Scenes.
+_Avoid_: Board, grid, overview (that is the pane)
+
+**Overview pane**:
+A pane beside the Prose in Writing mode that lists the Chapter or the whole Project one row per unit, so the Author keeps the whole story in view while writing a Scene. A row opens to edit its Outline and Notes.
+_Avoid_: Outline skeleton (that is Brainstorm's read-only view), navigator, sidebar
+
 **Unplaced Scene**:
 A Scene that exists in the Project but has no place in the Manuscript's order and isn't in Trash, such as one written on another computer or left by an interrupted change. It stays after the Chapters until the Author places it.
 _Avoid_: Orphan, stray, lost Scene
