@@ -63,6 +63,14 @@ _Avoid_: Memory, knowledge base, lore, wiki
 One typed item in the Story Bible — a Character, Place, Item, World Rule, Plot Thread, Theme, or Other — with a name, aliases, a free-text description, private notes the Assistant never sees, an optional image the Assistant never sees, and a few optional type-specific fields.
 _Avoid_: Card, note, record
 
+**Peek**:
+A short, read-only look at the Entries a highlighted name refers to, opened by clicking the name, or a Proposal's title in Brainstorm and Interview. Long text is cut off until the Author asks to read more.
+_Avoid_: Popup, tooltip, preview
+
+**Pinned note**:
+A Peek the Author has pinned in Writing so it stays while they write: it floats over the page, can be dragged aside, folded to its title and unpinned, and stays where it was left for the Project until unpinned.
+_Avoid_: Sticky, pin (as a noun), floating window
+
 **Voice**:
 A character's way of speaking, described in its Entry as traits (register, rhythm, tics), words the character uses and never uses, and short example lines written by the Author. The Assistant compares dialogue in the Prose against it and may propose trait descriptions, but never example lines.
 _Avoid_: Tone, style (when meaning a character's speech)
