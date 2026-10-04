@@ -132,6 +132,11 @@ export type EntryValue = {
   visibility: Visibility;
   description: string;
   fields: EntryFields;
+  /**
+   * Its image's file in `images/`, if it has one. Only `setEntryImage` and
+   * `removeEntryImage` change it; a write keeps the image the Entry has.
+   */
+  image?: string;
 };
 export type PrivateValue = { id: string; body: string };
 export type UnitValue =
@@ -169,7 +174,15 @@ export type EntrySummary = {
   name: string;
   aliases: string[];
   visibility: Visibility;
+  /** Its image's file in `images/`, if it has one. */
+  image?: string;
 };
+
+/** The extensions an Entry image is stored with. */
+export type ImageExtension = 'jpg' | 'png';
+
+/** An Entry image's bytes, as stored in `images/`. */
+export type EntryImage = { data: Uint8Array; extension: ImageExtension };
 
 export type SceneNode = { id: string; title: string };
 export type ChapterNode = { id: string; title: string; scenes: SceneNode[] };

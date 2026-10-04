@@ -8,6 +8,7 @@ import {
 } from '../shared/project-types';
 import { SHORTCUTS, withShortcut } from '../shared/shortcuts';
 import { ConflictMarker, Menu } from './Binder';
+import { EntryThumbnail } from './EntryImage';
 import type { Row } from './binder-keys';
 import { useListKeys } from './list-keys';
 import { MAC } from './platform';
@@ -131,6 +132,7 @@ export function StoryBible({
                     aria-current={entry.id === openId ? 'true' : undefined}
                     onClick={() => onOpen(entry.id)}
                   >
+                    <EntryThumbnail entry={entry} />
                     {entryTitle(entry)}
                     <ConflictMarker shown={conflicted.has(entry.id)} />
                   </button>

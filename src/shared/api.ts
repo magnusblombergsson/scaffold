@@ -124,6 +124,12 @@ export type EntriesChanged = {
   entries: EntrySummary[];
 };
 
+/**
+ * An Entry's image was set, replaced or removed here. The file can keep its
+ * name, so its Entry's summary may not change.
+ */
+export type EntryImageChanged = { type: 'entryImageChanged'; id: string };
+
 /** A newer app upgraded the Project; `host` is the computer it did so on, when known. */
 export type Upgrade = { host?: string };
 
@@ -146,6 +152,7 @@ export type ProjectEvent =
   | StructureChanged
   | ConflictsChanged
   | EntriesChanged
+  | EntryImageChanged
   | ProposalsChanged
   | ConversationsChanged
   | ReadOnly
@@ -212,6 +219,16 @@ export interface ProjectApi {
    * don't fit the new type are written at the end of its description.
    */
   setEntryType(entryId: string, type: EntryType): Promise<Changed>;
+  /**
+   * Asks the Author for a JPEG or PNG, then makes it the Entry's image,
+   * scaled down, in place of any it had; false if they cancel or it can't be
+   * read, which main has told them. There is no undo.
+   */
+  chooseEntryImage(entryId: string): Promise<boolean>;
+  /** Removes an Entry's image; there is no undo. */
+  removeEntryImage(entryId: string): Promise<void>;
+  /** An Entry's image as a `data:` URL; null without one, or before it syncs. */
+  entryImage(entryId: string): Promise<string | null>;
   /** Puts a Trash item back where it was, as near as the Manuscript allows. */
   restore(id: string): Promise<Changed>;
   /** Reverts `step` if it is still the latest structure operation. */

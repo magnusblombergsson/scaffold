@@ -25,8 +25,10 @@ export type Fingerprint = { mtimeMs: number; size: number };
 // inject faults.
 export interface FileSystem {
   readFile(path: string): Promise<string>;
-  /** Writes the file and fsyncs it before resolving. */
-  writeFileDurable(path: string, data: string): Promise<void>;
+  /** The file's bytes, as of an image. */
+  readBytes(path: string): Promise<Uint8Array>;
+  /** Writes the file, text as UTF-8, and fsyncs it before resolving. */
+  writeFileDurable(path: string, data: string | Uint8Array): Promise<void>;
   /** Appends to the file, creating it if need be, and fsyncs it before resolving. */
   appendFileDurable(path: string, data: string): Promise<void>;
   rename(from: string, to: string): Promise<void>;
@@ -52,10 +54,11 @@ export interface FileSystem {
 
 export const nodeFileSystem: FileSystem = {
   readFile: (path) => readFile(path, 'utf8'),
+  readBytes: async (path) => new Uint8Array(await readFile(path)),
   async writeFileDurable(path, data) {
     const handle = await open(path, 'w');
     try {
-      await handle.writeFile(data, 'utf8');
+      await handle.writeFile(data, typeof data === 'string' ? 'utf8' : null);
       await handle.sync();
     } finally {
       await handle.close();

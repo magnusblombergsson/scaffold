@@ -27,6 +27,7 @@ import {
   type Visibility,
   type Voice,
 } from '../shared/project-types';
+import { EntryImageSection } from './EntryImage';
 import {
   docToText,
   plainTextExtensions,
@@ -260,6 +261,7 @@ export function EntryView({
           ))}
         </select>
       </label>
+      <EntryImageSection entry={summary} />
       <UnitEditor
         unitKey={`${entryKey}:name`}
         field={{ unitKey: entryKey, text: nameOf }}

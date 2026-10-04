@@ -50,6 +50,12 @@ const project: ProjectApi = {
     ),
   setEntryType: (entryId, type) =>
     ipcRenderer.invoke(channel.project('setEntryType'), entryId, type),
+  chooseEntryImage: (entryId) =>
+    ipcRenderer.invoke(channel.project('chooseEntryImage'), entryId),
+  removeEntryImage: (entryId) =>
+    ipcRenderer.invoke(channel.project('removeEntryImage'), entryId),
+  entryImage: (entryId) =>
+    ipcRenderer.invoke(channel.project('entryImage'), entryId),
   restore: (id) => ipcRenderer.invoke(channel.project('restore'), id),
   undo: (step) => ipcRenderer.invoke(channel.project('undo'), step),
   listTrash: () => ipcRenderer.invoke(channel.project('listTrash')),

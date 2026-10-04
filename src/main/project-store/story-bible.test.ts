@@ -643,3 +643,204 @@ describe('the Assistant’s view', () => {
     ).rejects.toThrow(/private/i);
   });
 });
+
+describe('Entry images', () => {
+  const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 1, 2, 3]);
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 4, 5, 6]);
+
+  async function frontmatterImage(projectPath: string, id: string) {
+    const text = await readFile(
+      path.join(projectPath, 'bible', `${id}.md`),
+      'utf8',
+    );
+    return /^image: (.*)$/m.exec(text)?.[1];
+  }
+
+  it('stores an imported image as images/<id>.<extension>, named in frontmatter, and replaces and removes it', async () => {
+    const { projectPath, store } = await newProject();
+    const { id } = await store.createEntry('place', 'Harbour');
+    const events: ProjectEvent[] = [];
+    store.subscribe((e) => events.push(e));
+
+    await store.setEntryImage(id, { data: JPEG, extension: 'jpg' });
+
+    const images = path.join(projectPath, 'images');
+    expect(await readdir(images)).toEqual([`${id}.jpg`]);
+    expect(
+      new Uint8Array(await readFile(path.join(images, `${id}.jpg`))),
+    ).toEqual(JPEG);
+    expect(await frontmatterImage(projectPath, id)).toBe(`${id}.jpg`);
+    expect(store.listEntries()[0].image).toBe(`${id}.jpg`);
+    expect(await store.readEntryImage(id)).toEqual({
+      data: JPEG,
+      extension: 'jpg',
+    });
+    expect(events).toContainEqual({ type: 'entryImageChanged', id });
+
+    await store.setEntryImage(id, { data: PNG, extension: 'png' });
+    expect(await readdir(images)).toEqual([`${id}.png`]);
+    expect(await frontmatterImage(projectPath, id)).toBe(`${id}.png`);
+    expect(await store.readEntryImage(id)).toEqual({
+      data: PNG,
+      extension: 'png',
+    });
+
+    await store.removeEntryImage(id);
+    expect(await readdir(images)).toEqual([]);
+    expect(await frontmatterImage(projectPath, id)).toBeUndefined();
+    expect(store.listEntries()[0].image).toBeUndefined();
+    expect(await store.readEntryImage(id)).toBeNull();
+    await store.close();
+  });
+
+  it('keeps the image when an editor writes an Entry value read before it was set', async () => {
+    const { projectPath, store } = await newProject();
+    const { id } = await store.createEntry('character', 'Anna');
+    const before = await store.read(entry(id));
+
+    await store.setEntryImage(id, { data: JPEG, extension: 'jpg' });
+    await store.write(entry(id), { ...before, description: 'A pilot.' });
+    await store.close();
+
+    expect(await frontmatterImage(projectPath, id)).toBe(`${id}.jpg`);
+    const reopened = await openProject(projectPath, deps());
+    expect(reopened.listEntries()[0].image).toBe(`${id}.jpg`);
+    expect((await reopened.read(entry(id))).description).toBe('A pilot.');
+    await reopened.close();
+  });
+
+  it('moves the image to trash/ with its Entry, brings it back on restore, and deletes it when Trash is emptied', async () => {
+    const { projectPath, store } = await newProject();
+    const { id } = await store.createEntry('character', 'Anna');
+    await store.setEntryImage(id, { data: JPEG, extension: 'jpg' });
+    const images = path.join(projectPath, 'images');
+    const trash = path.join(projectPath, 'trash');
+
+    await store.trashEntry(id);
+    expect(await readdir(images)).toEqual([]);
+    expect((await readdir(trash)).sort()).toEqual(
+      [`${id}.entry.md`, `${id}.jpg`].sort(),
+    );
+    expect(store.listTrash().map((item) => item.id)).toEqual([id]);
+
+    await store.restore(id);
+    expect(await readdir(images)).toEqual([`${id}.jpg`]);
+    expect(await readdir(trash)).toEqual([]);
+    expect(await store.readEntryImage(id)).toEqual({
+      data: JPEG,
+      extension: 'jpg',
+    });
+
+    await store.trashEntry(id);
+    await store.emptyTrash();
+    expect(await readdir(images)).toEqual([]);
+    expect(await readdir(trash)).toEqual([]);
+    await store.close();
+  });
+
+  it('shows the file frontmatter names, ignoring conflict copies beside it', async () => {
+    const { projectPath, store } = await newProject();
+    const { id } = await store.createEntry('character', 'Anna');
+    await store.setEntryImage(id, { data: JPEG, extension: 'jpg' });
+    await store.close();
+    const images = path.join(projectPath, 'images');
+    await writeFile(
+      path.join(images, `${id} (Laptop's conflicted copy).jpg`),
+      PNG,
+    );
+    await writeFile(path.join(images, `${id}-DESKTOP.png`), PNG);
+
+    const reopened = await openProject(projectPath, deps());
+    expect(reopened.listEntries()[0].image).toBe(`${id}.jpg`);
+    expect(await reopened.readEntryImage(id)).toEqual({
+      data: JPEG,
+      extension: 'jpg',
+    });
+    expect(reopened.listConflicts()).toEqual([]);
+    await reopened.close();
+  });
+
+  it('ignores an image key that is not a file name in images/', async () => {
+    const { projectPath, store } = await newProject();
+    const { id } = await store.createEntry('character', 'Anna');
+    await store.close();
+    const file = path.join(projectPath, 'bible', `${id}.md`);
+    const text = await readFile(file, 'utf8');
+    await writeFile(
+      file,
+      text.replace('name: Anna', 'name: Anna\nimage: ../project.json'),
+    );
+
+    const reopened = await openProject(projectPath, deps());
+    expect(reopened.listEntries()[0].image).toBeUndefined();
+    expect(await reopened.readEntryImage(id)).toBeNull();
+    await reopened.close();
+  });
+
+  it('ignores an image key naming another Entry’s image, and never touches that file', async () => {
+    const { projectPath, store } = await newProject();
+    const { id: anna } = await store.createEntry('character', 'Anna');
+    const { id: bo } = await store.createEntry('character', 'Bo');
+    await store.setEntryImage(anna, { data: JPEG, extension: 'jpg' });
+    await store.close();
+    const file = path.join(projectPath, 'bible', `${bo}.md`);
+    const text = await readFile(file, 'utf8');
+    await writeFile(
+      file,
+      text.replace('name: Bo', `name: Bo\nimage: ${anna}.jpg`),
+    );
+
+    const reopened = await openProject(projectPath, deps());
+    expect(
+      reopened.listEntries().find((e) => e.id === bo)?.image,
+    ).toBeUndefined();
+    await reopened.trashEntry(bo);
+    await reopened.emptyTrash();
+    expect(await reopened.readEntryImage(anna)).toEqual({
+      data: JPEG,
+      extension: 'jpg',
+    });
+    await reopened.close();
+  });
+
+  it('puts back, not deletes, the image in Trash of an Entry restored elsewhere, as by an MVP app', async () => {
+    const { projectPath, store } = await newProject();
+    const { id } = await store.createEntry('character', 'Anna');
+    await store.setEntryImage(id, { data: JPEG, extension: 'jpg' });
+    const other = (await store.createEntry('item', 'Key')).id;
+    await store.trashEntry(id);
+    await store.trashEntry(other);
+    await store.close();
+    // The MVP's restore: the Entry's file comes back; its image stays in Trash.
+    const trashed = path.join(projectPath, 'trash', `${id}.entry.md`);
+    await writeFile(
+      path.join(projectPath, 'bible', `${id}.md`),
+      (await readFile(trashed, 'utf8')).replace(
+        /trashedEntry:\n {2}at: \d+\n/,
+        '',
+      ),
+    );
+    await rm(trashed);
+
+    const reopened = await openProject(projectPath, deps());
+    expect(await reopened.readEntryImage(id)).toBeNull();
+    await reopened.emptyTrash();
+    expect(await readdir(path.join(projectPath, 'trash'))).toEqual([]);
+    expect(await reopened.readEntryImage(id)).toEqual({
+      data: JPEG,
+      extension: 'jpg',
+    });
+    await reopened.close();
+  });
+
+  it('never shows the image to the Assistant', async () => {
+    const { store } = await newProject();
+    const { id } = await store.createEntry('character', 'Anna');
+    await store.setEntryImage(id, { data: JPEG, extension: 'jpg' });
+    const view = store.assistantView();
+
+    expect(view.listEntries()[0]).not.toHaveProperty('image');
+    expect(await view.read(entry(id))).not.toHaveProperty('image');
+    await store.close();
+  });
+});

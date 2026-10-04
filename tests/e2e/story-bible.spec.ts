@@ -1,5 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
-import { readdir, readFile } from 'node:fs/promises';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { answerDialogs, launch, useTempDir } from './app';
 
@@ -352,5 +352,73 @@ test('a name or alias another Entry goes by is saved, with a warning naming that
   await save(page);
   await expect(page.locator('.entry-collisions')).toHaveCount(0);
 
+  await app.close();
+});
+
+test('the Author adds an image to an Entry, scaled and shown in the list and the Entry, then replaces and removes it', async () => {
+  const projectPath = path.join(tempDir(), 'My Novel');
+  const { app, page } = await newProject(projectPath);
+  /** An image file of `width` × `height`, saved as a PNG; `alpha` 255 is opaque. */
+  async function imageFile(
+    name: string,
+    width: number,
+    height: number,
+    alpha: number,
+  ) {
+    const base64 = await app.evaluate(
+      ({ nativeImage }, { width, height, alpha }) => {
+        const bitmap = Buffer.alloc(width * height * 4, 0x60);
+        for (let i = 3; i < bitmap.length; i += 4) bitmap[i] = alpha;
+        return nativeImage
+          .createFromBitmap(bitmap, { width, height })
+          .toPNG()
+          .toString('base64');
+      },
+      { width, height, alpha },
+    );
+    const file = path.join(tempDir(), name);
+    await writeFile(file, Buffer.from(base64, 'base64'));
+    return file;
+  }
+  async function answerOpen(file: string) {
+    await app.evaluate(({ dialog }, file) => {
+      dialog.showOpenDialog = async () => ({
+        canceled: false,
+        filePaths: [file],
+      });
+    }, file);
+  }
+  await newEntry(page, 'Place');
+  await fill(page, 'Name', 'Harbour');
+  const [entryFile] = await readdir(path.join(projectPath, 'bible'));
+  const id = path.basename(entryFile, '.md');
+  const images = path.join(projectPath, 'images');
+  const frontmatter = () =>
+    readFile(path.join(projectPath, 'bible', entryFile), 'utf8');
+
+  await answerOpen(await imageFile('photo.png', 2000, 1000, 255));
+  await page.getByRole('button', { name: 'Add image…' }).click();
+  const shown = page.getByRole('img', { name: 'Image of Harbour' });
+  await expect(shown).toBeVisible();
+  expect(
+    await shown.evaluate((img: HTMLImageElement) => img.naturalWidth),
+  ).toBe(1024);
+  await expect(storyBible(page).locator('img.entry-thumbnail')).toBeVisible();
+  expect(await readdir(images)).toEqual([`${id}.jpg`]);
+  expect(await frontmatter()).toContain(`image: ${id}.jpg\n`);
+
+  await answerOpen(await imageFile('logo.png', 300, 200, 0));
+  await page.getByRole('button', { name: 'Replace image…' }).click();
+  await expect.poll(() => readdir(images)).toEqual([`${id}.png`]);
+  expect(await frontmatter()).toContain(`image: ${id}.png\n`);
+  await expect
+    .poll(() => shown.evaluate((img: HTMLImageElement) => img.naturalWidth))
+    .toBe(300);
+
+  await page.getByRole('button', { name: 'Remove image' }).click();
+  await expect(shown).toHaveCount(0);
+  await expect(storyBible(page).locator('img.entry-thumbnail')).toHaveCount(0);
+  expect(await readdir(images)).toEqual([]);
+  expect(await frontmatter()).not.toContain('image:');
   await app.close();
 });

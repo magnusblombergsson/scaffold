@@ -753,6 +753,29 @@ describe('private notes', () => {
   });
 });
 
+describe('Entry images', () => {
+  it('never reach the context, in any Mode and focus', async () => {
+    const project = await fixture();
+    const { store, view, entries } = project;
+    for (const id of Object.values(entries)) {
+      await store.setEntryImage(id, {
+        data: new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+        extension: 'png',
+      });
+    }
+
+    expect(view.listEntries().some((e) => 'image' in e)).toBe(false);
+    expect(
+      await view.read({ kind: 'entry', id: entries.mira }),
+    ).not.toHaveProperty('image');
+    for (const request of everyRequest(project)) {
+      const text = sent(await buildContext(view, request));
+      expect(text).toContain('Her sister.');
+      expect(text).not.toMatch(/\.png|images\/|PNG/);
+    }
+  });
+});
+
 describe('Role note and Appearance', () => {
   it('reach the context with the Entry, in every Mode and focus', async () => {
     const project = await fixture();

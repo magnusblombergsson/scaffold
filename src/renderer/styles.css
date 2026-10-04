@@ -1388,6 +1388,36 @@ h2.binder-title > button:hover::after {
   gap: 0.5rem;
 }
 
+/* An Entry's image, above its Name. */
+.entry-image {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.entry-image img {
+  max-width: min(100%, 24rem);
+  max-height: 24rem;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+}
+
+.entry-image-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* Beside an Entry's name in the Story Bible list. */
+.entry-thumbnail {
+  width: 1.25rem;
+  height: 1.25rem;
+  object-fit: cover;
+  border-radius: 3px;
+  margin-right: 0.4rem;
+  vertical-align: middle;
+}
+
 /* A Character's Role, with its Role note just under it. */
 .entry-role {
   display: flex;

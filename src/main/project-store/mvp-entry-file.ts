@@ -33,6 +33,22 @@ const DEFAULT_VISIBILITY: Visibility = 'mentioned';
 const ROLES = ['protagonist', 'supporting', 'mentioned'];
 const THREAD_STATUSES = ['open', 'resolved'];
 
+/**
+ * The folders the MVP lists, the Project folder itself (`''`) first, which
+ * lists only its own files. It reads no other folder's names.
+ */
+export const MVP_LISTED_FOLDERS = [
+  '',
+  'scenes',
+  'outlines',
+  'notes',
+  'bible',
+  'private',
+  'trash',
+  '.sessions',
+  'conversations',
+];
+
 /** An Entry from the text of its file, as the MVP reads it. */
 export function mvpReadEntry(id: string, text: string): EntryValue {
   return entryValue(id, parseUnitFile(text));
