@@ -52,7 +52,7 @@ The Author-visible, Author-editable body of knowledge about a story: characters,
 _Avoid_: Memory, knowledge base, lore, wiki
 
 **Entry**:
-One typed item in the Story Bible — a Character, Place, Item, World Rule, Plot Thread, Theme, or Other — with a name, aliases, a free-text description, private notes the Assistant never sees, and a few optional type-specific fields.
+One typed item in the Story Bible — a Character, Place, Item, World Rule, Plot Thread, Theme, or Other — with a name, aliases, a free-text description, private notes the Assistant never sees, an optional image the Assistant never sees, and a few optional type-specific fields.
 _Avoid_: Card, note, record
 
 **Voice**:
@@ -60,7 +60,7 @@ A character's way of speaking, described in its Entry as traits (register, rhyth
 _Avoid_: Tone, style (when meaning a character's speech)
 
 **Proposal**:
-A change to the Story Bible or an Outline suggested by the Assistant during a Conversation; it takes effect only when the Author accepts it, optionally after editing it. A Proposal is stale when its target has changed since it was made. An accepted Proposal can be undone while its target still holds the accepted values; it then becomes pending again. Proposals never touch Prose, Notes, or private notes.
+A change to the Story Bible or an Outline suggested by the Assistant during a Conversation; it takes effect only when the Author accepts it, optionally after editing it. A Proposal to a field or Outline either replaces its text, appends text to it, or adds an item to a list; an append or add lands on whatever the target holds when accepted. The Author may also append a replacing Proposal's text instead of replacing. A replacing Proposal is stale when its target has changed since it was made. An accepted Proposal can be undone while its target still holds the accepted values; it then becomes pending again. Proposals never touch Prose, Notes, or private notes.
 _Avoid_: Suggestion (when meaning a Story Bible change), auto-save
 
 **Outline**:
@@ -86,6 +86,24 @@ _Avoid_: Open (when meaning a manuscript file), convert
 **Conflict**:
 Two or more versions of one Scene, Outline, Notes or Entry, saved on different computers or at the same moment, kept side by side until the Author chooses one or merges them; the others go to Trash. A diverged Conversation is not a Conflict: it becomes a second Conversation.
 _Avoid_: Conflicted copy, sync error, merge conflict
+
+### The Assistant's models
+
+**Model**:
+The AI model a Conversation's Assistant runs on, reached through one Provider. A Conversation may switch Model between messages; each reply records the Model that wrote it.
+_Avoid_: Engine, LLM, AI (when meaning the model)
+
+**Provider**:
+The service a Model is reached through: Anthropic, OpenRouter, or LM Studio on the Author's own computer.
+_Avoid_: Vendor, backend, API
+
+**Model shortlist**:
+The Models the Author has chosen, per Provider, to have on offer when picking a Conversation's Model.
+_Avoid_: Favourites, model list
+
+**Untested**:
+Said of a Model that hasn't been checked against the rule that the Assistant never writes Prose. The rule still applies; the mark only warns that the Model may slip.
+_Avoid_: Unsupported, unsafe
 
 ### Modes
 
