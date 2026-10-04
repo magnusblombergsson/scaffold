@@ -636,7 +636,8 @@ h2.binder-title > button[aria-current='true'],
 /* Titles that rename on double-click. */
 .binder-chapters button.binder-title:hover::after,
 h2.binder-title > button:hover::after {
-  content: ' ✎';
+  /* Not part of the title's name. */
+  content: ' ✎' / '';
   color: var(--accent);
   font-weight: normal;
 }
@@ -1777,4 +1778,27 @@ button.finding-quote:hover {
   to {
     opacity: 1;
   }
+}
+
+/* The menu of Entry types Ctrl+E opens, over the left pane. */
+.entry-type-picker {
+  position: fixed;
+  top: 6rem;
+  left: 1rem;
+  z-index: 2;
+}
+
+.entry-type-picker .menu-items {
+  position: static;
+}
+
+/* A ⋯ menu item's shortcut, after its label. */
+.menu-items [role='menuitem'] {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.5rem;
+}
+
+.menu-shortcut {
+  color: var(--muted);
 }

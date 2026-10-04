@@ -1,3 +1,4 @@
+import type { Node } from '@tiptap/pm/model';
 import { useEffect, useRef, useState } from 'react';
 import { entryCollisions } from '../shared/entry';
 import {
@@ -48,6 +49,9 @@ export function textToLines(text: string): string[] {
     .map((line) => line.trim())
     .filter(Boolean);
 }
+
+/** All of a one-line field's text. */
+const selectAll = (doc: Node) => ({ from: 1, to: doc.content.size - 1 });
 
 const nameOf = (value: UnitValue) => (value as EntryValue).name;
 const aliasesOf = (value: UnitValue) =>
@@ -120,6 +124,7 @@ export function EntryView({
   entry: summary,
   entries,
   language,
+  focusName,
   onType,
   onVisibility,
   onShowProposal,
@@ -128,6 +133,8 @@ export function EntryView({
   /** Every Entry in the Story Bible, to warn of names they share. */
   entries: EntrySummary[];
   language: ProseLanguage;
+  /** Puts focus in the Name with it selected, as for an Entry just made. */
+  focusName?: boolean;
   onType(type: EntryType): void;
   onVisibility(visibility: Visibility): void;
   /** Opens a pending Proposal's Conversation at its card. */
@@ -250,6 +257,8 @@ export function EntryView({
         toText={docToText}
         save={(name) => save({ name })}
         attributes={attributes('Name', 'plain-text entry-name')}
+        autofocus={focusName}
+        select={focusName ? selectAll : undefined}
       />
       <section className="plain-text-field">
         <h3>Aliases</h3>

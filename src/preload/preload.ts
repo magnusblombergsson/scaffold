@@ -8,6 +8,7 @@ import {
   type SettingsApi,
   type ShellApi,
 } from '../shared/api';
+import type { Command } from '../shared/shortcuts';
 
 const project: ProjectApi = {
   manuscript: () => ipcRenderer.invoke(channel.project('manuscript')),
@@ -86,11 +87,11 @@ const shell: ShellApi = {
   chooseImport: () => ipcRenderer.invoke(channel.chooseImport),
   importProject: (file, convention) =>
     ipcRenderer.invoke(channel.importProject, file, convention),
-  onImportRequest(listener) {
-    const forward = () => listener();
-    ipcRenderer.on(channel.importRequest, forward);
+  onCommand(listener) {
+    const forward = (_event: unknown, command: Command) => listener(command);
+    ipcRenderer.on(channel.command, forward);
     return () => {
-      ipcRenderer.off(channel.importRequest, forward);
+      ipcRenderer.off(channel.command, forward);
     };
   },
   openRecent: (path) => ipcRenderer.invoke(channel.openRecent, path),

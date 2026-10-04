@@ -6,6 +6,8 @@ import {
   type ReactNode,
 } from 'react';
 import type { Changed, Created } from '../shared/api';
+import { SHORTCUTS, shortcutText, withShortcut } from '../shared/shortcuts';
+import { MAC } from './platform';
 import {
   PROJECT_OUTLINE,
   type Manuscript,
@@ -33,10 +35,10 @@ type Props = {
    * `message` says what it did, beside Undo.
    */
   onChange(operation: () => Promise<Changed>, message: string): Promise<void>;
+  /** The Chapter or Scene whose title is being edited, if any. */
+  renaming: string | null;
+  onRename(id: string | null): void;
 };
-
-/** What is being renamed: a Chapter or Scene id. */
-type Renaming = string | null;
 
 const SCENE = 'application/x-scaffold-scene';
 const CHAPTER = 'application/x-scaffold-chapter';
@@ -48,8 +50,9 @@ export function Binder({
   onSelect,
   conflicted,
   onChange,
+  renaming,
+  onRename: setRenaming,
 }: Props) {
-  const [renaming, setRenaming] = useState<Renaming>(null);
   const project = window.project;
   const { chapters } = manuscript;
   const isSelected = (kind: Selection['kind'], id?: string) =>
@@ -151,6 +154,7 @@ export function Binder({
       { label: 'Rename…', run: () => setRenaming(scene.id) },
       {
         label: 'New Scene Above',
+        shortcut: SHORTCUTS.newSceneAbove,
         run: () =>
           create(
             () => project.createScene(chapter.id, index),
@@ -160,6 +164,7 @@ export function Binder({
       },
       {
         label: 'New Scene Below',
+        shortcut: SHORTCUTS.newScene,
         run: () =>
           create(
             () => project.createScene(chapter.id, index + 1),
@@ -187,6 +192,7 @@ export function Binder({
       { label: 'Rename…', run: () => setRenaming(chapter.id) },
       {
         label: 'New Scene',
+        shortcut: SHORTCUTS.newScene,
         run: () =>
           create(
             () => project.createScene(chapter.id, chapter.scenes.length),
@@ -196,6 +202,7 @@ export function Binder({
       },
       {
         label: 'New Chapter Above',
+        shortcut: SHORTCUTS.newChapterAbove,
         run: () =>
           create(
             () => project.createChapter(index),
@@ -205,6 +212,7 @@ export function Binder({
       },
       {
         label: 'New Chapter Below',
+        shortcut: SHORTCUTS.newChapter,
         run: () =>
           create(
             () => project.createChapter(index + 1),
@@ -238,6 +246,8 @@ export function Binder({
       <li
         key={scene.id}
         className="binder-scene"
+        data-kind="scene"
+        data-id={scene.id}
         draggable={renaming !== scene.id}
         onDragStart={(event) => event.dataTransfer.setData(SCENE, scene.id)}
         onDragOver={(event) => {
@@ -300,6 +310,8 @@ export function Binder({
           <li
             key={chapter.id}
             className="binder-chapter"
+            data-kind="chapter"
+            data-id={chapter.id}
             aria-label={chapter.title}
             onDragOver={(event) => {
               if (event.dataTransfer.types.includes(SCENE))
@@ -366,6 +378,7 @@ export function Binder({
       </ol>
       <button
         className="binder-add"
+        title={withShortcut('New Chapter', SHORTCUTS.newChapter, MAC)}
         onClick={() =>
           create(
             () => project.createChapter(chapters.length),
@@ -430,17 +443,31 @@ export function TitleInput({
   );
 }
 
-export type MenuItem = { label: string; run(): unknown; disabled?: boolean };
+export type MenuItem = {
+  label: string;
+  run(): unknown;
+  disabled?: boolean;
+  /** The keys that do the same for the row with focus, as an accelerator. */
+  shortcut?: string;
+};
+
+/** Keys as `aria-keyshortcuts` names them, such as Control+Shift+Enter. */
+function ariaKeys(text: string): string {
+  return text.replace('Ctrl', 'Control').replace('⌘', 'Meta');
+}
 
 /** A button that opens `items`; it shows `children`, or ⋯ when there are none. */
 export function Menu({
   label,
   items,
   children,
+  title,
 }: {
   label: string;
   items: MenuItem[];
   children?: ReactNode;
+  /** The button's tooltip, such as its shortcut. */
+  title?: string;
 }) {
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
@@ -459,6 +486,7 @@ export function Menu({
       <button
         className="menu-button"
         aria-label={label}
+        title={title}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
@@ -476,12 +504,21 @@ export function Menu({
               key={item.label}
               role="menuitem"
               disabled={item.disabled}
+              aria-keyshortcuts={
+                item.shortcut && ariaKeys(shortcutText(item.shortcut, MAC))
+              }
               onClick={() => {
                 setOpen(false);
                 void item.run();
               }}
             >
               {item.label}
+              {item.shortcut && (
+                // Shown, not part of the item's name.
+                <span className="menu-shortcut" aria-hidden="true">
+                  {shortcutText(item.shortcut, MAC)}
+                </span>
+              )}
             </button>
           ))}
         </div>

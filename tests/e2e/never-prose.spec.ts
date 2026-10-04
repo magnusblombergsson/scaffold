@@ -133,7 +133,7 @@ test('nothing the Assistant writes reaches the Manuscript, in any Mode or room',
   const [sceneFile] = await readdir(path.join(projectPath, 'scenes'));
   const sceneId = path.basename(sceneFile, '.md');
 
-  // No menu inserts or applies anything.
+  // No menu inserts or applies anything: Insert only makes empty units.
   const labels = await app.evaluate(({ Menu }) => {
     const walk = (menu: Electron.Menu | null): string[] =>
       (menu?.items ?? []).flatMap((item) => [
@@ -142,7 +142,23 @@ test('nothing the Assistant writes reaches the Manuscript, in any Mode or room',
       ]);
     return walk(Menu.getApplicationMenu());
   });
-  expect(labels.filter((label) => /insert|apply/i.test(label))).toEqual([]);
+  expect(
+    labels.filter((label) => label !== 'Insert' && /insert|apply/i.test(label)),
+  ).toEqual([]);
+  const inserts = await app.evaluate(({ Menu }) =>
+    Menu.getApplicationMenu()
+      ?.items.find((item) => item.label === 'Insert')
+      ?.submenu?.items.flatMap((item) =>
+        item.type === 'separator' ? [] : [item.label],
+      ),
+  );
+  expect(inserts).toEqual([
+    'New Scene',
+    'New Scene Above',
+    'New Chapter',
+    'New Chapter Above',
+    'New Entry',
+  ]);
 
   // Writing, beside the editor: a question, with Proposals aimed at the Prose.
   anthropic.calls.push({

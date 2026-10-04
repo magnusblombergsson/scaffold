@@ -1,13 +1,8 @@
-import {
-  useCallback,
-  useEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   Changed,
   Conflict,
+  Created,
   Dropped,
   ImportFile,
   OpenedProject,
@@ -21,6 +16,7 @@ import {
   PROJECT_OUTLINE,
   unitKey,
   type EntrySummary,
+  type EntryType,
   type Manuscript,
   type ManuscriptChapter,
   type ManuscriptScene,
@@ -31,14 +27,22 @@ import {
 import { MODE_LABELS, type Mode } from '../shared/conversation';
 import type { ImportConvention } from '../shared/manuscript-import';
 import { upgradedMessage } from '../shared/format-gate';
+import {
+  commandForKey,
+  SHORTCUTS,
+  withShortcut,
+  type Command,
+} from '../shared/shortcuts';
 import { capitalized, unitName } from '../shared/unit-name';
 import { AssistantPanel } from './AssistantPanel';
 import { Binder, type Selection } from './Binder';
 import { BrainstormRoom } from './BrainstormRoom';
 import { WINDOW_MODES, type ShowProposal } from './Conversation';
 import { ConflictList, ConflictResolver } from './Conflicts';
+import { EntryTypePicker } from './EntryTypePicker';
 import { EntryView, VISIBILITY_LABELS } from './EntryView';
 import { ImportDialog } from './ImportDialog';
+import { chapterInsertion, sceneInsertion, type Current } from './insertion';
 import { InterviewRoom } from './InterviewRoom';
 import { Notices } from './Notices';
 import { OutlineNotes } from './OutlineNotes';
@@ -50,6 +54,7 @@ import {
   type MentionClick,
 } from './mention-highlight';
 import { MentionPeek } from './MentionPeek';
+import { MAC } from './platform';
 import { flushPendingEdits } from './pending-edits';
 import { ReadOnlyContext } from './read-only';
 import { SaveFailureBanner, useSaveStatus } from './SaveStatus';
@@ -80,7 +85,20 @@ export function App() {
   const [importing, setImporting] = useState<ImportFile | null>(null);
 
   useEffect(() => window.shell.onFlushRequest(flushPendingEdits), []);
-  useEffect(() => window.shell.onImportRequest(() => void chooseImport()), []);
+  useEffect(
+    () =>
+      window.shell.onCommand((command) => {
+        if (command.type === 'newProject')
+          void open(window.shell.createProject);
+        else if (command.type === 'openProject')
+          void open(window.shell.openProject);
+        else if (command.type === 'openRecent')
+          void open(() => window.shell.openRecent(command.path));
+        else if (command.type === 'import') void chooseImport();
+        else if (command.type === 'settings') openSettings();
+      }),
+    [],
+  );
   useEffect(() => {
     void window.shell.currentProject().then(setProject);
     void window.settings.showWelcome().then(setWelcome);
@@ -124,14 +142,25 @@ export function App() {
 
   const startButtons = (
     <>
-      <button onClick={() => open(window.shell.createProject)}>
+      <button
+        title={withShortcut('New Project', SHORTCUTS.newProject, MAC)}
+        onClick={() => open(window.shell.createProject)}
+      >
         New Project…
       </button>
-      <button onClick={() => open(window.shell.openProject)}>
+      <button
+        title={withShortcut('Open Project', SHORTCUTS.openProject, MAC)}
+        onClick={() => open(window.shell.openProject)}
+      >
         Open Project…
       </button>
       <button onClick={() => void chooseImport()}>Import…</button>
-      <button onClick={openSettings}>Settings…</button>
+      <button
+        title={withShortcut('Settings', SHORTCUTS.settings, MAC)}
+        onClick={openSettings}
+      >
+        Settings…
+      </button>
     </>
   );
 
@@ -143,7 +172,6 @@ export function App() {
           project={project}
           error={error}
           onError={setError}
-          headerActions={startButtons}
           onAddKey={addKey}
         />
       ) : welcome ? (
@@ -184,13 +212,11 @@ function ProjectView({
   project,
   error,
   onError,
-  headerActions,
   onAddKey,
 }: {
   project: OpenedProject;
   error: string | null;
   onError(message: string | null): void;
-  headerActions: ReactNode;
   /** Opens Settings to add an API key for the Assistant. */
   onAddKey(): void;
 }) {
@@ -258,6 +284,7 @@ function ProjectView({
 
   function select(selection: Selection) {
     setJump(undefined);
+    setFocusName(null);
     setResolving(null);
     setPeek(null);
     setSelected(selection);
@@ -437,6 +464,135 @@ function ProjectView({
     await refreshTrash();
   }
 
+  /** Runs a structure operation that makes a unit, as `change` does; its id, if made. */
+  async function create(
+    operation: () => Promise<Created>,
+    message: string,
+  ): Promise<string | undefined> {
+    let id: string | undefined;
+    await change(async () => {
+      const created = await operation();
+      id = created.id;
+      return created;
+    }, message);
+    return id;
+  }
+
+  /** The Chapter or Scene whose title the Binder is editing, if any. */
+  const [renaming, setRenaming] = useState<string | null>(null);
+  /** The Entry whose Name gets focus as it opens, as one just made. */
+  const [focusName, setFocusName] = useState<string | null>(null);
+  /** Whether the menu of Entry types to make one from is open. */
+  const [pickingEntryType, setPickingEntryType] = useState(false);
+
+  /**
+   * The Scene or Chapter a create chord works from: the highlighted one when
+   * focus is in the Binder, else the open one.
+   */
+  function current(): Current {
+    const row = document.activeElement?.closest<HTMLElement>(
+      '.binder [data-kind]',
+    );
+    if (row?.dataset.id) {
+      return {
+        kind: row.dataset.kind === 'chapter' ? 'chapter' : 'scene',
+        id: row.dataset.id,
+      };
+    }
+    if (selected?.kind === 'scene' || selected?.kind === 'chapter') {
+      return { kind: selected.kind, id: selected.id };
+    }
+    return null;
+  }
+
+  async function createEntry(type: EntryType) {
+    const label = ENTRY_TYPE_LABELS[type];
+    const id = await create(
+      () => window.project.createEntry(type, `New ${label}`),
+      `${label} created`,
+    );
+    if (!id) return;
+    setTab('bible');
+    select({ kind: 'entry', id });
+    setFocusName(id);
+  }
+
+  /**
+   * Does what the Author chose from the menu bar or with a shortcut; false
+   * when it doesn't apply here. Shortcuts other than the Modes' work in
+   * Writing only; the menus switch to it.
+   */
+  function run(command: Command): boolean {
+    if (command.type === 'mode') {
+      switchMode(command.mode);
+      return true;
+    }
+    if (
+      command.type !== 'newScene' &&
+      command.type !== 'newChapter' &&
+      command.type !== 'newEntry'
+    ) {
+      return false;
+    }
+    if (readOnly) return false;
+    if (mode !== 'writing') {
+      if (command.byKey) return false;
+      switchMode('writing');
+    }
+    if (command.type === 'newScene') {
+      const at = sceneInsertion(manuscript, current(), command.above);
+      if (!at) return false;
+      void create(
+        () => window.project.createScene(at.chapterId, at.index),
+        'Scene created',
+      ).then((id) => {
+        if (!id) return;
+        setTab('manuscript');
+        select({ kind: 'scene', id });
+      });
+    } else if (command.type === 'newChapter') {
+      const index = chapterInsertion(manuscript, current(), command.above);
+      void create(
+        () => window.project.createChapter(index),
+        'Chapter created',
+      ).then((id) => {
+        if (!id) return;
+        setTab('manuscript');
+        setRenaming(id);
+      });
+    } else if (command.entryType) {
+      void createEntry(command.entryType);
+    } else {
+      setPickingEntryType(true);
+    }
+    return true;
+  }
+  const latestRun = useRef(run);
+  useEffect(() => {
+    latestRun.current = run;
+  });
+  useEffect(
+    () => window.shell.onCommand((command) => latestRun.current(command)),
+    [],
+  );
+  // The window takes the chords before an editor does, so they work in one.
+  useEffect(() => {
+    const onKey = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.repeat) return;
+      const command = commandForKey(event, MAC);
+      // A dialog, or an open menu such as the Entry types, takes its own keys.
+      if (!command || document.querySelector('dialog[open], [role="menu"]')) {
+        return;
+      }
+      if (latestRun.current({ ...command, byKey: true })) {
+        event.preventDefault();
+        event.stopPropagation();
+      }
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, []);
+
   async function undo(step: number) {
     flushPendingEdits();
     setLatest(undefined);
@@ -483,6 +639,7 @@ function ProjectView({
               <button
                 key={value}
                 aria-pressed={mode === value}
+                title={withShortcut(MODE_LABELS[value], SHORTCUTS[value], MAC)}
                 onClick={() => switchMode(value)}
               >
                 {MODE_LABELS[value]}
@@ -504,7 +661,6 @@ function ProjectView({
                       ? entryTitle(openEntry)
                       : selected?.kind === 'project' && 'Project Outline'}
           </span>
-          <span className="header-actions">{headerActions}</span>
         </header>
         {readOnly && (
           <p className="read-only-banner" role="alert">
@@ -606,6 +762,8 @@ function ProjectView({
                       onSelect={select}
                       conflicted={conflicted}
                       onChange={change}
+                      renaming={renaming}
+                      onRename={setRenaming}
                     />
                   ) : tab === 'bible' ? (
                     <StoryBible
@@ -613,6 +771,7 @@ function ProjectView({
                       openId={openEntry?.id ?? null}
                       conflicted={conflicted}
                       onOpen={(id) => select({ kind: 'entry', id })}
+                      onCreate={(type) => void createEntry(type)}
                       onChange={change}
                       highlight={highlight}
                       onHighlight={(on) => {
@@ -680,6 +839,7 @@ function ProjectView({
                     entry={openEntry}
                     entries={entries}
                     language={language}
+                    focusName={focusName === openEntry.id}
                     onType={(type) =>
                       change(
                         () => window.project.setEntryType(openEntry.id, type),
@@ -802,6 +962,15 @@ function ProjectView({
             selection: mode === 'writing' ? selectionCounts : null,
           })}
         />
+        {pickingEntryType && (
+          <EntryTypePicker
+            onPick={(type) => {
+              setPickingEntryType(false);
+              void createEntry(type);
+            }}
+            onClose={() => setPickingEntryType(false)}
+          />
+        )}
         {peek && (
           <MentionPeek
             peek={peek}

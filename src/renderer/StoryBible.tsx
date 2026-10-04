@@ -1,11 +1,13 @@
-import type { Changed, Created } from '../shared/api';
+import type { Changed } from '../shared/api';
 import {
   ENTRY_TYPE_LABELS,
   ENTRY_TYPES,
   type EntrySummary,
   type EntryType,
 } from '../shared/project-types';
+import { SHORTCUTS, withShortcut } from '../shared/shortcuts';
 import { ConflictMarker, Menu } from './Binder';
+import { MAC } from './platform';
 
 const GROUP_TITLES: Record<EntryType, string> = {
   character: 'Characters',
@@ -31,6 +33,7 @@ export function StoryBible({
   openId,
   conflicted,
   onOpen,
+  onCreate,
   onChange,
   highlight,
   onHighlight,
@@ -41,31 +44,22 @@ export function StoryBible({
   /** The ids of Entries whose own file or private notes are in Conflict. */
   conflicted: ReadonlySet<string>;
   onOpen(id: string): void;
+  /** Makes an Entry of `type` and opens it, with its Name focused. */
+  onCreate(type: EntryType): void;
   /** Runs a change the Author can undo; `message` says what it did, beside Undo. */
   onChange(operation: () => Promise<Changed>, message: string): Promise<void>;
   highlight: boolean;
   onHighlight(on: boolean): void;
 }) {
-  async function create(type: EntryType) {
-    let created: Created | undefined;
-    await onChange(async () => {
-      created = await window.project.createEntry(
-        type,
-        `New ${ENTRY_TYPE_LABELS[type]}`,
-      );
-      return created;
-    }, `${ENTRY_TYPE_LABELS[type]} created`);
-    if (created) onOpen(created.id);
-  }
-
   return (
     <nav className="story-bible" aria-label="Story Bible">
       <div className="story-bible-new">
         <Menu
           label="New Entry"
+          title={withShortcut('New Entry', SHORTCUTS.newEntry, MAC)}
           items={ENTRY_TYPES.map((type) => ({
             label: ENTRY_TYPE_LABELS[type],
-            run: () => create(type),
+            run: () => onCreate(type),
           }))}
         >
           New Entry…

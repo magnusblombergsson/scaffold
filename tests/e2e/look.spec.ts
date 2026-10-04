@@ -6,7 +6,7 @@ import {
   type Page,
 } from '@playwright/test';
 import path from 'node:path';
-import { answerDialogs, launch, useTempDir } from './app';
+import { answerDialogs, chooseMenu, launch, useTempDir } from './app';
 import { useFakeAnthropic } from './fake-anthropic';
 
 const tempDir = useTempDir();
@@ -166,7 +166,7 @@ for (const theme of ['light', 'dark'] as const) {
       });
 
       // Settings: a dialog on the sheet colour, its dropdowns underlined.
-      await page.getByRole('button', { name: 'Settings…' }).click();
+      await chooseMenu(app, ['Tools', 'Settings…'], page);
       const settings = page.getByRole('dialog', { name: 'Settings' });
       await expect(settings).toHaveCSS('background-color', look.sheet);
       const dropdown = settings.locator('select').first();

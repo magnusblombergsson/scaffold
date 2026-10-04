@@ -12,6 +12,7 @@ import type {
 import type { ReviewCommand } from './finding';
 import type { ImportBlock, ImportConvention } from './manuscript-import';
 import type { ModelId } from './models';
+import type { Command } from './shortcuts';
 import type { PendingProposal, ProposedValue } from './proposal';
 
 /**
@@ -397,8 +398,11 @@ export interface ShellApi {
     file: ImportFile,
     convention: ImportConvention,
   ): Promise<OpenResult | 'canceled'>;
-  /** Calls `listener` when the Author chooses File → Import…. Returns an unsubscribe function. */
-  onImportRequest(listener: () => void): () => void;
+  /**
+   * Calls `listener` with what the Author chose from the menu bar, or with
+   * its shortcut. Returns an unsubscribe function.
+   */
+  onCommand(listener: (command: Command) => void): () => void;
   /** Opens a Project from the recent list. */
   openRecent(path: string): Promise<OpenResult>;
   /** Asks where a recent Project that wasn't found is now, and opens it. */
@@ -516,7 +520,7 @@ export const channel = {
   openProject: 'shell:openProject',
   chooseImport: 'shell:chooseImport',
   importProject: 'shell:importProject',
-  importRequest: 'shell:importRequest',
+  command: 'shell:command',
   openRecent: 'shell:openRecent',
   locateProject: 'shell:locateProject',
   recentProjects: 'shell:recentProjects',
