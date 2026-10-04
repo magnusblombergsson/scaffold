@@ -21,6 +21,7 @@
     "test": "vitest run",
     "test:live": "vitest run --config vitest.live.config.mts",
     "test:e2e": "electron-forge package && playwright test",
+    "icons": "node scripts/icons/main.ts",
     "eval:never-prose": "vitest run --config vitest.eval.config.mts never-prose"
   },
   "devDependencies": {
@@ -34,6 +35,7 @@
     "@electron-forge/plugin-vite": "^8.0.1",
     "@electron/fuses": "^2.1.3",
     "@playwright/test": "^1.63.0",
+    "@resvg/resvg-js": "^2.6.2",
     "@types/electron-squirrel-startup": "^1.0.2",
     "@types/mdast": "^4.0.4",
     "@types/node": "^26.6.3",
