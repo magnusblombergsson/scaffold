@@ -193,6 +193,7 @@ export function ProposalCard({
         {draft !== null ? (
           <>
             <button
+              className="primary"
               onClick={() => void accept(editedValue(draft))}
               disabled={readOnly || busy}
             >
@@ -207,6 +208,7 @@ export function ProposalCard({
             {!orphaned && (
               <>
                 <button
+                  className="primary"
                   onClick={() => void accept()}
                   disabled={readOnly || busy}
                 >

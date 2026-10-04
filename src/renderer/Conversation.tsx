@@ -647,6 +647,7 @@ export function Composer({
       )}
       <button
         type="submit"
+        className="primary"
         disabled={readOnly || streaming !== null || draft.trim() === ''}
       >
         Send

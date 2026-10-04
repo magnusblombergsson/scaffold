@@ -1,17 +1,47 @@
+/*
+ * Paper on a desk. Everything outside the work is the desk; the centre pane
+ * is a sheet lifted off it. Popovers and dialogs are sheets too. The app
+ * follows the system theme.
+ */
 :root {
-  --bg: #fbfaf7;
+  --desk: #e9e6df;
+  --sheet: #fffefb;
   --fg: #222;
-  --muted: #777;
-  --line: #e2dfd8;
+  --muted: #736f68;
+  --line: #d8d4cb;
+  /* Outlines of buttons and the underline of dropdowns. */
+  --pill-line: #b9b4a9;
+  /* The dashed rule of an editable field. */
+  --rule: #c9c3b6;
+  --hover: rgb(0 0 0 / 6%);
+  --accent: #2e6b4e;
+  --accent-tint: rgb(46 107 78 / 6%);
+  --danger: #b3261e;
+  --warning: #9a5c00;
+  --sheet-shadow: 0 1px 2px rgb(0 0 0 / 8%), 0 4px 14px rgb(0 0 0 / 7%);
+  --float-shadow: 0 4px 16px rgb(0 0 0 / 15%);
+  --raised-shadow: 0 1px 3px rgb(0 0 0 / 15%);
   color-scheme: light dark;
+  accent-color: var(--accent);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #1d1d1f;
+    --desk: #151517;
+    --sheet: #252528;
     --fg: #e8e6e1;
-    --muted: #999;
-    --line: #3a3a3c;
+    --muted: #9a9a9f;
+    --line: #38383d;
+    --pill-line: #55555c;
+    --rule: #4a4a50;
+    --hover: rgb(255 255 255 / 7%);
+    --accent: #79c29e;
+    --accent-tint: rgb(121 194 158 / 8%);
+    --danger: #f2867f;
+    --warning: #e0a040;
+    --sheet-shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 4px 14px rgb(0 0 0 / 30%);
+    --float-shadow: 0 4px 16px rgb(0 0 0 / 50%);
+    --raised-shadow: 0 1px 3px rgb(0 0 0 / 60%);
   }
 }
 
@@ -23,11 +53,158 @@ body,
 }
 
 body {
-  background: var(--bg);
+  background: var(--desk);
   color: var(--fg);
   font-family:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
     sans-serif;
+}
+
+/* Action buttons are outlined pills: every button with no class and no
+   role, and these classed ones. */
+button:not([class], [role]),
+button.primary,
+.binder-add,
+.room-new,
+.trash-empty-button,
+.entry-card-open,
+.proposal-undo,
+.story-bible-new .menu-button {
+  font: inherit;
+  font-size: 0.85rem;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--pill-line);
+  border-radius: 999px;
+  padding: 0.2rem 0.9rem;
+  cursor: pointer;
+}
+
+button:not([class], [role]):hover:not(:disabled),
+.binder-add:hover:not(:disabled),
+.room-new:hover:not(:disabled),
+.trash-empty-button:hover:not(:disabled),
+.entry-card-open:hover:not(:disabled),
+.proposal-undo:hover:not(:disabled),
+.story-bible-new .menu-button:hover:not(:disabled) {
+  border-color: var(--fg);
+}
+
+/* Add buttons. */
+.binder-add,
+.room-new,
+.story-bible-new .menu-button {
+  border-style: dashed;
+}
+
+/* Review Scene, Review Chapter, Send and Accept. */
+button.primary {
+  border: 1.5px solid var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+button.primary:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Dropdowns: no box, an underline and a chevron. */
+select {
+  appearance: none;
+  font: inherit;
+  font-size: 0.85rem;
+  color: inherit;
+  background-color: transparent;
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    calc(100% - 10px) 55%,
+    calc(100% - 5px) 55%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+  border: none;
+  border-bottom: 1.5px solid var(--pill-line);
+  border-radius: 0;
+  padding: 0.2rem 1.4rem 0.2rem 0.1rem;
+  cursor: pointer;
+}
+
+select:hover,
+select:focus-visible {
+  border-bottom-color: var(--accent);
+  outline: none;
+}
+
+select option {
+  background: var(--sheet);
+  color: var(--fg);
+}
+
+/* Editable cue: every editable field but the Prose has a dashed rule on its
+   left, solid accent while hovered or focused. Read-only text has none. */
+.plain-text[contenteditable='true'],
+.binder-rename,
+.proposal-edit,
+.proposal-edit-entry input,
+.key-form input[type='password'],
+textarea.conflict-text {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: none;
+  border-left: 2px dashed var(--rule);
+  border-radius: 0;
+  padding: 0.2rem 0.4rem 0.2rem 0.7rem;
+  outline: none;
+  transition:
+    border-color 0.12s,
+    background-color 0.12s;
+}
+
+:is(
+  .plain-text[contenteditable='true'],
+  .binder-rename,
+  .proposal-edit,
+  .proposal-edit-entry input,
+  .key-form input[type='password'],
+  textarea.conflict-text
+):hover {
+  border-left-style: solid;
+  border-left-color: var(--accent);
+}
+
+:is(
+  .plain-text[contenteditable='true'],
+  .binder-rename,
+  .proposal-edit,
+  .proposal-edit-entry input,
+  .key-form input[type='password'],
+  textarea.conflict-text
+):focus {
+  border-left: 2px solid var(--accent);
+  background: var(--accent-tint);
+}
+
+/* The field's label gets a pencil while the field is hovered or focused. */
+.plain-text-field:has(.plain-text[contenteditable='true']:is(:hover, :focus))
+  > :is(h3, h4) {
+  color: var(--accent);
+}
+
+.plain-text-field:has(.plain-text[contenteditable='true']:is(:hover, :focus))
+  > :is(h3, h4)::after {
+  content: ' ✎';
+}
+
+.key-form > label:has(input[type='password']:is(:hover, :focus)) {
+  color: var(--accent);
 }
 
 .start {
@@ -82,7 +259,7 @@ button.recent-open {
 }
 
 button.recent-open:hover {
-  background: var(--line);
+  background: var(--hover);
 }
 
 .recent-path {
@@ -114,40 +291,35 @@ button.recent-open:hover {
   align-items: center;
   gap: 1rem;
   padding: 0.5rem 1rem;
-  border-bottom: 1px solid var(--line);
 }
 
 .project-name {
   font-weight: 600;
 }
 
+/* A row of pills; the current Mode is raised in the sheet colour. */
 .mode-switch {
   display: flex;
+  gap: 2px;
 }
 
 .mode-switch button {
   background: none;
-  border: 1px solid var(--line);
+  border: none;
+  border-radius: 999px;
   color: inherit;
-  padding: 1px 0.75rem;
+  font: inherit;
+  padding: 2px 0.9rem;
   cursor: pointer;
 }
 
-.mode-switch button + button {
-  border-left: none;
-}
-
-.mode-switch button:first-child {
-  border-radius: 4px 0 0 4px;
-}
-
-.mode-switch button:last-child {
-  border-radius: 0 4px 4px 0;
+.mode-switch button:hover {
+  background: var(--hover);
 }
 
 .mode-switch button[aria-pressed='true'] {
-  background: var(--line);
-  font-weight: 600;
+  background: var(--sheet);
+  box-shadow: var(--raised-shadow);
 }
 
 .scene-title {
@@ -175,11 +347,16 @@ button.recent-open:hover {
   margin: 0 0 1em;
 }
 
+/* The sheet. */
 .centre {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
+  background: var(--sheet);
+  border-radius: 8px;
+  box-shadow: var(--sheet-shadow);
+  overflow: hidden;
 }
 
 .centre-title {
@@ -241,7 +418,7 @@ button.recent-open:hover {
 }
 
 [role='alert'] {
-  color: #b3261e;
+  color: var(--danger);
   padding: 0 1rem;
 }
 
@@ -257,14 +434,14 @@ button.recent-open:hover {
 }
 
 .save-status.failed {
-  color: #b3261e;
+  color: var(--danger);
   font-weight: 600;
 }
 
 .read-only-banner,
 .save-failures {
-  border-bottom: 1px solid #b3261e;
-  background: rgb(179 38 30 / 8%);
+  border-bottom: 1px solid var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
   padding: 0.5rem 1rem;
 }
 
@@ -301,6 +478,7 @@ button.recent-open:hover {
   display: flex;
   flex: 1;
   min-height: 0;
+  padding: 0 0.5rem 0.5rem;
 }
 
 /* One Mode's panes; another Mode's stay mounted, hidden. */
@@ -321,13 +499,12 @@ button.recent-open:hover {
   font-size: 0.9rem;
 }
 
+/* An invisible gap between panes that shows a bar on hover. */
 .panel-resizer {
   flex-shrink: 0;
-  width: 5px;
-  margin-left: -2px;
-  border-left: 2px solid transparent;
-  border-right: 2px solid transparent;
-  background: var(--line);
+  width: 3px;
+  padding: 0 3px;
+  background-color: transparent;
   background-clip: content-box;
   cursor: col-resize;
   touch-action: none;
@@ -335,7 +512,7 @@ button.recent-open:hover {
 
 .panel-resizer:hover,
 .panel-resizer:focus-visible {
-  background-color: var(--muted);
+  background-color: var(--pill-line);
   outline: none;
 }
 
@@ -354,7 +531,7 @@ button.recent-open:hover {
 }
 
 .tabs [role='tab'][aria-selected='true'] {
-  border-bottom-color: var(--fg);
+  border-bottom-color: var(--accent);
 }
 
 .binder {
@@ -434,7 +611,15 @@ h2.binder-title > button {
 button.binder-title[aria-current='true'],
 h2.binder-title > button[aria-current='true'],
 .binder-project[aria-current='true'] {
-  background: var(--line);
+  background: var(--sheet);
+}
+
+/* Titles that rename on double-click. */
+.binder-chapters button.binder-title:hover::after,
+h2.binder-title > button:hover::after {
+  content: ' ✎';
+  color: var(--accent);
+  font-weight: normal;
 }
 
 .binder-missing {
@@ -483,10 +668,10 @@ h2.binder-title > button[aria-current='true'],
   flex-direction: column;
   min-width: 11rem;
   padding: 0.25rem;
-  background: var(--bg);
+  background: var(--sheet);
   border: 1px solid var(--line);
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgb(0 0 0 / 15%);
+  border-radius: 8px;
+  box-shadow: var(--float-shadow);
 }
 
 .menu-items [role='menuitem'] {
@@ -501,7 +686,7 @@ h2.binder-title > button[aria-current='true'],
 }
 
 .menu-items [role='menuitem']:hover:not(:disabled) {
-  background: var(--line);
+  background: var(--hover);
 }
 
 .editor.empty,
@@ -568,20 +753,27 @@ h2.binder-title > button[aria-current='true'],
   display: flex;
   align-items: center;
   gap: 1rem;
-  padding: 0.5rem 0.75rem 0.5rem 1rem;
+  padding: 0.5rem 0.6rem 0.5rem 1rem;
   background: var(--fg);
-  color: var(--bg);
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgb(0 0 0 / 20%);
+  color: var(--sheet);
+  border-radius: 10px;
+  box-shadow: var(--float-shadow);
 }
 
 .toast button {
   background: none;
-  border: none;
+  border: 1px solid color-mix(in srgb, currentColor 45%, transparent);
+  border-radius: 999px;
   color: inherit;
   font: inherit;
+  font-size: 0.85rem;
   font-weight: 600;
+  padding: 0.1rem 0.75rem;
   cursor: pointer;
+}
+
+.toast button:hover:not(:disabled) {
+  border-color: currentColor;
 }
 
 .badge {
@@ -590,14 +782,14 @@ h2.binder-title > button[aria-current='true'],
   margin-left: 0.35rem;
   padding: 0 0.3rem;
   border-radius: 999px;
-  background: #b26a00;
-  color: #fff;
+  background: var(--warning);
+  color: var(--sheet);
   font-size: 0.75em;
   text-align: center;
 }
 
 .binder-conflict {
-  color: #b26a00;
+  color: var(--warning);
   font-size: 0.85em;
   font-weight: normal;
 }
@@ -632,7 +824,7 @@ h2.binder-title > button[aria-current='true'],
 }
 
 .conflict-item[aria-current='true'] {
-  background: var(--line);
+  background: var(--sheet);
 }
 
 .conflict-versions {
@@ -679,13 +871,6 @@ h2.binder-title > button[aria-current='true'],
 
 .story-bible-new {
   padding: 0.5rem;
-}
-
-.story-bible-new .menu-button {
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  color: var(--fg);
-  padding: 0.2rem 0.6rem;
 }
 
 .story-bible-new .menu-items {
@@ -766,9 +951,9 @@ h2.binder-title > button[aria-current='true'],
   list-style: none;
   margin: 0;
   padding: 0.5rem 0.75rem;
-  border: 1px solid rgb(176 120 0 / 50%);
-  border-radius: 6px;
-  background: rgb(176 120 0 / 10%);
+  border: 1px solid color-mix(in srgb, var(--warning) 50%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
   font-size: 0.85rem;
 }
 
@@ -833,10 +1018,10 @@ h2.binder-title > button[aria-current='true'],
   max-height: 60vh;
   overflow-y: auto;
   padding: 0.75rem;
-  background: var(--bg);
+  background: var(--sheet);
   border: 1px solid var(--line);
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgb(0 0 0 / 15%);
+  border-radius: 8px;
+  box-shadow: var(--float-shadow);
   font-size: 0.9rem;
 }
 
@@ -869,13 +1054,6 @@ h2.binder-title > button[aria-current='true'],
 .entry-card-open {
   grid-column: 2;
   grid-row: 1 / span 2;
-  background: none;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  color: var(--fg);
-  cursor: pointer;
-  font: inherit;
-  padding: 0.1rem 0.45rem;
 }
 
 .entry-card-aliases {
@@ -951,17 +1129,17 @@ h2.binder-title > button[aria-current='true'],
 }
 
 .key-message.warning {
-  color: #b0560c;
+  color: var(--warning);
 }
 
 .settings {
   width: min(28rem, 90vw);
   padding: 1rem 1.25rem;
-  background: var(--bg);
+  background: var(--sheet);
   color: var(--fg);
   border: 1px solid var(--line);
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgb(0 0 0 / 15%);
+  border-radius: 10px;
+  box-shadow: var(--float-shadow);
 }
 
 .settings::backdrop {
@@ -1140,7 +1318,7 @@ p.message-used,
 
 .message-system {
   align-self: stretch;
-  border: 1px solid #b3261e;
+  border: 1px solid var(--danger);
 }
 
 .message-system p {
@@ -1154,7 +1332,7 @@ p.message-used,
 }
 
 .assistant-error {
-  color: #b3261e;
+  color: var(--danger);
 }
 
 .review-actions {
@@ -1181,7 +1359,7 @@ p.message-used,
 }
 
 .finding-contradiction .finding-type {
-  color: #b3261e;
+  color: var(--danger);
 }
 
 .finding-comment,
@@ -1217,9 +1395,24 @@ button.finding-quote:hover {
   gap: 0.4rem;
 }
 
+/* The composer is a rounded bordered box. */
 .composer textarea {
   resize: vertical;
   font: inherit;
+  color: inherit;
+  background: var(--sheet);
+  border: 1px solid var(--pill-line);
+  border-radius: 10px;
+  padding: 0.5rem 0.7rem;
+}
+
+.composer textarea:hover {
+  border-color: var(--fg);
+}
+
+.composer textarea:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 
 .composer button {
@@ -1232,10 +1425,10 @@ button.finding-quote:hover {
   list-style: none;
   max-height: 12rem;
   overflow-y: auto;
-  background: var(--bg);
+  background: var(--sheet);
   border: 1px solid var(--line);
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgb(0 0 0 / 15%);
+  border-radius: 8px;
+  box-shadow: var(--float-shadow);
 }
 
 .at-mention-options [role='option'] {
@@ -1244,7 +1437,7 @@ button.finding-quote:hover {
 }
 
 .at-mention-options [aria-selected='true'] {
-  background: color-mix(in srgb, var(--fg) 10%, transparent);
+  background: var(--hover);
 }
 
 .at-mention-where {
@@ -1254,19 +1447,20 @@ button.finding-quote:hover {
 
 .proposal-card {
   margin: 0.5rem 0 0;
-  padding: 0.5rem 0.6rem;
+  padding: 0.5rem 0.7rem;
+  background: var(--sheet);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 10px;
   white-space: normal;
 }
 
 .proposal-card.warning {
-  border-color: rgb(176 120 0 / 50%);
-  background: rgb(176 120 0 / 10%);
+  border-color: color-mix(in srgb, var(--warning) 50%, transparent);
+  background: color-mix(in srgb, var(--warning) 10%, var(--sheet));
 }
 
 .proposal-card.highlighted {
-  outline: 2px solid rgb(64 120 200 / 60%);
+  outline: 2px solid var(--accent);
 }
 
 .proposal-card.decided {
@@ -1286,7 +1480,6 @@ button.finding-quote:hover {
 
 .proposal-undo {
   margin-left: 0.5rem;
-  font-size: 0.85em;
 }
 
 .proposal-undo-blocked {
@@ -1306,7 +1499,7 @@ button.finding-quote:hover {
 
 .proposal-card ins {
   text-decoration: none;
-  background: rgb(60 160 80 / 22%);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
   border-radius: 2px;
 }
 
@@ -1368,7 +1561,7 @@ button.finding-quote:hover {
 
 .proposal-error {
   margin: 0.3rem 0 0;
-  color: #b3261e;
+  color: var(--danger);
   font-size: 0.85em;
 }
 
