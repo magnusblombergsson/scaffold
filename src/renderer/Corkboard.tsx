@@ -8,17 +8,12 @@ import {
 } from '../shared/project-types';
 import { OutlineNotes } from './OutlineNotes';
 
-type Navigation = {
-  onOpenScene(id: string): void;
-  onOpenChapter(id: string): void;
-};
-
 /** The lane of Scenes that have no place in the Manuscript's order. */
 const UNPLACED = 'unplaced';
 
 /**
  * A Chapter as index cards: its own Outline and Notes in a wide card, then
- * its Scenes as a grid of numbered cards, each editable in place.
+ * its Scenes as numbered cards, each editable in place.
  */
 export function ChapterCorkboard({
   chapter,
@@ -35,21 +30,13 @@ export function ChapterCorkboard({
       <article className="card wide own" aria-label={chapter.title}>
         <OutlineNotes unitId={chapter.id} language={language} withNotes />
       </article>
-      {chapter.scenes.length === 0 ? (
-        <p className="corkboard-empty">No Scenes yet.</p>
-      ) : (
-        <div className="card-grid">
-          {chapter.scenes.map((scene, i) => (
-            <SceneCard
-              key={scene.id}
-              scene={scene}
-              number={i + 1}
-              language={language}
-              onOpen={() => onOpenScene(scene.id)}
-            />
-          ))}
-        </div>
-      )}
+      <div className="scene-cards">
+        <SceneCards
+          scenes={chapter.scenes}
+          language={language}
+          onOpenScene={onOpenScene}
+        />
+      </div>
     </div>
   );
 }
@@ -64,7 +51,12 @@ export function ProjectCorkboard({
   language,
   onOpenScene,
   onOpenChapter,
-}: Navigation & { manuscript: Manuscript; language: ProseLanguage }) {
+}: {
+  manuscript: Manuscript;
+  language: ProseLanguage;
+  onOpenScene(id: string): void;
+  onOpenChapter(id: string): void;
+}) {
   const [shown, setShown] = useState<ReadonlySet<string>>(() => new Set());
   const lanes = [
     ...manuscript.chapters.map((c) => c.id),
@@ -124,9 +116,9 @@ export function ProjectCorkboard({
           </article>
         </Lane>
       ))}
-      {manuscript.unplaced.length > 0 && (
+      {lanes.includes(UNPLACED) && (
         <Lane
-          title="Unplaced"
+          title="Unplaced Scenes"
           scenes={manuscript.unplaced}
           shown={shown.has(UNPLACED)}
           onToggle={() => toggle(UNPLACED)}
@@ -134,7 +126,7 @@ export function ProjectCorkboard({
           onOpenScene={onOpenScene}
         >
           <div className="card own unplaced">
-            <span className="card-title">Unplaced</span>
+            <span className="card-title">Unplaced Scenes</span>
           </div>
         </Lane>
       )}
@@ -178,22 +170,39 @@ function Lane({
           {scenes.length === 1 ? '1 Scene' : `${scenes.length} Scenes`}
         </span>
       </button>
-      {shown &&
-        (scenes.length === 0 ? (
-          <p className="corkboard-empty">No Scenes yet.</p>
-        ) : (
-          scenes.map((scene, i) => (
-            <SceneCard
-              key={scene.id}
-              scene={scene}
-              number={i + 1}
-              language={language}
-              onOpen={() => onOpenScene(scene.id)}
-            />
-          ))
-        ))}
+      {shown && (
+        <SceneCards
+          scenes={scenes}
+          language={language}
+          onOpenScene={onOpenScene}
+        />
+      )}
     </section>
   );
+}
+
+/** Scenes as numbered cards, or a word that there are none. */
+function SceneCards({
+  scenes,
+  language,
+  onOpenScene,
+}: {
+  scenes: ManuscriptScene[];
+  language: ProseLanguage;
+  onOpenScene(id: string): void;
+}) {
+  if (scenes.length === 0) {
+    return <p className="corkboard-empty">No Scenes yet.</p>;
+  }
+  return scenes.map((scene, i) => (
+    <SceneCard
+      key={scene.id}
+      scene={scene}
+      number={i + 1}
+      language={language}
+      onOpen={() => onOpenScene(scene.id)}
+    />
+  ));
 }
 
 function SceneCard({

@@ -67,7 +67,7 @@ const changing = (page: Page) => [page.locator('.save-status')];
  * A Project of two Chapters, the first with two Scenes, and a Scene written
  * on another computer that has no place yet.
  */
-async function twoChaptersAndAStray(projectPath: string) {
+async function twoChaptersAndAnUnplacedScene(projectPath: string) {
   const app = await launch(tempDir());
   await answerDialogs(app, projectPath);
   const page = await app.firstWindow();
@@ -80,10 +80,10 @@ async function twoChaptersAndAStray(projectPath: string) {
   await page.keyboard.press('Enter');
   await app.close();
 
-  const stray = '0b9f4a52-3c1e-4d7a-9f5e-2a6c8b1d4e70';
+  const unplaced = '0b9f4a52-3c1e-4d7a-9f5e-2a6c8b1d4e70';
   await writeFile(
-    path.join(projectPath, 'scenes', `${stray}.md`),
-    `---\nid: ${stray}\nformat: 1\n---\nWritten on the laptop.`,
+    path.join(projectPath, 'scenes', `${unplaced}.md`),
+    `---\nid: ${unplaced}\nformat: 1\n---\nWritten on the laptop.`,
   );
 }
 
@@ -92,7 +92,7 @@ for (const theme of ['light', 'dark'] as const) {
 
   test(`a Chapter's Corkboard edits its Outline and Notes, and its Scenes', in place, ${theme}`, async () => {
     const projectPath = path.join(tempDir(), 'My Novel');
-    await twoChaptersAndAStray(projectPath);
+    await twoChaptersAndAnUnplacedScene(projectPath);
     const app = await launch(tempDir());
     try {
       const page = await app.firstWindow();
@@ -148,7 +148,7 @@ for (const theme of ['light', 'dark'] as const) {
 
   test(`the Project's Corkboard has a lane per Chapter that opens to its Scenes, ${theme}`, async () => {
     const projectPath = path.join(tempDir(), 'My Novel');
-    await twoChaptersAndAStray(projectPath);
+    await twoChaptersAndAnUnplacedScene(projectPath);
     const app = await launch(tempDir());
     try {
       const page = await app.firstWindow();
@@ -161,7 +161,11 @@ for (const theme of ['light', 'dark'] as const) {
       const lanes = page.getByRole('region', { name: /^Lane:/ });
       await expect
         .poll(() => labels(lanes))
-        .toEqual(['Lane: Chapter 1', 'Lane: Part Two', 'Lane: Unplaced']);
+        .toEqual([
+          'Lane: Chapter 1',
+          'Lane: Part Two',
+          'Lane: Unplaced Scenes',
+        ]);
       await expect(page.getByRole('article')).toHaveText([
         /^Outline/,
         /^1Chapter 1Outline.*Notes/,
@@ -197,6 +201,8 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(lanes.nth(1)).toContainText('No Scenes yet');
       await expect(card(page, 'Untitled Scene')).toBeVisible();
       await expect(button(page, 'Show all Scenes')).toBeDisabled();
+      // Typing on a Scene's card scrolled its lane: back to its start.
+      await lanes.nth(0).evaluate((lane) => (lane.scrollLeft = 0));
       await expect(page).toHaveScreenshot(`project-corkboard-${theme}.png`, {
         mask: changing(page),
       });
@@ -212,7 +218,7 @@ for (const theme of ['light', 'dark'] as const) {
 
       // An Unplaced Scene's title opens its Prose.
       await button(page, 'Project Outline').click();
-      await button(page, 'Scenes of Unplaced').click();
+      await button(page, 'Scenes of Unplaced Scenes').click();
       await button(page, 'Open Untitled Scene').click();
       await expect(page.getByLabel('Prose')).toHaveText(
         'Written on the laptop.',

@@ -498,7 +498,7 @@ span.card-title {
   color: var(--muted);
 }
 
-.card-grid {
+.scene-cards {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
   gap: 0.9rem;
