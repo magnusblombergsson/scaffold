@@ -1,15 +1,12 @@
 import { roleText } from '../shared/entry';
-import {
-  ENTRY_TYPE_LABELS,
-  STATUS_LABELS,
-  type EntryValue,
-} from '../shared/project-types';
+import { ENTRY_TYPE_LABELS, type EntryValue } from '../shared/project-types';
 import { VISIBILITY_LABELS } from './EntryView';
+import { entryFields, type CardField } from './card-fields';
 import { entryTitle } from './StoryBible';
 
 /**
- * An Entry's fields at a glance, read-only, as the Story Bible peek and the
- * Brainstorm room show it, with an icon that opens the full Entry.
+ * An Entry's fields at a glance, read-only, as the Brainstorm and Interview
+ * rooms show it, with an icon that opens the full Entry.
  */
 export function EntryCard({
   entry,
@@ -54,22 +51,11 @@ export function EntryCard({
   );
 }
 
-/** An Entry's type-specific fields that have a value, labelled. */
-function cardFields({ fields }: EntryValue): [string, string][] {
-  const { role, roleNote, appearance, voice, senses, status } = fields;
-  const pairs: [string, string][] = [
-    ['Role', roleText(role, roleNote)],
-    ['Appearance', appearance ?? ''],
-    ['Voice traits', voice?.traits ?? ''],
-    ['Says', voice?.says.join(', ') ?? ''],
-    ['Never says', voice?.neverSays.join(', ') ?? ''],
-    ['Example lines', voice?.examples.join('\n') ?? ''],
-    ['Smells', senses?.smells ?? ''],
-    ['Sight', senses?.sight ?? ''],
-    ['Sound', senses?.sound ?? ''],
-    ['Touch', senses?.touch ?? ''],
-    ['Atmosphere', senses?.atmosphere ?? ''],
-    ['Status', status ? STATUS_LABELS[status] : ''],
+/** An Entry's Role and type-specific fields that have a value, labelled. */
+function cardFields(entry: EntryValue): CardField[] {
+  const role = roleText(entry.fields.role, entry.fields.roleNote);
+  return [
+    ...(role ? [['Role', role] satisfies CardField] : []),
+    ...entryFields(entry),
   ];
-  return pairs.filter(([, text]) => text.trim());
 }

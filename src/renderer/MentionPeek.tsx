@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from 'react';
 import type { EntryValue } from '../shared/project-types';
-import { EntryCard } from './EntryCard';
+import { PeekCard } from './PeekCard';
 import type { MentionClick } from './mention-highlight';
 
-const PEEK_WIDTH = 320;
+const PEEK_WIDTH = 340;
 
 /**
- * The Story Bible peek: the fields of each Entry a clicked highlight names,
- * below it, each with an icon that opens the full Entry. Escape, a click
- * elsewhere, or scrolling the highlight away closes it.
+ * The Peek: a shortened card for each Entry a clicked highlight names, below
+ * it, each with Read more and an icon that opens the full Entry. Escape, a
+ * click elsewhere, or scrolling the highlight away closes it.
  */
 export function MentionPeek({
   peek,
@@ -69,7 +69,7 @@ export function MentionPeek({
       style={{ top: anchor.bottom + 4, left, width: PEEK_WIDTH }}
     >
       {entries?.map((entry) => (
-        <EntryCard key={entry.id} entry={entry} onOpen={onOpen} />
+        <PeekCard key={entry.id} entry={entry} onOpen={onOpen} />
       ))}
     </div>
   );
