@@ -217,6 +217,80 @@ test('a reply cut short is kept as interrupted, and Retry adds a new turn', asyn
   await app.close();
 });
 
+test('a Claude reply ending on max_tokens shows Cut short and makes no Proposals; an empty one says so and offers Retry; unreadable Proposals are counted', async () => {
+  const projectPath = path.join(tempDir(), 'My Novel');
+  anthropic.calls.push(
+    {
+      reply: [
+        'Mira, then.\n```proposal\n{"create": "character", "name": "Mira"}\n```\nAnd',
+      ],
+      stopReason: 'max_tokens',
+    },
+    { reply: ['Noted.\n```proposal\n{oops\n```'] },
+    {
+      reply: ['<think>Long ', 'thoughts'],
+      usage: { input: 2_000, output: 4_096 },
+      stopReason: 'max_tokens',
+    },
+    { reply: ['Because.'] },
+  );
+  const app = await launch(tempDir(), { anthropicUrl: anthropic.url });
+  await answerDialogs(app, projectPath);
+  const page = await app.firstWindow();
+  await page.getByRole('button', { name: 'New Project…' }).click();
+  const assistant = await addKey(page);
+  const messages = assistant.getByRole('log', { name: 'Messages' });
+  const replies = messages.getByRole('article', { name: 'Assistant' });
+  async function send(text: string, count: number) {
+    await assistant.getByRole('textbox', { name: 'Message' }).fill(text);
+    await assistant.getByRole('button', { name: 'Send' }).click();
+    await expect(replies).toHaveCount(count);
+  }
+
+  await send('Who?', 1);
+  const cut = replies.first();
+  await expect(cut).toContainText('Mira, then.');
+  await expect(cut).toContainText(
+    'Cut short: the reply reached its length limit',
+  );
+  await expect(cut).not.toContainText('Interrupted');
+  await expect(messages.getByRole('region', { name: /^Proposal/ })).toHaveCount(
+    0,
+  );
+
+  await send('And?', 2);
+  await expect(replies.nth(1)).toContainText('Noted.');
+  await expect(replies.nth(1)).toContainText('1 Proposal couldn’t be read');
+  await expect(replies.nth(1)).not.toContainText('oops');
+
+  await send('Then?', 3);
+  const empty = replies.nth(2);
+  await expect(empty).toContainText(
+    'No reply: the Model used its whole length limit thinking. Try again or choose another Model.',
+  );
+  await expect(empty).not.toContainText('thoughts');
+  await expect(empty.getByLabel('Usage')).toContainText('4.1k out');
+
+  await empty.getByRole('button', { name: 'Retry' }).click();
+  await expect(replies).toHaveCount(4);
+  await expect(replies.last()).toContainText('Because.');
+  // Neither the reply cut short nor the empty one is sent back.
+  const sent = JSON.stringify(anthropic.sent[3].messages);
+  expect(sent).toContain('Noted.');
+  expect(sent).not.toContain('Mira');
+  expect(sent).not.toContain('thoughts');
+
+  const [log] = await logs(projectPath);
+  expect(log.find((e) => e.type === 'reply.empty')).toMatchObject({
+    model: 'claude-opus-5-5',
+    provider: 'anthropic',
+    reason: 'length',
+    usage: { input: 2_000, output: 4_096 },
+  });
+  expect(log.filter((e) => String(e.type).startsWith('proposal.'))).toEqual([]);
+  await app.close();
+});
+
 test('the Author asks for a Review of the Chapter, sees its Findings in order, and a quote opens the Scene at the line', async () => {
   const projectPath = path.join(tempDir(), 'My Novel');
   const finding = (json: object) =>

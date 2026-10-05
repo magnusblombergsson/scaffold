@@ -4,13 +4,14 @@ import type { AddressInfo } from 'node:net';
 
 /**
  * How the fake answers one call to the Messages API: a reply streamed in
- * pieces with what it used, an error before any reply, or pieces and then a
- * dropped connection.
+ * pieces with what it used and why it stopped, an error before any reply, or
+ * pieces and then a dropped connection.
  */
 export type FakeCall =
   | {
       reply: string[];
       usage?: { input: number; cached?: number; output: number };
+      stopReason?: 'end_turn' | 'max_tokens';
     }
   | { status: number; type: string }
   | { dropAfter: string[] };
@@ -54,7 +55,13 @@ export function useFakeAnthropic() {
           stream(response, call.dropAfter, { input: 10, output: 1 }, false);
           setTimeout(() => response.socket?.destroy(), 50);
         } else {
-          stream(response, call.reply, call.usage ?? { input: 10, output: 5 });
+          stream(
+            response,
+            call.reply,
+            call.usage ?? { input: 10, output: 5 },
+            true,
+            call.stopReason,
+          );
         }
       });
     });
@@ -84,6 +91,7 @@ function stream(
   pieces: string[],
   usage: { input: number; cached?: number; output: number },
   end = true,
+  stopReason = 'end_turn',
 ) {
   const cached = usage.cached ?? 0;
   const events: object[] = [
@@ -121,7 +129,7 @@ function stream(
       { type: 'content_block_stop', index: 0 },
       {
         type: 'message_delta',
-        delta: { stop_reason: 'end_turn', stop_sequence: null },
+        delta: { stop_reason: stopReason, stop_sequence: null },
         usage: { output_tokens: usage.output },
       },
       { type: 'message_stop' },

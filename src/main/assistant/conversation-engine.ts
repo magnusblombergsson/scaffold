@@ -7,6 +7,7 @@ import {
   type Compaction,
   type Conversation,
   type ConversationMessage,
+  type EmptyReply,
   type Saw,
 } from '../../shared/conversation';
 import {
@@ -23,8 +24,6 @@ import {
   newEntryOf,
   outlineChangeOf,
   proposalOf,
-  replyText,
-  splitReply,
   type Proposal,
   type ProposalChange,
 } from '../../shared/proposal';
@@ -38,8 +37,9 @@ import {
   type CompactionPolicy,
 } from './compaction';
 import { buildContext, defaultRequest, readableScene } from './context-builder';
-import { ProviderError, type ProviderRequest } from './provider';
+import { ProviderError, type Finish, type ProviderRequest } from './provider';
 import type { ProviderFor } from './providers';
+import { finishReply } from './reply-finishing';
 
 /** What a message is about: the Scene open in the editor when it was sent, if any. */
 export type Focus = { sceneId: string | null };
@@ -51,6 +51,7 @@ export type EngineDeps = {
     | 'assistantView'
     | 'readConversation'
     | 'appendMessage'
+    | 'appendEmptyReply'
     | 'appendProposal'
     | 'appendSummary'
   >;
@@ -143,8 +144,11 @@ export function createConversationEngine({
    * Author's message, with the context the Conversation's Mode gives the
    * Scene in `focus`, or in an Interview, the focus it was last set to.
    * Past the threshold, the older messages are compacted first.
-   * The reply is logged once it has come, or as interrupted if the call fails partway; a call that fails before any
-   * reply logs nothing. A Review's reply holds Findings, never Proposals.
+   * The reply is logged once it has come, without its thinking: as
+   * interrupted if the call fails partway, or cut short at the length limit,
+   * or as empty if nothing is left of it; a call that fails before any reply
+   * logs nothing. Only a complete reply makes Proposals, and a Review's
+   * reply holds Findings, never Proposals.
    */
   async function answer(
     conversationId: string,
@@ -177,6 +181,7 @@ export function createConversationEngine({
     };
     let text = '';
     let usage: Usage | undefined;
+    let finish: Finish | null = null;
     let failure: AssistantFailure | null = null;
     try {
       for await (const event of providerFor(chosen).stream(request)) {
@@ -185,6 +190,8 @@ export function createConversationEngine({
         } else if (event.type === 'text') {
           text += event.text;
           onText(event.text);
+        } else {
+          finish = event.finish;
         }
       }
     } catch (error) {
@@ -194,27 +201,49 @@ export function createConversationEngine({
         console.error('The Assistant call failed:', error);
         failure = 'other';
       }
-      if (text === '') return { reply: null, failure };
     }
 
+    const finished = finishReply({ text, finish, failed: failure !== null });
+    if (finished.ending === 'empty') {
+      if (failure) return { reply: null, failure };
+      const empty: EmptyReply = {
+        focus,
+        at: clock.now(),
+        model: chosen.id,
+        ...(usage && { usage }),
+        before: messages.length,
+      };
+      await store.appendEmptyReply(
+        conversationId,
+        empty,
+        chosen,
+        finish ?? 'complete',
+      );
+      return { reply: null, empty, failure: null };
+    }
     const findings =
-      mode === 'writing' ? await findingsIn(text, context.saw) : [];
+      mode === 'writing'
+        ? await findingsIn(finished.findings, context.saw)
+        : [];
+    // A Review asks before it proposes.
+    const made = reviewing ? null : await proposalsIn(finished.proposals);
+    const proposals = made?.proposals ?? [];
+    const unreadable = made ? finished.unreadable + made.unreadable : 0;
     const reply: ConversationMessage = {
       role: 'assistant',
-      text: replyText(text),
+      text: finished.text,
       focus,
       at: clock.now(),
       model: chosen.id,
       ...(usage && { usage }),
-      ...(failure && { interrupted: true as const }),
+      ...(finished.ending !== 'complete' && { interrupted: true as const }),
+      ...(finished.ending === 'cut-short' && { cutShort: true as const }),
+      ...(unreadable > 0 && { unreadable }),
       saw: context.saw,
       ...(findings.length > 0 && { findings }),
     };
     await store.appendMessage(conversationId, reply);
-    // A reply cut short isn't sent back to the model, so neither are its
-    // Proposals; a Review asks before it proposes.
-    const proposing = !failure && !reviewing;
-    for (const proposal of proposing ? await proposalsIn(text) : []) {
+    for (const proposal of proposals) {
       await store.appendProposal(conversationId, proposal);
     }
     return { reply, failure };
@@ -259,15 +288,13 @@ export function createConversationEngine({
   }
 
   /**
-   * The Findings a reply makes, in the order a Review lists them, each with
-   * the Scene it quotes among those the Assistant saw: the one it names if
-   * the quote is there, else the one the quote is in, else the one it
-   * names, else the only one.
+   * The Findings a reply's finding blocks make, in the order a Review lists
+   * them, each with the Scene it quotes among those the Assistant saw: the
+   * one it names if the quote is there, else the one the quote is in, else
+   * the one it names, else the only one.
    */
-  async function findingsIn(reply: string, saw: Saw): Promise<Finding[]> {
-    const findings = splitReply(reply).findings.flatMap(
-      (block) => findingOf(block) ?? [],
-    );
+  async function findingsIn(blocks: unknown[], saw: Saw): Promise<Finding[]> {
+    const findings = blocks.flatMap((block) => findingOf(block) ?? []);
     if (findings.length === 0) return [];
     const view = store.assistantView();
     const prose = new Map<string, string>();
@@ -294,25 +321,36 @@ export function createConversationEngine({
   }
 
   /**
-   * The Proposals a reply makes, each against its target as it is now. A
-   * block that proposes nothing this app takes, such as a change to Prose,
-   * Notes or a Voice's example lines, is left out.
+   * The Proposals a reply's proposal blocks make, each against its target as
+   * it is now, and how many of the blocks couldn't be read. A block that
+   * proposes nothing this app takes, such as a change to Prose, Notes or a
+   * Voice's example lines, is unreadable; one that proposes what its target
+   * holds already is left out.
    */
-  async function proposalsIn(reply: string): Promise<Proposal[]> {
+  async function proposalsIn(
+    blocks: unknown[],
+  ): Promise<{ proposals: Proposal[]; unreadable: number }> {
     const proposals: Proposal[] = [];
-    for (const block of splitReply(reply).proposals) {
+    let unreadable = 0;
+    for (const block of blocks) {
       const change = await changeOf(block);
-      if (change) proposals.push({ id: randomUUID(), ...change });
+      if (change === null) unreadable++;
+      else if (change !== 'unchanged') {
+        proposals.push({ id: randomUUID(), ...change });
+      }
     }
-    return proposals;
+    return { proposals, unreadable };
   }
 
   /**
    * What a block proposes: a new Entry, under the id it will get; a whole
    * Outline of a Chapter or Scene in the Project, or of the story; or a change
-   * to a field of an Entry in the Story Bible.
+   * to a field of an Entry in the Story Bible. `'unchanged'` when it
+   * proposes what its target holds; null when it can't be read as any.
    */
-  async function changeOf(block: unknown): Promise<ProposalChange | null> {
+  async function changeOf(
+    block: unknown,
+  ): Promise<ProposalChange | 'unchanged' | null> {
     const view = store.assistantView();
     const { entry: entryId, outline: outlineId } = (block ?? {}) as Record<
       string,

@@ -88,8 +88,10 @@ export type Saw = {
  * message says which Review it asked for, if any, as its `command`; the
  * reply to it holds the Review's `findings`. An Assistant turn
  * also says which `model` answered and what it used, when that is known, and
- * is `interrupted` when the call failed partway and the reply is cut short,
- * and says what the Assistant `saw`, and the `proposals` it made in it.
+ * is `interrupted` when the Assistant didn't finish it, so it is never sent
+ * back: the call failed partway, or the reply was `cutShort` at the length
+ * limit. It says what the Assistant `saw`, the `proposals` it made in it,
+ * and how many more it made that couldn't be read, as `unreadable`.
  */
 export type ConversationMessage = {
   role: 'author' | 'assistant';
@@ -101,6 +103,8 @@ export type ConversationMessage = {
   model?: string;
   usage?: Usage;
   interrupted?: true;
+  cutShort?: true;
+  unreadable?: number;
   saw?: Saw;
   findings?: Finding[];
   proposals?: ProposalView[];
@@ -119,12 +123,29 @@ export type AssistantFailure =
   | 'other';
 
 /**
- * How asking the Assistant went: the reply as logged, if any, and why the call
- * failed, if it did. A call that fails partway logs what came as an
- * interrupted reply; one that fails before any reply logs nothing.
+ * A reply that came back with no text, or none once its thinking was
+ * stripped. It isn't a message: it is never sent back, and stands before
+ * the message `before`, which is the number of messages before it. It says
+ * which `model` wrote it and what it used, so its cost counts.
+ */
+export type EmptyReply = {
+  focus: string[];
+  /** When it came, in ms since the epoch. */
+  at: number;
+  model: string;
+  usage?: Usage;
+  before: number;
+};
+
+/**
+ * How asking the Assistant went: the reply as logged, if any, or the `empty`
+ * one, and why the call failed, if it did. A call that fails partway logs
+ * what came as an interrupted reply; one that fails before any reply, or
+ * before any but thinking, logs nothing.
  */
 export type AskResult = {
   reply: ConversationMessage | null;
+  empty?: EmptyReply;
   failure: AssistantFailure | null;
 };
 
@@ -144,11 +165,13 @@ export type Compaction = {
 };
 
 /**
- * A Conversation's messages, and in an Interview, each time its focus was
- * set; once it is long, the summaries made of it, the latest last.
+ * A Conversation's messages, the replies that came back empty between them,
+ * and in an Interview, each time its focus was set; once it is long, the
+ * summaries made of it, the latest last.
  */
 export type Conversation = ConversationSummary & {
   messages: ConversationMessage[];
+  emptyReplies?: EmptyReply[];
   focusChanges?: FocusChange[];
   compactions?: Compaction[];
 };

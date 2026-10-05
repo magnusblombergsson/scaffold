@@ -38,7 +38,7 @@ import {
   type AtMention,
 } from './at-mention';
 import type { MenuItem } from './Binder';
-import { replyText } from '../shared/proposal';
+import { streamingText } from '../shared/proposal';
 import { describeTotal, describeUsage } from '../shared/usage';
 import { focusLabel } from './interview-focus';
 import { proposalCardId, ProposalCard } from './ProposalCard';
@@ -360,7 +360,11 @@ export function useConversation({
   // Summarising a long Conversation is a call too, and counts.
   const total = current
     ? describeTotal(
-        [...current.messages, ...(current.compactions ?? [])].flatMap((m) =>
+        [
+          ...current.messages,
+          ...(current.emptyReplies ?? []),
+          ...(current.compactions ?? []),
+        ].flatMap((m) =>
           m.model && m.usage
             ? [{ model: loggedModel(m.model), usage: m.usage }]
             : [],
@@ -447,6 +451,7 @@ export function MessageLog({
       {empty && !current && <p className="assistant-empty">{empty}</p>}
       {current?.messages.map((m, i) => (
         <Fragment key={i}>
+          <EmptyReplies conversation={current} before={i} />
           <FocusChanges conversation={current} before={i} names={names} />
           <Message
             message={m}
@@ -458,15 +463,24 @@ export function MessageLog({
         </Fragment>
       ))}
       {current && (
-        <FocusChanges
-          conversation={current}
-          before={current.messages.length}
-          names={names}
-        />
+        <>
+          <EmptyReplies
+            conversation={current}
+            before={current.messages.length}
+            onRetry={
+              streaming === null && !failure ? () => void retry() : undefined
+            }
+          />
+          <FocusChanges
+            conversation={current}
+            before={current.messages.length}
+            names={names}
+          />
+        </>
       )}
-      {streaming !== null && replyText(streaming) !== '' && (
+      {streaming !== null && streamingText(streaming) !== '' && (
         <Message
-          message={{ role: 'assistant', text: replyText(streaming) }}
+          message={{ role: 'assistant', text: streamingText(streaming) }}
           names={names}
         />
       )}
@@ -486,6 +500,49 @@ export function MessageLog({
       <div ref={messagesEnd} />
     </div>
   );
+}
+
+/**
+ * The replies that came back empty before the message `before`, each with
+ * what it used; the last offers `onRetry`, if given.
+ */
+function EmptyReplies({
+  conversation: { emptyReplies = [] },
+  before,
+  onRetry,
+}: {
+  conversation: Conversation;
+  before: number;
+  onRetry?(): void;
+}) {
+  const readOnly = useContext(ReadOnlyContext);
+  const here = emptyReplies.filter((reply) => reply.before === before);
+  return here.map(({ model, usage }, i) => (
+    <article
+      key={i}
+      className="message message-assistant"
+      aria-label="Assistant"
+    >
+      <p className="message-note">
+        No reply: the Model used its whole length limit thinking. Try again or
+        choose another Model.
+      </p>
+      {onRetry && i === here.length - 1 && (
+        <div className="message-actions">
+          <button onClick={onRetry} disabled={readOnly}>
+            Retry
+          </button>
+        </div>
+      )}
+      {usage && (
+        <p className="message-used">
+          <span className="message-usage" aria-label="Usage">
+            {describeUsage(loggedModel(model), usage)}
+          </span>
+        </p>
+      )}
+    </article>
+  ));
 }
 
 /** Where an Interview's focus was set, before the message `before`. */
@@ -665,7 +722,7 @@ export function Composer({
  * which opens to list what the Assistant saw.
  */
 function Message({
-  message: { role, text, model, usage, interrupted, saw, findings, proposals },
+  message,
   names,
   conversationId,
   shown,
@@ -679,6 +736,8 @@ function Message({
   shown?: string | null;
   onQuote?(sceneId: string, quote: string): void;
 }) {
+  const { role, text, model, usage, interrupted, unreadable } = message;
+  const { cutShort, saw, findings, proposals } = message;
   const used = model && usage && (
     <span className="message-usage" aria-label="Usage">
       {describeUsage(loggedModel(model), usage)}
@@ -711,7 +770,20 @@ function Message({
             highlighted={proposal.id === shown}
           />
         ))}
-      {interrupted && <p className="message-note">Interrupted</p>}
+      {interrupted && (
+        <p className="message-note">
+          {cutShort
+            ? 'Cut short: the reply reached its length limit'
+            : 'Interrupted'}
+        </p>
+      )}
+      {unreadable && (
+        <p className="message-note">
+          {unreadable === 1
+            ? '1 Proposal couldn’t be read'
+            : `${unreadable} Proposals couldn’t be read`}
+        </p>
+      )}
       {saw ? (
         <details className="message-saw">
           <summary>What the Assistant saw{used}</summary>

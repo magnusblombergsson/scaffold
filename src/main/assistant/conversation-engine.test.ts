@@ -693,6 +693,144 @@ describe('Proposals in a reply', () => {
     expect(skeleton.text).toContain(`Id: ${sceneId}`);
     expect(skeleton.text).toContain('Id: project');
   });
+
+  it('makes no Proposals in a reply cut short at the length limit, which keeps its text and is marked so', async () => {
+    const { store, engine } = await withAnna((annaId) => ({
+      text: [
+        'Older, then.\n',
+        block({ entry: annaId, field: 'description', value: 'Older.' }),
+        '\nAnd',
+      ],
+      finish: 'length',
+    }));
+    const { id } = await store.startConversation('writing', 'Anna');
+
+    const result = await engine.askAssistant(
+      id,
+      'Hm',
+      { sceneId: null },
+      () => {},
+    );
+
+    expect(result.failure).toBeNull();
+    const [, replied] = (await store.readConversation(id)).messages;
+    expect(replied).toMatchObject({
+      text: 'Older, then.\n\nAnd',
+      interrupted: true,
+      cutShort: true,
+    });
+    expect(replied.proposals).toBeUndefined();
+    expect(result.reply).toEqual({ ...replied, proposals: undefined });
+  });
+
+  it('strips thinking from the reply, and makes no Proposals from blocks inside it', async () => {
+    const { store, engine } = await withAnna((annaId) => [
+      '<think>Perhaps:\n',
+      block({ entry: annaId, field: 'description', value: 'Thought.' }),
+      '\n</think>\n\nOlder?\n',
+      block({ entry: annaId, field: 'role', value: 'supporting' }),
+    ]);
+    const { id } = await store.startConversation('writing', 'Anna');
+
+    await engine.askAssistant(id, 'Hm', { sceneId: null }, () => {});
+
+    const [, replied] = (await store.readConversation(id)).messages;
+    expect(replied.text).toBe('Older?');
+    expect(replied.unreadable).toBeUndefined();
+    expect(
+      replied.proposals?.map((p) => p.kind === 'field' && p.field),
+    ).toEqual(['role']);
+  });
+
+  it('counts the Proposal blocks it couldn’t read: bad JSON, an unknown Entry or field, a value the field can’t hold', async () => {
+    const { store, engine } = await withAnna((annaId) => [
+      'Noted.\n',
+      '```proposal\n{"entry": oops}\n```\n',
+      block({ entry: 'nobody', field: 'description', value: 'Who?' }),
+      block({ entry: annaId, field: 'mood', value: 'Sad.' }),
+      block({ entry: annaId, field: 'role', value: 'sidekick' }),
+      // Proposes what Anna holds already: readable, but nothing to propose.
+      block({ entry: annaId, field: 'description', value: 'Her sister.' }),
+      block({ entry: annaId, field: 'aliases', add: 'Nan' }),
+    ]);
+    const { id } = await store.startConversation('writing', 'Anna');
+
+    const result = await engine.askAssistant(
+      id,
+      'Hm',
+      { sceneId: null },
+      () => {},
+    );
+
+    expect(result.reply?.unreadable).toBe(4);
+    const [, replied] = (await store.readConversation(id)).messages;
+    expect(replied.unreadable).toBe(4);
+    expect(replied.proposals).toHaveLength(1);
+  });
+});
+
+describe('Empty replies', () => {
+  it('logs a reply with nothing left after thinking as reply.empty, with what it used, and makes no Proposals', async () => {
+    const usage = { input: 2_000, cached: 0, written: 0, output: 4_096 };
+    const { projectPath, store, sceneId, engine, clock } = await setUp(() => ({
+      text: ['<think>Hm. ', 'Long thoughts'],
+      usage,
+      finish: 'length',
+    }));
+    const { id } = await store.startConversation('writing', 'Anna');
+
+    const result = await engine.askAssistant(id, 'Why?', { sceneId }, () => {});
+
+    const empty = {
+      focus: [sceneId],
+      at: clock.now(),
+      model: 'claude-opus-5-5',
+      usage,
+      before: 1,
+    };
+    expect(result).toEqual({ reply: null, empty, failure: null });
+    const conversation = await store.readConversation(id);
+    expect(conversation.messages.map((m) => m.role)).toEqual(['author']);
+    expect(conversation.emptyReplies).toEqual([empty]);
+    const log = await readFile(
+      path.join(projectPath, 'conversations', `${id}.jsonl`),
+      'utf8',
+    );
+    const events = log
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { type?: string });
+    expect(events.at(-1)).toEqual({
+      type: 'reply.empty',
+      model: 'claude-opus-5-5',
+      provider: 'anthropic',
+      usage,
+      reason: 'length',
+      focus: [sceneId],
+      at: clock.now(),
+    });
+    expect(events.filter((e) => e.type?.startsWith('proposal.'))).toEqual([]);
+  });
+
+  it('never sends an empty reply back, and a retry answers the Author’s message afresh', async () => {
+    const { store, sceneId, engine, provider } = await setUp((n) =>
+      n === 0 ? [] : ['Because.'],
+    );
+    const { id } = await store.startConversation('writing', 'Anna');
+    await engine.askAssistant(id, 'Why?', { sceneId }, () => {});
+
+    await engine.retry(id, () => {});
+    await engine.askAssistant(id, 'And?', { sceneId }, () => {});
+
+    expect(provider.requests[1].messages).toEqual([
+      { role: 'user', content: 'Why?' },
+    ]);
+    expect(provider.requests[2].messages.map((m) => m.content)).toEqual([
+      'Why?',
+      'Because.',
+      'And?',
+    ]);
+  });
 });
 
 describe('Reviews', () => {

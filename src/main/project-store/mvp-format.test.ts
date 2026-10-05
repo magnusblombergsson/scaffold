@@ -226,6 +226,72 @@ it('an MVP app skips an Append or an Add, and its accept, applying nothing; it s
   ]);
 });
 
+it('an MVP app skips an empty reply, counting the same messages, and reads the message of one cut short as interrupted', async () => {
+  const store = await createProject(projectPath, deps());
+  const { id } = await store.startConversation('writing', 'Anna');
+  const usage = { input: 2_000, cached: 0, written: 0, output: 4_096 };
+  await store.appendMessage(id, {
+    role: 'author',
+    text: 'Why?',
+    focus: [],
+    at: 1,
+  });
+  await store.appendEmptyReply(
+    id,
+    { focus: [], at: 2, usage },
+    { provider: 'anthropic', id: 'claude-opus-5-5' },
+    'length',
+  );
+  await store.appendMessage(id, {
+    role: 'assistant',
+    text: 'Because',
+    focus: [],
+    at: 3,
+    interrupted: true,
+    cutShort: true,
+  });
+  await store.appendSummary(id, { text: 'Anna asked why.', covers: 2, at: 4 });
+  await store.close();
+
+  const log = await readFile(
+    path.join(projectPath, 'conversations', `${id}.jsonl`),
+    'utf8',
+  );
+  expect(log).toContain('"type":"reply.empty"');
+  expect(mvpParseLog(log)?.messages).toEqual([
+    { role: 'author', text: 'Why?', focus: [], at: 1 },
+    {
+      role: 'assistant',
+      text: 'Because',
+      focus: [],
+      at: 3,
+      interrupted: true,
+    },
+  ]);
+
+  // A summary covers the same messages in both.
+  expect(mvpParseLog(log)?.compactions?.[0].covers).toBe(2);
+
+  const reopened = await openProject(projectPath, deps());
+  const conversation = await reopened.readConversation(id);
+  expect(conversation.messages).toEqual([
+    { role: 'author', text: 'Why?', focus: [], at: 1 },
+    {
+      role: 'assistant',
+      text: 'Because',
+      focus: [],
+      at: 3,
+      interrupted: true,
+      cutShort: true,
+    },
+  ]);
+  expect(conversation.emptyReplies).toEqual([
+    { focus: [], at: 2, model: 'claude-opus-5-5', usage, before: 1 },
+  ]);
+  expect(conversation.compactions?.[0].covers).toBe(2);
+  await reopened.close();
+});
+
 it('reads a Proposal the MVP logged as a Replace', async () => {
   const store = await createProject(projectPath, deps());
   const { id: annaId } = await store.createEntry('character', 'Anna');

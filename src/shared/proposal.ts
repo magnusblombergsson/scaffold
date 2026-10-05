@@ -300,34 +300,63 @@ export function textValue(field: ProposalField, text: string): FieldValue {
 
 const BLOCK = /```(proposal|finding)[^\n]*\n([\s\S]*?)\n?```/g;
 const OPEN_BLOCK = /```(?:proposal|finding)[\s\S]*$/;
+const OPEN_PROPOSAL = /```proposal[\s\S]*$/;
 
 /**
  * A reply's text without its blocks, and what each block held, in order:
- * the proposal blocks as `proposals`, the finding blocks as `findings`.
+ * the proposal blocks as `proposals`, the finding blocks as `findings`, and
+ * how many proposal blocks weren't JSON, or one at the end never closed, as
+ * `unreadable`.
  */
 export function splitReply(reply: string): {
   text: string;
   proposals: unknown[];
   findings: unknown[];
+  unreadable: number;
 } {
   const proposals: unknown[] = [];
   const findings: unknown[] = [];
+  let unreadable = 0;
   const text = reply.replace(BLOCK, (_, kind: string, json: string) => {
     try {
       (kind === 'finding' ? findings : proposals).push(JSON.parse(json));
     } catch {
       // The Assistant wrote it badly: there is nothing to take.
+      if (kind === 'proposal') unreadable++;
     }
     return '';
   });
-  return { text: text === reply ? text : tidy(text), proposals, findings };
+  if (OPEN_PROPOSAL.test(text)) unreadable++;
+  return {
+    text: text === reply ? text : tidy(text),
+    proposals,
+    findings,
+    unreadable,
+  };
 }
 
-/** A reply's text as it streams in, without its blocks, even one not yet finished. */
+// A model may think aloud in its reply text, between <think> and </think>;
+// that is never shown, nor searched for blocks.
+const THINKING = /<think>[\s\S]*?(?:<\/think>|$)/g;
+/** The start of a <think> still streaming in. */
+const OPENING_THINK = /<(?:t(?:h(?:i(?:n(?:k)?)?)?)?)?$/;
+
+/** A reply's text without its thinking, even thinking not yet finished. */
+export function withoutThinking(reply: string): string {
+  const text = reply.replace(THINKING, '');
+  return text === reply ? text : tidy(text);
+}
+
+/** A reply's text without its thinking or its blocks, even one not finished. */
 export function replyText(reply: string): string {
-  const { text } = splitReply(reply);
+  const { text } = splitReply(withoutThinking(reply));
   const open = text.replace(OPEN_BLOCK, '');
   return open === text ? text : tidy(open);
+}
+
+/** A reply's text as it streams in, as `replyText`, nor a <think> not yet whole. */
+export function streamingText(reply: string): string {
+  return replyText(reply.replace(OPENING_THINK, ''));
 }
 
 /** Without the blank lines a block left, and without space at either end. */
@@ -336,17 +365,18 @@ function tidy(text: string): string {
 }
 
 /**
- * The change a block proposes to `entry`, as it is now, or null when it
- * proposes nothing this app takes: another Entry, a field its type lacks or
- * a Proposal may not change, a value the field can't hold, or no change.
+ * The change a block proposes to `entry`, as it is now; `'unchanged'` when
+ * it proposes what the field holds already; or null when it proposes
+ * nothing this app takes: another Entry, a field its type lacks or a
+ * Proposal may not change, or a value the field can't hold.
  * A block names the Entry by id and the field, and either a `value` to set,
  * text to `append` to a text field that isn't a choice, or an item to `add`
- * to a list; an Append or an Add the field holds already proposes nothing.
+ * to a list; an Append or an Add the field holds already changes nothing.
  */
 export function proposalOf(
   block: unknown,
   entry: EntryValue,
-): EntryFieldChange | null {
+): EntryFieldChange | 'unchanged' | null {
   if (typeof block !== 'object' || block === null) return null;
   const {
     entry: entryId,
@@ -367,9 +397,11 @@ export function proposalOf(
       : typeof append === 'string' && !isChoiceField(field)
         ? { ...target, operation: 'append', proposed: append.trim() }
         : null;
-    return change && !holdsAppended(change, base) ? change : null;
+    if (!change) return null;
+    return holdsAppended(change, base) ? 'unchanged' : change;
   }
-  if (!isFieldValue(field, value) || sameValue(value, base)) return null;
+  if (!isFieldValue(field, value)) return null;
+  if (sameValue(value, base)) return 'unchanged';
   return { ...target, base, proposed: value };
 }
 
@@ -524,15 +556,16 @@ export function asNewEntry(value: unknown): NewEntry | null {
 }
 
 /**
- * The change a block proposes to `outline`, as it is now, or null when it
- * proposes none: a block names the Outline by the id of its Chapter or
- * Scene, or `PROJECT_OUTLINE`, and gives the whole new body as `value`, or
- * text to `append`, unless the body ends with it already.
+ * The change a block proposes to `outline`, as it is now; `'unchanged'`
+ * when the body is that already, or ends with the text to append; or null
+ * when it can't be read as one: a block names the Outline by the id of its
+ * Chapter or Scene, or `PROJECT_OUTLINE`, and gives the whole new body as
+ * `value`, or text to `append`.
  */
 export function outlineChangeOf(
   block: unknown,
   outline: OutlineValue,
-): OutlineChange | null {
+): OutlineChange | 'unchanged' | null {
   if (typeof block !== 'object' || block === null) return null;
   const {
     outline: outlineId,
@@ -548,9 +581,10 @@ export function outlineChangeOf(
       operation: 'append',
       proposed: append.trim(),
     };
-    return holdsAppended(change, outline.body) ? null : change;
+    return holdsAppended(change, outline.body) ? 'unchanged' : change;
   }
-  if (typeof value !== 'string' || value === outline.body) return null;
+  if (typeof value !== 'string') return null;
+  if (value === outline.body) return 'unchanged';
   return { kind: 'outline', outlineId, base: outline.body, proposed: value };
 }
 
