@@ -11,6 +11,23 @@ export type Model = { provider: ProviderId; id: string };
 /** USD per million tokens of each kind, from Anthropic's pricing (5-minute cache writes). */
 export type Price = Usage;
 
+/** A Model as its Provider lists it, for the Author to shortlist. */
+export type ListedModel = {
+  id: string;
+  name: string;
+  /** Tokens, if the Provider says. */
+  contextWindow: number | null;
+  /** The most tokens a reply may have, if the Provider says. */
+  outputLimit: number | null;
+  /** Null when the Provider gives no fixed price; zero for a local Model. */
+  price: Price | null;
+  /** For LM Studio: whether the Model is loaded now. */
+  loaded?: boolean;
+};
+
+/** Whether a Provider answers: with the credential given, rejecting it, or not at all. */
+export type ProviderStatus = 'connected' | 'key-rejected' | 'unreachable';
+
 /** The Claude models the Author can choose from, in the order offered, with what each costs. */
 export const CLAUDE_MODELS = [
   {
