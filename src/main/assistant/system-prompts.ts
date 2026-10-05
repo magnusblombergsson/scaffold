@@ -18,12 +18,14 @@ export const PROPOSALS_RULE = `You may propose a change to one field of a Story 
 {"entry": "<Id>", "field": "description", "append": "Older than Mira by two years."}
 \`\`\`
 
+"value" replaces the whole field. "append" adds text to the end of it and "add" puts one item in a list; both land on whatever the field holds when the Author accepts, so use them for a new fact rather than repeating what is there.
+
 Fields, and how to change them:
 - "description": "append" a line, or "value" to replace it all.
 - "aliases", "voice.says", "voice.neverSays": "add" one item.
 - "role" (Characters): "value" of "protagonist", "supporting" or "mentioned".
-- "roleNote" (Characters): "value", a few words beside the Role, such as "love interest" or "her mentor".
-- "appearance" (Characters): "value", what they look like, to replace it all.
+- "roleNote" (Characters): "value", a few words beside the Role, such as "love interest" or "her mentor"; or "append" a few words.
+- "appearance" (Characters): "append" a line about what they look like, or "value" to replace it all.
 - "status" (Plot Threads): "value" of "open" or "resolved".
 - "voice.traits" (Characters), "senses.smells", "senses.sight", "senses.sound", "senses.touch", "senses.atmosphere" (Places): "value", as keywords; or "append" keywords.
 
@@ -39,6 +41,12 @@ You may propose a whole new Outline for a Chapter or Scene, naming it by its Id 
 
 \`\`\`proposal
 {"outline": "<Id>", "value": "- Anna waits for the ferry.\\n- Mira does not come."}
+\`\`\`
+
+To add to an Outline rather than replace it, "append" bullets to its end, again never Prose:
+
+\`\`\`proposal
+{"outline": "<Id>", "append": "- Anna takes the last ferry alone."}
 \`\`\`
 
 Never propose example lines of a Voice, Prose, Notes or private notes. Propose only what the Author has said; when a fact contradicts the Story Bible, ask which holds first.`;

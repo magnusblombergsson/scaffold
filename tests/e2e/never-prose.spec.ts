@@ -63,8 +63,12 @@ const LEAKS = {
 const ALLOWED_CONTROLS = [
   'Accept',
   'Accept anyway',
+  'Append',
+  'Add',
   'Edit…',
   'Accept edited',
+  'Append edited',
+  'Add edited',
   'Cancel',
   'Edited value',
   'Reject',
@@ -106,14 +110,15 @@ async function decideAll(messages: Locator) {
     ),
   ).toEqual([]);
 
-  for (const accept of await messages
-    .getByRole('button', { name: 'Accept', exact: true })
+  // A card's first of these: Accept, or the one button of an Append or an Add.
+  const decide = { name: /^(Accept|Append|Add)$/ };
+  for (const card of await messages
+    .getByRole('region', { name: /^Proposal:/ })
     .all()) {
-    await accept.click();
+    const button = card.getByRole('button', decide).first();
+    if ((await button.count()) > 0) await button.click();
   }
-  await expect(
-    messages.getByRole('button', { name: 'Accept', exact: true }),
-  ).toHaveCount(0);
+  await expect(messages.getByRole('button', decide)).toHaveCount(0);
   // Undo is the only control an accepted Proposal adds.
   expect(
     (await controlsIn(messages)).filter(
@@ -258,10 +263,10 @@ test('nothing the Assistant writes reaches the Manuscript, in any Mode or room',
   await description.getByRole('button', { name: 'Edit…' }).click();
   await description
     .getByRole('textbox', { name: 'Edited value' })
-    .fill('Leaves the island.\nHates long goodbyes.');
+    .fill('Hates long goodbyes.');
   await decideAll(brainstormed);
-  await description.getByRole('button', { name: 'Accept edited' }).click();
-  await expect(description).toContainText('✓ Accepted (edited)');
+  await description.getByRole('button', { name: 'Append edited' }).click();
+  await expect(description).toContainText('✓ Appended (edited)');
   await decideAll(brainstormed);
 
   // The Interview room, about Anna: never an example line of her Voice.

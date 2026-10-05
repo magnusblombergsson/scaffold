@@ -438,6 +438,27 @@ describe('Proposals in a reply', () => {
   it('turns structured Proposals into proposal.proposed events, with per-field base and proposed values', async () => {
     const { store, engine, annaId } = await withAnna((annaId) => [
       'Then the Story Bible should say so.\n\n',
+      block({ entry: annaId, field: 'description', value: 'Older.' }),
+    ]);
+    const { id } = await store.startConversation('writing', 'Anna');
+
+    await engine.askAssistant(id, 'She is older.', { sceneId: null }, () => {});
+
+    const [, replied] = (await store.readConversation(id)).messages;
+    expect(replied.proposals).toEqual([
+      expect.objectContaining({
+        kind: 'field',
+        entryId: annaId,
+        field: 'description',
+        base: 'Her sister.',
+        proposed: 'Older.',
+      }),
+    ]);
+  });
+
+  it('turns an Append and an Add into proposal.offered events, with the text or item alone, shown against the value now', async () => {
+    const { projectPath, store, engine, annaId } = await withAnna((annaId) => [
+      'Then the Story Bible should say so.\n\n',
       block({ entry: annaId, field: 'description', append: 'Older.' }),
       '\n',
       block({ entry: annaId, field: 'aliases', add: 'Nan' }),
@@ -460,16 +481,28 @@ describe('Proposals in a reply', () => {
         entryId: annaId,
         name: 'Anna',
         field: 'description',
-        base: 'Her sister.',
-        proposed: 'Her sister.\nOlder.',
+        operation: 'append',
+        proposed: 'Older.',
         state: { kind: 'pending', current: 'Her sister.', stale: false },
       }),
       expect.objectContaining({
         field: 'aliases',
-        base: [],
+        operation: 'add',
         proposed: ['Nan'],
+        state: { kind: 'pending', current: [], stale: false },
       }),
     ]);
+    const log = await readFile(
+      path.join(projectPath, 'conversations', `${id}.jsonl`),
+      'utf8',
+    );
+    expect(
+      log
+        .split('\n')
+        .filter(Boolean)
+        .map((line) => (JSON.parse(line) as { type?: string }).type)
+        .filter((type) => type?.startsWith('proposal.')),
+    ).toEqual(['proposal.offered', 'proposal.offered']);
   });
 
   it('never proposes Prose, Notes, private notes or Voice example lines, nor for an Entry not in the Story Bible', async () => {
@@ -575,9 +608,12 @@ describe('Proposals in a reply', () => {
       block({ outline: sceneId, value: '- She waits.\n- The ferry comes.' }),
       block({ outline: chapterId, value: '- She arrives.' }),
       block({ outline: 'project', value: '- A woman leaves an island.' }),
+      block({ outline: chapterId, append: '- She leaves again.' }),
       block({ outline: 'nowhere', value: '- Lost.' }),
       block({ scene: sceneId, value: 'She waited.' }),
+      block({ scene: sceneId, append: 'She ran.' }),
       block({ notes: sceneId, value: 'Remember the ferry.' }),
+      block({ notes: sceneId, append: 'And the gulls.' }),
     ]);
     await store.write(
       { kind: 'outline', id: sceneId },
@@ -590,12 +626,15 @@ describe('Proposals in a reply', () => {
     const [, replied] = (await store.readConversation(id)).messages;
     expect(
       replied.proposals?.map((p) =>
-        p.kind === 'outline' ? [p.outlineId, p.base, p.proposed] : p.kind,
+        p.kind === 'outline'
+          ? [p.outlineId, p.operation ?? p.base, p.proposed]
+          : p.kind,
       ),
     ).toEqual([
       [sceneId, '- She waits.', '- She waits.\n- The ferry comes.'],
       [chapterId, '', '- She arrives.'],
       ['project', '', '- A woman leaves an island.'],
+      [chapterId, 'append', '- She leaves again.'],
     ]);
     expect((await store.read({ kind: 'scene', id: sceneId })).markdown).toBe(
       '',

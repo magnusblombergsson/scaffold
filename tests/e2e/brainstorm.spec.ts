@@ -159,14 +159,14 @@ test('the Author brainstorms in the Brainstorm room, decides its Proposals inlin
     assistant.getByRole('button', { name: 'Review Scene' }),
   ).toHaveCount(0);
   await expect(assistant).toContainText('from the Brainstorm room');
-  await aliases.getByRole('button', { name: 'Accept' }).click();
-  await expect(aliases).toContainText('✓ Accepted');
+  await aliases.getByRole('button', { name: 'Add' }).click();
+  await expect(aliases).toContainText('✓ Added');
 
   // The room is as the Author left it, the decision made in Writing shown.
   await switchTo(page, 'Brainstorm');
   await expect(
     room.getByRole('region', { name: 'Proposal: Anna › Aliases' }),
-  ).toContainText('✓ Accepted');
+  ).toContainText('✓ Added');
   await app.close();
 });
 

@@ -85,17 +85,31 @@ test('the Assistant proposes changes to an Entry, and the Author accepts, edits 
   );
   await expect(description.locator('ins')).toHaveText('\nOlder.');
 
+  // An Append has one button, named for what it does.
+  await expect(description.getByRole('button', { name: 'Accept' })).toHaveCount(
+    0,
+  );
+
   // The open Entry shows the pending Proposals as ghost values.
   const ghost = page.getByRole('list', { name: 'Proposed Description' });
-  await expect(ghost).toContainText('Her sister.\nOlder.');
+  await expect(ghost).toContainText('+ Older.');
   await expect(
     ghost.getByRole('button', { name: 'Show in Conversation' }),
   ).toBeVisible();
 
-  await description.getByRole('button', { name: 'Accept' }).click();
-  await expect(description).toContainText('✓ Accepted');
+  // It lands on what the field holds now, and never goes stale.
+  await fill(page, 'Description', 'Her twin.');
+  await page.keyboard.press('ControlOrMeta+s');
+  await expect(page.locator('.save-status.confirmed')).toBeVisible();
+  await expect(description.getByLabel('Change')).toHaveText(
+    'Her twin.\nOlder.',
+  );
+  await expect(description).not.toContainText('has changed');
+
+  await description.getByRole('button', { name: 'Append' }).click();
+  await expect(description).toContainText('✓ Appended');
   await expect(page.getByLabel('Description', { exact: true })).toHaveText(
-    /Her sister\.\s*Older\./,
+    /Her twin\.\s*Older\./,
   );
   await expect(ghost).toBeHidden();
   // An accept is not a change from another computer.
@@ -106,8 +120,8 @@ test('the Assistant proposes changes to an Entry, and the Author accepts, edits 
   });
   await aliases.getByRole('button', { name: 'Edit…' }).click();
   await aliases.getByRole('textbox', { name: 'Edited value' }).fill('Nanna');
-  await aliases.getByRole('button', { name: 'Accept edited' }).click();
-  await expect(aliases).toContainText('✓ Accepted (edited)');
+  await aliases.getByRole('button', { name: 'Add edited' }).click();
+  await expect(aliases).toContainText('✓ Added (edited)');
   await expect(page.getByLabel('Aliases', { exact: true })).toHaveText('Nanna');
 
   const role = reply.getByRole('region', { name: 'Proposal: Anna › Role' });
@@ -116,8 +130,8 @@ test('the Assistant proposes changes to an Entry, and the Author accepts, edits 
 
   const events = (await logLines(projectPath)).map((e) => e.type);
   expect(events.slice(-6)).toEqual([
-    'proposal.proposed',
-    'proposal.proposed',
+    'proposal.offered',
+    'proposal.offered',
     'proposal.proposed',
     'proposal.accepted',
     'proposal.accepted',
@@ -248,8 +262,8 @@ test('the Author undoes accepted Proposals from their cards, while their targets
   });
   const editor = page.getByLabel('Description', { exact: true });
 
-  await description.getByRole('button', { name: 'Accept' }).click();
-  await expect(description).toContainText('✓ Accepted');
+  await description.getByRole('button', { name: 'Append' }).click();
+  await expect(description).toContainText('✓ Appended');
   await expect(editor).toHaveText(/Her sister\.\s*Older\./);
   // Ctrl+Z in the Entry never reverts an accept.
   await editor.click();
@@ -259,11 +273,11 @@ test('the Author undoes accepted Proposals from their cards, while their targets
 
   await description.getByRole('button', { name: 'Undo' }).click();
   await expect(
-    description.getByRole('button', { name: 'Accept' }),
+    description.getByRole('button', { name: 'Append' }),
   ).toBeVisible();
   await expect(editor).toHaveText('Her sister.');
 
-  await description.getByRole('button', { name: 'Accept' }).click();
+  await description.getByRole('button', { name: 'Append' }).click();
   await fill(page, 'Description', 'Her older sister.');
   await page.keyboard.press('ControlOrMeta+s');
   await expect(page.locator('.save-status.confirmed')).toBeVisible();

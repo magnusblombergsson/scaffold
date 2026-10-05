@@ -4,6 +4,7 @@ import { entryCollisions } from '../shared/entry';
 import {
   FIELD_LABELS,
   fieldText,
+  isAppending,
   type PendingProposal,
   type ProposalField,
 } from '../shared/proposal';
@@ -481,9 +482,10 @@ export function EntryView({
 }
 
 /**
- * The values Proposals pending on a field would give it, each with a way to
- * its card in the Conversation, where it can be shown; they are not in the
- * field until accepted.
+ * The values Proposals pending on a field would give it, or with a "+" what
+ * an Append or an Add would add, each with a way to its card in the
+ * Conversation, where it can be shown; they are not in the field until
+ * accepted.
  */
 export function Ghosts({
   field,
@@ -503,6 +505,7 @@ export function Ghosts({
       {on.map(({ conversationId, proposal }) => (
         <li key={proposal.id} className="ghost-value">
           <span className="ghost-text">
+            {isAppending(proposal) && '+ '}
             {fieldText(field, proposal.proposed)}
           </span>
           {showable(conversationId) && (

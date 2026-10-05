@@ -2,9 +2,11 @@ import { describe, expect, it } from 'vitest';
 import type { EntryValue } from './project-types';
 import {
   appended,
+  appendedOnto,
   canAppend,
   fieldDiff,
   fieldOf,
+  holdsAppended,
   newEntryOf,
   outlineChangeOf,
   proposalBlock,
@@ -139,29 +141,65 @@ describe('fieldOf and withField', () => {
 });
 
 describe('proposalOf', () => {
-  it('appends to a description on a line of its own', () => {
+  it('appends to a description, as the text alone, landing on the description when accepted', () => {
     expect(
       proposalOf(
-        { entry: 'anna', field: 'description', append: 'Older.' },
+        { entry: 'anna', field: 'description', append: ' Older. ' },
         anna,
       ),
     ).toEqual({
       kind: 'field',
       entryId: 'anna',
       field: 'description',
-      base: 'Her sister.',
-      proposed: 'Her sister.\nOlder.',
+      operation: 'append',
+      proposed: 'Older.',
     });
   });
 
-  it('adds an alias or a word once', () => {
+  it('appends keywords to Voice traits, a Sense or a Role note', () => {
+    for (const [block, entry] of [
+      [{ entry: 'anna', field: 'voice.traits', append: 'dry' }, anna],
+      [{ entry: 'anna', field: 'roleNote', append: 'rival' }, anna],
+      [{ entry: 'harbour', field: 'senses.smells', append: 'tar' }, harbour],
+    ] as const) {
+      expect(proposalOf(block, entry)).toMatchObject({
+        operation: 'append',
+        proposed: block.append,
+      });
+    }
+  });
+
+  it('adds one alias or word, as the item alone, unless the list holds it', () => {
     expect(
-      proposalOf({ entry: 'anna', field: 'aliases', add: 'Nan' }, anna)
+      proposalOf({ entry: 'anna', field: 'aliases', add: ' Nan ' }, anna),
+    ).toEqual({
+      kind: 'field',
+      entryId: 'anna',
+      field: 'aliases',
+      operation: 'add',
+      proposed: ['Nan'],
+    });
+    expect(
+      proposalOf({ entry: 'anna', field: 'voice.neverSays', add: 'okay' }, anna)
         ?.proposed,
-    ).toEqual(['Annie', 'Nan']);
+    ).toEqual(['okay']);
     expect(
       proposalOf({ entry: 'anna', field: 'aliases', add: 'annie' }, anna),
     ).toBeNull();
+  });
+
+  it('takes no append to a list or a choice, no add to text, and nothing that adds nothing', () => {
+    for (const block of [
+      { entry: 'anna', field: 'aliases', append: 'Nan' },
+      { entry: 'anna', field: 'role', append: 'supporting' },
+      { entry: 'anna', field: 'description', add: 'Older.' },
+      { entry: 'anna', field: 'description', append: '  ' },
+      { entry: 'anna', field: 'description', append: 'sister.' },
+      { entry: 'anna', field: 'description', append: 3 },
+      { entry: 'anna', field: 'aliases', add: ['Nan'] },
+    ]) {
+      expect(proposalOf(block, anna)).toBeNull();
+    }
   });
 
   it('sets a Role, Status or Sense', () => {
@@ -284,6 +322,26 @@ describe('outlineChangeOf', () => {
     ).toBeNull();
   });
 
+  it('appends to the Outline body, as the text alone, unless it adds nothing', () => {
+    const outline = { id: 'harbour', body: '- She waits.', meta: {} };
+    expect(
+      outlineChangeOf(
+        { outline: 'harbour', append: '- The ferry comes.\n' },
+        outline,
+      ),
+    ).toEqual({
+      kind: 'outline',
+      outlineId: 'harbour',
+      operation: 'append',
+      proposed: '- The ferry comes.',
+    });
+    for (const append of [' ', '- She waits.', 3]) {
+      expect(
+        outlineChangeOf({ outline: 'harbour', append }, outline),
+      ).toBeNull();
+    }
+  });
+
   it('takes nothing for another Outline, or without text', () => {
     const outline = { id: 'harbour', body: '', meta: {} };
     expect(
@@ -381,6 +439,47 @@ describe('appended', () => {
   });
 });
 
+describe('appendedOnto and holdsAppended', () => {
+  const append: ProposalChange = {
+    kind: 'field',
+    entryId: 'anna',
+    field: 'description',
+    operation: 'append',
+    proposed: 'Older.',
+  };
+  const add: ProposalChange = {
+    kind: 'field',
+    entryId: 'anna',
+    field: 'aliases',
+    operation: 'add',
+    proposed: ['Nan'],
+  };
+
+  it('lands an Append or an Add on whatever the target holds', () => {
+    expect(appendedOnto(append, 'Her sister.')).toBe('Her sister.\nOlder.');
+    expect(appendedOnto(append, 'Twin.')).toBe('Twin.\nOlder.');
+    expect(appendedOnto(add, ['Annie'])).toEqual(['Annie', 'Nan']);
+    expect(
+      appendedOnto(
+        {
+          kind: 'outline',
+          outlineId: 's1',
+          operation: 'append',
+          proposed: 'b',
+        },
+        'a',
+      ),
+    ).toBe('a\nb');
+  });
+
+  it('says a target holds an Append when it ends with its text, and an Add when the list has its item', () => {
+    expect(holdsAppended(append, 'Her sister.\nOlder. ')).toBe(true);
+    expect(holdsAppended(append, 'Older. Her sister.')).toBe(false);
+    expect(holdsAppended(add, ['nan'])).toBe(true);
+    expect(holdsAppended(add, ['Annie'])).toBe(false);
+  });
+});
+
 describe('canAppend', () => {
   const field = (f: ProposalField): ProposalChange => ({
     kind: 'field',
@@ -415,6 +514,18 @@ describe('canAppend', () => {
         kind: 'new-entry',
         entryId: 'e1',
         proposed: { type: 'item', name: 'Key', description: '' },
+      }),
+    ).toBe(false);
+  });
+
+  it('is not offered for an Append or an Add, which append already', () => {
+    expect(
+      canAppend({
+        kind: 'field',
+        entryId: 'anna',
+        field: 'description',
+        operation: 'append',
+        proposed: 'Older.',
       }),
     ).toBe(false);
   });

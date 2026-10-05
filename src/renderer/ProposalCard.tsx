@@ -9,13 +9,17 @@ import {
   type EntryType,
 } from '../shared/project-types';
 import {
+  appendedOnto,
   canAppend,
   FIELD_LABELS,
   fieldDiff,
   fieldText,
+  isAppending,
   isChoiceField,
   orphanedText,
+  textDiff,
   textValue,
+  type DiffPart,
   type FieldValue,
   type NewEntry,
   type ProposalField,
@@ -50,8 +54,10 @@ type Draft = string | NewEntry;
 /**
  * A Proposal inline in the reply that made it: what it changes, and Accept,
  * Append (but for a choice or a new Entry), Edit… and Reject while it is
- * pending. A field shows a diff, an Outline its body before and after side
- * by side, a new Entry its description. A stale one shows the target's
+ * pending; an Append or an Add has its one button, Append or Add, instead
+ * of Accept and Append, and is never stale. A field shows a diff, an
+ * Outline its body before and after side by side, an Append or an Add a
+ * diff from what its target holds now, a new Entry its description. A stale one shows the target's
  * current value too, in warning style; an orphaned one can only be
  * rejected. Decided, it collapses to a line; an accepted one offers Undo,
  * disabled with the reason while its target no longer holds what the accept
@@ -73,6 +79,13 @@ export function ProposalCard({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const title = proposalTitle(proposal);
+  const appending = isAppending(proposal);
+  // An Append or an Add has one button, named for what it does.
+  const [acceptLabel, acceptedLabel] = !appending
+    ? ['Accept', 'Accepted']
+    : proposal.operation === 'add'
+      ? ['Add', 'Added']
+      : ['Append', 'Appended'];
 
   async function decide(run: () => Promise<void>) {
     // Edits typed into the target reach main before it is changed.
@@ -102,7 +115,7 @@ export function ProposalCard({
           {state.kind === 'accepted'
             ? state.appended
               ? '✓ Appended'
-              : `✓ Accepted${state.edited ? ' (edited)' : ''}`
+              : `✓ ${acceptedLabel}${state.edited ? ' (edited)' : ''}`
             : '✕ Rejected'}
           {state.kind === 'accepted' && (
             <button
@@ -202,7 +215,7 @@ export function ProposalCard({
               onClick={() => void accept(editedValue(draft))}
               disabled={readOnly || busy}
             >
-              Accept edited
+              {acceptLabel} edited
             </button>
             {appendable && (
               <button
@@ -225,7 +238,7 @@ export function ProposalCard({
                   onClick={() => void accept()}
                   disabled={readOnly || busy}
                 >
-                  {stale ? 'Accept anyway' : 'Accept'}
+                  {stale ? 'Accept anyway' : acceptLabel}
                 </button>
                 {appendable && (
                   <button
@@ -257,8 +270,9 @@ export function ProposalCard({
  * What a pending Proposal changes. A field shows a diff, or when stale, its
  * value now, the one proposed against and the one proposed; an Outline its
  * base body, struck through, and the proposed one side by side, or when
- * stale, its body now, the one proposed against and the one proposed; a new
- * Entry its description.
+ * stale, its body now, the one proposed against and the one proposed; an
+ * Append or an Add a diff from what its target holds now; a new Entry its
+ * description.
  */
 function Change({
   proposal,
@@ -274,6 +288,18 @@ function Change({
       <p className="proposal-diff" aria-label="Change">
         <ins>{proposal.proposed.description || '—'}</ins>
       </p>
+    );
+  }
+  if (isAppending(proposal)) {
+    const after = appendedOnto(proposal, current);
+    return (
+      <Diff
+        parts={
+          proposal.kind === 'field'
+            ? fieldDiff(proposal.field, current, after)
+            : textDiff(String(current), String(after))
+        }
+      />
     );
   }
   if (proposal.kind === 'outline') {
@@ -322,9 +348,14 @@ function Change({
       </dl>
     );
   }
+  return <Diff parts={fieldDiff(field, base, proposed)} />;
+}
+
+/** A change shown inline: what goes struck through, what comes underlined. */
+function Diff({ parts }: { parts: DiffPart[] }) {
   return (
     <p className="proposal-diff" aria-label="Change">
-      {fieldDiff(field, base, proposed).map((part, i) =>
+      {parts.map((part, i) =>
         part.kind === 'removed' ? (
           <del key={i}>{part.text}</del>
         ) : part.kind === 'added' ? (

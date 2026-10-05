@@ -16,6 +16,7 @@ import {
   mvpReadEntry,
   mvpWriteEntry,
 } from './mvp-entry-file';
+import { mvpParseLog } from './mvp-conversation-log';
 import { mvpReadManifest, mvpWriteManifest } from './mvp-manifest-file';
 import { createProject, FORMAT, openProject } from './project-store';
 
@@ -161,5 +162,103 @@ it('an MVP app keeps the folded-image Project setting when it rewrites project.j
 
   const reopened = await openProject(projectPath, deps());
   expect(reopened.foldedNoteImage).toBe(false);
+  await reopened.close();
+});
+
+it('an MVP app skips an Append or an Add, and its accept, applying nothing; it still reads a Replace', async () => {
+  const store = await createProject(projectPath, deps());
+  const { id: annaId } = await store.createEntry('character', 'Anna');
+  const sceneId = store.tree().chapters[0].scenes[0].id;
+  const { id } = await store.startConversation('writing', 'Anna');
+  for (const role of ['author', 'assistant'] as const) {
+    await store.appendMessage(id, { role, text: 'Hm.', focus: [], at: 1 });
+  }
+  const field = { kind: 'field', entryId: annaId } as const;
+  await store.appendProposal(id, {
+    ...field,
+    id: 'replace',
+    field: 'description',
+    base: '',
+    proposed: 'A ferry pilot.',
+  });
+  await store.appendProposal(id, {
+    ...field,
+    id: 'append',
+    field: 'description',
+    operation: 'append',
+    proposed: 'Older.',
+  });
+  await store.appendProposal(id, {
+    ...field,
+    id: 'add',
+    field: 'aliases',
+    operation: 'add',
+    proposed: ['Nan'],
+  });
+  await store.appendProposal(id, {
+    kind: 'outline',
+    id: 'outline',
+    outlineId: sceneId,
+    operation: 'append',
+    proposed: '- She leaves.',
+  });
+  await store.acceptProposal(id, 'append');
+  await store.close();
+
+  const log = await readFile(
+    path.join(projectPath, 'conversations', `${id}.jsonl`),
+    'utf8',
+  );
+  expect(log).toContain('"type":"proposal.offered"');
+  const read = mvpParseLog(log);
+  expect(read?.messages).toHaveLength(2);
+  expect(read?.proposals).toEqual([
+    {
+      kind: 'field',
+      id: 'replace',
+      entryId: annaId,
+      field: 'description',
+      base: '',
+      proposed: 'A ferry pilot.',
+      message: 1,
+      decision: { kind: 'pending' },
+    },
+  ]);
+});
+
+it('reads a Proposal the MVP logged as a Replace', async () => {
+  const store = await createProject(projectPath, deps());
+  const { id: annaId } = await store.createEntry('character', 'Anna');
+  const { id } = await store.startConversation('writing', 'Anna');
+  for (const role of ['author', 'assistant'] as const) {
+    await store.appendMessage(id, { role, text: 'Hm.', focus: [], at: 1 });
+  }
+  await store.close();
+  // As the MVP logged an Append the Assistant made: the whole value, with its base.
+  const file = path.join(projectPath, 'conversations', `${id}.jsonl`);
+  await writeFile(
+    file,
+    `${await readFile(file, 'utf8')}${JSON.stringify({
+      type: 'proposal.proposed',
+      id: 'p1',
+      target: { kind: 'entry', id: annaId },
+      fields: {
+        description: { base: 'Her sister.', proposed: 'Her sister.\nOlder.' },
+      },
+      at: 1,
+    })}\n`,
+  );
+
+  const reopened = await openProject(projectPath, deps());
+  const [, reply] = (await reopened.readConversation(id)).messages;
+  expect(reply.proposals).toEqual([
+    expect.objectContaining({
+      id: 'p1',
+      base: 'Her sister.',
+      proposed: 'Her sister.\nOlder.',
+      state: { kind: 'pending', current: '', stale: true },
+    }),
+  ]);
+  expect(reply.proposals?.[0]).not.toHaveProperty('operation');
   await reopened.close();
 });

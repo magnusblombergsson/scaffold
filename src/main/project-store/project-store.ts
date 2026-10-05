@@ -54,10 +54,13 @@ import {
 } from '../../shared/entry';
 import {
   appended,
+  appendedOnto,
   asNewEntry,
   canAppend,
   FIELD_LABELS,
   fieldOf,
+  holdsAppended,
+  isAppending,
   isFieldValue,
   orphanedText,
   sameValue,
@@ -3071,11 +3074,11 @@ ${text}`);
    * writes its target first, an Entry or an Outline, and waits until it is
    * saved, then logs the accept with the value the target held and the one
    * written. A stale Proposal is accepted only `anyway`, and then replaces
-   * what the target holds now. One the Author chose to `append` lands on
-   * what the target holds now, so it may be stale. Refuses one already
-   * decided or found applied, one whose target is in Trash or gone or whose
-   * Entry has no such field now, one appended that can't be, a choice or a
-   * new Entry, and any once a newer app has upgraded the Project.
+   * what the target holds now. An Append or an Add, and a replacing one the
+   * Author chose to `append`, land on whatever the target holds now. Refuses
+   * one already decided or found applied, one whose target is in Trash or
+   * gone or whose Entry has no such field now, one appended that can't be, a
+   * choice or a new Entry, and any once a newer app has upgraded the Project.
    */
   acceptProposal(
     conversationId: string,
@@ -3108,10 +3111,11 @@ ${text}`);
 
   /** Writes a field of an Entry, as `acceptProposal`. */
   private async acceptField(
-    { entryId, field, base }: EntryFieldChange,
+    change: EntryFieldChange,
     value: ProposedValue,
     { anyway, append }: AcceptHow,
   ): Promise<Accepted> {
+    const { entryId, field } = change;
     if (!isFieldValue(field, value)) {
       throw new Error(`${FIELD_LABELS[field]} can't hold that value`);
     }
@@ -3134,9 +3138,9 @@ ${text}`);
           `${entry.name} has no ${FIELD_LABELS[field]} now`,
         );
       }
-      if (append) {
+      if (append || isAppending(change)) {
         wrote = appended(field, replaced, value);
-      } else if (!anyway && !sameValue(replaced, base)) {
+      } else if (!anyway && !sameValue(replaced, change.base)) {
         throw new ProjectError(
           'stale',
           `${FIELD_LABELS[field]} has changed since this was proposed`,
@@ -3154,10 +3158,11 @@ ${text}`);
 
   /** Writes a whole Outline body, keeping its metadata, as `acceptProposal`. */
   private async acceptOutline(
-    { outlineId, base }: OutlineChange,
+    change: OutlineChange,
     value: ProposedValue,
     { anyway, append }: AcceptHow,
   ): Promise<Accepted> {
+    const { outlineId } = change;
     if (typeof value !== 'string') {
       throw new Error("An Outline can't hold that value");
     }
@@ -3175,9 +3180,9 @@ ${text}`);
     const ref = outlineRef(outlineId);
     const { after } = await this.changeUnit(ref, (outline) => {
       replaced = outline.body;
-      if (append) {
+      if (append || isAppending(change)) {
         wrote = appended('outline', replaced, value) as string;
-      } else if (!anyway && replaced !== base) {
+      } else if (!anyway && replaced !== change.base) {
         throw new ProjectError(
           'stale',
           'The Outline has changed since this was proposed',
@@ -3405,10 +3410,14 @@ ${text}`);
       decision.replaced,
       decision.wrote,
     );
+    // What accepting as proposed would have written.
+    const asProposed =
+      isAppending(proposal) && decision.replaced !== undefined
+        ? appendedOnto(proposal, decision.replaced)
+        : proposal.proposed;
     const accepted = (undoBlocked: string | null): ProposalState => ({
       kind: 'accepted',
-      edited:
-        !appendedAsProposed && !sameValue(decision.wrote, proposal.proposed),
+      edited: !appendedAsProposed && !sameValue(decision.wrote, asProposed),
       ...(appendedAsProposed && { appended: true }),
       ...(undoBlocked && { undoBlocked }),
     });
@@ -3513,6 +3522,10 @@ ${text}`);
       return { kind: 'pending', orphaned: target.orphaned };
     }
     const { current } = target;
+    if (isAppending(proposal)) {
+      if (holdsAppended(proposal, current)) return applied;
+      return { kind: 'pending', current, stale: false };
+    }
     if (sameValue(current, proposal.proposed)) return applied;
     return {
       kind: 'pending',

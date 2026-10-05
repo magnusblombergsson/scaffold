@@ -108,8 +108,8 @@ test('the MVP hangs together: welcome, key, Project, Prose, Review Scene, a Prop
   const proposal = messages.getByRole('region', {
     name: 'Proposal: Anna › Description',
   });
-  await proposal.getByRole('button', { name: 'Accept' }).click();
-  await expect(proposal).toContainText('✓ Accepted');
+  await proposal.getByRole('button', { name: 'Append' }).click();
+  await expect(proposal).toContainText('✓ Appended');
 
   // The Entry changed, on screen and on disk.
   await page.getByRole('tab', { name: 'Story Bible' }).click();
