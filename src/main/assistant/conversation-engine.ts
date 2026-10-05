@@ -3,7 +3,6 @@ import {
   focusIds,
   OPEN_FOCUS,
   type AskResult,
-  type AssistantFailure,
   type Compaction,
   type Conversation,
   type ConversationMessage,
@@ -37,13 +36,8 @@ import {
   type CompactionPolicy,
 } from './compaction';
 import { buildContext, defaultRequest, readableScene } from './context-builder';
-import {
-  ProviderError,
-  type Finish,
-  type ProviderFor,
-  type ProviderRequest,
-} from './provider';
-import { finishReply } from './reply-finishing';
+import type { ProviderFor, ProviderRequest } from './provider';
+import { finishReply, streamCall } from './reply-finishing';
 
 /** What a message is about: the Scene open in the editor when it was sent, if any. */
 export type Focus = { sceneId: string | null };
@@ -184,32 +178,9 @@ export function createConversationEngine({
       system: context.system,
       messages: context.messages,
     };
-    let text = '';
-    let usage: Usage | undefined;
-    let cost: number | undefined;
-    let finish: Finish | null = null;
-    let failure: AssistantFailure | null = null;
-    try {
-      for await (const event of providerFor(chosen).stream(request)) {
-        if (event.type === 'usage') {
-          ({ usage, cost } = event);
-        } else if (event.type === 'text') {
-          text += event.text;
-          onText(event.text);
-        } else {
-          finish = event.finish;
-        }
-      }
-    } catch (error) {
-      if (error instanceof ProviderError) {
-        failure = error.kind;
-      } else {
-        console.error('The Assistant call failed:', error);
-        failure = 'other';
-      }
-    }
-
-    const finished = finishReply({ text, finish, failed: failure !== null });
+    const streamed = await streamCall(providerFor(chosen), request, onText);
+    const { usage, cost, finish, failure } = streamed;
+    const finished = finishReply(streamed);
     if (finished.ending === 'empty') {
       if (failure) return { reply: null, failure };
       const empty: EmptyReply = {

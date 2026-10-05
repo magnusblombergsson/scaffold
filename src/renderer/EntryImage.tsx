@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { EntrySummary } from '../shared/project-types';
+import { ImagePromptDialog } from './ImagePromptDialog';
 import { entryTitle } from './StoryBible';
 
 /**
@@ -35,9 +36,13 @@ export function EntryThumbnail({ entry }: { entry: EntrySummary }) {
   return url ? <img className="entry-thumbnail" src={url} alt="" /> : null;
 }
 
-/** The Entry view's image, with Add, Replace and Remove. */
+/**
+ * The Entry view's image, with Add, Replace and Remove, and Image prompt…,
+ * which has the Assistant describe the Entry for an image generator.
+ */
 export function EntryImageSection({ entry }: { entry: EntrySummary }) {
   const url = useEntryImage(entry);
+  const [imagePrompt, setImagePrompt] = useState(false);
   return (
     <section className="entry-image">
       {url && <img src={url} alt={`Image of ${entryTitle(entry)}`} />}
@@ -56,7 +61,16 @@ export function EntryImageSection({ entry }: { entry: EntrySummary }) {
             Remove image
           </button>
         )}
+        <button type="button" onClick={() => setImagePrompt(true)}>
+          Image prompt…
+        </button>
       </div>
+      {imagePrompt && (
+        <ImagePromptDialog
+          entry={entry}
+          onClose={() => setImagePrompt(false)}
+        />
+      )}
     </section>
   );
 }

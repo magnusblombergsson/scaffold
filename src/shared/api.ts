@@ -14,6 +14,7 @@ import type { ImportBlock, ImportConvention } from './manuscript-import';
 import type { ListedModel, Model, ProviderId, ProviderStatus } from './models';
 import type { Command } from './shortcuts';
 import type { PendingProposal, ProposedValue } from './proposal';
+import type { MeteredTurn } from './usage';
 
 /**
  * How the Author accepts a Proposal: with the value they `edited` it to,
@@ -27,6 +28,7 @@ export type AcceptOptions = {
 };
 import type {
   AskResult,
+  AssistantFailure,
   Conversation,
   ConversationSummary,
   InterviewFocus,
@@ -609,7 +611,34 @@ export interface AssistantApi {
   undoProposal(conversationId: string, proposalId: string): Promise<void>;
   /** The Proposals pending on an Entry, in any Conversation. */
   pendingProposals(entryId: string): Promise<PendingProposal[]>;
+  /**
+   * Has the Model chosen last write an Image prompt for an Entry, from its
+   * description, Appearance and Senses, in a one-off request outside any
+   * Conversation; a new one each time, and nothing of it is logged.
+   */
+  imagePrompt(entryId: string): Promise<ImagePromptResult>;
 }
+
+/**
+ * Why an Image prompt couldn't be had: the call failed, as an Assistant
+ * call fails; the reply came back `empty`; the Entry has `nothing` to
+ * describe; or it is `hidden`, an Entry the Assistant never sees.
+ */
+export type ImagePromptFailure =
+  | AssistantFailure
+  | 'empty'
+  | 'nothing'
+  | 'hidden';
+
+/**
+ * An Image prompt, or why there is none, with the Model asked and what the
+ * call used and cost, when known. It isn't kept, nor its cost logged.
+ */
+export type ImagePromptResult = MeteredTurn &
+  (
+    | { ok: true; text: string; cutShort: boolean }
+    | { ok: false; failure: ImagePromptFailure }
+  );
 
 export const channel = {
   project: (method: keyof ProjectApi) => `project:${method}`,
@@ -658,6 +687,7 @@ export const channel = {
   undoProposal: 'assistant:undoProposal',
   pendingProposals: 'assistant:pendingProposals',
   replyText: 'assistant:replyText',
+  imagePrompt: 'assistant:imagePrompt',
 } as const;
 
 declare global {

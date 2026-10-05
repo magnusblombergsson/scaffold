@@ -200,6 +200,7 @@ const assistant: AssistantApi = {
     ipcRenderer.invoke(channel.undoProposal, conversationId, proposalId),
   pendingProposals: (entryId) =>
     ipcRenderer.invoke(channel.pendingProposals, entryId),
+  imagePrompt: (entryId) => ipcRenderer.invoke(channel.imagePrompt, entryId),
 };
 
 /** Makes the call `invoke` with an id, passing on the pieces of its reply. */

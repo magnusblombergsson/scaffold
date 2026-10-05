@@ -2091,6 +2091,42 @@ h2.binder-title > button:hover::after {
   margin-top: 1rem;
 }
 
+.image-prompt {
+  width: min(36rem, 90vw);
+}
+
+/* The prompt is a slip of paper on the dialog's sheet, to copy from. */
+.image-prompt-result {
+  margin-top: 0.75rem;
+}
+
+.image-prompt-text {
+  margin: 0;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--accent-tint);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  user-select: text;
+}
+
+.image-prompt-writing {
+  margin: 0;
+  padding: 0.75rem 0;
+  color: var(--muted);
+}
+
+.image-prompt .settings-close {
+  align-items: center;
+}
+
+.image-prompt-copied {
+  margin-right: auto;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
 .assistant-panel {
   display: flex;
   flex-direction: column;

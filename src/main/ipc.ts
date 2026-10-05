@@ -16,6 +16,7 @@ import type { InterviewFocus, Mode } from '../shared/conversation';
 import type { ReviewCommand } from '../shared/finding';
 import { PROSE_LANGUAGES, type ProseLanguage } from '../shared/project-types';
 import { createConversationEngine } from './assistant/conversation-engine';
+import { createImagePrompts } from './assistant/image-prompt';
 import { entryImageOf, imageDataUrl } from './entry-image';
 import { systemClock } from './project-store/clock';
 import type { ProjectStore } from './project-store/project-store';
@@ -252,6 +253,13 @@ export function registerAssistantIpc(): void {
   );
   ipcMain.handle(channel.pendingProposals, (event, entryId: string) =>
     storeOfWindow(event.sender).pendingProposals(entryId),
+  );
+  ipcMain.handle(channel.imagePrompt, (event, entryId: string) =>
+    createImagePrompts({
+      store: storeOfWindow(event.sender),
+      providerFor: assistantProvider,
+      defaultModel,
+    }).write(entryId),
   );
   ipcMain.handle(
     channel.retry,

@@ -50,7 +50,7 @@ import { proposalCardId, ProposalCard } from './ProposalCard';
 import { flushPendingEdits } from './pending-edits';
 import { modelName } from './model-listing';
 import { failureMessage } from './provider-messages';
-import { useProviders, useShortlists } from './Providers';
+import { NO_SHORTLISTS, useProviders, useShortlists } from './Providers';
 import { ReadOnlyContext } from './read-only';
 import { sawList } from './saw-list';
 
@@ -85,8 +85,6 @@ export type ShowProposal = {
 
 /** Names the Model a turn was logged with, as the Author knows it. */
 type Named = (model: string, provider?: Model['provider']) => string;
-
-const NO_SHORTLISTS = { anthropic: [], openrouter: [], lmstudio: [] };
 
 /** The longest title a Conversation gets from its first message. */
 const TITLE_LENGTH = 60;

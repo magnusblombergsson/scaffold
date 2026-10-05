@@ -1,5 +1,12 @@
+import type { AssistantFailure } from '../../shared/conversation';
 import { replyText, splitReply, withoutThinking } from '../../shared/proposal';
-import type { Finish } from './provider';
+import type { Usage } from '../../shared/usage';
+import {
+  ProviderError,
+  type Finish,
+  type Provider,
+  type ProviderRequest,
+} from './provider';
 
 // Reply finishing (spec v2 §11): from what a Provider streamed to what the
 // Author sees, the same for every Model and Provider, Claude included.
@@ -33,6 +40,59 @@ export type FinishedReply = {
   findings: unknown[];
   unreadable: number;
 };
+
+/**
+ * A call as streamed: its outcome, what it used and, when the Provider
+ * said, cost, and when it failed, why.
+ */
+export type StreamedCall = StreamOutcome & {
+  usage?: Usage;
+  cost?: number;
+  failure: AssistantFailure | null;
+};
+
+/**
+ * Streams `request` through `provider`, calling `onText` with each piece of
+ * the reply; a failed call, before or while streaming, resolves too.
+ */
+export async function streamCall(
+  provider: Provider,
+  request: ProviderRequest,
+  onText: (text: string) => void = () => {},
+): Promise<StreamedCall> {
+  let text = '';
+  let usage: Usage | undefined;
+  let cost: number | undefined;
+  let finish: Finish | null = null;
+  let failure: AssistantFailure | null = null;
+  try {
+    for await (const event of provider.stream(request)) {
+      if (event.type === 'usage') {
+        ({ usage, cost } = event);
+      } else if (event.type === 'text') {
+        text += event.text;
+        onText(event.text);
+      } else {
+        finish = event.finish;
+      }
+    }
+  } catch (error) {
+    if (error instanceof ProviderError) {
+      failure = error.kind;
+    } else {
+      console.error('The Assistant call failed:', error);
+      failure = 'other';
+    }
+  }
+  return {
+    text,
+    finish,
+    failed: failure !== null,
+    failure,
+    ...(usage && { usage }),
+    ...(cost !== undefined && { cost }),
+  };
+}
 
 export function finishReply({
   text: streamed,

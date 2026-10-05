@@ -29,6 +29,13 @@ export function useProviders(): ProvidersView | undefined {
   return view;
 }
 
+/** Every shortlist empty, to name Models by until main has said. */
+export const NO_SHORTLISTS: Record<ProviderId, ListedModel[]> = {
+  anthropic: [],
+  openrouter: [],
+  lmstudio: [],
+};
+
 /**
  * Each Provider's Model shortlist as this window knows it, asked anew
  * whenever a Provider or a shortlist changes; undefined until main has said.
