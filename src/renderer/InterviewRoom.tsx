@@ -17,6 +17,7 @@ import {
 import { anyAdded, NoProviderState, useProviders } from './Providers';
 import {
   Composer,
+  ConversationUsage,
   MessageLog,
   useConversation,
   type Names,
@@ -145,14 +146,7 @@ export function InterviewRoom({
                 </select>
               </label>
               <ModelPicker conversation={conversation} />
-              {total && (
-                <p
-                  className="conversation-usage"
-                  aria-label="Conversation usage"
-                >
-                  {total}
-                </p>
-              )}
+              <ConversationUsage total={total} />
               <MessageLog
                 conversation={conversation}
                 names={names}

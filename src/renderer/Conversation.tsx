@@ -39,7 +39,12 @@ import {
 } from './at-mention';
 import type { MenuItem } from './Binder';
 import { streamingText } from '../shared/proposal';
-import { describeTotal, describeUsage } from '../shared/usage';
+import {
+  describeTotal,
+  describeUsage,
+  type MeteredTurn,
+  type Total,
+} from '../shared/usage';
 import { focusLabel } from './interview-focus';
 import { proposalCardId, ProposalCard } from './ProposalCard';
 import { flushPendingEdits } from './pending-edits';
@@ -413,7 +418,8 @@ export function useConversation({
     setFailure(failure && on ? { kind: failure, model: on } : null);
   }
 
-  // Summarising a long Conversation is a call too, and counts.
+  // Summarising a long Conversation is a call too, and counts. A turn with
+  // no usage counts too, as one whose price isn't known.
   const total = current
     ? describeTotal(
         [
@@ -421,9 +427,7 @@ export function useConversation({
           ...(current.emptyReplies ?? []),
           ...(current.compactions ?? []),
         ].flatMap((m) =>
-          m.model && m.usage
-            ? [{ model: loggedModel(m.model, m.provider), usage: m.usage }]
-            : [],
+          m.model ? [meteredTurn({ ...m, model: m.model })] : [],
         ),
       )
     : null;
@@ -596,7 +600,7 @@ function EmptyReplies({
 }) {
   const readOnly = useContext(ReadOnlyContext);
   const here = emptyReplies.filter((reply) => reply.before === before);
-  return here.map(({ model, provider, usage }, i) => (
+  return here.map((reply, i) => (
     <article
       key={i}
       className="message message-assistant"
@@ -615,13 +619,9 @@ function EmptyReplies({
       )}
       <p className="message-used">
         <span className="message-model" aria-label="Model">
-          {named(model, provider)}
+          {named(reply.model, reply.provider)}
         </span>
-        {usage && (
-          <span className="message-usage" aria-label="Usage">
-            {describeUsage(loggedModel(model, provider), usage)}
-          </span>
-        )}
+        <UsageLine turn={reply} />
       </p>
     </article>
   ));
@@ -799,6 +799,55 @@ export function Composer({
 }
 
 /**
+ * What a Conversation's turns used and cost so far; on hover, how many have
+ * no price when some haven't.
+ */
+export function ConversationUsage({ total }: { total: Total | null }) {
+  return (
+    total && (
+      <p
+        className="conversation-usage"
+        aria-label="Conversation usage"
+        title={total.hover}
+      >
+        {total.text}
+      </p>
+    )
+  );
+}
+
+/** What the log holds of a turn's cost: a message, empty reply or summary. */
+type LoggedTurn = Pick<ConversationMessage, 'provider' | 'usage' | 'cost'> & {
+  model: string;
+};
+
+/** A turn as far as its cost goes, from what the log holds of it. */
+function meteredTurn({
+  model,
+  provider,
+  usage,
+  cost,
+}: LoggedTurn): MeteredTurn {
+  return {
+    model: loggedModel(model, provider),
+    ...(usage && { usage }),
+    ...(cost !== undefined && { cost }),
+  };
+}
+
+/** What a turn used and cost, when anything of it is known. */
+function UsageLine({ turn }: { turn: LoggedTurn }) {
+  const described = describeUsage(meteredTurn(turn));
+  return (
+    described && (
+      <span className="message-usage" aria-label="Usage">
+        {described}
+      </span>
+    )
+  );
+}
+
+/**
  * A message; a reply shows the Findings it made as a list, and the Proposals
  * as cards, and ends with a collapsible line saying what it used and cost,
  * which opens to list what the Assistant saw.
@@ -820,19 +869,14 @@ function Message({
   shown?: string | null;
   onQuote?(sceneId: string, quote: string): void;
 }) {
-  const { role, text, model, provider, usage, interrupted, unreadable } =
-    message;
+  const { role, text, model, provider, interrupted, unreadable } = message;
   const { cutShort, saw, findings, proposals } = message;
   const used = model && (
     <>
       <span className="message-model" aria-label="Model">
         {named(model, provider)}
       </span>
-      {usage && (
-        <span className="message-usage" aria-label="Usage">
-          {describeUsage(loggedModel(model, provider), usage)}
-        </span>
-      )}
+      <UsageLine turn={{ ...message, model }} />
     </>
   );
   return (

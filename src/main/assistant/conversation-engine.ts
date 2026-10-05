@@ -186,12 +186,13 @@ export function createConversationEngine({
     };
     let text = '';
     let usage: Usage | undefined;
+    let cost: number | undefined;
     let finish: Finish | null = null;
     let failure: AssistantFailure | null = null;
     try {
       for await (const event of providerFor(chosen).stream(request)) {
         if (event.type === 'usage') {
-          usage = event.usage;
+          ({ usage, cost } = event);
         } else if (event.type === 'text') {
           text += event.text;
           onText(event.text);
@@ -217,6 +218,7 @@ export function createConversationEngine({
         model: chosen.id,
         provider: chosen.provider,
         ...(usage && { usage }),
+        ...(cost !== undefined && { cost }),
         before: messages.length,
       };
       await store.appendEmptyReply(
@@ -243,6 +245,7 @@ export function createConversationEngine({
       model: chosen.id,
       provider: chosen.provider,
       ...(usage && { usage }),
+      ...(cost !== undefined && { cost }),
       ...(finished.ending !== 'complete' && { interrupted: true as const }),
       ...(finished.ending === 'cut-short' && { cutShort: true as const }),
       ...(unreadable > 0 && { unreadable }),
@@ -272,10 +275,11 @@ export function createConversationEngine({
     if (covers === null) return latest;
     let text = '';
     let usage: Usage | undefined;
+    let cost: number | undefined;
     try {
       const request = summaryRequest(chosen, messages, covers, latest);
       for await (const event of providerFor(chosen).stream(request)) {
-        if (event.type === 'usage') usage = event.usage;
+        if (event.type === 'usage') ({ usage, cost } = event);
         else if (event.type === 'text') text += event.text;
       }
     } catch (error) {
@@ -290,6 +294,7 @@ export function createConversationEngine({
       model: chosen.id,
       provider: chosen.provider,
       ...(usage && { usage }),
+      ...(cost !== undefined && { cost }),
     };
     await store.appendSummary(conversationId, summary);
     return summary;

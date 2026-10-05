@@ -4,6 +4,7 @@ import { reviewText, type ReviewCommand } from '../shared/finding';
 import { anyAdded, NoProviderState, useProviders } from './Providers';
 import {
   Composer,
+  ConversationUsage,
   conversationActions,
   MessageLog,
   useConversation,
@@ -176,11 +177,7 @@ function Conversations({
           )}
         </div>
         <ModelPicker conversation={conversation} />
-        {total && (
-          <p className="conversation-usage" aria-label="Conversation usage">
-            {total}
-          </p>
-        )}
+        <ConversationUsage total={total} />
       </div>
       <MessageLog
         conversation={conversation}

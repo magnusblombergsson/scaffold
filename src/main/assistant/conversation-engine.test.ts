@@ -14,6 +14,7 @@ import { fakeProvider, type FakeReply } from './fake-provider';
 import type { ProviderRequest } from './provider';
 
 const OPUS: Model = { provider: 'anthropic', id: 'claude-opus-5-5' };
+const ROUTED: Model = { provider: 'openrouter', id: 'qwen/qwen3-235b' };
 
 let dir: string;
 
@@ -111,6 +112,39 @@ describe('askAssistant', () => {
       provider: 'anthropic',
       usage,
     });
+  });
+
+  it('logs what the Provider said a reply cost, with what it used', async () => {
+    const usage = { input: 18_000, cached: 0, written: 0, output: 900 };
+    const { store, sceneId, engine } = await setUp(() => ({
+      text: ['Hm.'],
+      usage,
+      cost: 0.031,
+    }));
+    const { id } = await store.startConversation('writing', 'Anna', ROUTED);
+
+    await engine.askAssistant(id, 'Why?', { sceneId }, () => {});
+
+    const [, replied] = (await store.readConversation(id)).messages;
+    expect(replied).toMatchObject({
+      model: 'qwen/qwen3-235b',
+      provider: 'openrouter',
+      usage,
+      cost: 0.031,
+    });
+  });
+
+  it('logs no cost for a reply whose Provider didn’t say one', async () => {
+    const { store, sceneId, engine } = await setUp(() => ({
+      text: ['Hm.'],
+      usage: { input: 18_000, cached: 0, written: 0, output: 900 },
+    }));
+    const { id } = await store.startConversation('writing', 'Anna');
+
+    await engine.askAssistant(id, 'Why?', { sceneId }, () => {});
+
+    const [, replied] = (await store.readConversation(id)).messages;
+    expect(replied).not.toHaveProperty('cost');
   });
 
   it('asks the Model the Conversation is on, switched from the next message, and logs which wrote each reply', async () => {
@@ -346,6 +380,27 @@ describe('askAssistant', () => {
     expect(
       (await store.readConversation(id)).messages.map((m) => m.role),
     ).toEqual(['author']);
+  });
+
+  it('keeps what a reply stopped partway used and cost, as looked up after', async () => {
+    const usage = { input: 2_000, cached: 0, written: 0, output: 3 };
+    const { store, sceneId, engine } = await setUp(() => ({
+      text: ['What does '],
+      usage,
+      cost: 0.002,
+      fail: 'offline',
+    }));
+    const { id } = await store.startConversation('writing', 'Anna', ROUTED);
+
+    const result = await engine.askAssistant(id, 'Why?', { sceneId }, () => {});
+
+    expect(result.reply).toMatchObject({
+      interrupted: true,
+      usage,
+      cost: 0.002,
+    });
+    const [, replied] = (await store.readConversation(id)).messages;
+    expect(replied).toEqual(result.reply);
   });
 
   it('keeps a reply cut short as an interrupted turn, with what it used', async () => {
@@ -843,6 +898,23 @@ describe('Empty replies', () => {
     expect(events.filter((e) => e.type?.startsWith('proposal.'))).toEqual([]);
   });
 
+  it('logs what the Provider said an empty reply cost, so it counts', async () => {
+    const usage = { input: 2_000, cached: 0, written: 0, output: 4_096 };
+    const { store, sceneId, engine } = await setUp(() => ({
+      text: ['<think>Long thoughts'],
+      usage,
+      cost: 0.05,
+      finish: 'length',
+    }));
+    const { id } = await store.startConversation('writing', 'Anna', ROUTED);
+
+    const result = await engine.askAssistant(id, 'Why?', { sceneId }, () => {});
+
+    expect(result.empty).toMatchObject({ usage, cost: 0.05 });
+    const conversation = await store.readConversation(id);
+    expect(conversation.emptyReplies).toEqual([result.empty]);
+  });
+
   it('never sends an empty reply back, and a retry answers the Author’s message afresh', async () => {
     const { store, sceneId, engine, provider } = await setUp((n) =>
       n === 0 ? [] : ['Because.'],
@@ -1119,6 +1191,28 @@ describe('Compaction of a long Conversation', () => {
         provider: 'anthropic',
       },
     ]);
+  });
+
+  it('logs what summarising used and cost, so it counts', async () => {
+    const usage = { input: 900, cached: 0, written: 0, output: 50 };
+    const { store, engine } = await setUp(
+      (n) =>
+        n === 2
+          ? { text: ['Anna wants to leave.'], usage, cost: 0.001 }
+          : [`Reply ${n}`],
+      { compaction },
+    );
+    const { id } = await store.startConversation('brainstorm', 'Anna', ROUTED);
+    await engine.askAssistant(id, long('Anna'), { sceneId: null }, () => {});
+    await engine.askAssistant(id, long('Mira'), { sceneId: null }, () => {});
+    await engine.askAssistant(id, 'And then?', { sceneId: null }, () => {});
+
+    const conversation = await store.readConversation(id);
+    expect(conversation.compactions?.[0]).toMatchObject({
+      provider: 'openrouter',
+      usage,
+      cost: 0.001,
+    });
   });
 
   it('always sends the undecided Proposals of the summarised part in full, and no decided ones', async () => {

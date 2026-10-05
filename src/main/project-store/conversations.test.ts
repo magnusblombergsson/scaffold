@@ -354,6 +354,41 @@ ${JSON.stringify({ type: 'message', role: 'assistant', text: 'Odd.', focus: [], 
   });
 });
 
+describe('What a turn cost', () => {
+  it('logs what the Provider said a reply cost on its message, and skips a cost it can’t read', async () => {
+    const { projectPath, store } = await newProject();
+    const { id } = await store.startConversation('brainstorm', 'Anna');
+    const usage = { input: 900, cached: 0, written: 0, output: 50 };
+    const reply = {
+      role: 'assistant' as const,
+      text: 'Hm.',
+      focus: [],
+      at: 2_000,
+      model: 'qwen/qwen3-235b',
+      provider: 'openrouter' as const,
+      usage,
+      cost: 0.0012,
+    };
+
+    await store.appendMessage(id, reply);
+    await appendFile(
+      path.join(projectPath, 'conversations', `${id}.jsonl`),
+      `${JSON.stringify({ ...reply, type: 'message', at: 3_000, cost: 'a lot' })}
+`,
+    );
+
+    expect((await logLines(projectPath, id)).at(-2)).toEqual({
+      type: 'message',
+      ...reply,
+    });
+    const { cost: _, ...unpriced } = reply;
+    expect((await store.readConversation(id)).messages).toEqual([
+      reply,
+      { ...unpriced, at: 3_000 },
+    ]);
+  });
+});
+
 describe('The Model of a Conversation', () => {
   const OPUS = { provider: 'anthropic', id: 'claude-opus-5-5' } as const;
   const QWEN = { provider: 'lmstudio', id: 'qwen3-8b' } as const;

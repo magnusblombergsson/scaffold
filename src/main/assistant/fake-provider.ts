@@ -8,15 +8,17 @@ import {
 } from './provider';
 
 /**
- * What the fake replies: the pieces of text it streams, then what the call
- * used, if given, and how it finished, complete unless `finish` says; with
- * `fail`, the call fails after the pieces instead.
+ * What the fake replies: what the call used, if given, with what the
+ * Provider said it cost, if it did; the pieces of text it streams; and how
+ * it finished, complete unless `finish` says; with `fail`, the call fails
+ * after the pieces instead.
  */
 export type FakeReply =
   | string[]
   | {
       text: string[];
       usage?: Usage;
+      cost?: number;
       finish?: Finish;
       fail?: AssistantFailure;
     };
@@ -35,10 +37,12 @@ export function fakeProvider(
       const n = requests.length;
       requests.push(structuredClone(request));
       const given = reply(request, n);
-      const { text, usage, finish, fail } = Array.isArray(given)
+      const { text, usage, cost, finish, fail } = Array.isArray(given)
         ? { text: given }
         : given;
-      if (usage) yield { type: 'usage', usage };
+      if (usage) {
+        yield { type: 'usage', usage, ...(cost !== undefined && { cost }) };
+      }
       for (const piece of text) {
         // A real reply arrives over time, not all at once.
         await new Promise((resolve) => setTimeout(resolve, 0));

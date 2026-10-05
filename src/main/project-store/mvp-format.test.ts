@@ -352,6 +352,40 @@ it('an MVP app skips the Model a Conversation is on and ignores which Provider w
   await reopened.close();
 });
 
+it('an MVP app ignores what OpenRouter said a reply cost', async () => {
+  const store = await createProject(projectPath, deps());
+  const routed = { provider: 'openrouter', id: 'qwen/qwen3-235b' } as const;
+  const { id } = await store.startConversation('writing', 'Anna', routed);
+  const usage = { input: 2_000, cached: 0, written: 0, output: 40 };
+  await store.appendMessage(id, {
+    role: 'assistant',
+    text: 'Because.',
+    focus: [],
+    at: 1,
+    model: 'qwen/qwen3-235b',
+    provider: 'openrouter',
+    usage,
+    cost: 0.003,
+  });
+  await store.close();
+
+  const log = await readFile(
+    path.join(projectPath, 'conversations', `${id}.jsonl`),
+    'utf8',
+  );
+  expect(log).toContain('"cost":0.003');
+  expect(mvpParseLog(log)?.messages).toEqual([
+    {
+      role: 'assistant',
+      text: 'Because.',
+      focus: [],
+      at: 1,
+      model: 'qwen/qwen3-235b',
+      usage,
+    },
+  ]);
+});
+
 it('reads a Proposal the MVP logged as a Replace', async () => {
   const store = await createProject(projectPath, deps());
   const { id: annaId } = await store.createEntry('character', 'Anna');

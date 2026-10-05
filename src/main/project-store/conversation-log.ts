@@ -105,15 +105,16 @@ export type UndoneEvent = {
 
 /**
  * A reply that came back with no text, or none once its thinking was
- * stripped: which Model wrote it and what it used, so its cost counts, and
- * how the Provider said it finished as its `reason`. It is never sent back
- * as context. The MVP skips it (ADR 0006).
+ * stripped: which Model wrote it, what it used and, when the Provider said,
+ * what it cost, so its cost counts, and how the Provider said it finished as
+ * its `reason`. It is never sent back as context. The MVP skips it (ADR 0006).
  */
 export type EmptyReplyEvent = {
   type: 'reply.empty';
   model: string;
   provider: Model['provider'];
   usage?: Usage;
+  cost?: number;
   reason: Finish;
   focus: string[];
   at: number;
@@ -528,7 +529,7 @@ function acceptedOf(
 function messageOf(event: MessageEvent): ConversationMessage {
   const { role, text, command, focus, at, model, usage, interrupted, saw } =
     event;
-  const { provider, cutShort, unreadable, findings } = event;
+  const { provider, cost, cutShort, unreadable, findings } = event;
   return {
     role,
     text,
@@ -538,6 +539,7 @@ function messageOf(event: MessageEvent): ConversationMessage {
     ...(typeof model === 'string' && { model }),
     ...(typeof model === 'string' && isProviderId(provider) && { provider }),
     ...(isUsage(usage) && { usage }),
+    ...(isCost(cost) && { cost }),
     ...(interrupted === true && { interrupted }),
     ...(interrupted === true && cutShort === true && { cutShort }),
     ...(isCount(unreadable) && { unreadable }),
@@ -551,7 +553,7 @@ function messageOf(event: MessageEvent): ConversationMessage {
  * for `reason`.
  */
 export function emptyReplyEvent(
-  { focus, at, usage }: Omit<EmptyReply, 'model' | 'provider' | 'before'>,
+  { focus, at, usage, cost }: Omit<EmptyReply, 'model' | 'provider' | 'before'>,
   model: Model,
   reason: Finish,
 ): EmptyReplyEvent {
@@ -560,6 +562,7 @@ export function emptyReplyEvent(
     model: model.id,
     provider: model.provider,
     ...(usage && { usage }),
+    ...(cost !== undefined && { cost }),
     reason,
     focus,
     at,
@@ -573,7 +576,7 @@ export function modelChosenEvent(model: Model, at: number): ModelChosenEvent {
 
 /** The empty reply an event holds, before the message `before`. */
 function emptyReplyOf(
-  { model, provider, usage, focus, at }: EmptyReplyEvent,
+  { model, provider, usage, cost, focus, at }: EmptyReplyEvent,
   before: number,
 ): EmptyReply {
   return {
@@ -582,6 +585,7 @@ function emptyReplyOf(
     model,
     provider,
     ...(isUsage(usage) && { usage }),
+    ...(isCost(cost) && { cost }),
     before,
   };
 }
@@ -592,7 +596,7 @@ function isCount(value: unknown): value is number {
 
 /** The summary an event holds; what is known of its cost is kept if readable. */
 function compactionOf(event: SummaryEvent): Compaction {
-  const { text, covers, at, model, provider, usage } = event;
+  const { text, covers, at, model, provider, usage, cost } = event;
   return {
     text,
     covers,
@@ -600,6 +604,7 @@ function compactionOf(event: SummaryEvent): Compaction {
     ...(typeof model === 'string' && { model }),
     ...(typeof model === 'string' && isProviderId(provider) && { provider }),
     ...(isUsage(usage) && { usage }),
+    ...(isCost(cost) && { cost }),
   };
 }
 
@@ -627,6 +632,11 @@ function isUsage(value: unknown): value is Usage {
     typeof usage.written === 'number' &&
     typeof usage.output === 'number'
   );
+}
+
+/** What a Provider said a call cost, in USD. */
+function isCost(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
 }
 
 function parseLine(line: string | undefined): unknown {

@@ -90,8 +90,9 @@ export type Saw = {
  * reply to it holds the Review's `findings`. An Assistant turn says which
  * `model` answered and through which `provider`; a turn logged before
  * Providers names no Provider, as it was Anthropic's. It says what it used,
- * when that is known, and is `interrupted` when the Assistant didn't finish
- * it, so it is never sent back: the call failed partway, or the reply was
+ * when that is known, and what it `cost` in USD when the Provider said. It
+ * is `interrupted` when the Assistant didn't finish it, so it is never sent
+ * back: the call failed partway, or the reply was
  * `cutShort` at the length limit. It says what the Assistant `saw`, the `proposals` it made in it,
  * and how many more it made that couldn't be read, as `unreadable`.
  */
@@ -105,6 +106,7 @@ export type ConversationMessage = {
   model?: string;
   provider?: ProviderId;
   usage?: Usage;
+  cost?: number;
   interrupted?: true;
   cutShort?: true;
   unreadable?: number;
@@ -129,8 +131,8 @@ export type AssistantFailure =
  * A reply that came back with no text, or none once its thinking was
  * stripped. It isn't a message: it is never sent back, and stands before
  * the message `before`, which is the number of messages before it. It says
- * which `model` wrote it, through which `provider`, and what it used, so its
- * cost counts.
+ * which `model` wrote it, through which `provider`, and what it used and,
+ * when the Provider said, cost, so its cost counts.
  */
 export type EmptyReply = {
   focus: string[];
@@ -139,6 +141,7 @@ export type EmptyReply = {
   model: string;
   provider: ProviderId;
   usage?: Usage;
+  cost?: number;
   before: number;
 };
 
@@ -158,7 +161,7 @@ export type AskResult = {
  * A summary of the older part of a long Conversation: it stands in for the
  * first `covers` messages when the Assistant is asked, though they stay in
  * the log and on screen. It says which `model` wrote it, through which
- * `provider` as a message does, and what that used, when known.
+ * `provider` as a message does, and what that used and cost, when known.
  */
 export type Compaction = {
   text: string;
@@ -168,6 +171,7 @@ export type Compaction = {
   model?: string;
   provider?: ProviderId;
   usage?: Usage;
+  cost?: number;
 };
 
 /**
