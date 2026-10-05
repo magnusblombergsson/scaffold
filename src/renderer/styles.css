@@ -2735,6 +2735,13 @@ button.finding-quote:hover {
   cursor: default;
 }
 
+.untested-mark {
+  color: var(--muted);
+  font-style: italic;
+  font-weight: normal;
+  cursor: help;
+}
+
 .model-picker-empty {
   margin: 0.3rem 0.5rem;
   font-size: 0.8rem;

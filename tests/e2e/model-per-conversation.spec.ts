@@ -62,6 +62,22 @@ async function openSettings(app: Parameters<typeof chooseMenu>[0], page: Page) {
   return page.getByRole('dialog', { name: 'Settings' });
 }
 
+/** Adds an Anthropic key in Settings, so its shortlist is offered. */
+async function addAnthropicKey(
+  app: Parameters<typeof chooseMenu>[0],
+  page: Page,
+) {
+  const settings = await openSettings(app, page);
+  const anthropicRow = settings.getByRole('region', { name: 'Anthropic' });
+  await anthropicRow.getByRole('button', { name: 'Add key' }).click();
+  await anthropicRow
+    .getByRole('textbox', { name: 'Anthropic API key' })
+    .fill('sk-ant-api03-good-abcd');
+  await anthropicRow.getByRole('button', { name: 'Check and save' }).click();
+  await expect(anthropicRow.getByLabel('Anthropic key in use')).toBeVisible();
+  await settings.getByRole('button', { name: 'Done' }).click();
+}
+
 test('the Author switches Model mid-Conversation: each reply names its Model, an unreachable one fails inline with Retry and a switch, and a removed one shows greyed', async () => {
   const projectPath = path.join(tempDir(), 'My Novel');
   lmStudioAdded(tempDir());
@@ -75,15 +91,7 @@ test('the Author switches Model mid-Conversation: each reply names its Model, an
   const page = await app.firstWindow();
   await page.getByRole('button', { name: 'New Project…' }).click();
 
-  const settings = await openSettings(app, page);
-  const anthropicRow = settings.getByRole('region', { name: 'Anthropic' });
-  await anthropicRow.getByRole('button', { name: 'Add key' }).click();
-  await anthropicRow
-    .getByRole('textbox', { name: 'Anthropic API key' })
-    .fill('sk-ant-api03-good-abcd');
-  await anthropicRow.getByRole('button', { name: 'Check and save' }).click();
-  await expect(anthropicRow.getByLabel('Anthropic key in use')).toBeVisible();
-  await settings.getByRole('button', { name: 'Done' }).click();
+  await addAnthropicKey(app, page);
 
   const assistant = page.getByRole('complementary', { name: 'Assistant' });
   const picker = assistant.getByRole('button', { name: /^Model: / });
@@ -91,14 +99,20 @@ test('the Author switches Model mid-Conversation: each reply names its Model, an
   // A new Conversation starts on the Model used last: none yet, so Opus.
   await expect(picker).toHaveText('Anthropic · Opus 5.5 ▾');
 
-  // The dropdown groups the shortlisted Models under their Provider.
+  // The dropdown groups the shortlisted Models under their Provider, and
+  // marks those not on the tested list.
   await picker.click();
   const claude = models.getByRole('group', { name: 'Anthropic' });
   await expect(claude.getByRole('menuitemradio')).toHaveText([
     'Opus 5.5 · 1M · $$$$',
-    'Sonnet 5 · 1M · $$$',
+    'Sonnet 5 · 1M · $$$ · Untested',
     'Haiku 4.5 · 200k · $$',
   ]);
+  await expect(
+    claude
+      .getByRole('menuitemradio', { name: /Sonnet 5/ })
+      .getByText('Untested'),
+  ).toHaveAttribute('title', /hasn't been checked against the rule/);
   await expect(
     claude.getByRole('menuitemradio', { name: /Opus 5\.5/ }),
   ).toHaveAttribute('title', '$4 in · $20 out per M');
@@ -107,7 +121,7 @@ test('the Author switches Model mid-Conversation: each reply names its Model, an
   ).toHaveAttribute('aria-checked', 'true');
   await expect(
     models.getByRole('group', { name: 'LM Studio' }).getByRole('menuitemradio'),
-  ).toHaveText(['Qwen3 8B · 32k · local · free']);
+  ).toHaveText(['Qwen3 8B · 32k · local · free · Untested']);
   await page.keyboard.press('Escape');
   await expect(models).toBeHidden();
 
@@ -146,7 +160,11 @@ test('the Author switches Model mid-Conversation: each reply names its Model, an
   await send('What does she fear?');
   const failed = log.getByRole('article', { name: 'System' });
   await expect(failed).toContainText("LM Studio isn't running at 127.0.0.1:9.");
-  await expect(picker).toHaveText('LM Studio · Qwen3 8B ▾');
+  await expect(picker).toHaveText('LM Studio · Qwen3 8B · Untested ▾');
+  await expect(picker.getByText('Untested')).toHaveAttribute(
+    'title',
+    /hasn't been checked against the rule/,
+  );
   await failed.getByRole('button', { name: 'Choose another Model' }).click();
   await expect(models).toBeVisible();
   await models.getByRole('menuitemradio', { name: /Haiku 4\.5/ }).click();
@@ -202,6 +220,44 @@ test('the Author switches Model mid-Conversation: each reply names its Model, an
   await expect(haiku).toHaveAttribute('aria-checked', 'true');
   await expect(
     models.getByRole('group', { name: 'Anthropic' }).getByRole('menuitemradio'),
-  ).toHaveText(['Opus 5.5 · 1M · $$$$', 'Sonnet 5 · 1M · $$$', 'Haiku 4.5']);
+  ).toHaveText([
+    'Opus 5.5 · 1M · $$$$',
+    'Sonnet 5 · 1M · $$$ · Untested',
+    'Haiku 4.5',
+  ]);
+  await app.close();
+});
+
+test('an Untested Model warns in the header but is asked like any other', async () => {
+  const projectPath = path.join(tempDir(), 'My Novel');
+  anthropic.calls.push({ reply: ['On Sonnet.'] });
+  const app = await launch(tempDir(), { anthropicUrl: anthropic.url });
+  await answerDialogs(app, projectPath);
+  const page = await app.firstWindow();
+  await page.getByRole('button', { name: 'New Project…' }).click();
+
+  await addAnthropicKey(app, page);
+
+  const assistant = page.getByRole('complementary', { name: 'Assistant' });
+  const picker = assistant.getByRole('button', { name: /^Model: / });
+  await picker.click();
+  await assistant
+    .getByRole('menu', { name: 'Models' })
+    .getByRole('menuitemradio', { name: /Sonnet 5/ })
+    .click();
+  await expect(picker).toHaveText('Anthropic · Sonnet 5 · Untested ▾');
+  await expect(picker).toHaveAccessibleName(
+    'Model: Anthropic · Sonnet 5, Untested',
+  );
+
+  await assistant
+    .getByRole('textbox', { name: 'Message' })
+    .fill('Why does Anna leave?');
+  await assistant.getByRole('button', { name: 'Send' }).click();
+  const reply = assistant
+    .getByRole('log', { name: 'Messages' })
+    .getByRole('article', { name: 'Assistant' });
+  await expect(reply).toContainText('On Sonnet.');
+  expect(anthropic.sent.map((body) => body.model)).toEqual(['claude-sonnet-5']);
   await app.close();
 });

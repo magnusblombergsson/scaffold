@@ -7,6 +7,7 @@ import {
   type Model,
   type ProviderId,
 } from '../shared/models';
+import { isTested, UNTESTED_TOOLTIP } from '../shared/tested-models';
 import type { ConversationState } from './Conversation';
 import { modelLine, modelName, priceLabel } from './model-listing';
 import { useProviders, useShortlists } from './Providers';
@@ -71,6 +72,7 @@ export function ModelPicker({
     return models.length > 0 ? [{ id, models }] : [];
   });
   const name = `${PROVIDER_NAMES[model.provider]} · ${modelName(model, shortlists)}`;
+  const untested = !isTested(model);
   const disabled = streaming !== null || (readOnly && current !== null);
 
   function closeToButton() {
@@ -109,7 +111,7 @@ export function ModelPicker({
       <button
         ref={button}
         className="model-picker-button"
-        aria-label={`Model: ${name}`}
+        aria-label={`Model: ${name}${untested ? ', Untested' : ''}`}
         title="The Model this Conversation asks, from its next message"
         aria-haspopup="menu"
         aria-expanded={picking}
@@ -117,6 +119,7 @@ export function ModelPicker({
         onClick={() => setPicking(!picking)}
       >
         {name}
+        {untested && <UntestedMark />}
         <span aria-hidden="true"> ▾</span>
       </button>
       {picking && (
@@ -145,30 +148,31 @@ export function ModelPicker({
               >
                 {PROVIDER_NAMES[id]}
               </div>
-              {models.map(({ listed, offered }) => (
-                <button
-                  key={listed.id}
-                  role="menuitemradio"
-                  tabIndex={-1}
-                  aria-checked={sameModel(model, {
-                    provider: id,
-                    id: listed.id,
-                  })}
-                  disabled={!offered}
-                  title={
-                    offered
-                      ? id === 'lmstudio'
-                        ? undefined
-                        : priceLabel(listed.price)
-                      : view.providers[id].added
-                        ? 'No longer on the shortlist'
-                        : `${PROVIDER_NAMES[id]} isn't added`
-                  }
-                  onClick={() => choose({ provider: id, id: listed.id })}
-                >
-                  {modelLine(id, listed)}
-                </button>
-              ))}
+              {models.map(({ listed, offered }) => {
+                const entry: Model = { provider: id, id: listed.id };
+                return (
+                  <button
+                    key={listed.id}
+                    role="menuitemradio"
+                    tabIndex={-1}
+                    aria-checked={sameModel(model, entry)}
+                    disabled={!offered}
+                    title={
+                      offered
+                        ? id === 'lmstudio'
+                          ? undefined
+                          : priceLabel(listed.price)
+                        : view.providers[id].added
+                          ? 'No longer on the shortlist'
+                          : `${PROVIDER_NAMES[id]} isn't added`
+                    }
+                    onClick={() => choose(entry)}
+                  >
+                    {modelLine(id, listed)}
+                    {!isTested(entry) && <UntestedMark />}
+                  </button>
+                );
+              })}
             </div>
           ))}
           {groups.every((group) => group.models.every((m) => !m.offered)) && (
@@ -179,6 +183,21 @@ export function ModelPicker({
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * The Untested mark after a Model's name, its warning on hover. It only
+ * warns: an Untested Model is asked like any other.
+ */
+function UntestedMark() {
+  return (
+    <>
+      {' · '}
+      <span className="untested-mark" title={UNTESTED_TOOLTIP}>
+        Untested
+      </span>
+    </>
   );
 }
 
