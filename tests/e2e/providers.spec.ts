@@ -333,7 +333,7 @@ test('Replace key checks the new key the same way; one without credit or uncheck
   await offline.close();
 });
 
-test('the current three Claude models are shortlisted and offered until the Author chooses others, which is remembered', async () => {
+test('the current three Claude models are shortlisted until the Author chooses others, which is remembered; Settings has no Model', async () => {
   const first = await start();
   const page = await first.firstWindow();
   const settings = await openSettings(page);
@@ -342,13 +342,10 @@ test('the current three Claude models are shortlisted and offered until the Auth
   await enterKey(anthropicRow, 'Anthropic API key', KEY);
   await anthropicRow.getByRole('button', { name: 'Check and save' }).click();
 
-  const model = settings.getByRole('combobox', { name: 'Model' });
-  await expect(model).toHaveValue('anthropic:claude-opus-5-5');
-  await expect(model.getByRole('option')).toHaveText([
-    'Opus 5.5',
-    'Sonnet 5',
-    'Haiku 4.5',
-  ]);
+  // Each Conversation chooses its Model, in its header.
+  await expect(settings.getByRole('combobox', { name: 'Model' })).toHaveCount(
+    0,
+  );
 
   await anthropicRow.getByRole('button', { name: 'Choose models…' }).click();
   const choose = page.getByRole('dialog', { name: 'Choose Anthropic models' });
@@ -360,13 +357,6 @@ test('the current three Claude models are shortlisted and offered until the Auth
   await choose.getByRole('button', { name: 'Save' }).click();
   await expect(choose).toBeHidden();
   await expect(settings).toBeVisible();
-  await expect(model.getByRole('option')).toHaveText([
-    'Fable 5.1',
-    'Opus 5.5',
-    'Haiku 4.5',
-  ]);
-
-  await model.selectOption({ label: 'Haiku 4.5' });
   await settings.getByRole('button', { name: 'Done' }).click();
   await expect(settings).toBeHidden();
   await first.close();
@@ -374,19 +364,22 @@ test('the current three Claude models are shortlisted and offered until the Auth
   const saved = JSON.parse(
     await readFile(path.join(userData(), 'settings.json'), 'utf8'),
   );
-  expect(saved.global.model).toEqual({
-    provider: 'anthropic',
-    id: 'claude-haiku-4-5',
-  });
+  expect(
+    saved.global.providers.shortlists.anthropic.map(
+      (m: { id: string }) => m.id,
+    ),
+  ).toEqual(['claude-fable-5-1', 'claude-opus-5-5', 'claude-haiku-4-5']);
   const second = await start();
-  const again = await openSettings(await second.firstWindow());
-  const reloaded = again.getByRole('combobox', { name: 'Model' });
-  await expect(reloaded).toHaveValue('anthropic:claude-haiku-4-5');
-  await expect(reloaded.getByRole('option')).toHaveText([
-    'Fable 5.1',
-    'Opus 5.5',
-    'Haiku 4.5',
-  ]);
+  const page2 = await second.firstWindow();
+  const again = await openSettings(page2);
+  await row(again, 'Anthropic')
+    .getByRole('button', { name: 'Choose models…' })
+    .click();
+  await expect(
+    page2
+      .getByRole('dialog', { name: 'Choose Anthropic models' })
+      .getByRole('checkbox', { checked: true }),
+  ).toHaveCount(3);
   await second.close();
 });
 
@@ -412,22 +405,13 @@ test('OpenRouter’s models are searched and shortlisted with their context wind
   await expect(list.getByRole('listitem')).toHaveCount(1);
   await choose.getByRole('checkbox', { name: /Qwen3 235B/ }).check();
   await choose.getByRole('button', { name: 'Save' }).click();
-
-  const model = settings.getByRole('combobox', { name: 'Model' });
-  await expect(model.locator('optgroup[label="OpenRouter"] option')).toHaveText(
-    ['Qwen: Qwen3 235B'],
-  );
-  await model.selectOption({ label: 'Qwen: Qwen3 235B' });
+  await expect(choose).toBeHidden();
   await settings.getByRole('button', { name: 'Done' }).click();
   await app.close();
 
   const saved = JSON.parse(
     await readFile(path.join(userData(), 'settings.json'), 'utf8'),
   );
-  expect(saved.global.model).toEqual({
-    provider: 'openrouter',
-    id: 'qwen/qwen3-235b',
-  });
   expect(saved.global.providers.shortlists.openrouter).toEqual([
     expect.objectContaining({ id: 'qwen/qwen3-235b', contextWindow: 131_072 }),
   ]);
@@ -458,15 +442,7 @@ test('LM Studio lists its downloaded models, loaded or not, and says when it isn
   ]);
   await choose.getByRole('checkbox', { name: /Gemma 3 12B/ }).check();
   await choose.getByRole('button', { name: 'Save' }).click();
-  await expect(
-    settings
-      .getByRole('combobox', { name: 'Model' })
-      .locator('optgroup[label="LM Studio"] option'),
-  ).toHaveText(['Gemma 3 12B']);
-  // LM Studio alone: its Model is the one used, as Claude can't be.
-  await expect(settings.getByRole('combobox', { name: 'Model' })).toHaveValue(
-    'lmstudio:gemma-3-12b',
-  );
+  await expect(choose).toBeHidden();
   await settings.getByRole('button', { name: 'Done' }).click();
 
   // LM Studio stops: it stays added, and says it isn't running.

@@ -61,8 +61,8 @@ export type EngineDeps = {
   >;
   /** The Provider each Model is reached through. */
   providerFor: ProviderFor;
-  /** The Model the next call uses, as chosen in Settings. */
-  model: () => Model;
+  /** The Model asked in a Conversation that isn't on one yet. */
+  defaultModel: () => Model;
   clock: Clock;
   /** When a long Conversation is compacted; tests make it short. */
   compaction?: CompactionPolicy;
@@ -76,7 +76,7 @@ export type EngineDeps = {
 export function createConversationEngine({
   store,
   providerFor,
-  model,
+  defaultModel,
   clock,
   compaction = DEFAULT_COMPACTION,
 }: EngineDeps) {
@@ -144,8 +144,8 @@ export function createConversationEngine({
   }
 
   /**
-   * Asks the model to answer the Conversation as logged, which ends with the
-   * Author's message, with the context the Conversation's Mode gives the
+   * Asks the Conversation's Model to answer it as logged, which ends with
+   * the Author's message, with the context the Conversation's Mode gives the
    * Scene in `focus`, or in an Interview, the focus it was last set to.
    * Past the threshold, the older messages are compacted first.
    * The reply is logged once it has come, without its thinking: as
@@ -160,12 +160,13 @@ export function createConversationEngine({
       mode,
       focus: interviewFocus,
       compactions,
-    }: Pick<Conversation, 'mode' | 'focus' | 'compactions'>,
+      model,
+    }: Pick<Conversation, 'mode' | 'focus' | 'compactions' | 'model'>,
     messages: ConversationMessage[],
     focus: string[],
     onText: (text: string) => void,
   ): Promise<AskResult> {
-    const chosen = model();
+    const chosen = model ?? defaultModel();
     const summary = await summaryToSend(
       conversationId,
       messages,
@@ -214,6 +215,7 @@ export function createConversationEngine({
         focus,
         at: clock.now(),
         model: chosen.id,
+        provider: chosen.provider,
         ...(usage && { usage }),
         before: messages.length,
       };
@@ -239,6 +241,7 @@ export function createConversationEngine({
       focus,
       at: clock.now(),
       model: chosen.id,
+      provider: chosen.provider,
       ...(usage && { usage }),
       ...(finished.ending !== 'complete' && { interrupted: true as const }),
       ...(finished.ending === 'cut-short' && { cutShort: true as const }),
@@ -285,6 +288,7 @@ export function createConversationEngine({
       covers,
       at: clock.now(),
       model: chosen.id,
+      provider: chosen.provider,
       ...(usage && { usage }),
     };
     await store.appendSummary(conversationId, summary);

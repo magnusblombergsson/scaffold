@@ -374,34 +374,48 @@ describe('ProviderSettings', () => {
     expect(asked[0].credential.secret).toBe('sk-or-v1-other-0123456789');
   });
 
-  describe('the Model for the next call', () => {
+  describe('the Model a new Conversation starts on', () => {
     const opus = { provider: 'anthropic', id: 'claude-opus-5-5' } as const;
 
-    it('is the one chosen while its Provider is added', async () => {
+    it('is the one used last while it is shortlisted and its Provider added', async () => {
       const providers = await load();
       await providers.add('anthropic', entry(ANTHROPIC_KEY));
       await providers.add('lmstudio', entry(''));
       providers.setShortlist('lmstudio', [QWEN]);
 
-      expect(providers.modelFor(opus)).toEqual(opus);
+      expect(providers.defaultModel(opus)).toEqual(opus);
     });
 
-    it('is the first shortlisted of an added Provider when the chosen one’s isn’t added', async () => {
+    it('is the first shortlisted when the one used last is gone from the shortlist', async () => {
+      const providers = await load();
+      await providers.add('anthropic', entry(ANTHROPIC_KEY));
+      providers.setShortlist('anthropic', [
+        { ...QWEN, id: 'claude-haiku-4-5' },
+        { ...QWEN, id: 'claude-sonnet-5' },
+      ]);
+
+      expect(providers.defaultModel(opus)).toEqual({
+        provider: 'anthropic',
+        id: 'claude-sonnet-5',
+      });
+    });
+
+    it('is the first shortlisted of an added Provider when the one used last’s isn’t added', async () => {
       const providers = await load();
       await providers.add('lmstudio', entry(''));
       providers.setShortlist('lmstudio', [QWEN]);
 
-      expect(providers.modelFor(opus)).toEqual({
+      expect(providers.defaultModel(opus)).toEqual({
         provider: 'lmstudio',
         id: 'qwen3-8b',
       });
     });
 
-    it('is the one chosen when no added Provider has a Model shortlisted', async () => {
+    it('is the one used last when no added Provider has a Model shortlisted', async () => {
       const providers = await load();
       await providers.add('lmstudio', entry(''));
 
-      expect(providers.modelFor(opus)).toEqual(opus);
+      expect(providers.defaultModel(opus)).toEqual(opus);
     });
   });
 

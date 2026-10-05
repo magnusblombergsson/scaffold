@@ -154,20 +154,21 @@ for (const theme of ['light', 'dark'] as const) {
         'background-color',
         look.sheet,
       );
+      // The Conversation's Model is underlined as the dropdowns are.
+      const model = page.locator('.room:not([hidden]) .model-picker-button');
+      await expect(model).toHaveCSS('border-top-width', '0px');
+      await expect(model).toHaveCSS('border-bottom-style', 'solid');
       await expect(page).toHaveScreenshot(`brainstorm-${theme}.png`, {
         mask: changing(page),
       });
 
-      // Settings: a dialog on the sheet colour, its dropdowns underlined.
+      // Settings: a dialog on the sheet colour.
       await chooseMenu(app, ['Tools', 'Settings…'], page);
       const settings = page.getByRole('dialog', { name: 'Settings' });
       await expect(settings).toHaveCSS('background-color', look.sheet);
       await expect(settings.getByLabel('Anthropic status')).toHaveText(
         'Connected',
       );
-      const dropdown = settings.locator('select').first();
-      await expect(dropdown).toHaveCSS('border-top-width', '0px');
-      await expect(dropdown).toHaveCSS('border-bottom-style', 'solid');
       await expect(settings).toHaveScreenshot(`settings-${theme}.png`);
     } finally {
       await app.close();

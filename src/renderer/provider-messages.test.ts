@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { KeyKeeping, ProvidersView } from '../shared/api';
-import { addedMessage, statusLabel } from './provider-messages';
+import { addedMessage, failureMessage, statusLabel } from './provider-messages';
 
 /** Every Provider added, its secret kept as `kept`. */
 function view(
@@ -102,5 +102,42 @@ describe('statusLabel', () => {
     ['lmstudio', 'key-rejected', 'Token rejected'],
   ] as const)('labels %s %s as %s', (id, status, label) => {
     expect(statusLabel(id, status)).toBe(label);
+  });
+});
+
+describe('failureMessage', () => {
+  const local = view(null, 'http://localhost:1234');
+  const lmStudio = { provider: 'lmstudio', id: 'qwen3-8b' } as const;
+  const openRouter = { provider: 'openrouter', id: 'qwen/qwen3-235b' } as const;
+
+  it('says LM Studio isn’t running at its address', () => {
+    expect(failureMessage('offline', lmStudio, local)).toBe(
+      "LM Studio isn't running at localhost:1234. Start its server, then retry, or choose another Model.",
+    );
+  });
+
+  it('names the Provider that couldn’t be reached, or refused', () => {
+    expect(failureMessage('offline', openRouter, encrypted)).toBe(
+      "Can't reach OpenRouter. Check the connection, then retry, or choose another Model.",
+    );
+    expect(failureMessage('key', openRouter, encrypted)).toBe(
+      "OpenRouter didn't accept the API key. Check it in Settings, then retry.",
+    );
+    expect(failureMessage('credit', openRouter, encrypted)).toBe(
+      'The OpenRouter account is out of credit. Add credit there, then retry, or choose another Model.',
+    );
+  });
+
+  it('says when the Model’s Provider isn’t added, whatever the call said', () => {
+    const removed: ProvidersView = {
+      ...encrypted,
+      providers: {
+        ...encrypted.providers,
+        openrouter: { added: false, masked: null, kept: null, address: null },
+      },
+    };
+    expect(failureMessage('key', openRouter, removed)).toBe(
+      "OpenRouter isn't added. Add it in Settings, or choose another Model.",
+    );
   });
 });

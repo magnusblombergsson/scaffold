@@ -397,10 +397,10 @@ export class AppSettings {
   }
 
   /**
-   * The Model for the next call, in every Project; a Claude model this app
-   * doesn't offer reads as the default.
+   * The Model the Author chose last for a Conversation, in any Project; a
+   * Claude model this app doesn't offer reads as the default.
    */
-  model(): Model {
+  lastUsedModel(): Model {
     const model = this.data.global.model;
     if (isModel(model) && model.provider !== 'anthropic') {
       return { provider: model.provider, id: model.id };
@@ -410,7 +410,7 @@ export class AppSettings {
     return isClaudeModelId(id) ? { provider: 'anthropic', id } : DEFAULT_MODEL;
   }
 
-  setModel(model: Model): void {
+  setLastUsedModel(model: Model): void {
     this.data.global.model = { provider: model.provider, id: model.id };
     this.changed();
   }

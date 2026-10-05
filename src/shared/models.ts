@@ -124,11 +124,11 @@ export function isModel(value: unknown): value is Model {
 }
 
 /**
- * The Model a log names by its id alone, as every log so far does: they were
- * all written by Claude models.
+ * The Model a log names by its id and Provider; a log written before
+ * Providers names only the id, as every turn then was Anthropic's.
  */
-export function loggedModel(id: string): Model {
-  return { provider: 'anthropic', id };
+export function loggedModel(id: string, provider?: ProviderId): Model {
+  return { provider: provider ?? 'anthropic', id };
 }
 
 /** What `model` costs, if it is one of the built-in Claude models. */
@@ -148,6 +148,11 @@ export function claudeListing(): ListedModel[] {
       price: { ...price },
     }),
   );
+}
+
+/** Whether `a` and `b` are the same Model. */
+export function sameModel(a: Model, b: Model): boolean {
+  return a.provider === b.provider && a.id === b.id;
 }
 
 /** Whether `value` names a Provider. */

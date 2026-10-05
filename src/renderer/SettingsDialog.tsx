@@ -1,10 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { KeyKeeping, ProviderResult, ProvidersView } from '../shared/api';
 import {
   PROVIDER_IDS,
   PROVIDER_NAMES,
-  type ListedModel,
-  type Model,
   type ProviderId,
   type ProviderStatus,
 } from '../shared/models';
@@ -25,29 +23,16 @@ const KEPT_LABELS: Record<KeyKeeping, string> = {
 
 /**
  * Settings for every Project on this computer: the Providers, each with its
- * key shown only masked, whether it answers, and its Model shortlist; and
- * the Model. All apply from the Assistant's next call.
+ * key shown only masked, whether it answers, and its Model shortlist. All
+ * apply from the Assistant's next call; each Conversation chooses its Model.
  */
 export function SettingsDialog({ onClose }: { onClose(): void }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const view = useProviders();
-  const [shortlists, setShortlists] =
-    useState<Record<ProviderId, ListedModel[]>>();
-  const [model, setModel] = useState<Model>();
-
-  /** The shortlists, and the Model, which follows the Providers added. */
-  const loadShortlists = useCallback(() => {
-    void window.settings.shortlists().then(setShortlists);
-    void window.settings.model().then(setModel);
-  }, []);
 
   useEffect(() => {
     dialogRef.current?.showModal();
   }, []);
-
-  useEffect(() => {
-    loadShortlists();
-  }, [loadShortlists, view]);
 
   return (
     <dialog
@@ -67,30 +52,8 @@ export function SettingsDialog({ onClose }: { onClose(): void }) {
         </p>
         {view &&
           PROVIDER_IDS.map((id) => (
-            <ProviderRow
-              key={id}
-              id={id}
-              view={view}
-              onShortlisted={loadShortlists}
-            />
+            <ProviderRow key={id} id={id} view={view} />
           ))}
-      </section>
-      <section aria-labelledby="model-heading">
-        <h3 id="model-heading">Model</h3>
-        {model && view && shortlists && (
-          <ModelSelect
-            model={model}
-            view={view}
-            shortlists={shortlists}
-            onChange={(chosen) => {
-              setModel(chosen);
-              window.settings.setModel(chosen);
-            }}
-          />
-        )}
-        <p className="field-hint">
-          Used for every Project, from the Assistant's next call.
-        </p>
       </section>
       <div className="settings-close">
         <button onClick={() => dialogRef.current?.close()}>Done</button>
@@ -104,15 +67,7 @@ export function SettingsDialog({ onClose }: { onClose(): void }) {
  * Provider added or replaced shows what checking it said; otherwise its
  * status is asked for when the row shows.
  */
-function ProviderRow({
-  id,
-  view,
-  onShortlisted,
-}: {
-  id: ProviderId;
-  view: ProvidersView;
-  onShortlisted(): void;
-}) {
+function ProviderRow({ id, view }: { id: ProviderId; view: ProvidersView }) {
   const provider = view.providers[id];
   const name = PROVIDER_NAMES[id];
   const lmStudio = id === 'lmstudio';
@@ -229,64 +184,8 @@ function ProviderRow({
         </div>
       )}
       {choosing && (
-        <ChooseModelsDialog
-          id={id}
-          onClose={(saved) => {
-            setChoosing(false);
-            if (saved) onShortlisted();
-          }}
-        />
+        <ChooseModelsDialog id={id} onClose={() => setChoosing(false)} />
       )}
     </section>
-  );
-}
-
-/**
- * The Model for every Project, from the shortlists of the Providers added.
- * One no longer offered still shows, as it is still used.
- */
-function ModelSelect({
-  model,
-  view,
-  shortlists,
-  onChange,
-}: {
-  model: Model;
-  view: ProvidersView;
-  shortlists: Record<ProviderId, ListedModel[]>;
-  onChange(model: Model): void;
-}) {
-  const offered = PROVIDER_IDS.filter((id) => view.providers[id].added).map(
-    (id) => ({ id, models: shortlists[id] }),
-  );
-  const value = `${model.provider}:${model.id}`;
-  const isOffered = offered.some(
-    (group) =>
-      group.id === model.provider &&
-      group.models.some((m) => m.id === model.id),
-  );
-  return (
-    <select
-      aria-labelledby="model-heading"
-      value={value}
-      onChange={(event) => {
-        const at = event.target.value.indexOf(':');
-        onChange({
-          provider: event.target.value.slice(0, at) as ProviderId,
-          id: event.target.value.slice(at + 1),
-        });
-      }}
-    >
-      {!isOffered && <option value={value}>{model.id}</option>}
-      {offered.map(({ id, models }) => (
-        <optgroup key={id} label={PROVIDER_NAMES[id]}>
-          {models.map((m) => (
-            <option key={m.id} value={`${id}:${m.id}`}>
-              {m.name}
-            </option>
-          ))}
-        </optgroup>
-      ))}
-    </select>
   );
 }

@@ -1,6 +1,8 @@
-import type { ProviderResult } from '../shared/api';
+import type { ProviderResult, ProvidersView } from '../shared/api';
+import type { AssistantFailure } from '../shared/conversation';
 import {
   PROVIDER_NAMES,
+  type Model,
   type ProviderId,
   type ProviderStatus,
 } from '../shared/models';
@@ -47,6 +49,37 @@ export function addedMessage(
         warning: true,
         text: `Can't reach ${name}, so the key wasn't checked. ${untilQuit ? "It's kept until Scaffold quits" : "It's saved"}; if it doesn't work, the Assistant will say so.`,
       };
+  }
+}
+
+/**
+ * What the Author is told when the Assistant couldn't answer on `model`:
+ * why, naming its Provider, and what to do, which may be to choose another
+ * Model.
+ */
+export function failureMessage(
+  failure: AssistantFailure,
+  model: Model,
+  view: ProvidersView,
+): string {
+  const name = PROVIDER_NAMES[model.provider];
+  const provider = view.providers[model.provider];
+  if (!provider.added) {
+    return `${name} isn't added. Add it in Settings, or choose another Model.`;
+  }
+  switch (failure) {
+    case 'key':
+      return `${name} didn't accept the ${model.provider === 'lmstudio' ? 'token' : 'API key'}. Check it in Settings, then retry.`;
+    case 'credit':
+      return `The ${name} account is out of credit. Add credit there, then retry, or choose another Model.`;
+    case 'rate-limit':
+      return `${name} is getting too many calls from this key. Wait a moment, then retry.`;
+    case 'offline':
+      return model.provider === 'lmstudio'
+        ? `LM Studio isn't running at ${hostOf(provider.address)}. Start its server, then retry, or choose another Model.`
+        : `Can't reach ${name}. Check the connection, then retry, or choose another Model.`;
+    case 'other':
+      return "The Assistant couldn't answer. Retry, or choose another Model.";
   }
 }
 

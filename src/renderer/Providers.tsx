@@ -4,6 +4,7 @@ import {
   LMSTUDIO_ADDRESS,
   PROVIDER_IDS,
   PROVIDER_NAMES,
+  type ListedModel,
   type ProviderId,
 } from '../shared/models';
 import { addedMessage } from './provider-messages';
@@ -26,6 +27,29 @@ export function useProviders(): ProvidersView | undefined {
     };
   }, []);
   return view;
+}
+
+/**
+ * Each Provider's Model shortlist as this window knows it, asked anew
+ * whenever a Provider or a shortlist changes; undefined until main has said.
+ */
+export function useShortlists(): Record<ProviderId, ListedModel[]> | undefined {
+  const [shortlists, setShortlists] =
+    useState<Record<ProviderId, ListedModel[]>>();
+  useEffect(() => {
+    let current = true;
+    const load = () =>
+      void window.settings.shortlists().then((lists) => {
+        if (current) setShortlists(lists);
+      });
+    load();
+    const unsubscribe = window.settings.onProviders(load);
+    return () => {
+      current = false;
+      unsubscribe();
+    };
+  }, []);
+  return shortlists;
 }
 
 /** Whether any Provider is added, so the Assistant can be asked. */

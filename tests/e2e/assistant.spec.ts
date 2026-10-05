@@ -72,18 +72,24 @@ test('the Author asks about the Scene in focus, sees the reply stream in, and re
   await expect(messages.getByRole('button')).toHaveCount(0);
 
   // The reply is logged once it has streamed in.
-  await expect.poll(async () => (await logs(projectPath))[0].length).toBe(3);
-  const [[header, asked, replied]] = await logs(projectPath);
+  await expect.poll(async () => (await logs(projectPath))[0].length).toBe(4);
+  const [[header, chosen, asked, replied]] = await logs(projectPath);
   expect(header).toMatchObject({
     mode: 'writing',
     title: 'Why does Anna leave?',
     format: 1,
+  });
+  expect(chosen).toMatchObject({
+    type: 'modelChosen',
+    provider: 'anthropic',
+    model: 'claude-opus-5-5',
   });
   expect(asked).toMatchObject({ type: 'message', role: 'author' });
   expect(replied).toMatchObject({
     type: 'message',
     role: 'assistant',
     model: 'claude-opus-5-5',
+    provider: 'anthropic',
     usage: { input: 18_000, cached: 12_000, written: 0, output: 900 },
     saw: { entries: [], messages: 0 },
   });
@@ -142,7 +148,7 @@ test('a refused key shows inline with Retry and Open Settings, and logs no turn'
   await expect(
     messages.getByRole('article', { name: 'Assistant' }),
   ).toHaveCount(0);
-  expect((await logs(projectPath))[0]).toHaveLength(2);
+  expect((await logs(projectPath))[0]).toHaveLength(3);
 
   await failed.getByRole('button', { name: 'Open Settings' }).click();
   const settings = page.getByRole('dialog', { name: 'Settings' });
@@ -156,6 +162,7 @@ test('a refused key shows inline with Retry and Open Settings, and logs no turn'
   await expect(failed).toHaveCount(0);
   const [log] = await logs(projectPath);
   expect(log.map((event) => event.role)).toEqual([
+    undefined,
     undefined,
     'author',
     'assistant',
@@ -179,7 +186,7 @@ test('a reply cut short is kept as interrupted, and Retry adds a new turn', asyn
 
   const messages = assistant.getByRole('log', { name: 'Messages' });
   const failed = messages.getByRole('article', { name: 'System' });
-  await expect(failed).toContainText("Can't reach the Provider");
+  await expect(failed).toContainText("Can't reach Anthropic");
   await expect(
     failed.getByRole('button', { name: 'Open Settings' }),
   ).toHaveCount(0);
@@ -195,7 +202,7 @@ test('a reply cut short is kept as interrupted, and Retry adds a new turn', asyn
   expect(anthropic.sent[1].messages).toEqual([
     { role: 'user', content: 'Why?' },
   ]);
-  const [[, asked, cut, whole]] = await logs(projectPath);
+  const [[, , asked, cut, whole]] = await logs(projectPath);
   expect(asked).toMatchObject({ role: 'author' });
   expect(cut).toMatchObject({ text: 'What does ', interrupted: true });
   expect(whole).toMatchObject({ text: 'Whole reply.' });
@@ -349,8 +356,8 @@ test('the Author asks for a Review of the Chapter, sees its Findings in order, a
   );
 
   // The Findings are logged in the reply, the Review in the ask.
-  await expect.poll(async () => (await logs(projectPath))[0].length).toBe(3);
-  const [[, asked, replied]] = await logs(projectPath);
+  await expect.poll(async () => (await logs(projectPath))[0].length).toBe(4);
+  const [[, , asked, replied]] = await logs(projectPath);
   expect(asked).toMatchObject({ command: 'review-chapter' });
   expect(replied.findings.map((f: { type: string }) => f.type)).toEqual([
     'contradiction',

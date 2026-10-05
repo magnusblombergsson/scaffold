@@ -11,6 +11,7 @@ import {
   currentClaudeModels,
   LMSTUDIO_ADDRESS,
   PROVIDER_IDS,
+  sameModel,
   type ListedModel,
   type Model,
   type ProviderId,
@@ -202,18 +203,19 @@ export class ProviderSettings {
   }
 
   /**
-   * The Model a call goes to when the Author chose `chosen`: that one while
-   * its Provider is added, else the first shortlisted of a Provider that is,
-   * so any one Provider is enough.
+   * The Model a new Conversation starts on when `lastUsed` was the one used
+   * last: that one while it is shortlisted and its Provider added, else the
+   * first shortlisted of a Provider that is, so any one Provider is enough.
    */
-  modelFor(chosen: Model): Model {
-    if (this.added(chosen.provider)) return chosen;
+  defaultModel(lastUsed: Model): Model {
     const lists = this.shortlists();
-    for (const id of PROVIDER_IDS) {
-      const [first] = this.added(id) ? lists[id] : [];
-      if (first) return { provider: id, id: first.id };
-    }
-    return chosen;
+    const offered = PROVIDER_IDS.flatMap((id) =>
+      this.added(id)
+        ? lists[id].map((model): Model => ({ provider: id, id: model.id }))
+        : [],
+    );
+    const shortlisted = offered.some((model) => sameModel(model, lastUsed));
+    return shortlisted ? lastUsed : (offered[0] ?? lastUsed);
   }
 
   setShortlist(id: ProviderId, models: ListedModel[]): void {

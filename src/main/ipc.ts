@@ -19,7 +19,13 @@ import { createConversationEngine } from './assistant/conversation-engine';
 import { entryImageOf, imageDataUrl } from './entry-image';
 import { systemClock } from './project-store/clock';
 import type { ProjectStore } from './project-store/project-store';
-import { assistantModel, assistantProvider, storeOf } from './shell';
+import { isModel } from '../shared/models';
+import {
+  assistantProvider,
+  defaultModel,
+  rememberModel,
+  storeOf,
+} from './shell';
 import { trashConversationQuestion } from './trash-question';
 
 /**
@@ -130,7 +136,7 @@ function engineOf(sender: WebContents) {
   return createConversationEngine({
     store: storeOfWindow(sender),
     providerFor: assistantProvider,
-    model: assistantModel,
+    defaultModel,
     clock: systemClock,
   });
 }
@@ -152,8 +158,24 @@ export function registerAssistantIpc(): void {
   );
   ipcMain.handle(
     channel.startConversation,
-    (event, mode: Mode, title: string) =>
-      storeOfWindow(event.sender).startConversation(mode, title),
+    async (event, mode: Mode, title: string, model: unknown) => {
+      if (!isModel(model)) throw new Error('A Conversation needs a Model');
+      const started = await storeOfWindow(event.sender).startConversation(
+        mode,
+        title,
+        model,
+      );
+      rememberModel(model);
+      return started;
+    },
+  );
+  ipcMain.handle(
+    channel.chooseModel,
+    async (event, conversationId: string, model: unknown) => {
+      if (!isModel(model)) throw new Error('No such Model');
+      await storeOfWindow(event.sender).chooseModel(conversationId, model);
+      rememberModel(model);
+    },
   );
   ipcMain.handle(
     channel.renameConversation,

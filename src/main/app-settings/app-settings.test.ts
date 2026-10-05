@@ -98,17 +98,20 @@ describe('saving', () => {
     expect((await load()).highlightMentions()).toBe(false);
   });
 
-  it('uses Opus 5.5 until the Author chooses another model, and remembers it', async () => {
+  it('remembers the Model used last, Opus 5.5 before any', async () => {
     const settings = await load();
-    expect(settings.model()).toEqual({
+    expect(settings.lastUsedModel()).toEqual({
       provider: 'anthropic',
       id: 'claude-opus-5-5',
     });
 
-    settings.setModel({ provider: 'anthropic', id: 'claude-haiku-4-5' });
+    settings.setLastUsedModel({
+      provider: 'anthropic',
+      id: 'claude-haiku-4-5',
+    });
     await settings.flush();
 
-    expect((await load()).model()).toEqual({
+    expect((await load()).lastUsedModel()).toEqual({
       provider: 'anthropic',
       id: 'claude-haiku-4-5',
     });
@@ -128,7 +131,7 @@ describe('saving', () => {
       }),
     );
 
-    expect((await load()).model()).toEqual({
+    expect((await load()).lastUsedModel()).toEqual({
       provider: 'anthropic',
       id: 'claude-sonnet-5',
     });
@@ -137,19 +140,19 @@ describe('saving', () => {
   it('reads a Claude model this app doesn’t offer as the default', async () => {
     const settings = await load();
 
-    settings.setModel({ provider: 'anthropic', id: 'claude-gone-1' });
+    settings.setLastUsedModel({ provider: 'anthropic', id: 'claude-gone-1' });
     await settings.flush();
 
-    expect((await load()).model()).toEqual(DEFAULT_MODEL);
+    expect((await load()).lastUsedModel()).toEqual(DEFAULT_MODEL);
   });
 
   it('remembers a Model of another Provider', async () => {
     const settings = await load();
 
-    settings.setModel({ provider: 'lmstudio', id: 'qwen3-8b' });
+    settings.setLastUsedModel({ provider: 'lmstudio', id: 'qwen3-8b' });
     await settings.flush();
 
-    expect((await load()).model()).toEqual({
+    expect((await load()).lastUsedModel()).toEqual({
       provider: 'lmstudio',
       id: 'qwen3-8b',
     });
@@ -400,7 +403,7 @@ describe('a bad or newer settings file', () => {
     expect(settings.recent()).toEqual([valid]);
     expect(settings.openAtQuit()).toEqual([]);
     expect(settings.highlightMentions()).toBe(true);
-    expect(settings.model()).toEqual(DEFAULT_MODEL);
+    expect(settings.lastUsedModel()).toEqual(DEFAULT_MODEL);
     expect(settings.welcomed()).toBe(false);
     expect(settings.project('a')).toEqual({ panelWidths: { binder: 300 } });
     expect(settings.project('b')).toEqual({});

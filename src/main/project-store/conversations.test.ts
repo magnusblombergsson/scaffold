@@ -353,3 +353,117 @@ ${JSON.stringify({ type: 'message', role: 'assistant', text: 'Odd.', focus: [], 
     expect(conversation.compactions).toEqual([summary]);
   });
 });
+
+describe('The Model of a Conversation', () => {
+  const OPUS = { provider: 'anthropic', id: 'claude-opus-5-5' } as const;
+  const QWEN = { provider: 'lmstudio', id: 'qwen3-8b' } as const;
+
+  it('logs the Model a Conversation starts on, and each switch, as modelChosen; the latest is its Model', async () => {
+    const { projectPath, store, clock } = await newProject();
+    const { id } = await store.startConversation('writing', 'Anna', OPUS);
+    expect((await store.readConversation(id)).model).toEqual(OPUS);
+
+    await clock.sleep(1_000);
+    await store.chooseModel(id, QWEN);
+
+    expect((await logLines(projectPath, id)).slice(1)).toEqual([
+      {
+        type: 'modelChosen',
+        provider: 'anthropic',
+        model: 'claude-opus-5-5',
+        at: 1_000,
+      },
+      {
+        type: 'modelChosen',
+        provider: 'lmstudio',
+        model: 'qwen3-8b',
+        at: 2_000,
+      },
+    ]);
+    expect((await store.readConversation(id)).model).toEqual(QWEN);
+  });
+
+  it('logs which Provider wrote a reply, and reads a reply logged without one as written by Anthropic', async () => {
+    const { projectPath, store } = await newProject();
+    const { id } = await store.startConversation('brainstorm', 'Anna');
+    const reply = {
+      role: 'assistant' as const,
+      text: 'Hm.',
+      focus: [],
+      at: 2_000,
+      model: 'qwen3-8b',
+      provider: 'lmstudio' as const,
+    };
+
+    await store.appendMessage(id, reply);
+    await appendFile(
+      path.join(projectPath, 'conversations', `${id}.jsonl`),
+      `${JSON.stringify({ ...reply, type: 'message', provider: 'elsewhere' })}\n`,
+    );
+
+    expect((await logLines(projectPath, id))[1]).toEqual({
+      type: 'message',
+      ...reply,
+    });
+    const { messages } = await store.readConversation(id);
+    expect(messages[0]).toEqual(reply);
+    expect(messages[1]).not.toHaveProperty('provider');
+  });
+
+  it('is, without a Model chosen, the one its latest reply was written by, if any', async () => {
+    const { projectPath, store } = await newProject();
+    const { id } = await store.startConversation('brainstorm', 'Anna');
+    expect(await store.readConversation(id)).not.toHaveProperty('model');
+
+    await store.appendMessage(id, {
+      role: 'assistant',
+      text: 'Hm.',
+      focus: [],
+      at: 2_000,
+      model: 'claude-haiku-4-5',
+    });
+    await appendFile(
+      path.join(projectPath, 'conversations', `${id}.jsonl`),
+      `${JSON.stringify({ type: 'modelChosen', provider: 'elsewhere', model: 'x', at: 3_000 })}\n`,
+    );
+
+    expect((await store.readConversation(id)).model).toEqual({
+      provider: 'anthropic',
+      id: 'claude-haiku-4-5',
+    });
+  });
+
+  it('keeps the Provider of an empty reply and of a summary', async () => {
+    const { store } = await newProject();
+    const { id } = await store.startConversation('brainstorm', 'Anna');
+    await store.appendMessage(id, {
+      role: 'author',
+      text: 'Why?',
+      focus: [],
+      at: 2_000,
+    });
+    await store.appendEmptyReply(id, { focus: [], at: 3_000 }, QWEN, 'length');
+    await store.appendSummary(id, {
+      text: 'Anna asked why.',
+      covers: 1,
+      at: 4_000,
+      model: 'qwen3-8b',
+      provider: 'lmstudio',
+    });
+
+    const conversation = await store.readConversation(id);
+    expect(conversation.emptyReplies).toEqual([
+      {
+        focus: [],
+        at: 3_000,
+        model: 'qwen3-8b',
+        provider: 'lmstudio',
+        before: 1,
+      },
+    ]);
+    expect(conversation.compactions?.[0]).toMatchObject({
+      model: 'qwen3-8b',
+      provider: 'lmstudio',
+    });
+  });
+});

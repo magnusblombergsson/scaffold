@@ -286,9 +286,69 @@ it('an MVP app skips an empty reply, counting the same messages, and reads the m
     },
   ]);
   expect(conversation.emptyReplies).toEqual([
-    { focus: [], at: 2, model: 'claude-opus-5-5', usage, before: 1 },
+    {
+      focus: [],
+      at: 2,
+      model: 'claude-opus-5-5',
+      provider: 'anthropic',
+      usage,
+      before: 1,
+    },
   ]);
   expect(conversation.compactions?.[0].covers).toBe(2);
+  await reopened.close();
+});
+
+it('an MVP app skips the Model a Conversation is on and ignores which Provider wrote a reply, so it asks its own one Model', async () => {
+  const store = await createProject(projectPath, deps());
+  const local = { provider: 'lmstudio', id: 'qwen3-8b' } as const;
+  const { id } = await store.startConversation('writing', 'Anna', local);
+  await store.appendMessage(id, {
+    role: 'author',
+    text: 'Why?',
+    focus: [],
+    at: 1,
+  });
+  await store.appendMessage(id, {
+    role: 'assistant',
+    text: 'Because.',
+    focus: [],
+    at: 2,
+    model: 'qwen3-8b',
+    provider: 'lmstudio',
+  });
+  await store.chooseModel(id, {
+    provider: 'anthropic',
+    id: 'claude-haiku-4-5',
+  });
+  await store.close();
+
+  const log = await readFile(
+    path.join(projectPath, 'conversations', `${id}.jsonl`),
+    'utf8',
+  );
+  expect(log.match(/"type":"modelChosen"/g)).toHaveLength(2);
+  const mvp = mvpParseLog(log);
+  // Nothing in what it reads names a Model to ask: it asks its global one.
+  expect(mvp).not.toHaveProperty('model');
+  expect(mvp?.messages).toEqual([
+    { role: 'author', text: 'Why?', focus: [], at: 1 },
+    {
+      role: 'assistant',
+      text: 'Because.',
+      focus: [],
+      at: 2,
+      model: 'qwen3-8b',
+    },
+  ]);
+
+  const reopened = await openProject(projectPath, deps());
+  const conversation = await reopened.readConversation(id);
+  expect(conversation.model).toEqual({
+    provider: 'anthropic',
+    id: 'claude-haiku-4-5',
+  });
+  expect(conversation.messages[1]).toMatchObject({ provider: 'lmstudio' });
   await reopened.close();
 });
 

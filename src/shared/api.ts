@@ -439,8 +439,8 @@ export interface SettingsApi {
   /** Forgets the Provider's key, or LM Studio's address and token. */
   removeProvider(provider: ProviderId): Promise<ProvidersView>;
   /**
-   * Calls `listener` when a Provider is added, replaced or removed, from any
-   * window. Returns an unsubscribe function.
+   * Calls `listener` when a Provider is added, replaced or removed, or a
+   * shortlist changes, from any window. Returns an unsubscribe function.
    */
   onProviders(listener: (view: ProvidersView) => void): () => void;
   /** The Models the Provider offers to shortlist. */
@@ -448,9 +448,11 @@ export interface SettingsApi {
   /** The Author's Model shortlist of each Provider. */
   shortlists(): Promise<Record<ProviderId, ListedModel[]>>;
   setShortlist(provider: ProviderId, models: ListedModel[]): Promise<void>;
-  /** The Model the next call uses. */
-  model(): Promise<Model>;
-  setModel(model: Model): void;
+  /**
+   * The Model a new Conversation starts on: the one chosen last, while it is
+   * shortlisted, else the first shortlisted.
+   */
+  defaultModel(): Promise<Model>;
 }
 
 /** A Word or Markdown file read for an Import: its name without extension, and its blocks. */
@@ -530,7 +532,17 @@ export interface AssistantApi {
   /** The Conversations in the Project, latest first. */
   listConversations(): Promise<ConversationSummary[]>;
   readConversation(id: string): Promise<Conversation>;
-  startConversation(mode: Mode, title: string): Promise<ConversationSummary>;
+  /** Starts a Conversation on `model`, which becomes the Model chosen last. */
+  startConversation(
+    mode: Mode,
+    title: string,
+    model: Model,
+  ): Promise<ConversationSummary>;
+  /**
+   * Puts a Conversation on `model` from its next message on, which becomes
+   * the Model chosen last.
+   */
+  chooseModel(conversationId: string, model: Model): Promise<void>;
   /** Gives a Conversation a new title; refused for an empty one. */
   renameConversation(conversationId: string, title: string): Promise<void>;
   /**
@@ -628,13 +640,13 @@ export const channel = {
   listModels: 'settings:listModels',
   shortlists: 'settings:shortlists',
   setShortlist: 'settings:setShortlist',
-  model: 'settings:model',
-  setModel: 'settings:setModel',
+  defaultModel: 'settings:defaultModel',
   flushed: 'shell:flushed',
   projectEvent: 'project:event',
   listConversations: 'assistant:listConversations',
   readConversation: 'assistant:readConversation',
   startConversation: 'assistant:startConversation',
+  chooseModel: 'assistant:chooseModel',
   renameConversation: 'assistant:renameConversation',
   trashConversation: 'assistant:trashConversation',
   setInterviewFocus: 'assistant:setInterviewFocus',

@@ -2660,3 +2660,88 @@ button.finding-quote:hover {
 .menu-shortcut {
   color: var(--muted);
 }
+
+/* The Conversation's Model, in its header, styled as the dropdowns are. */
+.model-picker {
+  align-self: flex-start;
+}
+
+.model-picker-button {
+  font: inherit;
+  font-size: 0.85rem;
+  color: inherit;
+  background: none;
+  border: none;
+  border-bottom: 1.5px solid var(--pill-line);
+  border-radius: 0;
+  padding: 0.2rem 0.1rem;
+  cursor: pointer;
+}
+
+.model-picker-button:hover:not(:disabled),
+.model-picker-button:focus-visible {
+  border-bottom-color: var(--accent);
+  outline: none;
+}
+
+.model-picker-items {
+  left: 0;
+  right: auto;
+  min-width: 16rem;
+  max-height: 22rem;
+  overflow-y: auto;
+}
+
+.model-group + .model-group {
+  margin-top: 0.25rem;
+  border-top: 1px solid var(--line);
+  padding-top: 0.25rem;
+}
+
+.model-group-heading {
+  padding: 0.2rem 0.5rem;
+  font-size: 0.75rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.model-picker-items [role='menuitemradio'] {
+  display: block;
+  width: 100%;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  padding: 0.3rem 0.5rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.model-picker-items [role='menuitemradio']:hover:not(:disabled),
+.model-picker-items [role='menuitemradio']:focus-visible {
+  background: var(--hover);
+  outline: none;
+}
+
+.model-picker-items [role='menuitemradio'][aria-checked='true'] {
+  font-weight: 600;
+}
+
+.model-picker-items [role='menuitemradio']:disabled {
+  color: var(--muted);
+  opacity: 0.6;
+  cursor: default;
+}
+
+.model-picker-empty {
+  margin: 0.3rem 0.5rem;
+  font-size: 0.8rem;
+  color: var(--muted);
+}
+
+.message-saw summary .message-model::before,
+.message-used .message-model + .message-usage::before {
+  content: ' · ';
+}

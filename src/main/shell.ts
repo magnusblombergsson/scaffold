@@ -27,12 +27,7 @@ import {
   splitManuscript,
   type ImportConvention,
 } from '../shared/manuscript-import';
-import {
-  isModel,
-  isProviderId,
-  type ListedModel,
-  type Model,
-} from '../shared/models';
+import { isProviderId, type ListedModel, type Model } from '../shared/models';
 import type { ProseLanguage } from '../shared/project-types';
 import { unitName } from '../shared/unit-name';
 import {
@@ -92,9 +87,14 @@ export function storeOf(contents: WebContents): ProjectStore | undefined {
   return stores.get(contents.id);
 }
 
-/** The Model the next call to the Assistant uses: as chosen in Settings, or one of a Provider that is added. */
-export function assistantModel(): Model {
-  return providers.modelFor(settings.model());
+/** The Model a new Conversation starts on: the one chosen last, or one shortlisted of a Provider that is added. */
+export function defaultModel(): Model {
+  return providers.defaultModel(settings.lastUsedModel());
+}
+
+/** The Author chose `model` for a Conversation: a new one starts on it. */
+export function rememberModel(model: Model): void {
+  settings.setLastUsedModel(model);
 }
 
 /** The Provider the next call to `model` goes through, with its credential as kept then. */
@@ -588,15 +588,13 @@ export function registerSettingsIpc(): void {
     (_event, id: unknown, models: ListedModel[]) => {
       if (isProviderId(id) && Array.isArray(models)) {
         providers.setShortlist(id, models);
+        // The Conversations' dropdowns offer it.
+        announceProviders(providers.view());
       }
     },
   );
 
-  ipcMain.handle(channel.model, () => assistantModel());
-
-  ipcMain.on(channel.setModel, (_event, model: unknown) => {
-    if (isModel(model)) settings.setModel(model);
-  });
+  ipcMain.handle(channel.defaultModel, () => defaultModel());
 }
 
 /** Tells every window the Providers changed, so the Assistant shows or asks for one. */

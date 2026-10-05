@@ -40,7 +40,7 @@ async function setUp(
   const engine = createConversationEngine({
     store,
     providerFor: () => provider,
-    model: () => OPUS,
+    defaultModel: () => OPUS,
     clock,
     compaction,
   });
@@ -68,6 +68,7 @@ describe('askAssistant', () => {
         focus: [sceneId],
         at: clock.now(),
         model: 'claude-opus-5-5',
+        provider: 'anthropic',
         saw: {
           entries: [],
           units: [
@@ -107,41 +108,70 @@ describe('askAssistant', () => {
       role: 'assistant',
       text: 'Hm.',
       model: 'claude-opus-5-5',
+      provider: 'anthropic',
       usage,
     });
   });
 
-  it('asks the Provider of the Model chosen for each call', async () => {
+  it('asks the Model the Conversation is on, switched from the next message, and logs which wrote each reply', async () => {
     const { store, sceneId, clock } = await setUp();
     const local: Model = { provider: 'lmstudio', id: 'qwen3-8b' };
-    let chosen = OPUS;
     const asked: Model[] = [];
     const engine = createConversationEngine({
       store,
       providerFor: (model) => {
         asked.push(model);
-        return fakeProvider(() => ({
-          text: [`From ${model.id}.`],
-          finish: 'length',
-        }));
+        return fakeProvider(() => [`From ${model.id}.`]);
       },
-      model: () => chosen,
+      defaultModel: () => {
+        throw new Error('The Conversation has a Model');
+      },
       clock,
     });
-    const { id } = await store.startConversation('writing', 'Anna');
+    const { id } = await store.startConversation('writing', 'Anna', OPUS);
 
     await engine.askAssistant(id, 'Why?', { sceneId }, () => {});
-    chosen = local;
+    await store.chooseModel(id, local);
     await engine.askAssistant(id, 'And?', { sceneId }, () => {});
 
     expect(asked).toEqual([OPUS, local]);
     const replies = (await store.readConversation(id)).messages.filter(
       (m) => m.role === 'assistant',
     );
-    expect(replies.map((m) => [m.text, m.model])).toEqual([
-      ['From claude-opus-5-5.', 'claude-opus-5-5'],
-      ['From qwen3-8b.', 'qwen3-8b'],
+    expect(replies.map((m) => [m.text, m.provider, m.model])).toEqual([
+      ['From claude-opus-5-5.', 'anthropic', 'claude-opus-5-5'],
+      ['From qwen3-8b.', 'lmstudio', 'qwen3-8b'],
     ]);
+  });
+
+  it('asks the Model of the latest reply in a Conversation with none chosen, and the default Model before any reply', async () => {
+    const { store, sceneId, clock } = await setUp();
+    const haiku: Model = { provider: 'anthropic', id: 'claude-haiku-4-5' };
+    const asked: Model[] = [];
+    const engine = createConversationEngine({
+      store,
+      providerFor: (model) => {
+        asked.push(model);
+        return fakeProvider(() => ['Hm.']);
+      },
+      defaultModel: () => haiku,
+      clock,
+    });
+    const { id } = await store.startConversation('writing', 'Anna');
+    await engine.askAssistant(id, 'Why?', { sceneId }, () => {});
+    const { id: older } = await store.startConversation('writing', 'Mira');
+    // As the MVP logged a reply: the model's id alone.
+    await store.appendMessage(older, {
+      role: 'assistant',
+      text: 'Hm.',
+      focus: [],
+      at: 1,
+      model: 'claude-opus-5-5',
+    });
+
+    await engine.askAssistant(older, 'And?', { sceneId }, () => {});
+
+    expect(asked).toEqual([haiku, OPUS]);
   });
 
   it('sends the Writing context for the Scene in focus and this Conversation only', async () => {
@@ -262,7 +292,7 @@ describe('askAssistant', () => {
           yield { type: 'text', text: 'Hm.' };
         },
       }),
-      model: () => OPUS,
+      defaultModel: () => OPUS,
       clock,
     });
     const { id } = await store.startConversation('writing', 'Anna');
@@ -785,6 +815,7 @@ describe('Empty replies', () => {
       focus: [sceneId],
       at: clock.now(),
       model: 'claude-opus-5-5',
+      provider: 'anthropic',
       usage,
       before: 1,
     };
@@ -1009,7 +1040,7 @@ describe('Reviews', () => {
     const engine = createConversationEngine({
       store,
       providerFor: () => provider,
-      model: () => OPUS,
+      defaultModel: () => OPUS,
       clock,
     });
     const { id } = await store.startConversation('writing', 'Review');
@@ -1085,6 +1116,7 @@ describe('Compaction of a long Conversation', () => {
         covers: 2,
         at: clock.now(),
         model: 'claude-opus-5-5',
+        provider: 'anthropic',
       },
     ]);
   });

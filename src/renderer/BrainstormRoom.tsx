@@ -14,6 +14,7 @@ import {
   type OnChange,
 } from './Conversation';
 import { EntryCard } from './EntryCard';
+import { ModelPicker } from './ModelPicker';
 import { PanelResizer, type PaneSize } from './PanelResizer';
 import { RoomList } from './RoomList';
 
@@ -73,6 +74,7 @@ export function BrainstormRoom({
         {providers &&
           (anyAdded(providers) ? (
             <div className="conversations">
+              <ModelPicker conversation={conversation} />
               {total && (
                 <p
                   className="conversation-usage"

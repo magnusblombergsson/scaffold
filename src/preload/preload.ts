@@ -150,8 +150,7 @@ const settings: SettingsApi = {
   shortlists: () => ipcRenderer.invoke(channel.shortlists),
   setShortlist: (provider, models) =>
     ipcRenderer.invoke(channel.setShortlist, provider, models),
-  model: () => ipcRenderer.invoke(channel.model),
-  setModel: (model) => ipcRenderer.send(channel.setModel, model),
+  defaultModel: () => ipcRenderer.invoke(channel.defaultModel),
 };
 
 /** Tells the replies streaming at once apart. */
@@ -160,8 +159,10 @@ let asked = 0;
 const assistant: AssistantApi = {
   listConversations: () => ipcRenderer.invoke(channel.listConversations),
   readConversation: (id) => ipcRenderer.invoke(channel.readConversation, id),
-  startConversation: (mode, title) =>
-    ipcRenderer.invoke(channel.startConversation, mode, title),
+  startConversation: (mode, title, model) =>
+    ipcRenderer.invoke(channel.startConversation, mode, title, model),
+  chooseModel: (conversationId, model) =>
+    ipcRenderer.invoke(channel.chooseModel, conversationId, model),
   renameConversation: (conversationId, title) =>
     ipcRenderer.invoke(channel.renameConversation, conversationId, title),
   trashConversation: (conversationId) =>

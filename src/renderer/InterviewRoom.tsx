@@ -25,6 +25,7 @@ import {
 } from './Conversation';
 import { EntryCard } from './EntryCard';
 import { Ghosts } from './EntryView';
+import { ModelPicker } from './ModelPicker';
 import {
   focusLabel,
   focusOfValue,
@@ -143,6 +144,7 @@ export function InterviewRoom({
                   ) && <option value={valueOf(focus)}>{label}</option>}
                 </select>
               </label>
+              <ModelPicker conversation={conversation} />
               {total && (
                 <p
                   className="conversation-usage"

@@ -13,6 +13,7 @@ import {
   type ShowProposal,
 } from './Conversation';
 import { Menu, TitleInput } from './Binder';
+import { ModelPicker } from './ModelPicker';
 import { ReadOnlyContext } from './read-only';
 
 /**
@@ -174,6 +175,7 @@ function Conversations({
             />
           )}
         </div>
+        <ModelPicker conversation={conversation} />
         {total && (
           <p className="conversation-usage" aria-label="Conversation usage">
             {total}
