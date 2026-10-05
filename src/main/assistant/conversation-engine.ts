@@ -1,4 +1,3 @@
-import { randomUUID } from 'node:crypto';
 import {
   focusIds,
   OPEN_FOCUS,
@@ -18,14 +17,7 @@ import {
   type ReviewCommand,
 } from '../../shared/finding';
 import type { Model } from '../../shared/models';
-import { PROJECT_OUTLINE, unitText } from '../../shared/project-types';
-import {
-  newEntryOf,
-  outlineChangeOf,
-  proposalOf,
-  type Proposal,
-  type ProposalChange,
-} from '../../shared/proposal';
+import { unitText } from '../../shared/project-types';
 import type { Usage } from '../../shared/usage';
 import type { Clock } from '../project-store/clock';
 import type { ProjectStore } from '../project-store/project-store';
@@ -37,6 +29,7 @@ import {
 } from './compaction';
 import { buildContext, defaultRequest, readableScene } from './context-builder';
 import type { ProviderFor, ProviderRequest } from './provider';
+import { readProposals } from './proposal-blocks';
 import { finishReply, streamCall } from './reply-finishing';
 
 /** What a message is about: the Scene open in the editor when it was sent, if any. */
@@ -205,7 +198,9 @@ export function createConversationEngine({
         ? await findingsIn(finished.findings, context.saw)
         : [];
     // A Review asks before it proposes.
-    const made = reviewing ? null : await proposalsIn(finished.proposals);
+    const made = reviewing
+      ? null
+      : await readProposals(store.assistantView(), finished.proposals);
     const proposals = made?.proposals ?? [];
     const unreadable = made ? finished.unreadable + made.unreadable : 0;
     const reply: ConversationMessage = {
@@ -302,60 +297,6 @@ export function createConversationEngine({
         return { ...finding, ...(sceneId && { sceneId }) };
       }),
     );
-  }
-
-  /**
-   * The Proposals a reply's proposal blocks make, each against its target as
-   * it is now, and how many of the blocks couldn't be read. A block that
-   * proposes nothing this app takes, such as a change to Prose, Notes or a
-   * Voice's example lines, is unreadable; one that proposes what its target
-   * holds already is left out.
-   */
-  async function proposalsIn(
-    blocks: unknown[],
-  ): Promise<{ proposals: Proposal[]; unreadable: number }> {
-    const proposals: Proposal[] = [];
-    let unreadable = 0;
-    for (const block of blocks) {
-      const change = await changeOf(block);
-      if (change === null) unreadable++;
-      else if (change !== 'unchanged') {
-        proposals.push({ id: randomUUID(), ...change });
-      }
-    }
-    return { proposals, unreadable };
-  }
-
-  /**
-   * What a block proposes: a new Entry, under the id it will get; a whole
-   * Outline of a Chapter or Scene in the Project, or of the story; or a change
-   * to a field of an Entry in the Story Bible. `'unchanged'` when it
-   * proposes what its target holds; null when it can't be read as any.
-   */
-  async function changeOf(
-    block: unknown,
-  ): Promise<ProposalChange | 'unchanged' | null> {
-    const view = store.assistantView();
-    const { entry: entryId, outline: outlineId } = (block ?? {}) as Record<
-      string,
-      unknown
-    >;
-    const proposed = newEntryOf(block);
-    if (proposed) return { kind: 'new-entry', entryId: randomUUID(), proposed };
-    if (typeof outlineId === 'string') {
-      const { chapters, unplaced } = view.manuscript();
-      const known =
-        outlineId === PROJECT_OUTLINE ||
-        [...chapters, ...chapters.flatMap((c) => c.scenes), ...unplaced].some(
-          (unit) => unit.id === outlineId,
-        );
-      if (!known) return null;
-      const outline = await view.read({ kind: 'outline', id: outlineId });
-      return outlineChangeOf(block, outline);
-    }
-    if (!view.listEntries().some((e) => e.id === entryId)) return null;
-    const entry = await view.read({ kind: 'entry', id: entryId as string });
-    return proposalOf(block, entry);
   }
 
   return {

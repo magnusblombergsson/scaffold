@@ -176,6 +176,9 @@ export function lmStudioProvider({
         outputLimit: null,
         price: { input: 0, cached: 0, written: 0, output: 0 },
         loaded: (model.loaded_instances ?? []).length > 0,
+        ...(model.quantization?.name && {
+          quantisation: model.quantization.name,
+        }),
       }));
   }
 
@@ -565,4 +568,5 @@ type LmStudioModel = {
   display_name?: string;
   max_context_length?: number;
   loaded_instances?: unknown[];
+  quantization?: { name?: string } | null;
 };

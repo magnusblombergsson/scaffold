@@ -43,12 +43,13 @@ export type FinishedReply = {
 
 /**
  * A call as streamed: its outcome, what it used and, when the Provider
- * said, cost, and when it failed, why.
+ * said, cost, and when it failed, why, with the error's message as `error`.
  */
 export type StreamedCall = StreamOutcome & {
   usage?: Usage;
   cost?: number;
   failure: AssistantFailure | null;
+  error?: string;
 };
 
 /**
@@ -65,6 +66,7 @@ export async function streamCall(
   let cost: number | undefined;
   let finish: Finish | null = null;
   let failure: AssistantFailure | null = null;
+  let message: string | undefined;
   try {
     for await (const event of provider.stream(request)) {
       if (event.type === 'usage') {
@@ -77,6 +79,7 @@ export async function streamCall(
       }
     }
   } catch (error) {
+    message = error instanceof Error ? error.message : String(error);
     if (error instanceof ProviderError) {
       failure = error.kind;
     } else {
@@ -89,6 +92,7 @@ export async function streamCall(
     finish,
     failed: failure !== null,
     failure,
+    ...(message !== undefined && { error: message }),
     ...(usage && { usage }),
     ...(cost !== undefined && { cost }),
   };

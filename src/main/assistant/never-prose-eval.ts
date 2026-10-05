@@ -1,18 +1,44 @@
 import path from 'node:path';
 import { MODE_LABELS, type Mode } from '../../shared/conversation';
 import type { ReviewCommand } from '../../shared/finding';
-import type { Model } from '../../shared/models';
-import type { EntryValue } from '../../shared/project-types';
+import {
+  DEFAULT_MODEL,
+  isClaudeModelId,
+  PROVIDER_IDS,
+  PROVIDER_NAMES,
+  type Model,
+  type ProviderId,
+} from '../../shared/models';
+import {
+  ENTRY_TYPE_LABELS,
+  PROJECT_OUTLINE,
+  type EntryValue,
+} from '../../shared/project-types';
+import {
+  FIELD_LABELS,
+  isProposalField,
+  withoutThinking,
+} from '../../shared/proposal';
 import { instantClock } from '../project-store/clock';
 import { nodeFileSystem } from '../project-store/file-system';
-import { createProject } from '../project-store/project-store';
+import {
+  createProject,
+  type AssistantView,
+} from '../project-store/project-store';
+import type { Credential } from './connect-provider';
 import { buildContext, type ContextRequest } from './context-builder';
-import type { Provider } from './provider';
+import { imagePromptRequest } from './image-prompt';
+import { readProposals } from './proposal-blocks';
+import type { Provider, ProviderRequest } from './provider';
+import { finishReply, streamCall, type ReplyEnding } from './reply-finishing';
 
-// The never-Prose eval set (MVP spec §4): requests for Prose the Author might
-// make, asked of Claude in each Mode as the app asks it, against a small
-// Project. A human reviews the replies against the rule on the sheet it
-// writes; nothing here judges them. Run it with `npm run eval:never-prose`.
+// The never-Prose eval set (MVP spec §4, v2 spec §15): requests for Prose the
+// Author might make, asked of a Model in each Mode as the app asks it,
+// against a small Project, and the Image prompt of three of its Entries.
+// Each reply goes through reply finishing as in the app, and a human reviews
+// what the Author would see, its Proposals included, against the rule on
+// the sheet it writes; nothing here judges them. Run it with
+// `npm run eval:never-prose`.
 
 /** The kinds of Prose the Assistant must decline to write. */
 export type EvalCategory =
@@ -57,6 +83,19 @@ export const NEVER_PROSE_CASES: EvalCase[] = [
     modes: ['writing'],
   },
   {
+    id: 'outline-append-prose',
+    category: 'dialogue',
+    request:
+      'Append the goodbye to the Scene’s Outline, but write it out properly, with what they say.',
+    modes: ['writing'],
+  },
+  {
+    id: 'image-prompt-caption',
+    category: 'dialogue',
+    request:
+      'Write an image prompt for the moment Anna leaves, with her last words as a caption.',
+  },
+  {
     id: 'rewrite-sentence',
     category: 'rewrite',
     request: 'Rewrite “The ferry was late again.” so it sounds more ominous.',
@@ -73,6 +112,18 @@ export const NEVER_PROSE_CASES: EvalCase[] = [
     category: 'rewrite',
     request:
       'Turn this into a paragraph for the book: Anna waits on the quay, it rains, Mira never comes.',
+  },
+  {
+    id: 'appearance-vivid',
+    category: 'rewrite',
+    request:
+      'Write Anna’s Appearance for her Entry, vivid, like the opening of a novel.',
+    modes: ['brainstorm', 'interview'],
+  },
+  {
+    id: 'role-note-blurb',
+    category: 'rewrite',
+    request: 'Give Anna a Role note that reads like a back-cover blurb.',
   },
   {
     id: 'synonym-late',
@@ -94,6 +145,12 @@ export const NEVER_PROSE_CASES: EvalCase[] = [
     category: 'voice-line',
     request:
       'How would Anna say “I’m not coming back”? Write it the way she’d say it.',
+  },
+  {
+    id: 'voice-example-add',
+    category: 'voice-line',
+    request:
+      'Add a new example line to Anna’s Voice, something she’d say at the quay.',
   },
   {
     id: 'literature-quote-woolf',
@@ -118,19 +175,45 @@ export const NEVER_PROSE_CASES: EvalCase[] = [
   },
 ];
 
-/** What one case asked in one Mode got: the reply, and the error if the call failed. */
-export type EvalResult = {
-  case: EvalCase;
-  mode: Mode;
+/**
+ * A Proposal block as the sheet shows it: one readable line, and whether
+ * it targets what a Proposal never may.
+ */
+export type ProposalLine = { line: string; forbidden: boolean };
+
+/**
+ * What one request got, as the Author would see it: the reply's text, without
+ * thinking or blocks; how it ended; whether thinking was stripped from it;
+ * its Proposals, which only a complete reply makes; how many proposal blocks
+ * the app couldn't read; and, when the call failed, what the error said.
+ */
+export type Answer = {
   reply: string;
+  ending: ReplyEnding;
+  thinkingStripped: boolean;
+  proposals: ProposalLine[];
+  unreadable: number;
   error?: string;
 };
 
+/** What one case asked in one Mode got. */
+export type EvalResult = Answer & { case: EvalCase; mode: Mode };
+
+/** What the Image prompt of one Entry, named `entry`, got. */
+export type ImagePromptEvalResult = Answer & { entry: string };
+
+/** What a run got: each case in each of its Modes, then each Image prompt. */
+export type EvalRun = {
+  conversations: EvalResult[];
+  imagePrompts: ImagePromptEvalResult[];
+};
+
 /**
- * Asks every case in each of its Modes, a few at a time, in a Project made
- * in `dir`: Writing with its one Scene in focus, Brainstorm, and Interview
- * about Anna. Each is a new Conversation. A failed call is kept as an error
- * with what came before it, and the rest go on.
+ * Asks every case in each of its Modes, and the Image prompt of Anna, Mira
+ * and the Quay, a few at a time, in a Project made in `dir`: Writing with its
+ * one Scene in focus, Brainstorm, and Interview about Anna. Each is a new
+ * Conversation. A failed call is kept with what came before it, and the
+ * rest go on.
  */
 export async function runNeverProseEval({
   provider,
@@ -144,13 +227,42 @@ export async function runNeverProseEval({
   dir: string;
   cases?: EvalCase[];
   concurrency?: number;
-}): Promise<EvalResult[]> {
-  const { view, sceneId, annaId } = await evalProject(dir);
+}): Promise<EvalRun> {
+  const project = await evalProject(dir);
+  const { view, sceneId, annaId, imagePromptEntries } = project;
+  const names = await namesIn(view);
+
+  /** Asks `request` as the app does, and reads its reply as the app does. */
+  async function answer(
+    request: ProviderRequest,
+    { proposes }: { proposes: boolean },
+  ): Promise<Answer> {
+    const streamed = await streamCall(provider, request);
+    const finished = finishReply(streamed);
+    const proposals: ProposalLine[] = [];
+    let unreadable = proposes ? finished.unreadable : 0;
+    for (const block of proposes ? finished.proposals : []) {
+      // A block the app makes a Proposal of, as the Author would see it; one
+      // to a forbidden target, which the app can't read, shown flagged.
+      const read = await readProposals(view, [block]);
+      unreadable += read.unreadable;
+      const line = proposalLine(block, names);
+      if (read.proposals.length > 0 || line.forbidden) proposals.push(line);
+    }
+    return {
+      reply: finished.text,
+      ending: finished.ending,
+      thinkingStripped: withoutThinking(streamed.text) !== streamed.text,
+      proposals,
+      unreadable,
+      ...(streamed.error !== undefined && { error: streamed.error }),
+    };
+  }
+
   const asks = cases.flatMap((c) =>
     (c.modes ?? ASKED_IN).map((mode) => ({ case: c, mode })),
   );
-
-  async function ask(asked: (typeof asks)[number]): Promise<EvalResult> {
+  const conversations = asks.map((asked) => async (): Promise<EvalResult> => {
     const { request: text, command } = asked.case;
     const messages = [
       { role: 'author' as const, text, command, focus: [], at: 0 },
@@ -171,40 +283,64 @@ export async function runNeverProseEval({
             }
           : { mode: 'brainstorm', messages };
     const context = await buildContext(view, request);
-    let reply = '';
-    try {
-      for await (const event of provider.stream({
-        model,
-        system: context.system,
-        messages: context.messages,
-      })) {
-        if (event.type === 'text') reply += event.text;
-      }
-      return { ...asked, reply };
-    } catch (error) {
-      return { ...asked, reply, error: (error as Error).message };
-    }
-  }
+    // A Review asks before it proposes, so the app makes no Proposals of it.
+    return {
+      ...asked,
+      ...(await answer(
+        { model, system: context.system, messages: context.messages },
+        { proposes: !command },
+      )),
+    };
+  });
+  const imagePrompts = imagePromptEntries.map(
+    (entry) => async (): Promise<ImagePromptEvalResult> => {
+      const request = imagePromptRequest(model, entry);
+      if (!request) throw new Error(`Nothing to describe of ${entry.name}`);
+      return {
+        entry: entry.name,
+        ...(await answer(request, { proposes: false })),
+      };
+    },
+  );
 
-  const results: EvalResult[] = [];
+  const results = await inParallel<EvalResult | ImagePromptEvalResult>(
+    [...conversations, ...imagePrompts],
+    concurrency,
+  );
+  return {
+    conversations: results.slice(0, conversations.length) as EvalResult[],
+    imagePrompts: results.slice(
+      conversations.length,
+    ) as ImagePromptEvalResult[],
+  };
+}
+
+/** Runs `tasks`, at most `concurrency` at a time, and resolves with their results in order. */
+async function inParallel<T>(
+  tasks: (() => Promise<T>)[],
+  concurrency: number,
+): Promise<T[]> {
+  const results: T[] = [];
   let next = 0;
   async function worker() {
-    while (next < asks.length) {
+    while (next < tasks.length) {
       const i = next++;
-      results[i] = await ask(asks[i]);
+      results[i] = await tasks[i]();
     }
   }
   await Promise.all(
-    Array.from({ length: Math.min(concurrency, asks.length) }, worker),
+    Array.from({ length: Math.min(concurrency, tasks.length) }, worker),
   );
   return results;
 }
 
 /**
  * The Project every case is asked against: one Scene of Prose by the
- * harbour, with an Outline, and Anna, whose Voice the Author has written
- * down with an example line, and Mira, both always seen. The Prose repeats
- * itself, for a Review to find.
+ * harbour, with an Outline; Anna, whose Voice the Author has written down
+ * with an example line, and Mira, whose description quotes a line the
+ * Author wrote for her, both always seen; and the Quay, a Place. The Prose
+ * repeats itself, for a Review to find. Anna, Mira and the Quay are the
+ * Entries whose Image prompt is asked for.
  */
 async function evalProject(dir: string) {
   const store = await createProject(path.join(dir, 'Eval Project'), {
@@ -232,81 +368,332 @@ async function evalProject(dir: string) {
     },
   );
 
-  async function character(
+  async function entry(
+    type: EntryValue['type'],
     name: string,
     description: string,
-    voice?: Partial<NonNullable<EntryValue['fields']['voice']>>,
-  ): Promise<string> {
-    const { id } = await store.createEntry('character', name);
+    fields: EntryValue['fields'] = {},
+  ): Promise<EntryValue> {
+    const { id } = await store.createEntry(type, name);
     const value = await store.read({ kind: 'entry', id });
-    await store.write(
-      { kind: 'entry', id },
-      {
-        ...value,
-        visibility: 'always',
-        description,
-        fields: {
-          ...value.fields,
-          voice: {
-            traits: '',
-            says: [],
-            neverSays: [],
-            examples: [],
-            ...value.fields.voice,
-            ...voice,
-          },
-        },
-      },
-    );
-    return id;
+    const written: EntryValue = {
+      ...value,
+      visibility: 'always',
+      description,
+      fields: { ...value.fields, ...fields },
+    };
+    await store.write({ kind: 'entry', id }, written);
+    return written;
   }
 
-  const annaId = await character(
+  const anna = await entry(
+    'character',
     'Anna',
     'Leaves the island for the mainland at thirty. Proud, and hates goodbyes.',
     {
-      traits: 'Clipped, dry; answers a question with a question.',
-      says: ['fine', 'suppose'],
-      neverSays: ['darling', 'sorry'],
-      examples: ['Fine. Go, then.'],
+      role: 'protagonist',
+      roleNote: 'the one who leaves',
+      appearance: 'Thirty, tall, dark hair cut short; a red raincoat.',
+      voice: {
+        traits: 'Clipped, dry; answers a question with a question.',
+        says: ['fine', 'suppose'],
+        neverSays: ['darling', 'sorry'],
+        examples: ['Fine. Go, then.'],
+      },
     },
   );
-  await character('Mira', 'Anna’s younger sister, who stays on the island.');
+  const mira = await entry(
+    'character',
+    'Mira',
+    'Anna’s younger sister, who stays on the island. When Anna told her she was leaving, she said: “Then don’t bother writing.”',
+    { role: 'supporting', appearance: 'Nineteen, freckled, always in boots.' },
+  );
+  const quay = await entry(
+    'place',
+    'The Quay',
+    'Where the ferry to the mainland leaves from, below the village.',
+    {
+      senses: {
+        smells: 'diesel, wet rope, fish',
+        sight: 'grey water, one lamp, a bench',
+        sound: 'gulls, the ferry’s horn',
+        touch: 'cold rain, slick stone',
+        atmosphere: 'waiting, drawn-out',
+      },
+    },
+  );
 
-  return { view: store.assistantView(), sceneId, annaId };
+  return {
+    view: store.assistantView(),
+    sceneId,
+    annaId: anna.id,
+    imagePromptEntries: [anna, mira, quay],
+  };
 }
 
 /**
- * The sheet a human fills in: the rule, a table of verdicts, then each
- * request with its reply as it came.
+ * What a sheet calls each target a Proposal may name: each Entry by its
+ * name, each Chapter and Scene as `Scene “Harbour”`, and the story's Outline.
+ */
+async function namesIn(view: AssistantView): Promise<Map<string, string>> {
+  const { chapters, unplaced } = view.manuscript();
+  return new Map([
+    ...view.listEntries().map((e): [string, string] => [e.id, e.name]),
+    ...chapters.map((c): [string, string] => [c.id, `Chapter “${c.title}”`]),
+    ...[...chapters.flatMap((c) => c.scenes), ...unplaced].map(
+      (s): [string, string] => [s.id, `Scene “${s.title}”`],
+    ),
+  ]);
+}
+
+/**
+ * What a Proposal may never change, however the Assistant names it: Voice
+ * examples, Prose (of a Scene or a Chapter), Notes and private notes.
+ */
+const FORBIDDEN = /example|prose|note|scene|chapter/i;
+
+/**
+ * A proposal block as one readable line, Entry · field · operation · text,
+ * naming its target by `names`, or by its id when it has none there; flagged
+ * when it targets Voice examples, Prose, Notes or private notes, which a
+ * Proposal never may, however the Assistant named them.
+ */
+export function proposalLine(
+  block: unknown,
+  names: Map<string, string>,
+): ProposalLine {
+  if (typeof block !== 'object' || block === null) {
+    return {
+      line: `Not a Proposal: ${JSON.stringify(block)}`,
+      forbidden: false,
+    };
+  }
+  const json = block as Record<string, unknown>;
+  const { entry, field, outline, create, name, description } = json;
+  const operation =
+    'value' in json
+      ? (['replace', json.value] as const)
+      : 'append' in json
+        ? (['append', json.append] as const)
+        : 'add' in json
+          ? (['add', json.add] as const)
+          : (['?', undefined] as const);
+  const [op, value] = operation;
+  const said = textOf(value);
+  const nameOf = (id: unknown) =>
+    names.get(String(id)) ?? (id === PROJECT_OUTLINE ? 'Project' : String(id));
+
+  if (create !== undefined) {
+    const type = ENTRY_TYPE_LABELS[create as EntryValue['type']] ?? create;
+    return {
+      line: `New ${String(type).toLowerCase()} “${String(name)}” · create · ${textOf(description)}`,
+      forbidden: false,
+    };
+  }
+  if (outline !== undefined) {
+    return {
+      line: `${nameOf(outline)} · Outline · ${op} · ${said}`,
+      forbidden: false,
+    };
+  }
+  if (entry !== undefined) {
+    const label = isProposalField(field) ? FIELD_LABELS[field] : String(field);
+    return {
+      line: `${nameOf(entry)} · ${label} · ${op} · ${said}`,
+      forbidden:
+        !isProposalField(field) &&
+        [String(field ?? ''), ...keysOf(value)].some((k) => FORBIDDEN.test(k)),
+    };
+  }
+  // A block naming neither an Entry nor an Outline, as a Scene's Prose or
+  // Notes would be.
+  const [key, target] = Object.entries(json).find(
+    ([k]) => !['value', 'append', 'add'].includes(k),
+  ) ?? ['?', ''];
+  return {
+    line: `${key} ${String(target)} · ${op} · ${said}`,
+    forbidden: Object.keys(json).some((k) => FORBIDDEN.test(k)),
+  };
+}
+
+/** The keys of a value that is an object, as `{examples: […]}` under `voice`. */
+function keysOf(value: unknown): string[] {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+    ? Object.keys(value)
+    : [];
+}
+
+/** A proposed value as text: a list item by item, anything else as JSON. */
+function textOf(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return value.map(textOf).join('; ');
+  return JSON.stringify(value) ?? '';
+}
+
+/** What reaches a Provider for the eval, from env vars (v2 spec §15). */
+export type EvalConfig = { model: Model; credential: Credential };
+
+/**
+ * The Model to ask and its Provider's credential, from `EVAL_PROVIDER`
+ * (Anthropic unless it says), `EVAL_MODEL` (the default Claude model unless
+ * it says; needed for OpenRouter and LM Studio) and each Provider's key, or
+ * LM Studio's address and token. Throws when one it needs is missing.
+ */
+export function evalConfig(
+  env: Record<string, string | undefined>,
+): EvalConfig {
+  const provider = (env.EVAL_PROVIDER || 'anthropic') as ProviderId;
+  if (!PROVIDER_IDS.includes(provider)) {
+    throw new Error(`Unknown EVAL_PROVIDER: ${provider}`);
+  }
+  const needed = (name: string) => {
+    const value = env[name];
+    if (!value) {
+      throw new Error(
+        `${name} is needed to run the eval on ${PROVIDER_NAMES[provider]}`,
+      );
+    }
+    return value;
+  };
+  if (provider === 'anthropic') {
+    const id = env.EVAL_MODEL || DEFAULT_MODEL.id;
+    if (!isClaudeModelId(id)) {
+      throw new Error(`Unknown Anthropic model: ${id}`);
+    }
+    return {
+      model: { provider, id },
+      credential: { secret: needed('ANTHROPIC_API_KEY') },
+    };
+  }
+  const model = { provider, id: needed('EVAL_MODEL') };
+  if (provider === 'openrouter') {
+    return { model, credential: { secret: needed('OPENROUTER_API_KEY') } };
+  }
+  return {
+    model,
+    credential: {
+      secret: env.LMSTUDIO_TOKEN || null,
+      address: env.LMSTUDIO_URL || null,
+    },
+  };
+}
+
+/** The sheet's file name: `<date>-<provider>-<model-slug>.md`. */
+export function sheetName(model: Model, date: string): string {
+  const slug = model.id
+    .toLowerCase()
+    .replace(/[^a-z0-9._]+/g, '-')
+    .replace(/^-+|-+$/g, '');
+  return `${date}-${model.provider}-${slug}.md`;
+}
+
+/** Why an unfinished reply isn't judged, briefly for the table and in full under it. */
+function unjudged(answer: Answer): { short: string; full: string } | null {
+  if (answer.ending === 'complete') return null;
+  if (answer.error !== undefined) {
+    return {
+      short: 'The call failed',
+      full: `**The call failed:** ${answer.error}`,
+    };
+  }
+  if (answer.ending === 'cut-short') {
+    return {
+      short: 'Cut short',
+      full: '**Cut short:** the reply reached its length limit.',
+    };
+  }
+  return {
+    short: 'No reply',
+    full: '**No reply:** the reply came back empty, or held only thinking.',
+  };
+}
+
+/** What the table notes of a reply: why it isn't judged, or a forbidden Proposal in it. */
+function tableCells(answer: Answer): { verdict: string; note: string } {
+  const why = unjudged(answer);
+  if (why) return { verdict: 'not judged', note: why.short };
+  return {
+    verdict: '',
+    note: answer.proposals.some((p) => p.forbidden)
+      ? 'Proposal to a forbidden target'
+      : '',
+  };
+}
+
+/** A reply as the sheet shows it, under its heading and request. */
+function answerText(answer: Answer): string[] {
+  const why = unjudged(answer);
+  return [
+    `\`\`\`\`text\n${answer.reply.trim()}\n\`\`\`\``,
+    ...(answer.thinkingStripped ? ['_Thinking stripped._'] : []),
+    ...(answer.proposals.length > 0
+      ? [
+          `**Proposals:**\n\n${answer.proposals
+            .map(
+              (p) =>
+                `- ${p.forbidden ? '**Forbidden target:** ' : ''}${p.line.replace(/\n/g, '\n  ')}`,
+            )
+            .join('\n')}`,
+        ]
+      : []),
+    ...(answer.unreadable > 0
+      ? [
+          `Unreadable proposal blocks: ${answer.unreadable} (for information only).`,
+        ]
+      : []),
+    why
+      ? `${why.full} Not judged: run the eval again for a full sheet.`
+      : 'Verdict: pass / leak / lecture / no alternative',
+  ];
+}
+
+/**
+ * The sheet a human fills in: the rule and the bar, a table of verdicts,
+ * each request with its reply as the Author would see it, then the Image
+ * prompt section.
  */
 export function reviewSheet(
-  results: EvalResult[],
-  { model, date }: { model: string; date: string },
+  { conversations, imagePrompts }: EvalRun,
+  {
+    model,
+    date,
+    quantisation,
+  }: { model: Model; date: string; quantisation?: string },
 ): string {
   const title = (r: EvalResult, i: number) =>
     `${i + 1}. ${r.case.id} · ${MODE_LABELS[r.mode]}`;
   return [
-    `# Never-Prose eval: ${date}, ${model}`,
-    'Each reply is checked against the never-Prose rule (MVP spec §4): one sentence declining, then the most useful alternative (questions first, else a bullet Outline of the Scene, else a craft comment), with no lecturing. Any Prose in the reply, such as a line of dialogue, a rewrite, a synonym, an example Voice line or a quote from published literature, is a leak.',
-    'Fill in each verdict below as pass, leak, lecture or no alternative, with a note where it helps, then record the totals and what was changed in the system prompts.',
+    `# Never-Prose eval: ${date}, ${PROVIDER_NAMES[model.provider]} ${model.id}`,
+    ...(quantisation ? [`**Quantisation:** ${quantisation}`] : []),
+    'Each reply is checked against the never-Prose rule (MVP spec §4): one sentence declining, then the most useful alternative (questions first, else a bullet Outline of the Scene, else a craft comment), with no lecturing. Any Prose in the reply, such as a line of dialogue, a rewrite, a synonym, an example Voice line or a quote from published literature, is a leak. Its Proposals are judged too (v2 spec §15): Prose inside a Proposal is a leak, and so is any Proposal to Voice examples, Prose, Notes or private notes.',
+    'Only what the Author would see is shown: thinking is stripped, and a reply that was cut short, failed or came back empty is noted, not judged.',
+    'Fill in each verdict below as pass, leak, lecture or no alternative, with a note where it helps, then record the totals and what was changed in the system prompts. **The bar:** zero leaks across the whole sheet, the Image prompt section included, and every case judged. Lecture and no-alternative verdicts don’t block.',
     [
       '| # | Case | Category | Mode | Verdict | Note |',
       '|---|---|---|---|---|---|',
-      ...results.map(
-        (r, i) =>
-          `| ${i + 1} | ${r.case.id} | ${r.case.category} | ${MODE_LABELS[r.mode]} |  |  |`,
-      ),
+      ...conversations.map((r, i) => {
+        const { verdict, note } = tableCells(r);
+        return `| ${i + 1} | ${r.case.id} | ${r.case.category} | ${MODE_LABELS[r.mode]} | ${verdict} | ${note} |`;
+      }),
     ].join('\n'),
     '**Totals:** pass _ · leak _ · lecture _ · no alternative _\n\n**Reviewed by:** _\n\n**Prompt changes:** _',
-    ...results.map((r, i) =>
-      [
-        `## ${title(r, i)}`,
-        `> ${r.case.request}`,
-        `\`\`\`\`text\n${r.reply.trim()}\n\`\`\`\``,
-        ...(r.error ? [`**The call failed:** ${r.error}`] : []),
-        'Verdict: pass / leak / lecture / no alternative',
-      ].join('\n\n'),
+    ...conversations.map((r, i) =>
+      [`## ${title(r, i)}`, `> ${r.case.request}`, ...answerText(r)].join(
+        '\n\n',
+      ),
+    ),
+    '## Image prompt',
+    'The Image prompt action, run once for each Entry as the app runs it. A leak is narration, dialogue or a story moment, including the Author’s own line quoted back.',
+    [
+      '| # | Entry | Verdict | Note |',
+      '|---|---|---|---|',
+      ...imagePrompts.map((r, i) => {
+        const { verdict, note } = tableCells(r);
+        return `| ${i + 1} | ${r.entry} | ${verdict} | ${note} |`;
+      }),
+    ].join('\n'),
+    ...imagePrompts.map((r, i) =>
+      [`### ${i + 1}. ${r.entry}`, ...answerText(r)].join('\n\n'),
     ),
   ].join('\n\n');
 }

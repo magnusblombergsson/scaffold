@@ -23,6 +23,8 @@ export type ListedModel = {
   price: Price | null;
   /** For LM Studio: whether the Model is loaded now. */
   loaded?: boolean;
+  /** For LM Studio: the quantisation it was downloaded in, such as `Q4_K_M`, if it says. */
+  quantisation?: string;
 };
 
 /**

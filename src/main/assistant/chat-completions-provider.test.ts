@@ -670,7 +670,7 @@ describe('lmStudioProvider', () => {
     });
   });
 
-  it('lists the downloaded LLMs, marked loaded or not, free', async () => {
+  it('lists the downloaded LLMs, marked loaded or not, free, with the quantisation it says', async () => {
     routes['/api/v1/models'] = json(200, {
       models: [
         {
@@ -679,6 +679,7 @@ describe('lmStudioProvider', () => {
           display_name: 'Gemma 4 26B A4B',
           loaded_instances: [{ id: 'google/gemma-4-26b-a4b', config: {} }],
           max_context_length: 262_144,
+          quantization: { name: 'Q4_K_M', bits_per_weight: 4 },
         },
         {
           type: 'llm',
@@ -708,6 +709,7 @@ describe('lmStudioProvider', () => {
         outputLimit: null,
         price: free,
         loaded: true,
+        quantisation: 'Q4_K_M',
       },
       {
         id: 'deepseek-r1',
