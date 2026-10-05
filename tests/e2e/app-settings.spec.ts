@@ -13,6 +13,7 @@ import {
   answerDialogs,
   answerQuestions,
   appEnv,
+  chooseMenu,
   launch,
   root,
   useTempDir,
@@ -34,7 +35,7 @@ async function openInNewWindow(
   await answerDialogs(app, at);
   const [opened] = await Promise.all([
     app.waitForEvent('window'),
-    page.getByRole('button', { name: 'Open Project…' }).click(),
+    chooseMenu(app, ['File', 'Open Project…'], page),
   ]);
   return opened;
 }
@@ -65,7 +66,7 @@ test('the Projects open at quit reopen in their windows, at the Scene and binder
   await answerDialogs(first, novel);
   const [page] = await Promise.all([
     first.waitForEvent('window'),
-    storiesPage.getByRole('button', { name: 'New Project…' }).click(),
+    chooseMenu(first, ['File', 'New Project…'], storiesPage),
   ]);
   await expect(page.locator('.project-name')).toHaveText('My Novel');
 
@@ -117,7 +118,7 @@ test('opening a Project that is already open brings its window to the front', as
   await expect(page.getByLabel('Prose')).toBeFocused();
 
   await answerDialogs(app, novel);
-  await page.getByRole('button', { name: 'Open Project…' }).click();
+  await chooseMenu(app, ['File', 'Open Project…'], page);
   // Long enough for a second window to have appeared.
   await page.waitForTimeout(1000);
 
@@ -163,7 +164,7 @@ test('a recent Project that is gone stays listed as Not found, to locate or remo
   await answerDialogs(first, stories);
   await Promise.all([
     first.waitForEvent('window'),
-    page.getByRole('button', { name: 'New Project…' }).click(),
+    chooseMenu(first, ['File', 'New Project…'], page),
   ]);
   await first.close();
 

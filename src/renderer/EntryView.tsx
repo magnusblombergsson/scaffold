@@ -1,8 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import type { Node } from '@tiptap/pm/model';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { entryCollisions } from '../shared/entry';
 import {
   FIELD_LABELS,
   fieldText,
+  isAppending,
   type PendingProposal,
   type ProposalField,
 } from '../shared/proposal';
@@ -26,6 +28,8 @@ import {
   type Visibility,
   type Voice,
 } from '../shared/project-types';
+import { EntryImageSection } from './EntryImage';
+import { useReveal, type Reveal } from './reveal';
 import {
   docToText,
   plainTextExtensions,
@@ -34,6 +38,7 @@ import {
 } from './plain-text-editor';
 import { entryTitle } from './StoryBible';
 import { UnitEditor } from './UnitEditor';
+import { tellEntryWritten } from './entry-written';
 
 export const VISIBILITY_LABELS: Record<Visibility, string> = {
   always: 'Always',
@@ -49,10 +54,17 @@ export function textToLines(text: string): string[] {
     .filter(Boolean);
 }
 
+/** All of a one-line field's text. */
+const selectAll = (doc: Node) => ({ from: 1, to: doc.content.size - 1 });
+
 const nameOf = (value: UnitValue) => (value as EntryValue).name;
 const aliasesOf = (value: UnitValue) =>
   (value as EntryValue).aliases.join('\n');
 const descriptionOf = (value: UnitValue) => (value as EntryValue).description;
+const roleNoteOf = (value: UnitValue) =>
+  (value as EntryValue).fields.roleNote ?? '';
+const appearanceOf = (value: UnitValue) =>
+  (value as EntryValue).fields.appearance ?? '';
 
 /** A text field of an Entry's type, and its text in a value of the Entry. */
 type TypeField<K extends string> = {
@@ -115,11 +127,15 @@ type Loaded = { entry: EntryValue; privateNotes: PrivateValue };
  * Entry anew. A name or alias another Entry also goes by is allowed, with a
  * warning once it is saved. A Proposal pending on a field shows under it as
  * a ghost value, until it is decided; an accepted one fills the field in.
+ * A Proposal's title in Writing brings the Author to its field, focused,
+ * with its ghost highlighted.
  */
 export function EntryView({
   entry: summary,
   entries,
   language,
+  focusName,
+  reveal,
   onType,
   onVisibility,
   onShowProposal,
@@ -128,6 +144,13 @@ export function EntryView({
   /** Every Entry in the Story Bible, to warn of names they share. */
   entries: EntrySummary[];
   language: ProseLanguage;
+  /**
+   * Puts focus in the Name with it selected, as for an Entry just made; each
+   * new number asks again.
+   */
+  focusName?: number;
+  /** The field to go to, as a Proposal's title asks; with none, the Name. */
+  reveal?: Reveal;
   onType(type: EntryType): void;
   onVisibility(visibility: Visibility): void;
   /** Opens a pending Proposal's Conversation at its card. */
@@ -140,7 +163,13 @@ export function EntryView({
   /** A Character's Role and a Plot Thread's Status, as last saved or reloaded. */
   const [choices, setChoices] = useState<EntryFields>({});
   const [pending, setPending] = useState<PendingProposal[]>([]);
+  const view = useRef<HTMLElement>(null);
   const entryKey = unitKey({ kind: 'entry', id: entryId });
+  // A new selection for each ask, so that the Name takes focus again.
+  const selectName = useMemo(
+    () => (focusName ? (doc: Node) => selectAll(doc) : undefined),
+    [focusName],
+  );
 
   useEffect(() => {
     let current = true;
@@ -160,7 +189,12 @@ export function EntryView({
 
   /** The ghost values of the Proposals pending on `field`. */
   const ghosts = (field: ProposalField) => (
-    <Ghosts field={field} pending={pending} onShow={onShowProposal} />
+    <Ghosts
+      field={field}
+      pending={pending}
+      onShow={onShowProposal}
+      highlighted={reveal?.proposalId}
+    />
   );
 
   useEffect(() => {
@@ -195,10 +229,18 @@ export function EntryView({
     if (value.current) value.current = { ...value.current, visibility };
   }, [visibility]);
 
+  useReveal(
+    view,
+    reveal,
+    loaded !== null,
+    reveal?.field ? `[data-field="${reveal.field}"]` : '.entry-name',
+  );
+
   /** Resolves once main has the Entry. */
   async function save(change: Partial<EntryValue>): Promise<void> {
     if (!value.current) return;
     value.current = { ...value.current, ...change };
+    tellEntryWritten(value.current);
     return window.project.write({ kind: 'entry', id: entryId }, value.current);
   }
 
@@ -226,7 +268,7 @@ export function EntryView({
   });
 
   return (
-    <main className="centre entry-view">
+    <main className="centre entry-view" ref={view}>
       <label className="entry-type">
         Type
         <select
@@ -241,6 +283,7 @@ export function EntryView({
           ))}
         </select>
       </label>
+      <EntryImageSection entry={summary} />
       <UnitEditor
         unitKey={`${entryKey}:name`}
         field={{ unitKey: entryKey, text: nameOf }}
@@ -250,8 +293,10 @@ export function EntryView({
         toText={docToText}
         save={(name) => save({ name })}
         attributes={attributes('Name', 'plain-text entry-name')}
+        autofocus={!!focusName}
+        select={selectName}
       />
-      <section className="plain-text-field">
+      <section className="plain-text-field" data-field="aliases">
         <h3>Aliases</h3>
         <UnitEditor
           unitKey={`${entryKey}:aliases`}
@@ -290,7 +335,7 @@ export function EntryView({
           </label>
         ))}
       </fieldset>
-      <section className="plain-text-field">
+      <section className="plain-text-field" data-field="description">
         <h3>Description</h3>
         <UnitEditor
           unitKey={entryKey}
@@ -306,25 +351,66 @@ export function EntryView({
       </section>
       {entry.type === 'character' && (
         <>
-          <fieldset className="entry-choice">
-            <legend>Role</legend>
-            {ROLES.map((role) => (
-              <label key={role}>
-                <input
-                  type="radio"
-                  name={`role-${entryId}`}
-                  checked={choices.role === role}
-                  onChange={() => choose({ role })}
-                />
-                {ROLE_LABELS[role]}
-              </label>
-            ))}
-            {ghosts('role')}
-          </fieldset>
+          <div className="entry-role">
+            <fieldset className="entry-choice" data-field="role">
+              <legend>Role</legend>
+              {ROLES.map((role) => (
+                <label key={role}>
+                  <input
+                    type="radio"
+                    name={`role-${entryId}`}
+                    checked={choices.role === role}
+                    onChange={() => choose({ role })}
+                  />
+                  {ROLE_LABELS[role]}
+                </label>
+              ))}
+              {ghosts('role')}
+            </fieldset>
+            <section className="plain-text-field" data-field="roleNote">
+              <h4>Role note</h4>
+              <UnitEditor
+                unitKey={`${entryKey}:roleNote`}
+                field={{ unitKey: entryKey, text: roleNoteOf }}
+                text={roleNoteOf(entry)}
+                extensions={singleLineExtensions()}
+                toDoc={textToDoc}
+                toText={docToText}
+                save={(roleNote) =>
+                  saveFields((fields) => ({ ...fields, roleNote }))
+                }
+                attributes={attributes('Role note', 'plain-text short')}
+              />
+              <p className="field-hint">
+                A few words beside the Role, such as “love interest”
+              </p>
+              {ghosts('roleNote')}
+            </section>
+          </div>
+          <section className="plain-text-field" data-field="appearance">
+            <h3>Appearance</h3>
+            <UnitEditor
+              unitKey={`${entryKey}:appearance`}
+              field={{ unitKey: entryKey, text: appearanceOf }}
+              text={appearanceOf(entry)}
+              extensions={plainTextExtensions({ bullets: false })}
+              toDoc={textToDoc}
+              toText={docToText}
+              save={(appearance) =>
+                saveFields((fields) => ({ ...fields, appearance }))
+              }
+              attributes={attributes('Appearance')}
+            />
+            {ghosts('appearance')}
+          </section>
           <section className="entry-field-group" aria-label="Voice">
             <h3>Voice</h3>
             {VOICE_FIELDS.map(({ key, label, hint, text }) => (
-              <section className="plain-text-field" key={key}>
+              <section
+                className="plain-text-field"
+                key={key}
+                data-field={`voice.${key}`}
+              >
                 <h4>{label}</h4>
                 <UnitEditor
                   unitKey={`${entryKey}:voice.${key}`}
@@ -355,7 +441,11 @@ export function EntryView({
         <section className="entry-field-group" aria-label="Senses">
           <h3>Senses</h3>
           {SENSE_FIELDS.map(({ key, label, text }) => (
-            <section className="plain-text-field" key={key}>
+            <section
+              className="plain-text-field"
+              key={key}
+              data-field={`senses.${key}`}
+            >
               <h4>{label}</h4>
               <UnitEditor
                 unitKey={`${entryKey}:senses.${key}`}
@@ -378,7 +468,7 @@ export function EntryView({
         </section>
       )}
       {entry.type === 'plot-thread' && (
-        <fieldset className="entry-choice">
+        <fieldset className="entry-choice" data-field="status">
           <legend>Status</legend>
           {THREAD_STATUSES.map((status) => (
             <label key={status}>
@@ -419,28 +509,36 @@ export function EntryView({
 }
 
 /**
- * The values Proposals pending on a field would give it, each with a way to
- * its card in the Conversation, where it can be shown; they are not in the
- * field until accepted.
+ * The values Proposals pending on a field would give it, or with a "+" what
+ * an Append or an Add would add, each with a way to its card in the
+ * Conversation, where it can be shown; they are not in the field until
+ * accepted. The one `highlighted` is the one the Author came to see.
  */
 export function Ghosts({
   field,
   pending,
   onShow,
   showable = () => true,
+  highlighted,
 }: {
   field: ProposalField;
   pending: PendingProposal[];
   onShow(conversationId: string, proposalId: string): void;
   showable?(conversationId: string): boolean;
+  /** The id of the Proposal to highlight, if any. */
+  highlighted?: string;
 }) {
   const on = pending.filter((p) => p.proposal.field === field);
   if (on.length === 0) return null;
   return (
     <ul className="ghost-values" aria-label={`Proposed ${FIELD_LABELS[field]}`}>
       {on.map(({ conversationId, proposal }) => (
-        <li key={proposal.id} className="ghost-value">
+        <li
+          key={proposal.id}
+          className={`ghost-value${proposal.id === highlighted ? ' highlighted' : ''}`}
+        >
           <span className="ghost-text">
+            {isAppending(proposal) && '+ '}
             {fieldText(field, proposal.proposed)}
           </span>
           {showable(conversationId) && (

@@ -2,6 +2,7 @@ import {
   BrowserWindow,
   dialog,
   ipcMain,
+  nativeImage,
   type IpcMainInvokeEvent,
   type WebContents,
 } from 'electron';
@@ -13,18 +14,28 @@ import {
 } from '../shared/api';
 import type { InterviewFocus, Mode } from '../shared/conversation';
 import type { ReviewCommand } from '../shared/finding';
+import { PROSE_LANGUAGES, type ProseLanguage } from '../shared/project-types';
 import { createConversationEngine } from './assistant/conversation-engine';
 import { claudeProvider } from './assistant/claude-provider';
+import { entryImageOf, imageDataUrl } from './entry-image';
 import { systemClock } from './project-store/clock';
 import type { ProjectStore } from './project-store/project-store';
 import { assistantKey, assistantModel, storeOf } from './shell';
 import { trashConversationQuestion } from './trash-question';
 
 /**
- * Every method but `emptyTrash`, which asks the Author first, and
- * `subscribe`, whose events the shell sends to the window.
+ * Every method but `emptyTrash`, which asks the Author first, the Project
+ * settings, which may warn them, `chooseEntryImage`, which asks for a file,
+ * and `subscribe`, whose events the shell sends to the window.
  */
-type StoreMethod = Exclude<keyof ProjectApi, 'emptyTrash' | 'subscribe'>;
+type StoreMethod = Exclude<
+  keyof ProjectApi,
+  | 'emptyTrash'
+  | 'setLanguage'
+  | 'setFoldedNoteImage'
+  | 'chooseEntryImage'
+  | 'subscribe'
+>;
 
 type Handlers = {
   [K in StoreMethod]: (
@@ -59,6 +70,11 @@ const projectHandlers: Handlers = {
   setEntryVisibility: (store, entryId, visibility) =>
     store.setEntryVisibility(entryId, visibility),
   setEntryType: (store, entryId, type) => store.setEntryType(entryId, type),
+  removeEntryImage: (store, entryId) => store.removeEntryImage(entryId),
+  entryImage: async (store, entryId) => {
+    const image = await store.readEntryImage(entryId);
+    return image && imageDataUrl(image);
+  },
   restore: (store, id) => store.restore(id),
   undo: (store, step) => store.undo(step),
   listTrash: async (store) => store.listTrash(),
@@ -85,6 +101,28 @@ export function registerProjectIpc(): void {
   }
   ipcMain.handle(channel.project('emptyTrash'), (event) =>
     emptyTrash(event.sender, storeOfWindow(event.sender)),
+  );
+  ipcMain.handle(
+    channel.project('chooseEntryImage'),
+    (event, entryId: string) =>
+      chooseEntryImage(event.sender, storeOfWindow(event.sender), entryId),
+  );
+  ipcMain.handle(
+    channel.project('setLanguage'),
+    (event, language: ProseLanguage) =>
+      setLanguage(event.sender, storeOfWindow(event.sender), language),
+  );
+  ipcMain.handle(
+    channel.project('setFoldedNoteImage'),
+    (event, on: boolean) => {
+      const store = storeOfWindow(event.sender);
+      return saveProjectSetting(
+        event.sender,
+        store,
+        `The Pinned notes setting of ${store.displayName}`,
+        () => store.setFoldedNoteImage(on === true),
+      );
+    },
   );
 }
 
@@ -264,4 +302,89 @@ async function emptyTrash(
   if (response !== 0) return false;
   await store.emptyTrash();
   return true;
+}
+
+/**
+ * Asks for an image and makes it the Entry's, scaled down; tells the Author
+ * when it can't be read or stored.
+ */
+async function chooseEntryImage(
+  sender: WebContents,
+  store: ProjectStore,
+  entryId: string,
+): Promise<boolean> {
+  const window = BrowserWindow.fromWebContents(sender);
+  const options = {
+    title: 'Choose Image',
+    buttonLabel: 'Choose',
+    filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png'] }],
+    properties: ['openFile' as const],
+  };
+  const { canceled, filePaths } = window
+    ? await dialog.showOpenDialog(window, options)
+    : await dialog.showOpenDialog(options);
+  if (canceled || filePaths.length === 0) return false;
+  try {
+    const image = entryImageOf(nativeImage.createFromPath(filePaths[0]));
+    await store.setEntryImage(entryId, image);
+    return true;
+  } catch (error) {
+    console.error(`Can't set the image of Entry ${entryId}:`, error);
+    const warning = {
+      type: 'warning' as const,
+      buttons: ['OK'],
+      message: "The image can't be used.",
+      detail: error instanceof Error ? error.message : String(error),
+    };
+    await (window
+      ? dialog.showMessageBox(window, warning)
+      : dialog.showMessageBox(warning));
+    return false;
+  }
+}
+
+/** Sets the Prose language, warning the Author when it can't be saved. */
+async function setLanguage(
+  sender: WebContents,
+  store: ProjectStore,
+  language: ProseLanguage,
+): Promise<boolean> {
+  if (!PROSE_LANGUAGES.some((offered) => offered.language === language)) {
+    return false;
+  }
+  return saveProjectSetting(
+    sender,
+    store,
+    `The Prose language of ${store.displayName}`,
+    () => store.setLanguage(language),
+  );
+}
+
+/**
+ * Saves a Project setting, warning the Author that `setting` can't be
+ * changed now when it can't be saved.
+ */
+async function saveProjectSetting(
+  sender: WebContents,
+  store: ProjectStore,
+  setting: string,
+  save: () => Promise<void>,
+): Promise<boolean> {
+  try {
+    await save();
+    return true;
+  } catch (error) {
+    console.error(`Can't save a Project setting of ${store.path}:`, error);
+    const options = {
+      type: 'warning' as const,
+      buttons: ['OK'],
+      message: `${setting} can't be changed now.`,
+      detail: error instanceof Error ? error.message : String(error),
+    };
+    const window = BrowserWindow.fromWebContents(sender);
+    await (window
+      ? dialog.showMessageBox(window, options)
+      : dialog.showMessageBox(options));
+    return false;
+  }
 }

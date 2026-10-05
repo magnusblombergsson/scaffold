@@ -68,7 +68,7 @@ A description of an Entry, written by the Assistant on request from what the Ent
 _Avoid_: Image description, caption
 
 **Peek**:
-A short, read-only look at the Entries a highlighted name refers to, opened by clicking the name, or a Proposal's title in Brainstorm and Interview. Long text is cut off until the Author asks to read more.
+A short, read-only look at the Entries a highlighted name refers to, opened by clicking the name; or at a Proposal's target, an Entry or an Outline, opened by clicking its title in Brainstorm and Interview. Long text is cut off until the Author asks to read more.
 _Avoid_: Popup, tooltip, preview
 
 **Pinned note**:
@@ -92,7 +92,7 @@ The Author's working notes on a Chapter or Scene. Visible to the Assistant, unli
 _Avoid_: Comments (when meaning the Author's own), annotations
 
 **Trash**:
-Where deleted Scenes, Chapters, Entries and Conversations go within a Project; they stay recoverable until the Author empties it. A Chapter goes with its Scenes and comes back with them; a Conversation goes with its pending Proposals.
+Where deleted Scenes, Chapters, Entries and Conversations go within a Project; they stay recoverable until the Author empties it. A Chapter goes with its Scenes and comes back with them; an Entry with its image; a Conversation goes with its pending Proposals.
 _Avoid_: Bin, archive
 
 **Export**:

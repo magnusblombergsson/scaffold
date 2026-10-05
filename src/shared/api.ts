@@ -12,13 +12,19 @@ import type {
 import type { ReviewCommand } from './finding';
 import type { ImportBlock, ImportConvention } from './manuscript-import';
 import type { ModelId } from './models';
+import type { Command } from './shortcuts';
 import type { PendingProposal, ProposedValue } from './proposal';
 
 /**
  * How the Author accepts a Proposal: with the value they `edited` it to,
- * and `anyway` when they saw it was stale.
+ * `anyway` when they saw it was stale, and `append` to add it to what its
+ * target holds now rather than replace that.
  */
-export type AcceptOptions = { edited?: ProposedValue; anyway?: boolean };
+export type AcceptOptions = {
+  edited?: ProposedValue;
+  anyway?: boolean;
+  append?: boolean;
+};
 import type {
   AskResult,
   Conversation,
@@ -123,6 +129,12 @@ export type EntriesChanged = {
   entries: EntrySummary[];
 };
 
+/**
+ * An Entry's image was set, replaced or removed here. The file can keep its
+ * name, so its Entry's summary may not change.
+ */
+export type EntryImageChanged = { type: 'entryImageChanged'; id: string };
+
 /** A newer app upgraded the Project; `host` is the computer it did so on, when known. */
 export type Upgrade = { host?: string };
 
@@ -138,6 +150,12 @@ export type LanguageChanged = {
   language: ProseLanguage;
 };
 
+/** A folded Pinned note now shows its Entry's image, or doesn't. */
+export type FoldedNoteImageChanged = {
+  type: 'foldedNoteImageChanged';
+  on: boolean;
+};
+
 /** What main tells a window about its Project as it happens. */
 export type ProjectEvent =
   | UnitSaveStatus
@@ -145,10 +163,12 @@ export type ProjectEvent =
   | StructureChanged
   | ConflictsChanged
   | EntriesChanged
+  | EntryImageChanged
   | ProposalsChanged
   | ConversationsChanged
   | ReadOnly
-  | LanguageChanged;
+  | LanguageChanged
+  | FoldedNoteImageChanged;
 
 /** Mirrors the main-process ProjectStore of this window's Project. */
 export interface ProjectApi {
@@ -211,6 +231,16 @@ export interface ProjectApi {
    * don't fit the new type are written at the end of its description.
    */
   setEntryType(entryId: string, type: EntryType): Promise<Changed>;
+  /**
+   * Asks the Author for a JPEG or PNG, then makes it the Entry's image,
+   * scaled down, in place of any it had; false if they cancel or it can't be
+   * read, which main has told them. There is no undo.
+   */
+  chooseEntryImage(entryId: string): Promise<boolean>;
+  /** Removes an Entry's image; there is no undo. */
+  removeEntryImage(entryId: string): Promise<void>;
+  /** An Entry's image as a `data:` URL; null without one, or before it syncs. */
+  entryImage(entryId: string): Promise<string | null>;
   /** Puts a Trash item back where it was, as near as the Manuscript allows. */
   restore(id: string): Promise<Changed>;
   /** Reverts `step` if it is still the latest structure operation. */
@@ -232,30 +262,57 @@ export interface ProjectApi {
   resolveConflict<R extends UnitRef>(ref: R, kept: ValueOf<R>): Promise<void>;
   /** Asks the Author to confirm, then deletes Trash for good; false if not. */
   emptyTrash(): Promise<boolean>;
+  /**
+   * Spellchecks and typesets the Prose in `language` from now on, a Project
+   * setting. False when it can't be saved, which main has told the Author.
+   */
+  setLanguage(language: ProseLanguage): Promise<boolean>;
+  /**
+   * Whether a folded Pinned note shows its Entry's image, a Project setting.
+   * False when it can't be saved, which main has told the Author.
+   */
+  setFoldedNoteImage(on: boolean): Promise<boolean>;
 }
 
 /**
  * Widths in CSS pixels of the panels the Author can resize: in Writing, the
- * Binder and the Assistant panel; in the Brainstorm and Interview rooms,
- * their Conversations and the reference.
+ * Binder, the Overview pane and the Assistant panel; in the Brainstorm and
+ * Interview rooms, their Conversations and the reference.
  */
 export type PanelWidths = {
   binder?: number;
+  overview?: number;
   assistant?: number;
   conversations?: number;
   reference?: number;
 };
 
 /**
+ * A Pinned note: the Entry it shows, where its top left corner was left in
+ * the window in CSS pixels, and whether it is folded to its title.
+ */
+export type PinnedNote = {
+  entryId: string;
+  x: number;
+  y: number;
+  folded: boolean;
+};
+
+/**
  * How the Author left a Project's window on this computer; `cursor` is where
- * it was in the last Scene, and `outlineNotesOpen` says whether the Outline &
- * Notes box above the Prose is open.
+ * it was in the last Scene, `outlineNotesOpen` says whether the Outline &
+ * Notes box above the Prose is open, and `overviewOpen` whether the Overview
+ * pane beside it is. `pinnedNotes` are the Pinned notes, the one on top last.
+ * The Overview pane's state and the Pinned notes are never kept in the
+ * Project.
  */
 export type ProjectView = {
   lastSceneId?: string;
   cursor?: number;
   panelWidths?: PanelWidths;
   outlineNotesOpen?: boolean;
+  overviewOpen?: boolean;
+  pinnedNotes?: PinnedNote[];
 };
 
 /**
@@ -272,6 +329,8 @@ export type SessionNotice = {
 export type OpenedProject = {
   displayName: string;
   language: ProseLanguage;
+  /** Whether a folded Pinned note shows its Entry's image. */
+  foldedNoteImage: boolean;
   manuscript: Manuscript;
   view: ProjectView;
   sessions: SessionNotice;
@@ -397,8 +456,11 @@ export interface ShellApi {
     file: ImportFile,
     convention: ImportConvention,
   ): Promise<OpenResult | 'canceled'>;
-  /** Calls `listener` when the Author chooses File → Import…. Returns an unsubscribe function. */
-  onImportRequest(listener: () => void): () => void;
+  /**
+   * Calls `listener` with what the Author chose from the menu bar, or with
+   * its shortcut. Returns an unsubscribe function.
+   */
+  onCommand(listener: (command: Command) => void): () => void;
   /** Opens a Project from the recent list. */
   openRecent(path: string): Promise<OpenResult>;
   /** Asks where a recent Project that wasn't found is now, and opens it. */
@@ -490,8 +552,8 @@ export interface AssistantApi {
   /**
    * Accepts a pending Proposal, as proposed or as the Author edited it:
    * main writes its target, an Entry or Outline, then logs the accept. Refused for one already
-   * decided, an orphaned one, a stale one unless accepted anyway, and in a
-   * read-only Project.
+   * decided, an orphaned one, a stale one unless accepted anyway or
+   * appended, one appended that can't be, and in a read-only Project.
    */
   acceptProposal(
     conversationId: string,
@@ -516,7 +578,7 @@ export const channel = {
   openProject: 'shell:openProject',
   chooseImport: 'shell:chooseImport',
   importProject: 'shell:importProject',
-  importRequest: 'shell:importRequest',
+  command: 'shell:command',
   openRecent: 'shell:openRecent',
   locateProject: 'shell:locateProject',
   recentProjects: 'shell:recentProjects',

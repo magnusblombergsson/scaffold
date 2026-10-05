@@ -1,17 +1,47 @@
+/*
+ * Paper on a desk. Everything outside the work is the desk; the centre pane
+ * is a sheet lifted off it. Popovers and dialogs are sheets too. The app
+ * follows the system theme.
+ */
 :root {
-  --bg: #fbfaf7;
+  --desk: #e9e6df;
+  --sheet: #fffefb;
   --fg: #222;
-  --muted: #777;
-  --line: #e2dfd8;
+  --muted: #736f68;
+  --line: #d8d4cb;
+  /* Outlines of buttons and the underline of dropdowns. */
+  --pill-line: #b9b4a9;
+  /* The dashed rule of an editable field. */
+  --rule: #c9c3b6;
+  --hover: rgb(0 0 0 / 6%);
+  --accent: #2e6b4e;
+  --accent-tint: rgb(46 107 78 / 6%);
+  --danger: #b3261e;
+  --warning: #9a5c00;
+  --sheet-shadow: 0 1px 2px rgb(0 0 0 / 8%), 0 4px 14px rgb(0 0 0 / 7%);
+  --float-shadow: 0 4px 16px rgb(0 0 0 / 15%);
+  --raised-shadow: 0 1px 3px rgb(0 0 0 / 15%);
   color-scheme: light dark;
+  accent-color: var(--accent);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --bg: #1d1d1f;
+    --desk: #151517;
+    --sheet: #252528;
     --fg: #e8e6e1;
-    --muted: #999;
-    --line: #3a3a3c;
+    --muted: #9a9a9f;
+    --line: #38383d;
+    --pill-line: #55555c;
+    --rule: #4a4a50;
+    --hover: rgb(255 255 255 / 7%);
+    --accent: #79c29e;
+    --accent-tint: rgb(121 194 158 / 8%);
+    --danger: #f2867f;
+    --warning: #e0a040;
+    --sheet-shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 4px 14px rgb(0 0 0 / 30%);
+    --float-shadow: 0 4px 16px rgb(0 0 0 / 50%);
+    --raised-shadow: 0 1px 3px rgb(0 0 0 / 60%);
   }
 }
 
@@ -23,11 +53,158 @@ body,
 }
 
 body {
-  background: var(--bg);
+  background: var(--desk);
   color: var(--fg);
   font-family:
     -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial,
     sans-serif;
+}
+
+/* Action buttons are outlined pills: every button with no class and no
+   role, and these classed ones. */
+button:not([class], [role]),
+button.primary,
+.binder-add,
+.room-new,
+.trash-empty-button,
+.entry-card-open,
+.proposal-undo,
+.story-bible-new .menu-button {
+  font: inherit;
+  font-size: 0.85rem;
+  color: inherit;
+  background: transparent;
+  border: 1px solid var(--pill-line);
+  border-radius: 999px;
+  padding: 0.2rem 0.9rem;
+  cursor: pointer;
+}
+
+button:not([class], [role]):hover:not(:disabled),
+.binder-add:hover:not(:disabled),
+.room-new:hover:not(:disabled),
+.trash-empty-button:hover:not(:disabled),
+.entry-card-open:hover:not(:disabled),
+.proposal-undo:hover:not(:disabled),
+.story-bible-new .menu-button:hover:not(:disabled) {
+  border-color: var(--fg);
+}
+
+/* Add buttons. */
+.binder-add,
+.room-new,
+.story-bible-new .menu-button {
+  border-style: dashed;
+}
+
+/* Review Scene, Review Chapter, Send and Accept. */
+button.primary {
+  border: 1.5px solid var(--accent);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+button.primary:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+}
+
+button:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+/* Dropdowns: no box, an underline and a chevron. */
+select {
+  appearance: none;
+  font: inherit;
+  font-size: 0.85rem;
+  color: inherit;
+  background-color: transparent;
+  background-image:
+    linear-gradient(45deg, transparent 50%, currentColor 50%),
+    linear-gradient(135deg, currentColor 50%, transparent 50%);
+  background-position:
+    calc(100% - 10px) 55%,
+    calc(100% - 5px) 55%;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+  border: none;
+  border-bottom: 1.5px solid var(--pill-line);
+  border-radius: 0;
+  padding: 0.2rem 1.4rem 0.2rem 0.1rem;
+  cursor: pointer;
+}
+
+select:hover,
+select:focus-visible {
+  border-bottom-color: var(--accent);
+  outline: none;
+}
+
+select option {
+  background: var(--sheet);
+  color: var(--fg);
+}
+
+/* Editable cue: every editable field but the Prose has a dashed rule on its
+   left, solid accent while hovered or focused. Read-only text has none. */
+.plain-text[contenteditable='true'],
+.binder-rename,
+.proposal-edit,
+.proposal-edit-entry input,
+.key-form input[type='password'],
+textarea.conflict-text {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: none;
+  border-left: 2px dashed var(--rule);
+  border-radius: 0;
+  padding: 0.2rem 0.4rem 0.2rem 0.7rem;
+  outline: none;
+  transition:
+    border-color 0.12s,
+    background-color 0.12s;
+}
+
+:is(
+  .plain-text[contenteditable='true'],
+  .binder-rename,
+  .proposal-edit,
+  .proposal-edit-entry input,
+  .key-form input[type='password'],
+  textarea.conflict-text
+):hover {
+  border-left-style: solid;
+  border-left-color: var(--accent);
+}
+
+:is(
+  .plain-text[contenteditable='true'],
+  .binder-rename,
+  .proposal-edit,
+  .proposal-edit-entry input,
+  .key-form input[type='password'],
+  textarea.conflict-text
+):focus {
+  border-left: 2px solid var(--accent);
+  background: var(--accent-tint);
+}
+
+/* The field's label gets a pencil while the field is hovered or focused. */
+.plain-text-field:has(.plain-text[contenteditable='true']:is(:hover, :focus))
+  > :is(h3, h4) {
+  color: var(--accent);
+}
+
+.plain-text-field:has(.plain-text[contenteditable='true']:is(:hover, :focus))
+  > :is(h3, h4)::after {
+  content: ' ✎';
+}
+
+.key-form > label:has(input[type='password']:is(:hover, :focus)) {
+  color: var(--accent);
 }
 
 .start {
@@ -82,7 +259,7 @@ button.recent-open {
 }
 
 button.recent-open:hover {
-  background: var(--line);
+  background: var(--hover);
 }
 
 .recent-path {
@@ -114,40 +291,35 @@ button.recent-open:hover {
   align-items: center;
   gap: 1rem;
   padding: 0.5rem 1rem;
-  border-bottom: 1px solid var(--line);
 }
 
 .project-name {
   font-weight: 600;
 }
 
+/* A row of pills; the current Mode is raised in the sheet colour. */
 .mode-switch {
   display: flex;
+  gap: 2px;
 }
 
 .mode-switch button {
   background: none;
-  border: 1px solid var(--line);
+  border: none;
+  border-radius: 999px;
   color: inherit;
-  padding: 1px 0.75rem;
+  font: inherit;
+  padding: 2px 0.9rem;
   cursor: pointer;
 }
 
-.mode-switch button + button {
-  border-left: none;
-}
-
-.mode-switch button:first-child {
-  border-radius: 4px 0 0 4px;
-}
-
-.mode-switch button:last-child {
-  border-radius: 0 4px 4px 0;
+.mode-switch button:hover {
+  background: var(--hover);
 }
 
 .mode-switch button[aria-pressed='true'] {
-  background: var(--line);
-  font-weight: 600;
+  background: var(--sheet);
+  box-shadow: var(--raised-shadow);
 }
 
 .scene-title {
@@ -175,11 +347,16 @@ button.recent-open:hover {
   margin: 0 0 1em;
 }
 
+/* The sheet. */
 .centre {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
+  background: var(--sheet);
+  border-radius: 8px;
+  box-shadow: var(--sheet-shadow);
+  overflow: hidden;
 }
 
 .centre-title {
@@ -240,14 +417,437 @@ button.recent-open:hover {
   margin: 0;
 }
 
+/* The Corkboard: the Project Outline or a Chapter as index cards on the
+   sheet, each with its Outline and Notes editable in place. */
+.corkboard {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0 1rem 2rem;
+}
+
+.corkboard > .centre-title {
+  padding: 1rem 0 0.75rem;
+}
+
+.card {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  box-sizing: border-box;
+  padding: 0.6rem 0.8rem 0.7rem;
+  background: var(--sheet);
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  box-shadow: var(--raised-shadow);
+
+  header {
+    display: flex;
+    align-items: baseline;
+    gap: 0.5rem;
+  }
+
+  /* A card grows with its text; it never scrolls. */
+  .outline-notes-fields {
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+    padding: 0;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .plain-text {
+    min-height: 2em;
+  }
+}
+
+/* The unit the Corkboard is of, and each lane's own card. */
+.card.own {
+  background: color-mix(in srgb, var(--accent) 5%, var(--sheet));
+}
+
+/* Outline and Notes side by side, unless there are no Notes. */
+.card.wide .outline-notes-fields:not(:has(> :only-child)) {
+  grid-template-columns: 1fr 1fr;
+}
+
+.card-number {
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A title opens its unit. */
+button.card-title {
+  font: inherit;
+  font-weight: 600;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+  cursor: pointer;
+}
+
+button.card-title:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+span.card-title {
+  font-weight: 600;
+  color: var(--muted);
+}
+
+.scene-cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(15rem, 1fr));
+  gap: 0.9rem;
+  margin-top: 1.25rem;
+}
+
+.corkboard-heading {
+  display: flex;
+  align-items: baseline;
+  gap: 0.4rem;
+  margin: 1.75rem 0 0.5rem;
+
+  h3 {
+    margin: 0 auto 0 0;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+  }
+}
+
+.corkboard-count {
+  font-weight: normal;
+}
+
+.corkboard-empty {
+  color: var(--muted);
+  font-style: italic;
+  font-size: 0.85rem;
+  margin: 0.25rem 0;
+}
+
+/* A lane opens sideways to its Scenes. */
+.lane {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.75rem;
+  overflow-x: auto;
+  padding: 0.25rem 0.1rem 0.75rem;
+
+  > .card {
+    flex: 0 0 15rem;
+  }
+
+  > .card.own {
+    flex-basis: 19rem;
+  }
+
+  > .corkboard-empty {
+    align-self: center;
+  }
+}
+
+.lane-toggle {
+  flex-shrink: 0;
+  align-self: stretch;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.3rem;
+  font: inherit;
+  font-size: 0.8rem;
+  color: var(--muted);
+  background: none;
+  border: 1px dashed var(--pill-line);
+  border-radius: 6px;
+  padding: 0 0.45rem;
+  cursor: pointer;
+}
+
+.lane-toggle:hover {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+
+.lane-count {
+  writing-mode: vertical-rl;
+}
+
+/* The bar above the Prose: Outline & Notes, then the Overview pane's switch. */
+.outline-notes-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-right: 0.5rem;
+}
+
+.overview-button {
+  background: none;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 1px 0.7rem;
+  cursor: pointer;
+}
+
+.overview-button:hover {
+  background: var(--hover);
+}
+
+.overview-button[aria-pressed='true'] {
+  color: var(--accent);
+  border-color: var(--pill-line);
+}
+
+/* The Overview pane: a narrow sheet between the Binder and the Prose, a row
+   per unit that opens to its Outline and Notes. */
+.overview-pane {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--sheet);
+  border-radius: 8px;
+  box-shadow: var(--sheet-shadow);
+  overflow: hidden;
+  font-size: 0.9rem;
+}
+
+.overview-head {
+  padding: 0.5rem 0.5rem 0.35rem 0.75rem;
+  border-bottom: 1px solid var(--line);
+
+  .mode-switch {
+    background: var(--hover);
+    border-radius: 999px;
+    padding: 2px;
+  }
+
+  .mode-switch button {
+    padding: 1px 0.7rem;
+  }
+
+  .mode-switch button:disabled {
+    color: var(--muted);
+    cursor: default;
+    background: none;
+  }
+}
+
+/* The scope switch, and the pane's close button at the far end. */
+.overview-scope {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+}
+
+.overview-actions {
+  display: flex;
+  gap: 0.6rem;
+  margin-top: 0.3rem;
+
+  button {
+    background: none;
+    border: none;
+    color: var(--accent);
+    font: inherit;
+    font-size: 0.8rem;
+    padding: 2px 0;
+    cursor: pointer;
+  }
+
+  button:hover:not(:disabled) {
+    text-decoration: underline;
+  }
+
+  button:disabled {
+    color: var(--muted);
+    cursor: default;
+  }
+}
+
+.overview-close {
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--muted);
+  font-size: 1.1rem;
+  line-height: 1;
+  padding: 0 0.3rem;
+  cursor: pointer;
+}
+
+.overview-close:hover {
+  background: var(--hover);
+  color: var(--fg);
+}
+
+.overview-rows {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.35rem 0.5rem 1rem;
+}
+
+.overview-row-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.35rem;
+  min-width: 0;
+  padding: 0.2rem 0;
+}
+
+.overview-row.chapter > .overview-row-head,
+.overview-row.project > .overview-row-head,
+.overview-row.group > .overview-row-head {
+  font-weight: 600;
+}
+
+/* Only the arrow opens and closes a row. */
+.overview-toggle {
+  flex-shrink: 0;
+  width: 1.3rem;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--muted);
+  font: inherit;
+  font-weight: normal;
+  padding: 0;
+  cursor: pointer;
+}
+
+.overview-toggle:hover:not(:disabled) {
+  background: var(--hover);
+  color: var(--accent);
+}
+
+.overview-toggle:disabled {
+  visibility: hidden;
+}
+
+/* A title opens its unit. */
+.overview-title {
+  flex-shrink: 0;
+  max-width: 60%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font: inherit;
+  color: inherit;
+  background: none;
+  border: none;
+  padding: 0;
+  text-align: left;
+}
+
+button.overview-title {
+  cursor: pointer;
+}
+
+button.overview-title:hover {
+  color: var(--accent);
+  text-decoration: underline;
+}
+
+span.overview-title {
+  color: var(--muted);
+}
+
+.overview-preview {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: normal;
+  color: var(--muted);
+}
+
+.overview-preview.empty,
+.overview-empty {
+  font-style: italic;
+}
+
+.overview-empty {
+  color: var(--muted);
+  font-size: 0.85rem;
+  margin: 0.2rem 0 0.2rem 1.65rem;
+}
+
+.overview-writing {
+  font-size: 0.7rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--accent);
+  background: var(--accent-tint);
+  border-radius: 999px;
+  padding: 1px 0.5rem;
+}
+
+.overview-row[data-writing] > .overview-row-head {
+  background: var(--accent-tint);
+  border-radius: 4px;
+}
+
+.overview-row-body {
+  margin: 0.15rem 0 0.5rem 1.65rem;
+  font-weight: normal;
+
+  .outline-notes-fields {
+    grid-template-columns: 1fr;
+    gap: 0.5rem;
+    padding: 0;
+    max-height: none;
+    overflow: visible;
+  }
+
+  .plain-text {
+    min-height: 2em;
+  }
+}
+
+.overview-children {
+  margin-left: 1.1rem;
+}
+
 [role='alert'] {
-  color: #b3261e;
+  color: var(--danger);
   padding: 0 1rem;
+}
+
+/* Along the bottom, on the desk like the header: the save state, then the counts. */
+.status-bar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0 1rem 0.35rem;
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.counts {
+  cursor: default;
+}
+
+.counts-scope {
+  font-weight: 600;
 }
 
 .save-status {
   color: var(--muted);
-  font-size: 0.85rem;
   transition: color 0.2s;
 }
 
@@ -257,14 +857,14 @@ button.recent-open:hover {
 }
 
 .save-status.failed {
-  color: #b3261e;
+  color: var(--danger);
   font-weight: 600;
 }
 
 .read-only-banner,
 .save-failures {
-  border-bottom: 1px solid #b3261e;
-  background: rgb(179 38 30 / 8%);
+  border-bottom: 1px solid var(--danger);
+  background: color-mix(in srgb, var(--danger) 8%, transparent);
   padding: 0.5rem 1rem;
 }
 
@@ -301,6 +901,7 @@ button.recent-open:hover {
   display: flex;
   flex: 1;
   min-height: 0;
+  padding: 0 0.5rem 0.5rem;
 }
 
 /* One Mode's panes; another Mode's stay mounted, hidden. */
@@ -321,13 +922,12 @@ button.recent-open:hover {
   font-size: 0.9rem;
 }
 
+/* An invisible gap between panes that shows a bar on hover. */
 .panel-resizer {
   flex-shrink: 0;
-  width: 5px;
-  margin-left: -2px;
-  border-left: 2px solid transparent;
-  border-right: 2px solid transparent;
-  background: var(--line);
+  width: 3px;
+  padding: 0 3px;
+  background-color: transparent;
   background-clip: content-box;
   cursor: col-resize;
   touch-action: none;
@@ -335,7 +935,7 @@ button.recent-open:hover {
 
 .panel-resizer:hover,
 .panel-resizer:focus-visible {
-  background-color: var(--muted);
+  background-color: var(--pill-line);
   outline: none;
 }
 
@@ -354,7 +954,7 @@ button.recent-open:hover {
 }
 
 .tabs [role='tab'][aria-selected='true'] {
-  border-bottom-color: var(--fg);
+  border-bottom-color: var(--accent);
 }
 
 .binder {
@@ -434,7 +1034,16 @@ h2.binder-title > button {
 button.binder-title[aria-current='true'],
 h2.binder-title > button[aria-current='true'],
 .binder-project[aria-current='true'] {
-  background: var(--line);
+  background: var(--sheet);
+}
+
+/* Titles that rename on double-click. */
+.binder-chapters button.binder-title:hover::after,
+h2.binder-title > button:hover::after {
+  /* Not part of the title's name. */
+  content: ' ✎' / '';
+  color: var(--accent);
+  font-weight: normal;
 }
 
 .binder-missing {
@@ -483,10 +1092,10 @@ h2.binder-title > button[aria-current='true'],
   flex-direction: column;
   min-width: 11rem;
   padding: 0.25rem;
-  background: var(--bg);
+  background: var(--sheet);
   border: 1px solid var(--line);
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgb(0 0 0 / 15%);
+  border-radius: 8px;
+  box-shadow: var(--float-shadow);
 }
 
 .menu-items [role='menuitem'] {
@@ -501,7 +1110,7 @@ h2.binder-title > button[aria-current='true'],
 }
 
 .menu-items [role='menuitem']:hover:not(:disabled) {
-  background: var(--line);
+  background: var(--hover);
 }
 
 .editor.empty,
@@ -555,7 +1164,8 @@ h2.binder-title > button[aria-current='true'],
 
 .toasts {
   position: fixed;
-  bottom: 1rem;
+  /* Above the status bar. */
+  bottom: 2.25rem;
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -568,20 +1178,27 @@ h2.binder-title > button[aria-current='true'],
   display: flex;
   align-items: center;
   gap: 1rem;
-  padding: 0.5rem 0.75rem 0.5rem 1rem;
+  padding: 0.5rem 0.6rem 0.5rem 1rem;
   background: var(--fg);
-  color: var(--bg);
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgb(0 0 0 / 20%);
+  color: var(--sheet);
+  border-radius: 10px;
+  box-shadow: var(--float-shadow);
 }
 
 .toast button {
   background: none;
-  border: none;
+  border: 1px solid color-mix(in srgb, currentColor 45%, transparent);
+  border-radius: 999px;
   color: inherit;
   font: inherit;
+  font-size: 0.85rem;
   font-weight: 600;
+  padding: 0.1rem 0.75rem;
   cursor: pointer;
+}
+
+.toast button:hover:not(:disabled) {
+  border-color: currentColor;
 }
 
 .badge {
@@ -590,14 +1207,14 @@ h2.binder-title > button[aria-current='true'],
   margin-left: 0.35rem;
   padding: 0 0.3rem;
   border-radius: 999px;
-  background: #b26a00;
-  color: #fff;
+  background: var(--warning);
+  color: var(--sheet);
   font-size: 0.75em;
   text-align: center;
 }
 
 .binder-conflict {
-  color: #b26a00;
+  color: var(--warning);
   font-size: 0.85em;
   font-weight: normal;
 }
@@ -632,7 +1249,7 @@ h2.binder-title > button[aria-current='true'],
 }
 
 .conflict-item[aria-current='true'] {
-  background: var(--line);
+  background: var(--sheet);
 }
 
 .conflict-versions {
@@ -679,13 +1296,6 @@ h2.binder-title > button[aria-current='true'],
 
 .story-bible-new {
   padding: 0.5rem;
-}
-
-.story-bible-new .menu-button {
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  color: var(--fg);
-  padding: 0.2rem 0.6rem;
 }
 
 .story-bible-new .menu-items {
@@ -766,9 +1376,9 @@ h2.binder-title > button[aria-current='true'],
   list-style: none;
   margin: 0;
   padding: 0.5rem 0.75rem;
-  border: 1px solid rgb(176 120 0 / 50%);
-  border-radius: 6px;
-  background: rgb(176 120 0 / 10%);
+  border: 1px solid color-mix(in srgb, var(--warning) 50%, transparent);
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--warning) 10%, transparent);
   font-size: 0.85rem;
 }
 
@@ -778,7 +1388,45 @@ h2.binder-title > button[aria-current='true'],
   gap: 0.5rem;
 }
 
-.entry-field-group h4 {
+/* An Entry's image, above its Name. */
+.entry-image {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.5rem;
+}
+
+.entry-image img {
+  max-width: min(100%, 24rem);
+  max-height: 24rem;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+}
+
+.entry-image-actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+/* Beside an Entry's name in the Story Bible list. */
+.entry-thumbnail {
+  width: 1.25rem;
+  height: 1.25rem;
+  object-fit: cover;
+  border-radius: 3px;
+  margin-right: 0.4rem;
+  vertical-align: middle;
+}
+
+/* A Character's Role, with its Role note just under it. */
+.entry-role {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.entry-field-group h4,
+.entry-role h4 {
   font-size: 0.8rem;
   font-weight: 600;
   margin: 0;
@@ -828,16 +1476,254 @@ h2.binder-title > button[aria-current='true'],
 
 .mention-peek {
   position: fixed;
-  z-index: 2;
+  /* Over the Pinned notes: the Author just asked for it. */
+  z-index: 4;
   box-sizing: border-box;
   max-height: 60vh;
   overflow-y: auto;
   padding: 0.75rem;
-  background: var(--bg);
+  background: var(--sheet);
   border: 1px solid var(--line);
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgb(0 0 0 / 15%);
+  border-radius: 8px;
+  box-shadow: var(--float-shadow);
   font-size: 0.9rem;
+}
+
+/* An Entry in the Peek, shortened until Read more unfolds it. */
+.peek-card + .peek-card {
+  border-top: 1px solid var(--line);
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
+}
+
+.peek-card header {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.6rem;
+  /* Not the project header's. */
+  padding: 0;
+}
+
+.peek-card-thumbnail {
+  flex-shrink: 0;
+  width: 2.75rem;
+  height: 2.75rem;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+}
+
+.peek-card-image {
+  display: block;
+  max-width: 100%;
+  max-height: 20rem;
+  margin: 0 auto 0.6rem;
+  border-radius: 6px;
+  border: 1px solid var(--line);
+}
+
+.peek-card-titles {
+  flex: 1;
+  min-width: 0;
+}
+
+.peek-card-type {
+  color: var(--muted);
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.peek-card h2 {
+  font-size: 1.05rem;
+  margin: 0;
+}
+
+.peek-card-role {
+  color: var(--muted);
+  font-style: italic;
+  margin: 0.1rem 0 0;
+}
+
+.peek-card-actions {
+  display: flex;
+  gap: 0.1rem;
+}
+
+.peek-card-icon {
+  font: inherit;
+  color: var(--muted);
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  width: 1.75rem;
+  height: 1.75rem;
+  cursor: pointer;
+}
+
+.peek-card-icon:hover:not(:disabled) {
+  color: var(--accent);
+  background: var(--hover);
+}
+
+.peek-card-aliases {
+  color: var(--muted);
+  margin: 0.25rem 0 0;
+}
+
+.peek-card-description {
+  white-space: pre-wrap;
+  margin: 0.5rem 0 0;
+}
+
+.peek-card dl {
+  margin: 0.5rem 0 0;
+}
+
+.peek-card dl div {
+  display: grid;
+  grid-template-columns: 6.5rem 1fr;
+  gap: 0.5rem;
+}
+
+.peek-card dl div + div {
+  margin-top: 0.25rem;
+}
+
+.peek-card dt {
+  color: var(--muted);
+}
+
+.peek-card dd {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+/* Shortened: the description cut to three lines, each key field to two. */
+.peek-card:not(.expanded) .peek-card-description,
+.peek-card:not(.expanded) dd {
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.peek-card:not(.expanded) .peek-card-description {
+  -webkit-line-clamp: 3;
+}
+
+.peek-card:not(.expanded) dd {
+  -webkit-line-clamp: 2;
+}
+
+.peek-card-more {
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--accent);
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin-top: 0.5rem;
+  cursor: pointer;
+}
+
+.peek-card-more:hover {
+  text-decoration: underline;
+}
+
+/* A Proposal's target, Peeked at from a room: going to it in Writing. */
+.peek-open-in-writing {
+  display: block;
+  margin-top: 0.75rem;
+  padding-top: 0.5rem;
+  width: 100%;
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  color: var(--accent);
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.peek-open-in-writing:hover {
+  text-decoration: underline;
+}
+
+.peek-gone {
+  margin: 0;
+  color: var(--muted);
+}
+
+/* The Pinned notes float over everything in Writing, the Overview pane too;
+   each stacks within this layer, the one used last on top. */
+.pinned-notes {
+  position: fixed;
+  inset: 0;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.pinned-note {
+  position: fixed;
+  box-sizing: border-box;
+  display: flex;
+  flex-direction: column;
+  max-height: 55vh;
+  background: var(--sheet);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--float-shadow);
+  pointer-events: auto;
+}
+
+.pinned-note-header {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  /* Not the project header's. */
+  padding: 0.3rem 0.4rem 0.3rem 0.6rem;
+  border-bottom: 1px solid var(--line);
+  cursor: grab;
+  user-select: none;
+  touch-action: none;
+}
+
+.pinned-note.folded .pinned-note-header {
+  border-bottom: none;
+}
+
+.pinned-note-header:active {
+  cursor: grabbing;
+}
+
+.pinned-note-grip {
+  color: var(--muted);
+  margin-right: 0.15rem;
+}
+
+.pinned-note-thumbnail {
+  flex-shrink: 0;
+  width: 1.75rem;
+  height: 1.75rem;
+  object-fit: cover;
+  border-radius: 4px;
+  border: 1px solid var(--line);
+}
+
+.pinned-note-title {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+  font-size: 1rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pinned-note-body {
+  overflow-y: auto;
+  padding: 0.6rem 0.75rem 0.75rem;
 }
 
 .entry-card + .entry-card {
@@ -869,13 +1755,6 @@ h2.binder-title > button[aria-current='true'],
 .entry-card-open {
   grid-column: 2;
   grid-row: 1 / span 2;
-  background: none;
-  border: 1px solid var(--line);
-  border-radius: 4px;
-  color: var(--fg);
-  cursor: pointer;
-  font: inherit;
-  padding: 0.1rem 0.45rem;
 }
 
 .entry-card-aliases {
@@ -951,17 +1830,17 @@ h2.binder-title > button[aria-current='true'],
 }
 
 .key-message.warning {
-  color: #b0560c;
+  color: var(--warning);
 }
 
 .settings {
   width: min(28rem, 90vw);
   padding: 1rem 1.25rem;
-  background: var(--bg);
+  background: var(--sheet);
   color: var(--fg);
   border: 1px solid var(--line);
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgb(0 0 0 / 15%);
+  border-radius: 10px;
+  box-shadow: var(--float-shadow);
 }
 
 .settings::backdrop {
@@ -1023,6 +1902,14 @@ h2.binder-title > button[aria-current='true'],
   white-space: nowrap;
 }
 
+.setting select {
+  margin-left: 0.5rem;
+}
+
+.setting input[type='checkbox'] {
+  margin: 0 0.5rem 0 0;
+}
+
 .settings-close button + button {
   margin-left: 0.5rem;
 }
@@ -1037,6 +1924,46 @@ h2.binder-title > button[aria-current='true'],
 .key-kept {
   color: var(--muted);
   font-size: 0.85rem;
+}
+
+.shortcuts {
+  width: min(36rem, 90vw);
+  max-height: 85vh;
+}
+
+.shortcuts-group {
+  width: 100%;
+  margin-top: 1rem;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.shortcuts-group caption {
+  text-align: left;
+  font-weight: 600;
+  padding-bottom: 0.25rem;
+}
+
+.shortcuts-group th,
+.shortcuts-group td {
+  padding: 0.25rem 0;
+  border-top: 1px solid var(--line);
+  vertical-align: baseline;
+  text-align: left;
+}
+
+.shortcuts-group th {
+  width: 12rem;
+  padding-right: 1rem;
+  font-weight: normal;
+  white-space: nowrap;
+}
+
+.shortcuts-group kbd {
+  font-family: inherit;
+  padding: 0 0.3rem;
+  border: 1px solid var(--pill-line);
+  border-radius: 4px;
 }
 
 .settings-close {
@@ -1140,7 +2067,7 @@ p.message-used,
 
 .message-system {
   align-self: stretch;
-  border: 1px solid #b3261e;
+  border: 1px solid var(--danger);
 }
 
 .message-system p {
@@ -1154,7 +2081,7 @@ p.message-used,
 }
 
 .assistant-error {
-  color: #b3261e;
+  color: var(--danger);
 }
 
 .review-actions {
@@ -1181,7 +2108,7 @@ p.message-used,
 }
 
 .finding-contradiction .finding-type {
-  color: #b3261e;
+  color: var(--danger);
 }
 
 .finding-comment,
@@ -1217,9 +2144,24 @@ button.finding-quote:hover {
   gap: 0.4rem;
 }
 
+/* The composer is a rounded bordered box. */
 .composer textarea {
   resize: vertical;
   font: inherit;
+  color: inherit;
+  background: var(--sheet);
+  border: 1px solid var(--pill-line);
+  border-radius: 10px;
+  padding: 0.5rem 0.7rem;
+}
+
+.composer textarea:hover {
+  border-color: var(--fg);
+}
+
+.composer textarea:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 
 .composer button {
@@ -1232,10 +2174,10 @@ button.finding-quote:hover {
   list-style: none;
   max-height: 12rem;
   overflow-y: auto;
-  background: var(--bg);
+  background: var(--sheet);
   border: 1px solid var(--line);
-  border-radius: 6px;
-  box-shadow: 0 4px 12px rgb(0 0 0 / 15%);
+  border-radius: 8px;
+  box-shadow: var(--float-shadow);
 }
 
 .at-mention-options [role='option'] {
@@ -1244,7 +2186,7 @@ button.finding-quote:hover {
 }
 
 .at-mention-options [aria-selected='true'] {
-  background: color-mix(in srgb, var(--fg) 10%, transparent);
+  background: var(--hover);
 }
 
 .at-mention-where {
@@ -1254,19 +2196,20 @@ button.finding-quote:hover {
 
 .proposal-card {
   margin: 0.5rem 0 0;
-  padding: 0.5rem 0.6rem;
+  padding: 0.5rem 0.7rem;
+  background: var(--sheet);
   border: 1px solid var(--line);
-  border-radius: 6px;
+  border-radius: 10px;
   white-space: normal;
 }
 
 .proposal-card.warning {
-  border-color: rgb(176 120 0 / 50%);
-  background: rgb(176 120 0 / 10%);
+  border-color: color-mix(in srgb, var(--warning) 50%, transparent);
+  background: color-mix(in srgb, var(--warning) 10%, var(--sheet));
 }
 
 .proposal-card.highlighted {
-  outline: 2px solid rgb(64 120 200 / 60%);
+  outline: 2px solid var(--accent);
 }
 
 .proposal-card.decided {
@@ -1279,6 +2222,13 @@ button.finding-quote:hover {
   font-weight: 600;
 }
 
+/* A title that goes to the Proposal's target, as a link. */
+.proposal-title-link {
+  font-size: inherit;
+  font-weight: inherit;
+  text-align: left;
+}
+
 .proposal-decided {
   margin: 0;
   font-size: 0.9em;
@@ -1286,7 +2236,6 @@ button.finding-quote:hover {
 
 .proposal-undo {
   margin-left: 0.5rem;
-  font-size: 0.85em;
 }
 
 .proposal-undo-blocked {
@@ -1306,7 +2255,7 @@ button.finding-quote:hover {
 
 .proposal-card ins {
   text-decoration: none;
-  background: rgb(60 160 80 / 22%);
+  background: color-mix(in srgb, var(--accent) 22%, transparent);
   border-radius: 2px;
 }
 
@@ -1368,7 +2317,7 @@ button.finding-quote:hover {
 
 .proposal-error {
   margin: 0.3rem 0 0;
-  color: #b3261e;
+  color: var(--danger);
   font-size: 0.85em;
 }
 
@@ -1394,6 +2343,10 @@ button.finding-quote:hover {
   border: 1px dashed var(--line);
   border-radius: 6px;
   color: var(--muted);
+}
+
+.ghost-value.highlighted {
+  outline: 2px solid var(--accent);
 }
 
 .ghost-text {
@@ -1564,4 +2517,27 @@ button.finding-quote:hover {
   to {
     opacity: 1;
   }
+}
+
+/* The menu of Entry types Ctrl+E opens, over the left pane. */
+.entry-type-picker {
+  position: fixed;
+  top: 6rem;
+  left: 1rem;
+  z-index: 2;
+}
+
+.entry-type-picker .menu-items {
+  position: static;
+}
+
+/* A ⋯ menu item's shortcut, after its label. */
+.menu-items [role='menuitem'] {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.5rem;
+}
+
+.menu-shortcut {
+  color: var(--muted);
 }

@@ -8,6 +8,7 @@ import {
   type SettingsApi,
   type ShellApi,
 } from '../shared/api';
+import type { Command } from '../shared/shortcuts';
 
 const project: ProjectApi = {
   manuscript: () => ipcRenderer.invoke(channel.project('manuscript')),
@@ -49,10 +50,20 @@ const project: ProjectApi = {
     ),
   setEntryType: (entryId, type) =>
     ipcRenderer.invoke(channel.project('setEntryType'), entryId, type),
+  chooseEntryImage: (entryId) =>
+    ipcRenderer.invoke(channel.project('chooseEntryImage'), entryId),
+  removeEntryImage: (entryId) =>
+    ipcRenderer.invoke(channel.project('removeEntryImage'), entryId),
+  entryImage: (entryId) =>
+    ipcRenderer.invoke(channel.project('entryImage'), entryId),
   restore: (id) => ipcRenderer.invoke(channel.project('restore'), id),
   undo: (step) => ipcRenderer.invoke(channel.project('undo'), step),
   listTrash: () => ipcRenderer.invoke(channel.project('listTrash')),
   emptyTrash: () => ipcRenderer.invoke(channel.project('emptyTrash')),
+  setLanguage: (language) =>
+    ipcRenderer.invoke(channel.project('setLanguage'), language),
+  setFoldedNoteImage: (on) =>
+    ipcRenderer.invoke(channel.project('setFoldedNoteImage'), on),
   listConflicts: () => ipcRenderer.invoke(channel.project('listConflicts')),
   readConflictVersion: (ref, versionId) =>
     ipcRenderer.invoke(channel.project('readConflictVersion'), ref, versionId),
@@ -86,11 +97,11 @@ const shell: ShellApi = {
   chooseImport: () => ipcRenderer.invoke(channel.chooseImport),
   importProject: (file, convention) =>
     ipcRenderer.invoke(channel.importProject, file, convention),
-  onImportRequest(listener) {
-    const forward = () => listener();
-    ipcRenderer.on(channel.importRequest, forward);
+  onCommand(listener) {
+    const forward = (_event: unknown, command: Command) => listener(command);
+    ipcRenderer.on(channel.command, forward);
     return () => {
-      ipcRenderer.off(channel.importRequest, forward);
+      ipcRenderer.off(channel.command, forward);
     };
   },
   openRecent: (path) => ipcRenderer.invoke(channel.openRecent, path),

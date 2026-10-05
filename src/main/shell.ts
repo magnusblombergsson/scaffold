@@ -6,7 +6,6 @@ import {
   Menu,
   screen,
   shell,
-  type MenuItemConstructorOptions,
   type WebContents,
 } from 'electron';
 import { access, realpath, writeFile } from 'node:fs/promises';
@@ -29,7 +28,7 @@ import {
   type ImportConvention,
 } from '../shared/manuscript-import';
 import { isModelId, type ModelId } from '../shared/models';
-import { PROSE_LANGUAGES, type ProseLanguage } from '../shared/project-types';
+import type { ProseLanguage } from '../shared/project-types';
 import { unitName } from '../shared/unit-name';
 import {
   loadAppSettings,
@@ -63,6 +62,7 @@ import {
   type ProjectStore,
 } from './project-store/project-store';
 import { writeFailureReason } from './project-store/safe-write';
+import { menuTemplate, type MenuState } from './menu';
 
 // The app shell: its windows, the Project each one shows, and the settings
 // that remember them on this computer.
@@ -244,6 +244,7 @@ function attach(contents: WebContents, store: ProjectStore): void {
     store.subscribe((event) => {
       if (contents.isDestroyed()) return;
       contents.send(channel.projectEvent, event);
+      // Which also spellchecks in the new language.
       if (event.type === 'languageChanged' || event.type === 'readOnly') {
         updateMenu();
       }
@@ -276,13 +277,27 @@ function rememberOpenProjects(): void {
 }
 
 function openedProject(store: ProjectStore): OpenedProject {
-  const { lastSceneId, cursor, panelWidths, outlineNotesOpen } =
-    settings.project(store.id);
+  const {
+    lastSceneId,
+    cursor,
+    panelWidths,
+    outlineNotesOpen,
+    overviewOpen,
+    pinnedNotes,
+  } = settings.project(store.id);
   return {
     displayName: store.displayName,
     language: store.language,
+    foldedNoteImage: store.foldedNoteImage,
     manuscript: store.manuscript(),
-    view: { lastSceneId, cursor, panelWidths, outlineNotesOpen },
+    view: {
+      lastSceneId,
+      cursor,
+      panelWidths,
+      outlineNotesOpen,
+      overviewOpen,
+      pinnedNotes,
+    },
     sessions: store.sessionNotice(),
     dropped: store.takeDropped(),
     readOnly: store.readOnly(),
@@ -454,6 +469,7 @@ export function registerShellIpc(): void {
     // Null here means it opened in another window, or was open already.
     if (result?.ok !== false && !samePath(chosen, oldPath)) {
       settings.remove(oldPath);
+      updateMenu();
     }
     return result;
   });
@@ -462,6 +478,7 @@ export function registerShellIpc(): void {
 
   ipcMain.handle(channel.removeRecent, (_event, projectPath: string) => {
     settings.remove(projectPath);
+    updateMenu();
     return recentProjects();
   });
 
@@ -558,92 +575,48 @@ function announceKeyStatus(status: KeyStatus): void {
   }
 }
 
-/** The menus: File holds Import… and Export…; the others are Electron's own. */
+/** The menu bar, made anew for the window in front whenever what it shows changes. */
 function setApplicationMenu(): void {
-  const mac = process.platform === 'darwin';
-  const template: MenuItemConstructorOptions[] = [
-    ...(mac ? [{ role: 'appMenu' as const }] : []),
-    {
-      label: 'File',
-      submenu: [
-        {
-          id: 'import',
-          label: 'Import…',
-          click: (_item, window) => {
-            // The window shows the file's split before anything is written.
-            if (window instanceof BrowserWindow) {
-              window.webContents.send(channel.importRequest);
-            } else {
-              createWindow(null);
-            }
-          },
+  const window = BrowserWindow.getFocusedWindow();
+  const store = window && stores.get(window.webContents.id);
+  const state: MenuState = {
+    mac: process.platform === 'darwin',
+    project: store ? { readOnly: store.readOnly() !== null } : null,
+    recent: settings
+      .recent()
+      .map(({ path, displayName }) => ({ path, displayName })),
+  };
+  Menu.setApplicationMenu(
+    Menu.buildFromTemplate(
+      menuTemplate(state, {
+        send: (command, window) => {
+          if (window instanceof BrowserWindow) {
+            window.webContents.send(channel.command, command);
+          } else if (!command.byKey) {
+            // No window, as on macOS: a start screen takes it.
+            const start = createWindow(null);
+            start.webContents.once('did-finish-load', () =>
+              start.webContents.send(channel.command, command),
+            );
+          }
         },
-        {
-          id: 'export',
-          label: 'Export…',
-          enabled: false,
-          click: (_item, window) => {
-            if (window instanceof BrowserWindow) void exportFrom(window);
-          },
+        export: (window) => {
+          if (window instanceof BrowserWindow) void exportFrom(window);
         },
-        {
-          id: 'language',
-          label: 'Prose Language',
-          enabled: false,
-          submenu: PROSE_LANGUAGES.map(({ language, label }) => ({
-            id: `language:${language}`,
-            label,
-            type: 'radio' as const,
-            click: (_item, window) => {
-              const store =
-                window instanceof BrowserWindow &&
-                stores.get(window.webContents.id);
-              if (!store) return;
-              store.setLanguage(language).catch(async (error: unknown) => {
-                console.error(
-                  `Can't set the language of ${store.path}:`,
-                  error,
-                );
-                updateMenu();
-                await dialog.showMessageBox(window, {
-                  type: 'warning',
-                  buttons: ['OK'],
-                  message: `The Prose language of ${store.displayName} can't be changed now.`,
-                  detail:
-                    error instanceof Error ? error.message : String(error),
-                });
-              });
-            },
-          })),
-        },
-        { type: 'separator' },
-        mac ? { role: 'close' } : { role: 'quit' },
-      ],
-    },
-    { role: 'editMenu' },
-    { role: 'viewMenu' },
-    { role: 'windowMenu' },
-  ];
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
+      }),
+    ),
+  );
 }
 
 /**
- * Export is there for the window in front while it shows a Project, and
- * Prose Language while that Project can be written. The window in front
+ * The menus follow the window in front and its Project. The window in front
  * also sets the spellchecker's language for every window.
  */
 function updateMenu(): void {
-  const menu = Menu.getApplicationMenu();
+  setApplicationMenu();
   const window = BrowserWindow.getFocusedWindow();
   const store = window && stores.get(window.webContents.id);
-  const exportItem = menu?.getMenuItemById('export');
-  if (exportItem) exportItem.enabled = !!store;
-  const language = menu?.getMenuItemById('language');
-  if (language) language.enabled = !!store && !store.readOnly();
-  if (!store) return;
-  const chosen = menu?.getMenuItemById(`language:${store.language}`);
-  if (chosen) chosen.checked = true;
-  spellcheckIn(window.webContents, store.language);
+  if (store) spellcheckIn(window.webContents, store.language);
 }
 
 /** The real path of `target`, or `target` when it can't be resolved. */

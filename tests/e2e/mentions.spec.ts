@@ -1,4 +1,5 @@
 import { expect, test, type Page } from '@playwright/test';
+import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { answerDialogs, launch, useTempDir } from './app';
 
@@ -73,6 +74,125 @@ test('Entry names are highlighted as the Author types, and a click peeks at the 
 
   await app.close();
 });
+
+test('the Peek shortens each Entry a highlight names, and Read more unfolds it in place', async () => {
+  const { app, page } = await newProject(path.join(tempDir(), 'My Novel'));
+  // A grey square, as the Entry's image.
+  const imagePath = path.join(tempDir(), 'anna.png');
+  const png = await app.evaluate(({ nativeImage }) =>
+    nativeImage
+      .createFromBitmap(Buffer.alloc(64 * 64 * 4, 0x80), {
+        width: 64,
+        height: 64,
+      })
+      .toPNG()
+      .toString('base64'),
+  );
+  await writeFile(imagePath, Buffer.from(png, 'base64'));
+  await app.evaluate(({ dialog }, file) => {
+    dialog.showOpenDialog = async () => ({
+      canceled: false,
+      filePaths: [file],
+    });
+  }, imagePath);
+
+  await newCharacter(
+    page,
+    'Anna',
+    [
+      'A pilot who never flies at night.',
+      'She grew up on the island.',
+      'Her father kept the light.',
+      'She left at sixteen.',
+    ].join('\n'),
+  );
+  await page
+    .getByRole('group', { name: 'Role' })
+    .getByLabel('Protagonist')
+    .check();
+  await fill(page, 'Role note', 'the keeper’s daughter');
+  await fill(page, 'Appearance', 'Tall, wind-red cheeks.');
+  await fill(page, 'Traits', 'clipped, dry');
+  await fill(page, 'Says', 'aye');
+  await page.getByRole('button', { name: 'Add image…' }).click();
+  await expect(page.getByRole('img', { name: 'Image of Anna' })).toBeVisible();
+  // Another Entry the same highlight names.
+  await newCharacter(page, 'Mira', 'Her sister.');
+  await fill(page, 'Aliases', 'Anna');
+
+  await openScene(page);
+  await page.getByLabel('Prose').click();
+  await page.keyboard.type('Anna waited.');
+  await mentions(page).filter({ hasText: 'Anna' }).click();
+
+  await expect(peek(page).getByRole('article')).toHaveCount(2);
+  const anna = peek(page).getByRole('article', { name: 'Anna' });
+  const mira = peek(page).getByRole('article', { name: 'Mira' });
+  await expect(mira).toContainText('Her sister.');
+  await expect(mira.getByRole('button', { name: 'Open “Mira”' })).toBeVisible();
+  await expect(mira.getByRole('button', { name: 'Pin “Mira”' })).toBeVisible();
+
+  // Shortened: Role · Role note, the key fields, the description cut to
+  // three lines, the image small.
+  await expect(anna).toContainText('Protagonist · the keeper’s daughter');
+  await expect(anna.locator('dt')).toHaveText(['Appearance', 'Voice traits']);
+  await expect(anna).not.toContainText('Assistant sees it');
+  const description = anna.locator('.peek-card-description');
+  expect(
+    await description.evaluate((p) => p.scrollHeight > p.clientHeight),
+  ).toBe(true);
+  await expect(anna.locator('.peek-card-thumbnail')).toBeVisible();
+  await expect(anna.getByRole('img', { name: 'Image of Anna' })).toHaveCount(0);
+
+  await anna.getByRole('button', { name: 'Read more' }).click();
+  await expect(anna.locator('dt')).toHaveText([
+    'Appearance',
+    'Voice traits',
+    'Says',
+    'Assistant sees it',
+  ]);
+  expect(
+    await description.evaluate((p) => p.scrollHeight > p.clientHeight),
+  ).toBe(false);
+  await expect(anna.getByRole('img', { name: 'Image of Anna' })).toBeVisible();
+  await expect(anna.locator('.peek-card-thumbnail')).toHaveCount(0);
+  // Mira's card stays as it was.
+  await expect(mira.getByRole('button', { name: 'Read more' })).toBeVisible();
+
+  await anna.getByRole('button', { name: 'Show less' }).click();
+  await expect(anna.locator('dt')).toHaveText(['Appearance', 'Voice traits']);
+  await expect(anna.getByRole('button', { name: 'Read more' })).toBeVisible();
+  await expect(peek(page)).toBeVisible();
+
+  await anna.getByRole('button', { name: 'Open “Anna”' }).click();
+  await expect(peek(page)).toBeHidden();
+  await expect(page.getByLabel('Name', { exact: true })).toHaveText('Anna');
+  await app.close();
+});
+
+for (const [theme, sheet, accent] of [
+  ['light', 'rgb(255, 254, 251)', 'rgb(46, 107, 78)'],
+  ['dark', 'rgb(37, 37, 40)', 'rgb(121, 194, 158)'],
+] as const) {
+  test(`the Peek is a sheet over the page, ${theme}`, async () => {
+    const { app, page } = await newProject(path.join(tempDir(), 'My Novel'));
+    await page.emulateMedia({ colorScheme: theme });
+    await newCharacter(page, 'Anna', 'A pilot who never flies at night.');
+    await fill(page, 'Appearance', 'Tall, wind-red cheeks.');
+    await openScene(page);
+    await page.getByLabel('Prose').click();
+    await page.keyboard.type('Anna waited.');
+    await mentions(page).filter({ hasText: 'Anna' }).click();
+
+    await expect(peek(page)).toHaveCSS('background-color', sheet);
+    const readMore = peek(page).getByRole('button', { name: 'Read more' });
+    await expect(readMore).toHaveCSS('color', accent);
+    await expect(peek(page)).toHaveScreenshot(`peek-${theme}.png`);
+    await readMore.click();
+    await expect(peek(page)).toHaveScreenshot(`peek-expanded-${theme}.png`);
+    await app.close();
+  });
+}
 
 test('the Author can turn highlighting off, and it stays off', async () => {
   const projectPath = path.join(tempDir(), 'My Novel');

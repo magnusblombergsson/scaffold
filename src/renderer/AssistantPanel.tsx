@@ -200,6 +200,7 @@ function Conversations({
         <>
           <div className="review-actions">
             <button
+              className="primary"
               onClick={() => void review('review-scene')}
               disabled={
                 readOnly || streaming !== null || !canReview('review-scene')
@@ -208,6 +209,7 @@ function Conversations({
               Review Scene
             </button>
             <button
+              className="primary"
               onClick={() => void review('review-chapter')}
               disabled={
                 readOnly || streaming !== null || !canReview('review-chapter')

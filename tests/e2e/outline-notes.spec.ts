@@ -74,15 +74,17 @@ test('Scenes, Chapters and the Project have Outlines and Notes, each with its ow
   // A Chapter has an Outline and Notes, and no Prose.
   await button(page, 'Chapter 1').click();
   await expect(page.getByLabel('Prose')).toHaveCount(0);
-  await page.getByLabel('Outline', { exact: true }).click();
+  const chapter = page.getByRole('article', { name: 'Chapter 1' });
+  await chapter.getByLabel('Outline', { exact: true }).click();
   await page.keyboard.type('- Arrival in town');
-  await page.getByLabel('Notes', { exact: true }).click();
+  await chapter.getByLabel('Notes', { exact: true }).click();
   await page.keyboard.type('Too slow?');
 
   // The Project has one Outline of its own, and no Notes.
   await button(page, 'Project Outline').click();
-  await expect(page.getByLabel('Notes', { exact: true })).toHaveCount(0);
-  await page.getByLabel('Outline', { exact: true }).click();
+  const project = page.getByRole('article', { name: 'Project Outline' });
+  await expect(project.getByLabel('Notes', { exact: true })).toHaveCount(0);
+  await project.getByLabel('Outline', { exact: true }).click();
   await page.keyboard.type('- Beginning');
 
   // The box above the Prose collapses, and stays collapsed.

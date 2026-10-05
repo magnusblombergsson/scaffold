@@ -10,7 +10,9 @@ import {
   unitKey,
   VISIBILITIES,
   type ChapterNode,
+  type EntryImage,
   type EntryRef,
+  type ImageExtension,
   type EntrySummary,
   type EntryType,
   type EntryValue,
@@ -51,12 +53,18 @@ import {
   revertEntryType,
 } from '../../shared/entry';
 import {
+  appended,
+  appendedOnto,
   asNewEntry,
+  canAppend,
   FIELD_LABELS,
   fieldOf,
+  holdsAppended,
+  isAppending,
   isFieldValue,
   orphanedText,
   sameValue,
+  wasAppended,
   withField,
   type EntryCreation,
   type EntryFieldChange,
@@ -93,7 +101,7 @@ import {
 } from './conversation-log';
 import { entryFieldsFrontmatter, readEntryFields } from './entry-fields-file';
 import type { FileSystem, Fingerprint } from './file-system';
-import { safeWrite, writeFailureReason } from './safe-write';
+import { renameWithRetry, safeWrite, writeFailureReason } from './safe-write';
 import { formatUnitFile, parseUnitFile, type UnitFile } from './unit-file';
 
 export const FORMAT = 1;
@@ -111,6 +119,8 @@ type Manifest = {
   format: number;
   id: string;
   language: string;
+  /** Whether a folded Pinned note shows its Entry's image; on unless false. */
+  foldedNoteImage?: unknown;
   tree: ProjectTree;
 };
 
@@ -123,6 +133,9 @@ type Accepted = {
   wrote: ProposedValue;
   reloaded?: { ref: UnitRef; value: UnitValue };
 };
+
+/** How the Author accepts a change to a target: `anyway` when stale, or to `append`. */
+type AcceptHow = Required<Pick<AcceptOptions, 'anyway' | 'append'>>;
 
 /** A unit the Assistant may read: anything but an Entry's private notes. */
 export type AssistantRef = Exclude<UnitRef, { kind: 'private' }>;
@@ -452,6 +465,7 @@ async function sweepTempFiles(projectPath: string, fs: FileSystem) {
   const dirs = [
     ...Object.values(UNIT_DIRS),
     'trash',
+    IMAGES,
     SESSIONS,
     CONVERSATIONS,
   ].map((d) => path.join(projectPath, d));
@@ -468,6 +482,7 @@ const ID = new RegExp(`^${UUID}$`);
 const VERSION_FILE = new RegExp(`^(${UUID})\\.version\\.md$`);
 const CHAPTER_FILE = new RegExp(`^(${UUID})\\.json$`);
 const ENTRY_TRASH_FILE = new RegExp(`^(${UUID})\\.entry\\.md$`);
+const IMAGE_FILE = new RegExp(`^(${UUID})\\.(jpg|png)$`);
 
 const UNPLACED_TITLE = 'Untitled Scene';
 
@@ -743,8 +758,23 @@ function entrySummary({
   name,
   aliases,
   visibility,
+  image,
 }: EntryValue): EntrySummary {
-  return { id, type, name, aliases: [...aliases], visibility };
+  return withImage<EntrySummary>(
+    { id, type, name, aliases: [...aliases], visibility },
+    image,
+  );
+}
+
+/** `value` with `image` as its image, or none. */
+function withImage<T extends { image?: string }>(value: T, image?: string): T {
+  const rest = withoutImage(value);
+  return image ? { ...rest, image } : rest;
+}
+
+function withoutImage<T extends { image?: string }>(value: T): T {
+  const { image: _, ...rest } = value;
+  return rest as T;
 }
 
 function trashedEntry(value: EntryValue, info: TrashedEntryInfo): TrashedEntry {
@@ -1112,8 +1142,18 @@ export class ProjectStore {
     void this.checkForChanges();
   }
 
-  /** Records how the Author leaves the Project; a new Scene is written at once. */
-  updateSession(view: ProjectView): void {
+  /**
+   * Records how the Author leaves the Project; a new Scene is written at
+   * once. The Overview pane's state stays on this computer, out of the marker.
+   */
+  updateSession(change: ProjectView): void {
+    const view = { ...change };
+    delete view.overviewOpen;
+    delete view.pinnedNotes;
+    if (view.panelWidths) {
+      view.panelWidths = { ...view.panelWidths };
+      delete view.panelWidths.overview;
+    }
     const sceneChanged =
       view.lastSceneId !== undefined &&
       view.lastSceneId !== this.view.lastSceneId;
@@ -1231,18 +1271,22 @@ export class ProjectStore {
     const units = await scanUnits(this.path, manifest.tree, this.deps.fs, {
       repair: false,
     });
-    // The language has its own event; it isn't a change of structure.
+    // The Project settings have their own events; they aren't changes of
+    // structure.
     const structure = () =>
       JSON.stringify([
-        { ...this.manifest, language: null },
+        { ...this.manifest, language: null, foldedNoteImage: null },
         this.manuscript(),
         this.listTrash(),
       ]);
     const before = structure();
-    const language = this.language;
+    const { language, foldedNoteImage } = this;
     this.manifest = manifest;
     if (this.language !== language) {
       this.emit({ type: 'languageChanged', language: this.language });
+    }
+    if (this.foldedNoteImage !== foldedNoteImage) {
+      this.emit({ type: 'foldedNoteImageChanged', on: this.foldedNoteImage });
     }
     replaceAll(this.files, units.files);
     this.trash.clear();
@@ -1250,7 +1294,12 @@ export class ProjectStore {
     // An Entry's value accepted here and not yet saved is newer.
     for (const { ref, value } of this.unsaved.values()) {
       if (ref.kind === 'entry') {
-        units.entries.set(ref.id, entrySummary(value as EntryValue));
+        // Its image is as on disk: only setEntryImage changes it here.
+        const image = units.entries.get(ref.id)?.image;
+        units.entries.set(
+          ref.id,
+          entrySummary(withImage(value as EntryValue, image)),
+        );
       }
     }
     this.setEntries(() => {
@@ -1546,6 +1595,19 @@ export class ProjectStore {
     });
   }
 
+  /** Whether a folded Pinned note shows its Entry's image, a Project setting. */
+  get foldedNoteImage(): boolean {
+    return this.manifest.foldedNoteImage !== false;
+  }
+
+  setFoldedNoteImage(on: boolean): Promise<void> {
+    return this.enqueueWrite(async () => {
+      if (this.foldedNoteImage === on) return;
+      await this.writeManifest({ ...this.manifest, foldedNoteImage: on });
+      this.emit({ type: 'foldedNoteImageChanged', on });
+    });
+  }
+
   tree(): ProjectTree {
     return structuredClone(this.manifest.tree);
   }
@@ -1750,6 +1812,13 @@ export class ProjectStore {
       this.settle(key);
       this.setEntries(() => this.entries.delete(entryId));
       await this.deps.fs.unlink(unitPath(this.path, ref));
+      // Last: a crash before leaves it in images/, where restoring finds it.
+      if (latest.image) {
+        await this.moveFile(
+          imagePath(this.path, latest.image),
+          path.join(trashDir(this.path), latest.image),
+        );
+      }
     } finally {
       this.closing.delete(entryId);
     }
@@ -1769,6 +1838,14 @@ export class ProjectStore {
     );
     const { trashedEntry: _, ...own } = frontmatter;
     const file = { frontmatter: own, body };
+    // First: a crash after leaves it in images/, where restoring finds it.
+    const image = imageFile(item.id, own.image);
+    if (image) {
+      await this.moveFile(
+        path.join(trashDir(this.path), image),
+        imagePath(this.path, image),
+      );
+    }
     await this.deps.fs.mkdir(path.join(this.path, UNIT_DIRS.entry));
     await safeWrite(
       this.deps.fs,
@@ -1780,6 +1857,75 @@ export class ProjectStore {
     const entry = entrySummary(entryValue(item.id, file));
     this.setEntries(() => this.entries.set(item.id, entry));
     await this.deps.fs.unlink(trashed);
+  }
+
+  /**
+   * Moves a file, if it is there; an image may not have synced yet. One
+   * already at `to` is replaced.
+   */
+  private async moveFile(from: string, to: string): Promise<void> {
+    if (!(await this.deps.fs.exists(from))) return;
+    await this.deps.fs.mkdir(path.dirname(to));
+    await renameWithRetry(this.deps.fs, this.deps.clock, from, to);
+  }
+
+  /**
+   * Sets an Entry's image, stored as `images/<id>.<extension>`, in place of
+   * any it had. It isn't a step: undo has no copy of the image it replaced.
+   */
+  setEntryImage(entryId: string, image: EntryImage): Promise<void> {
+    return this.enqueueWrite(async () => {
+      this.refuseUnavailable(entryRef(entryId));
+      const name = `${entryId}.${image.extension}`;
+      await this.deps.fs.mkdir(path.join(this.path, IMAGES));
+      await safeWrite(
+        this.deps.fs,
+        this.deps.clock,
+        imagePath(this.path, name),
+        image.data,
+      );
+      await this.changeImage(entryId, name);
+    });
+  }
+
+  /** Removes an Entry's image, deleting its file. Not a step either. */
+  removeEntryImage(entryId: string): Promise<void> {
+    return this.enqueueWrite(async () => {
+      this.refuseUnavailable(entryRef(entryId));
+      await this.changeImage(entryId, undefined);
+    });
+  }
+
+  /**
+   * The image an Entry's frontmatter names; null without one, or while its
+   * file isn't here, as before it syncs. Other files in `images/`, such as
+   * a sync client's conflict copies, are never read.
+   */
+  async readEntryImage(entryId: string): Promise<EntryImage | null> {
+    const name = this.entries.get(entryId)?.image;
+    if (!name) return null;
+    const file = imagePath(this.path, name);
+    if (!(await this.deps.fs.exists(file))) return null;
+    return {
+      data: await this.deps.fs.readBytes(file),
+      extension: IMAGE_FILE.exec(name)![2] as ImageExtension,
+    };
+  }
+
+  /** Names `image` in the Entry's frontmatter, then deletes the file it named before. */
+  private async changeImage(entryId: string, image?: string): Promise<void> {
+    const before = this.entries.get(entryId)?.image;
+    // A write takes the Entry's image from here.
+    this.setEntries(() => {
+      const entry = this.entries.get(entryId);
+      if (entry) this.entries.set(entryId, withImage(entry, image));
+    });
+    await this.changeEntry(entryId, (value) => withImage(value, image));
+    if (before && before !== image) {
+      const file = imagePath(this.path, before);
+      if (await this.deps.fs.exists(file)) await this.deps.fs.unlink(file);
+    }
+    this.emit({ type: 'entryImageChanged', id: entryId });
   }
 
   /** Changes the Entries, and says so if that changes the list. */
@@ -2137,7 +2283,16 @@ export class ProjectStore {
         }
       }
       for (const name of names) {
-        await this.deps.fs.unlink(path.join(dir, name));
+        const file = path.join(dir, name);
+        // The image of an Entry back in the Story Bible, as when an MVP app
+        // restored it, goes back to images/.
+        const owner = IMAGE_FILE.exec(name)?.[1];
+        if (owner && this.entries.get(owner)?.image === name) {
+          await this.moveFile(file, imagePath(this.path, name));
+          this.emit({ type: 'entryImageChanged', id: owner });
+        } else {
+          await this.deps.fs.unlink(file);
+        }
       }
       this.trash.clear();
     });
@@ -2526,13 +2681,17 @@ export class ProjectStore {
   assistantView(): AssistantView {
     return {
       manuscript: () => this.manuscript(),
-      listEntries: () => this.listEntries(),
+      // Nor an Entry's image.
+      listEntries: () => this.listEntries().map(withoutImage),
       read: async (ref) => {
         // Refused at run time too, whatever a caller's types say.
         if ((ref as UnitRef).kind === 'private') {
           throw new Error("The Assistant never reads an Entry's private notes");
         }
-        return this.read(ref);
+        const value = await this.read(ref);
+        return ref.kind === 'entry'
+          ? (withoutImage(value as EntryValue) as typeof value)
+          : value;
       },
     };
   }
@@ -2580,6 +2739,11 @@ export class ProjectStore {
     if (this.editsRefused) this.refuseIfUpgraded();
     this.refuseUnavailable(ref);
     const key = unitKey(ref);
+    if (ref.kind === 'entry') {
+      // Only setEntryImage and removeEntryImage change its image.
+      const image = this.entries.get(ref.id)?.image;
+      value = withImage(value as EntryValue, image) as ValueOf<R>;
+    }
     this.unsaved.set(key, { ref, value: structuredClone(value) });
     if (ref.kind === 'entry') {
       const entry = entrySummary({ ...(value as EntryValue), id: ref.id });
@@ -2910,24 +3074,29 @@ ${text}`);
    * writes its target first, an Entry or an Outline, and waits until it is
    * saved, then logs the accept with the value the target held and the one
    * written. A stale Proposal is accepted only `anyway`, and then replaces
-   * what the target holds now. Refuses one already decided or found
-   * applied, one whose target is in Trash or gone or whose Entry has no such
-   * field now, and any once a newer app has upgraded the Project.
+   * what the target holds now. An Append or an Add, and a replacing one the
+   * Author chose to `append`, land on whatever the target holds now. Refuses
+   * one already decided or found applied, one whose target is in Trash or
+   * gone or whose Entry has no such field now, one appended that can't be, a
+   * choice or a new Entry, and any once a newer app has upgraded the Project.
    */
   acceptProposal(
     conversationId: string,
     proposalId: string,
-    { edited, anyway = false }: AcceptOptions = {},
+    { edited, anyway = false, append = false }: AcceptOptions = {},
   ): Promise<void> {
     return this.inLog(conversationId, async () => {
       await this.passFormatGate();
       const proposal = await this.undecided(conversationId, proposalId);
+      if (append && !canAppend(proposal)) {
+        throw new Error('This Proposal can’t be appended');
+      }
       const value = edited === undefined ? proposal.proposed : edited;
       const { replaced, wrote, reloaded } =
         proposal.kind === 'field'
-          ? await this.acceptField(proposal, value, anyway)
+          ? await this.acceptField(proposal, value, { anyway, append })
           : proposal.kind === 'outline'
-            ? await this.acceptOutline(proposal, value, anyway)
+            ? await this.acceptOutline(proposal, value, { anyway, append })
             : await this.acceptNewEntry(proposal, value);
       await this.appendEvent(
         conversationId,
@@ -2942,11 +3111,12 @@ ${text}`);
 
   /** Writes a field of an Entry, as `acceptProposal`. */
   private async acceptField(
-    { entryId, field, base }: EntryFieldChange,
-    wrote: ProposedValue,
-    anyway: boolean,
+    change: EntryFieldChange,
+    value: ProposedValue,
+    { anyway, append }: AcceptHow,
   ): Promise<Accepted> {
-    if (!isFieldValue(field, wrote)) {
+    const { entryId, field } = change;
+    if (!isFieldValue(field, value)) {
       throw new Error(`${FIELD_LABELS[field]} can't hold that value`);
     }
     if (!this.entries.has(entryId)) {
@@ -2958,22 +3128,25 @@ ${text}`);
       );
     }
     let replaced: FieldValue | undefined;
+    let wrote = value;
     const ref = entryRef(entryId);
-    const { after } = await this.changeUnit(ref, (value) => {
-      replaced = fieldOf(value, field);
+    const { after } = await this.changeUnit(ref, (entry) => {
+      replaced = fieldOf(entry, field);
       if (replaced === undefined) {
         throw new ProjectError(
           'orphaned',
-          `${value.name} has no ${FIELD_LABELS[field]} now`,
+          `${entry.name} has no ${FIELD_LABELS[field]} now`,
         );
       }
-      if (!anyway && !sameValue(replaced, base)) {
+      if (append || isAppending(change)) {
+        wrote = appended(field, replaced, value);
+      } else if (!anyway && !sameValue(replaced, change.base)) {
         throw new ProjectError(
           'stale',
           `${FIELD_LABELS[field]} has changed since this was proposed`,
         );
       }
-      return withField(value, field, wrote);
+      return withField(entry, field, wrote);
     });
     this.refuseUnsaved(ref, after.name);
     return {
@@ -2985,11 +3158,12 @@ ${text}`);
 
   /** Writes a whole Outline body, keeping its metadata, as `acceptProposal`. */
   private async acceptOutline(
-    { outlineId, base }: OutlineChange,
-    wrote: ProposedValue,
-    anyway: boolean,
+    change: OutlineChange,
+    value: ProposedValue,
+    { anyway, append }: AcceptHow,
   ): Promise<Accepted> {
-    if (typeof wrote !== 'string') {
+    const { outlineId } = change;
+    if (typeof value !== 'string') {
       throw new Error("An Outline can't hold that value");
     }
     const orphaned = this.outlineOrphaned(outlineId);
@@ -3002,16 +3176,19 @@ ${text}`);
       );
     }
     let replaced = '';
+    let wrote = value;
     const ref = outlineRef(outlineId);
-    const { after } = await this.changeUnit(ref, (value) => {
-      replaced = value.body;
-      if (!anyway && replaced !== base) {
+    const { after } = await this.changeUnit(ref, (outline) => {
+      replaced = outline.body;
+      if (append || isAppending(change)) {
+        wrote = appended('outline', replaced, value) as string;
+      } else if (!anyway && replaced !== change.base) {
         throw new ProjectError(
           'stale',
           'The Outline has changed since this was proposed',
         );
       }
-      return { ...value, body: wrote };
+      return { ...outline, body: wrote };
     });
     this.refuseUnsaved(ref, unitName(ref, this.manuscript()));
     return {
@@ -3228,9 +3405,20 @@ ${text}`);
     proposal: Proposal,
     decision: Extract<Decision, { kind: 'accepted' }>,
   ): Promise<ProposalState> {
+    const appendedAsProposed = wasAppended(
+      proposal,
+      decision.replaced,
+      decision.wrote,
+    );
+    // What accepting as proposed would have written.
+    const asProposed =
+      isAppending(proposal) && decision.replaced !== undefined
+        ? appendedOnto(proposal, decision.replaced)
+        : proposal.proposed;
     const accepted = (undoBlocked: string | null): ProposalState => ({
       kind: 'accepted',
-      edited: !sameValue(decision.wrote, proposal.proposed),
+      edited: !appendedAsProposed && !sameValue(decision.wrote, asProposed),
+      ...(appendedAsProposed && { appended: true }),
       ...(undoBlocked && { undoBlocked }),
     });
     if (proposal.kind === 'new-entry') {
@@ -3334,6 +3522,10 @@ ${text}`);
       return { kind: 'pending', orphaned: target.orphaned };
     }
     const { current } = target;
+    if (isAppending(proposal)) {
+      if (holdsAppended(proposal, current)) return applied;
+      return { kind: 'pending', current, stale: false };
+    }
     if (sameValue(current, proposal.proposed)) return applied;
     return {
       kind: 'pending',
@@ -3795,6 +3987,20 @@ function unitPath(projectPath: string, ref: UnitRef): string {
   return path.join(projectPath, UNIT_DIRS[ref.kind], `${ref.id}.md`);
 }
 
+/** Where Entry images are, each named by its Entry's `image`. */
+const IMAGES = 'images';
+
+function imagePath(projectPath: string, name: string): string {
+  return path.join(projectPath, IMAGES, name);
+}
+
+/** `image` when it names the Entry's own image file, `<id>.jpg` or `<id>.png`. */
+function imageFile(entryId: string, image: unknown): string | undefined {
+  return typeof image === 'string' && IMAGE_FILE.exec(image)?.[1] === entryId
+    ? image
+    : undefined;
+}
+
 const CONVERSATIONS = 'conversations';
 const CONVERSATION_FILE = new RegExp(`^(${UUID})\\.jsonl$`);
 
@@ -3914,9 +4120,14 @@ function entryFile(value: EntryValue, previous: UnknownKeys = {}): string {
     name: _name,
     aliases: _aliases,
     visibility: previousVisibility,
+    image: previousImage,
     ...unknown
   } = previous;
   const { id, name, aliases, description } = value;
+  // One this app can't show is kept, unless an image replaces it.
+  const image =
+    value.image ??
+    (imageFile(value.id, previousImage) ? undefined : previousImage);
   const keepsType =
     value.type === 'other' && !ENTRY_TYPES.includes(previousType as EntryType);
   const type = keepsType ? (previousType ?? value.type) : value.type;
@@ -3933,7 +4144,16 @@ function entryFile(value: EntryValue, previous: UnknownKeys = {}): string {
     rest,
   );
   return formatUnitFile({
-    frontmatter: { id, format, type, name, aliases, visibility, ...fields },
+    frontmatter: {
+      id,
+      format,
+      type,
+      name,
+      aliases,
+      visibility,
+      ...(image !== undefined && { image }),
+      ...fields,
+    },
     body: description,
   });
 }
@@ -3952,6 +4172,7 @@ function unitValue(ref: UnitRef, file: UnitFile): UnitValue {
 /** An Entry from its file; a field that is missing or not understood reads as its default. */
 function entryValue(id: string, { frontmatter, body }: UnitFile): EntryValue {
   const { type, name, aliases, visibility } = frontmatter;
+  const image = imageFile(id, frontmatter.image);
   const entryType = ENTRY_TYPES.includes(type as EntryType)
     ? (type as EntryType)
     : 'other';
@@ -3967,6 +4188,7 @@ function entryValue(id: string, { frontmatter, body }: UnitFile): EntryValue {
       : DEFAULT_VISIBILITY,
     description: body,
     fields: readEntryFields(entryType, frontmatter),
+    ...(image && { image }),
   };
 }
 

@@ -11,6 +11,8 @@ const anna: EntryValue = {
   description: 'A ferry pilot.',
   fields: {
     role: 'protagonist',
+    roleNote: 'love interest',
+    appearance: 'Tall, a scar over one eye.',
     voice: {
       traits: 'clipped, dry',
       says: ['right then', 'aye'],
@@ -29,6 +31,8 @@ describe('changing an Entry’s type', () => {
         'A ferry pilot.',
         '',
         'Role: Protagonist',
+        'Role note: love interest',
+        'Appearance: Tall, a scar over one eye.',
         'Voice traits: clipped, dry',
         'Says: right then, aye',
         'Never says: okay',

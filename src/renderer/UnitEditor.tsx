@@ -46,6 +46,13 @@ type Props = {
   select?(doc: Node): { from: number; to: number } | null;
   /** Called with the cursor's position as the Author moves it. */
   onCursor?(position: number): void;
+  /** Called with the unit's text as the editor shows it, and as it changes. */
+  onText?(text: string): void;
+  /**
+   * Called with the selected text, its paragraphs one to a line; empty when
+   * nothing is selected, or the editor hasn't focus.
+   */
+  onSelection?(text: string): void;
   className?: string;
 };
 
@@ -72,6 +79,8 @@ export function UnitEditor({
   focusAt,
   select,
   onCursor,
+  onText,
+  onSelection,
   className,
 }: Props) {
   const [{ editor, created }] = useState(() => {
@@ -156,6 +165,37 @@ export function UnitEditor({
       }),
     [editor, autosave, reloadKey, textOf, toDoc],
   );
+
+  useEffect(() => {
+    if (!onText) return;
+    const report = () => onText(toText(editor.getJSON()));
+    report();
+    editor.on('update', report);
+    return () => {
+      editor.off('update', report);
+    };
+  }, [editor, onText, toText]);
+
+  useEffect(() => {
+    if (!onSelection) return;
+    const report = () => {
+      const { from, to } = editor.state.selection;
+      onSelection(
+        editor.isFocused ? editor.state.doc.textBetween(from, to, '\n') : '',
+      );
+    };
+    const clear = () => onSelection('');
+    report();
+    editor.on('selectionUpdate', report);
+    editor.on('focus', report);
+    editor.on('blur', clear);
+    return () => {
+      editor.off('selectionUpdate', report);
+      editor.off('focus', report);
+      editor.off('blur', clear);
+      clear();
+    };
+  }, [editor, onSelection]);
 
   useEffect(() => {
     if (!onCursor) return;

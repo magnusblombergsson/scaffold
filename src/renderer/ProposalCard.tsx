@@ -1,4 +1,4 @@
-import { useContext, useState } from 'react';
+import { createContext, useContext, useState } from 'react';
 import {
   ENTRY_TYPE_LABELS,
   ENTRY_TYPES,
@@ -9,15 +9,22 @@ import {
   type EntryType,
 } from '../shared/project-types';
 import {
+  appendedOnto,
+  canAppend,
   FIELD_LABELS,
   fieldDiff,
   fieldText,
+  isAppending,
   isChoiceField,
   orphanedText,
+  proposalTarget,
+  textDiff,
   textValue,
+  type DiffPart,
   type FieldValue,
   type NewEntry,
   type ProposalField,
+  type ProposalTarget,
   type ProposalView,
   type ProposedValue,
 } from '../shared/proposal';
@@ -41,6 +48,42 @@ export function proposalTitle(proposal: ProposalView): string {
 }
 
 /**
+ * What clicking a Proposal's title does where its card is: in Writing, go
+ * to its target; in Brainstorm and Interview, Peek at it below `anchor`,
+ * the title's place. Unset, a title is plain.
+ */
+export const ProposalTargetContext = createContext<
+  | ((proposal: ProposalView, target: ProposalTarget, anchor: DOMRect) => void)
+  | null
+>(null);
+
+/** A Proposal's title, a link to its target while it has one to go to. */
+function Title({
+  proposal,
+  as: Tag,
+}: {
+  proposal: ProposalView;
+  as: 'header' | 'span';
+}) {
+  const goTo = useContext(ProposalTargetContext);
+  const title = proposalTitle(proposal);
+  const target = proposalTarget(proposal);
+  if (!goTo || !target) return <Tag className="proposal-title">{title}</Tag>;
+  return (
+    <Tag className="proposal-title">
+      <button
+        className="link-button proposal-title-link"
+        onClick={(event) =>
+          goTo(proposal, target, event.currentTarget.getBoundingClientRect())
+        }
+      >
+        {title}
+      </button>
+    </Tag>
+  );
+}
+
+/**
  * What the Author edits a proposed value as, until accepted or cancelled: a
  * field's or an Outline's text, or a new Entry's type, name and description.
  */
@@ -48,13 +91,16 @@ type Draft = string | NewEntry;
 
 /**
  * A Proposal inline in the reply that made it: what it changes, and Accept,
- * Edit… and Reject while it is pending. A field shows a diff, an Outline its
- * body before and after side by side, a new Entry its description. A stale
- * one shows the target's current value too, in warning style; an orphaned
- * one can only be rejected. Decided, it collapses to a line; an accepted
- * one offers Undo, disabled with the reason while its target no longer
- * holds what the accept wrote. Nothing is decided or undone in a read-only
- * Project.
+ * Append (but for a choice or a new Entry), Edit… and Reject while it is
+ * pending; an Append or an Add has its one button, Append or Add, instead
+ * of Accept and Append, and is never stale. A field shows a diff, an
+ * Outline its body before and after side by side, an Append or an Add a
+ * diff from what its target holds now, a new Entry its description. A stale one shows the target's
+ * current value too, in warning style; an orphaned one can only be
+ * rejected. Decided, it collapses to a line; an accepted one offers Undo,
+ * disabled with the reason while its target no longer holds what the accept
+ * wrote. Nothing is decided or undone in a read-only Project. Its title
+ * goes to its target, as `ProposalTargetContext` has it.
  */
 export function ProposalCard({
   conversationId,
@@ -72,6 +118,13 @@ export function ProposalCard({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const title = proposalTitle(proposal);
+  const appending = isAppending(proposal);
+  // An Append or an Add has one button, named for what it does.
+  const [acceptLabel, acceptedLabel] = !appending
+    ? ['Accept', 'Accepted']
+    : proposal.operation === 'add'
+      ? ['Add', 'Added']
+      : ['Append', 'Appended'];
 
   async function decide(run: () => Promise<void>) {
     // Edits typed into the target reach main before it is changed.
@@ -97,9 +150,11 @@ export function ProposalCard({
         aria-label={`Proposal: ${title}`}
       >
         <p className="proposal-decided">
-          <span className="proposal-title">{title}</span>{' '}
+          <Title proposal={proposal} as="span" />{' '}
           {state.kind === 'accepted'
-            ? `✓ Accepted${state.edited ? ' (edited)' : ''}`
+            ? state.appended
+              ? '✓ Appended'
+              : `✓ ${acceptedLabel}${state.edited ? ' (edited)' : ''}`
             : '✕ Rejected'}
           {state.kind === 'accepted' && (
             <button
@@ -132,14 +187,16 @@ export function ProposalCard({
   const current = 'current' in state ? state.current : null;
   const stale = 'stale' in state && state.stale;
 
-  const accept = (edited?: ProposedValue) =>
+  const accept = (edited?: ProposedValue, append = false) =>
     decide(() =>
       window.assistant.acceptProposal(conversationId, id, {
         edited,
         // The Author sees a stale one as such, and may accept it anyway.
         anyway: stale,
+        append,
       }),
     );
+  const appendable = canAppend(proposal);
   const reject = () =>
     decide(() => window.assistant.rejectProposal(conversationId, id));
 
@@ -163,7 +220,7 @@ export function ProposalCard({
         .join(' ')}
       aria-label={`Proposal: ${title}`}
     >
-      <header className="proposal-title">{title}</header>
+      <Title proposal={proposal} as="header" />
       {orphaned ? (
         <p className="proposal-warning">
           {orphanedText(proposal, orphaned)} This Proposal can only be rejected.
@@ -193,11 +250,20 @@ export function ProposalCard({
         {draft !== null ? (
           <>
             <button
+              className="primary"
               onClick={() => void accept(editedValue(draft))}
               disabled={readOnly || busy}
             >
-              Accept edited
+              {acceptLabel} edited
             </button>
+            {appendable && (
+              <button
+                onClick={() => void accept(editedValue(draft), true)}
+                disabled={readOnly || busy}
+              >
+                Append edited
+              </button>
+            )}
             <button onClick={() => setDraft(null)} disabled={busy}>
               Cancel
             </button>
@@ -207,11 +273,20 @@ export function ProposalCard({
             {!orphaned && (
               <>
                 <button
+                  className="primary"
                   onClick={() => void accept()}
                   disabled={readOnly || busy}
                 >
-                  {stale ? 'Accept anyway' : 'Accept'}
+                  {stale ? 'Accept anyway' : acceptLabel}
                 </button>
+                {appendable && (
+                  <button
+                    onClick={() => void accept(undefined, true)}
+                    disabled={readOnly || busy}
+                  >
+                    Append
+                  </button>
+                )}
                 <button
                   onClick={() => setDraft(draftOf(proposal))}
                   disabled={readOnly || busy}
@@ -234,8 +309,9 @@ export function ProposalCard({
  * What a pending Proposal changes. A field shows a diff, or when stale, its
  * value now, the one proposed against and the one proposed; an Outline its
  * base body, struck through, and the proposed one side by side, or when
- * stale, its body now, the one proposed against and the one proposed; a new
- * Entry its description.
+ * stale, its body now, the one proposed against and the one proposed; an
+ * Append or an Add a diff from what its target holds now; a new Entry its
+ * description.
  */
 function Change({
   proposal,
@@ -251,6 +327,18 @@ function Change({
       <p className="proposal-diff" aria-label="Change">
         <ins>{proposal.proposed.description || '—'}</ins>
       </p>
+    );
+  }
+  if (isAppending(proposal)) {
+    const after = appendedOnto(proposal, current);
+    return (
+      <Diff
+        parts={
+          proposal.kind === 'field'
+            ? fieldDiff(proposal.field, current, after)
+            : textDiff(String(current), String(after))
+        }
+      />
     );
   }
   if (proposal.kind === 'outline') {
@@ -299,9 +387,14 @@ function Change({
       </dl>
     );
   }
+  return <Diff parts={fieldDiff(field, base, proposed)} />;
+}
+
+/** A change shown inline: what goes struck through, what comes underlined. */
+function Diff({ parts }: { parts: DiffPart[] }) {
   return (
     <p className="proposal-diff" aria-label="Change">
-      {fieldDiff(field, base, proposed).map((part, i) =>
+      {parts.map((part, i) =>
         part.kind === 'removed' ? (
           <del key={i}>{part.text}</del>
         ) : part.kind === 'added' ? (

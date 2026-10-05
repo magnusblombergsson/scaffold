@@ -98,11 +98,14 @@ export const STATUS_LABELS: Record<ThreadStatus, string> = {
 };
 
 /**
- * An Entry's type-specific fields: a Character has `role` and `voice`, a
- * Place `senses` and a Plot Thread `status`; the other types have none.
+ * An Entry's type-specific fields: a Character has `role`, with a short
+ * `roleNote` beside it, `appearance` and `voice`, a Place `senses` and a
+ * Plot Thread `status`; the other types have none.
  */
 export type EntryFields = {
   role?: Role | null;
+  roleNote?: string;
+  appearance?: string;
   voice?: Voice;
   senses?: Senses;
   status?: ThreadStatus;
@@ -129,6 +132,11 @@ export type EntryValue = {
   visibility: Visibility;
   description: string;
   fields: EntryFields;
+  /**
+   * Its image's file in `images/`, if it has one. Only `setEntryImage` and
+   * `removeEntryImage` change it; a write keeps the image the Entry has.
+   */
+  image?: string;
 };
 export type PrivateValue = { id: string; body: string };
 export type UnitValue =
@@ -166,7 +174,15 @@ export type EntrySummary = {
   name: string;
   aliases: string[];
   visibility: Visibility;
+  /** Its image's file in `images/`, if it has one. */
+  image?: string;
 };
+
+/** The extensions an Entry image is stored with. */
+export type ImageExtension = 'jpg' | 'png';
+
+/** An Entry image's bytes, as stored in `images/`. */
+export type EntryImage = { data: Uint8Array; extension: ImageExtension };
 
 export type SceneNode = { id: string; title: string };
 export type ChapterNode = { id: string; title: string; scenes: SceneNode[] };

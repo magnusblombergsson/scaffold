@@ -3,9 +3,21 @@ import {
   useRef,
   useState,
   type DragEvent,
+  type KeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from 'react';
 import type { Changed, Created } from '../shared/api';
+import {
+  chapterMove,
+  listRows,
+  sceneMove,
+  type Direction,
+  type Row,
+} from './binder-keys';
+import { useListKeys } from './list-keys';
+import { SHORTCUTS, shortcutText, withShortcut } from '../shared/shortcuts';
+import { MAC } from './platform';
 import {
   PROJECT_OUTLINE,
   type Manuscript,
@@ -33,10 +45,12 @@ type Props = {
    * `message` says what it did, beside Undo.
    */
   onChange(operation: () => Promise<Changed>, message: string): Promise<void>;
+  /** The Chapter or Scene whose title is being edited, if any. */
+  renaming: string | null;
+  onRename(id: string | null): void;
+  /** Undoes the last structure change, as Ctrl+Z in the list does. */
+  onUndo(): Promise<void>;
 };
-
-/** What is being renamed: a Chapter or Scene id. */
-type Renaming = string | null;
 
 const SCENE = 'application/x-scaffold-scene';
 const CHAPTER = 'application/x-scaffold-chapter';
@@ -48,10 +62,33 @@ export function Binder({
   onSelect,
   conflicted,
   onChange,
+  renaming,
+  onRename: setRenaming,
+  onUndo,
 }: Props) {
-  const [renaming, setRenaming] = useState<Renaming>(null);
   const project = window.project;
   const { chapters } = manuscript;
+  const rows = listRows(manuscript);
+  /** The row whose ⋯ menu is open, as by Shift+F10. */
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  /** Whether a row is a Chapter or a Scene in one: Unplaced Scenes ignore F2 and Alt+↑/↓. */
+  const placed = (row: Row) => row.kind !== 'scene' || row.chapterId !== null;
+  const keys = useListKeys(rows, {
+    rename: (row) => {
+      if (placed(row)) setRenaming(row.id);
+    },
+    move: (row, direction) => move(row, direction) ?? Promise.resolve(),
+    menu: (row) => setMenuFor(row.id),
+    undo: onUndo,
+  });
+  /** What lets a row open its ⋯ menu, as Shift+F10 does, and Escape come back to it. */
+  const rowMenu = (id: string) => ({
+    open: menuFor === id,
+    onOpenChange: (open: boolean) => setMenuFor(open ? id : null),
+    returnFocus: () => keys.focusRow(id),
+  });
+  const onContextMenu = (id: string) => (event: ReactMouseEvent<HTMLElement>) =>
+    keys.onContextMenu(event, menuFor === id, () => setMenuFor(id));
   const isSelected = (kind: Selection['kind'], id?: string) =>
     selected?.kind === kind && (!id || ('id' in selected && selected.id === id))
       ? 'true'
@@ -91,6 +128,32 @@ export function Binder({
       () => project.moveChapter(chapterId, index),
       'Chapter moved',
     );
+  }
+
+  /**
+   * Moves a Chapter, or a Scene across Chapters, a place up or down;
+   * undefined at either end.
+   */
+  function move(row: Row, direction: Direction) {
+    if (row.kind === 'chapter') {
+      const to = chapterMove(manuscript, row.id, direction);
+      return to === null ? undefined : moveChapter(row.id, to);
+    }
+    const to = sceneMove(manuscript, row.id, direction);
+    return to ? moveScene(row.id, to.chapterId, to.index) : undefined;
+  }
+
+  /** The ⋯ menu's Move Up and Move Down, after which the row keeps the highlight. */
+  function moveItems(row: Row): MenuItem[] {
+    return (['up', 'down'] as const).map((direction) => ({
+      label: direction === 'up' ? 'Move Up' : 'Move Down',
+      shortcut: direction === 'up' ? SHORTCUTS.moveUp : SHORTCUTS.moveDown,
+      disabled:
+        row.kind === 'chapter'
+          ? chapterMove(manuscript, row.id, direction) === null
+          : !sceneMove(manuscript, row.id, direction),
+      run: () => move(row, direction)?.then(() => keys.focusRow(row.id)),
+    }));
   }
 
   function trash(
@@ -148,9 +211,14 @@ export function Binder({
     if (!chapter) return [...moves, toTrash];
     const index = chapter.scenes.indexOf(scene);
     return [
-      { label: 'Rename…', run: () => setRenaming(scene.id) },
+      {
+        label: 'Rename…',
+        shortcut: SHORTCUTS.rename,
+        run: () => setRenaming(scene.id),
+      },
       {
         label: 'New Scene Above',
+        shortcut: SHORTCUTS.newSceneAbove,
         run: () =>
           create(
             () => project.createScene(chapter.id, index),
@@ -160,6 +228,7 @@ export function Binder({
       },
       {
         label: 'New Scene Below',
+        shortcut: SHORTCUTS.newScene,
         run: () =>
           create(
             () => project.createScene(chapter.id, index + 1),
@@ -167,16 +236,7 @@ export function Binder({
             onOpenScene,
           ),
       },
-      {
-        label: 'Move Up',
-        disabled: index === 0,
-        run: () => moveScene(scene.id, chapter.id, index - 1),
-      },
-      {
-        label: 'Move Down',
-        disabled: index === chapter.scenes.length - 1,
-        run: () => moveScene(scene.id, chapter.id, index + 1),
-      },
+      ...moveItems({ kind: 'scene', id: scene.id, chapterId: chapter.id }),
       ...moves,
       toTrash,
     ];
@@ -184,9 +244,14 @@ export function Binder({
 
   function chapterMenu(chapter: ManuscriptChapter, index: number): MenuItem[] {
     return [
-      { label: 'Rename…', run: () => setRenaming(chapter.id) },
+      {
+        label: 'Rename…',
+        shortcut: SHORTCUTS.rename,
+        run: () => setRenaming(chapter.id),
+      },
       {
         label: 'New Scene',
+        shortcut: SHORTCUTS.newScene,
         run: () =>
           create(
             () => project.createScene(chapter.id, chapter.scenes.length),
@@ -196,6 +261,7 @@ export function Binder({
       },
       {
         label: 'New Chapter Above',
+        shortcut: SHORTCUTS.newChapterAbove,
         run: () =>
           create(
             () => project.createChapter(index),
@@ -205,6 +271,7 @@ export function Binder({
       },
       {
         label: 'New Chapter Below',
+        shortcut: SHORTCUTS.newChapter,
         run: () =>
           create(
             () => project.createChapter(index + 1),
@@ -212,16 +279,7 @@ export function Binder({
             setRenaming,
           ),
       },
-      {
-        label: 'Move Up',
-        disabled: index === 0,
-        run: () => moveChapter(chapter.id, index - 1),
-      },
-      {
-        label: 'Move Down',
-        disabled: index === chapters.length - 1,
-        run: () => moveChapter(chapter.id, index + 1),
-      },
+      ...moveItems({ kind: 'chapter', id: chapter.id }),
       {
         label: 'Move to Trash',
         // The Manuscript keeps at least one Chapter, and a Missing Scene has
@@ -238,6 +296,9 @@ export function Binder({
       <li
         key={scene.id}
         className="binder-scene"
+        data-kind="scene"
+        data-id={scene.id}
+        onContextMenu={onContextMenu(scene.id)}
         draggable={renaming !== scene.id}
         onDragStart={(event) => event.dataTransfer.setData(SCENE, scene.id)}
         onDragOver={(event) => {
@@ -256,13 +317,16 @@ export function Binder({
         {renaming === scene.id ? (
           <TitleInput
             title={scene.title}
-            onDone={(title) =>
-              title ? rename(scene.id, title, 'scene') : setRenaming(null)
-            }
+            onDone={(title, byKey) => {
+              if (title) rename(scene.id, title, 'scene');
+              else setRenaming(null);
+              if (byKey) keys.focusRow(scene.id);
+            }}
           />
         ) : (
           <button
             className="binder-title"
+            data-row={scene.id}
             aria-current={isSelected('scene', scene.id)}
             onClick={() => onOpenScene(scene.id)}
             onDoubleClick={() => chapter && setRenaming(scene.id)}
@@ -280,13 +344,19 @@ export function Binder({
         <Menu
           label={`Scene actions: ${scene.title}`}
           items={sceneMenu(scene, chapter)}
+          {...rowMenu(scene.id)}
         />
       </li>
     );
   }
 
   return (
-    <nav className="binder" aria-label="Manuscript">
+    <nav
+      className="binder"
+      aria-label="Manuscript"
+      ref={keys.list}
+      onKeyDown={keys.onKeyDown}
+    >
       <button
         className="binder-project"
         aria-current={isSelected('project')}
@@ -300,6 +370,8 @@ export function Binder({
           <li
             key={chapter.id}
             className="binder-chapter"
+            data-kind="chapter"
+            data-id={chapter.id}
             aria-label={chapter.title}
             onDragOver={(event) => {
               if (event.dataTransfer.types.includes(SCENE))
@@ -314,6 +386,7 @@ export function Binder({
           >
             <div
               className="binder-chapter-head"
+              onContextMenu={onContextMenu(chapter.id)}
               draggable={renaming !== chapter.id}
               onDragStart={(event) =>
                 event.dataTransfer.setData(CHAPTER, chapter.id)
@@ -333,15 +406,16 @@ export function Binder({
               {renaming === chapter.id ? (
                 <TitleInput
                   title={chapter.title}
-                  onDone={(title) =>
-                    title
-                      ? rename(chapter.id, title, 'chapter')
-                      : setRenaming(null)
-                  }
+                  onDone={(title, byKey) => {
+                    if (title) rename(chapter.id, title, 'chapter');
+                    else setRenaming(null);
+                    if (byKey) keys.focusRow(chapter.id);
+                  }}
                 />
               ) : (
                 <h2 className="binder-title">
                   <button
+                    data-row={chapter.id}
                     aria-current={isSelected('chapter', chapter.id)}
                     onClick={() =>
                       onSelect({ kind: 'chapter', id: chapter.id })
@@ -356,6 +430,7 @@ export function Binder({
               <Menu
                 label={`Chapter actions: ${chapter.title}`}
                 items={chapterMenu(chapter, index)}
+                {...rowMenu(chapter.id)}
               />
             </div>
             <ol className="binder-scenes">
@@ -366,6 +441,7 @@ export function Binder({
       </ol>
       <button
         className="binder-add"
+        title={withShortcut('New Chapter', SHORTCUTS.newChapter, MAC)}
         onClick={() =>
           create(
             () => project.createChapter(chapters.length),
@@ -398,20 +474,23 @@ function inLowerHalf(event: DragEvent<HTMLElement>): boolean {
   return event.clientY > box.top + box.height / 2;
 }
 
-/** Edits a title in place: Enter or leaving the field keeps it, Escape cancels. */
+/**
+ * Edits a title in place: Enter or leaving the field keeps it, Escape
+ * cancels. `byKey` is set when Enter or Escape ended it.
+ */
 export function TitleInput({
   title,
   onDone,
 }: {
   title: string;
-  onDone(title: string | null): void;
+  onDone(title: string | null, byKey: boolean): void;
 }) {
   const [value, setValue] = useState(title);
   const done = useRef(false);
-  function finish(result: string | null) {
+  function finish(result: string | null, byKey = false) {
     if (done.current) return;
     done.current = true;
-    onDone(result === title ? null : result);
+    onDone(result === title ? null : result, byKey);
   }
   return (
     <input
@@ -422,43 +501,119 @@ export function TitleInput({
       onFocus={(event) => event.currentTarget.select()}
       onChange={(event) => setValue(event.target.value)}
       onKeyDown={(event) => {
-        if (event.key === 'Enter') finish(value.trim() || null);
-        if (event.key === 'Escape') finish(null);
+        if (event.key !== 'Enter' && event.key !== 'Escape') return;
+        // Focus goes back to the row, which this Enter must not then open.
+        event.preventDefault();
+        finish(event.key === 'Enter' ? value.trim() || null : null, true);
       }}
       onBlur={() => finish(value.trim() || null)}
     />
   );
 }
 
-export type MenuItem = { label: string; run(): unknown; disabled?: boolean };
+export type MenuItem = {
+  label: string;
+  run(): unknown;
+  disabled?: boolean;
+  /** The keys that do the same for the row with focus, as an accelerator. */
+  shortcut?: string;
+};
 
-/** A button that opens `items`; it shows `children`, or ⋯ when there are none. */
+/** Keys as `aria-keyshortcuts` names them, such as Control+Shift+Enter or Alt+ArrowUp. */
+function ariaKeys(text: string): string {
+  return text
+    .replace('Ctrl', 'Control')
+    .replace('⌘', 'Meta')
+    .replace('Option', 'Alt')
+    .replace('↑', 'ArrowUp')
+    .replace('↓', 'ArrowDown')
+    .replace('←', 'ArrowLeft')
+    .replace('→', 'ArrowRight');
+}
+
+/**
+ * A button that opens `items`; it shows `children`, or ⋯ when there are none.
+ * Open, the first item has focus; ↑/↓, Home and End choose, Enter does it,
+ * and Escape closes it, returning focus to `returnFocus` or the button.
+ * `open` and `onOpenChange` let a list open it from its row, as Shift+F10 does.
+ */
 export function Menu({
   label,
   items,
   children,
+  title,
+  open: controlledOpen,
+  onOpenChange,
+  returnFocus,
 }: {
   label: string;
   items: MenuItem[];
   children?: ReactNode;
+  /** The button's tooltip, such as its shortcut. */
+  title?: string;
+  open?: boolean;
+  onOpenChange?(open: boolean): void;
+  returnFocus?(): void;
 }) {
-  const [open, setOpen] = useState(false);
+  const [ownOpen, setOwnOpen] = useState(false);
+  const open = controlledOpen ?? ownOpen;
   const root = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const setOpen = (next: boolean) => {
+    setOwnOpen(next);
+    onOpenChange?.(next);
+  };
+  const latestSetOpen = useRef(setOpen);
+  useEffect(() => {
+    latestSetOpen.current = setOpen;
+  });
 
   useEffect(() => {
     if (!open) return;
+    root.current
+      ?.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)')
+      ?.focus();
     const close = (event: MouseEvent) => {
-      if (!root.current?.contains(event.target as Node)) setOpen(false);
+      if (!root.current?.contains(event.target as Node)) {
+        latestSetOpen.current(false);
+      }
     };
     document.addEventListener('mousedown', close);
     return () => document.removeEventListener('mousedown', close);
   }, [open]);
 
+  function closeToRow() {
+    setOpen(false);
+    if (returnFocus) returnFocus();
+    else button.current?.focus();
+  }
+
+  function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const enabled = [
+      ...event.currentTarget.querySelectorAll<HTMLElement>(
+        '[role="menuitem"]:not(:disabled)',
+      ),
+    ];
+    const at = enabled.indexOf(document.activeElement as HTMLElement);
+    const last = enabled.length - 1;
+    const key = event.key;
+    if (key === 'Escape') closeToRow();
+    else if (key === 'ArrowDown') enabled[at >= last ? 0 : at + 1]?.focus();
+    else if (key === 'ArrowUp') enabled[at <= 0 ? last : at - 1]?.focus();
+    else if (key === 'Home') enabled[0]?.focus();
+    else if (key === 'End') enabled[last]?.focus();
+    else return;
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
   return (
     <div className="menu" ref={root}>
       <button
+        ref={button}
         className="menu-button"
         aria-label={label}
+        title={title}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
@@ -468,20 +623,35 @@ export function Menu({
       {open && (
         <div
           role="menu"
+          aria-label={label}
           className="menu-items"
-          onKeyDown={(e) => e.key === 'Escape' && setOpen(false)}
+          onKeyDown={onKeyDown}
+          // Focus leaving it, as by Tab or F6, closes it behind.
+          onBlur={(event) => {
+            if (!root.current?.contains(event.relatedTarget)) setOpen(false);
+          }}
         >
           {items.map((item) => (
             <button
               key={item.label}
               role="menuitem"
+              tabIndex={-1}
               disabled={item.disabled}
+              aria-keyshortcuts={
+                item.shortcut && ariaKeys(shortcutText(item.shortcut, MAC))
+              }
               onClick={() => {
-                setOpen(false);
+                closeToRow();
                 void item.run();
               }}
             >
               {item.label}
+              {item.shortcut && (
+                // Shown, not part of the item's name.
+                <span className="menu-shortcut" aria-hidden="true">
+                  {shortcutText(item.shortcut, MAC)}
+                </span>
+              )}
             </button>
           ))}
         </div>

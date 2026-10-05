@@ -28,6 +28,8 @@ export const PROPOSAL_FIELDS = [
   'description',
   'aliases',
   'role',
+  'roleNote',
+  'appearance',
   'status',
   'voice.traits',
   'voice.says',
@@ -44,6 +46,8 @@ export const FIELD_LABELS: Record<ProposalField, string> = {
   description: 'Description',
   aliases: 'Aliases',
   role: 'Role',
+  roleNote: 'Role note',
+  appearance: 'Appearance',
   status: 'Status',
   'voice.traits': 'Voice traits',
   'voice.says': 'Says',
@@ -59,16 +63,25 @@ export const FIELD_LABELS: Record<ProposalField, string> = {
 export type FieldValue = string | string[] | null;
 
 /**
- * A change to one field of an Entry, as the Assistant proposed it: the value
- * the field had then, its `base`, and the one proposed.
+ * How a Proposal changes its target: a Replace sets the `proposed` value,
+ * its `base` being the one the target had then; an Append or an Add lands
+ * text or one list item on whatever the target holds when accepted, so it
+ * has no base and never goes stale. Proposals logged by the MVP replace.
+ */
+export type Operation<V, Appends extends 'append' | 'add'> =
+  | { operation?: undefined; base: V; proposed: V }
+  | { operation: Appends; proposed: V };
+
+/**
+ * A change to one field of an Entry, as the Assistant proposed it: a value
+ * in place of its `base`, text appended to it, or an item, as a list of one,
+ * added to a list.
  */
 export type EntryFieldChange = {
   kind: 'field';
   entryId: string;
   field: ProposalField;
-  base: FieldValue;
-  proposed: FieldValue;
-};
+} & Operation<FieldValue, 'append' | 'add'>;
 
 /** A new Entry as proposed: its type, name and a one-line description. */
 export type NewEntry = { type: EntryType; name: string; description: string };
@@ -84,15 +97,14 @@ export type EntryCreation = {
 };
 
 /**
- * A whole Outline body in place of the one it had, its `base`: of a Chapter
- * or Scene, or with the id `PROJECT_OUTLINE`, of the whole story.
+ * A whole Outline body in place of the one it had, its `base`, or text
+ * appended to it: of a Chapter or Scene, or with the id `PROJECT_OUTLINE`,
+ * of the whole story.
  */
 export type OutlineChange = {
   kind: 'outline';
   outlineId: string;
-  base: string;
-  proposed: string;
-};
+} & Operation<string, 'append'>;
 
 /** What a Proposal changes: a field of an Entry, a new Entry, or an Outline. */
 export type ProposalChange = EntryFieldChange | EntryCreation | OutlineChange;
@@ -108,8 +120,9 @@ export type ProposedValue = FieldValue | NewEntry;
  * longer holds the base, and `orphaned` when its Entry, Chapter or Scene is
  * in Trash or gone, or the Entry is no longer of a type with the field; then
  * it can only be rejected. A new Entry is never either, and its `current`
- * value is null. An accepted one says whether the Author `edited` it first;
- * one found already applied on load, as after a crash between writing the
+ * value is null. An accepted one says whether the Author `edited` it first,
+ * or `appended` it as proposed to what its target held; one found already
+ * applied on load, as after a crash between writing the
  * target and logging the accept, counts as accepted. An accepted one can be
  * undone unless `undoBlocked` says why not: its target no longer holds what
  * the accept wrote, or what it replaced isn't known.
@@ -117,7 +130,12 @@ export type ProposedValue = FieldValue | NewEntry;
 export type ProposalState =
   | { kind: 'pending'; current: FieldValue; stale: boolean }
   | { kind: 'pending'; orphaned: 'trashed' | 'gone' | 'field' }
-  | { kind: 'accepted'; edited: boolean; undoBlocked?: string }
+  | {
+      kind: 'accepted';
+      edited: boolean;
+      appended?: true;
+      undoBlocked?: string;
+    }
   | { kind: 'rejected' };
 
 /**
@@ -155,6 +173,8 @@ const FIELDS_OF: Record<EntryType, ProposalField[]> = {
     'description',
     'aliases',
     'role',
+    'roleNote',
+    'appearance',
     'voice.traits',
     'voice.says',
     'voice.neverSays',
@@ -202,6 +222,9 @@ export function fieldOf(
   if (field === 'aliases') return entry.aliases;
   if (field === 'role') return fields.role ?? null;
   if (field === 'status') return fields.status ?? 'open';
+  if (field === 'roleNote' || field === 'appearance') {
+    return fields[field] ?? '';
+  }
   const [group, key] = field.split('.') as ['voice' | 'senses', string];
   return (fields[group] as Record<string, FieldValue> | undefined)?.[key];
 }
@@ -218,7 +241,9 @@ export function withField(
   const fields: EntryFields = { ...entry.fields };
   if (field === 'role') fields.role = value as Role | null;
   else if (field === 'status') fields.status = value as ThreadStatus;
-  else if (field.startsWith('voice.')) {
+  else if (field === 'roleNote' || field === 'appearance') {
+    fields[field] = value as string;
+  } else if (field.startsWith('voice.')) {
     const key = field.slice('voice.'.length) as keyof Voice;
     fields.voice = { ...fields.voice!, [key]: value };
   } else {
@@ -315,8 +340,8 @@ function tidy(text: string): string {
  * proposes nothing this app takes: another Entry, a field its type lacks or
  * a Proposal may not change, a value the field can't hold, or no change.
  * A block names the Entry by id and the field, and either a `value` to set,
- * text to `append` (a description gets it on a line of its own), or an item
- * to `add` to a list.
+ * text to `append` to a text field that isn't a choice, or an item to `add`
+ * to a list; an Append or an Add the field holds already proposes nothing.
  */
 export function proposalOf(
   block: unknown,
@@ -333,20 +358,141 @@ export function proposalOf(
   if (entryId !== entry.id || !isProposalField(field)) return null;
   const base = fieldOf(entry, field);
   if (base === undefined) return null;
-  let proposed: unknown = value;
-  if (typeof append === 'string' && typeof base === 'string') {
-    const text = append.trim();
-    const separator = field === 'description' ? '\n' : ', ';
-    proposed = base.trim() ? `${base.trimEnd()}${separator}${text}` : text;
-  } else if (typeof add === 'string' && Array.isArray(base)) {
-    const item = add.trim();
-    const has = base.some(
-      (b) => b.toLocaleLowerCase() === item.toLocaleLowerCase(),
-    );
-    proposed = item && !has ? [...base, item] : base;
+  const target = { kind: 'field', entryId: entry.id, field } as const;
+  if (append !== undefined || add !== undefined) {
+    const change: EntryFieldChange | null = isListField(field)
+      ? typeof add === 'string'
+        ? { ...target, operation: 'add', proposed: [add.trim()] }
+        : null
+      : typeof append === 'string' && !isChoiceField(field)
+        ? { ...target, operation: 'append', proposed: append.trim() }
+        : null;
+    return change && !holdsAppended(change, base) ? change : null;
   }
-  if (!isFieldValue(field, proposed) || sameValue(proposed, base)) return null;
-  return { kind: 'field', entryId: entry.id, field, base, proposed };
+  if (!isFieldValue(field, value) || sameValue(value, base)) return null;
+  return { ...target, base, proposed: value };
+}
+
+/** An Append or an Add, which lands on whatever its target holds. */
+export type AppendingChange = Extract<
+  ProposalChange,
+  { operation: 'append' | 'add' }
+>;
+
+/** Whether a Proposal is an Append or an Add rather than a Replace or a new Entry. */
+export function isAppending(change: ProposalChange): change is AppendingChange {
+  return change.kind !== 'new-entry' && change.operation !== undefined;
+}
+
+/** What accepting an Append or an Add writes to a target that holds `current`. */
+export function appendedOnto(
+  change: AppendingChange,
+  current: FieldValue,
+): FieldValue {
+  const target = change.kind === 'field' ? change.field : 'outline';
+  return appended(target, current, change.proposed);
+}
+
+/**
+ * Whether a target that holds `current` has an Append or an Add already: it
+ * ends with the text exactly, or its list has the item, whatever its case.
+ * Appending it again would only repeat it.
+ */
+export function holdsAppended(
+  change: AppendingChange,
+  current: FieldValue,
+): boolean {
+  if (Array.isArray(change.proposed)) {
+    return sameValue(appendedOnto(change, current), current);
+  }
+  const text = (change.proposed ?? '').trim();
+  return typeof current === 'string' && current.trimEnd().endsWith(text);
+}
+
+/**
+ * Whether the Author may append a replacing Proposal to its target rather
+ * than replace it: any text, list or Outline; never a choice, such as a
+ * Role, nor a new Entry. An Append or an Add appends already.
+ */
+export function canAppend(change: ProposalChange): boolean {
+  if (change.kind === 'new-entry' || isAppending(change)) return false;
+  return change.kind === 'outline' || !isChoiceField(change.field);
+}
+
+/**
+ * Where a Proposal's title takes the Author: a field of an Entry, a new
+ * Entry, or an Outline of a Scene, a Chapter or the Project.
+ */
+export type ProposalTarget =
+  | { kind: 'entry'; entryId: string; field?: ProposalField }
+  | { kind: 'outline'; outlineId: string };
+
+/**
+ * Where a Proposal's title takes the Author, decided or not; null while
+ * there is nowhere to go: a new Entry not accepted, or a target in Trash,
+ * gone, or without the field.
+ */
+export function proposalTarget(proposal: ProposalView): ProposalTarget | null {
+  const { state } = proposal;
+  if (state.kind === 'pending' && 'orphaned' in state) return null;
+  if (proposal.kind === 'new-entry') {
+    return state.kind === 'accepted'
+      ? { kind: 'entry', entryId: proposal.entryId }
+      : null;
+  }
+  if (proposal.kind === 'outline') {
+    return { kind: 'outline', outlineId: proposal.outlineId };
+  }
+  return { kind: 'entry', entryId: proposal.entryId, field: proposal.field };
+}
+
+/**
+ * `current` with `added` appended, as the Author's Append on a Proposal: a
+ * Description, Appearance or Outline gets the text on a line of its own,
+ * other text after ", ", and a list the items it doesn't hold yet, whatever
+ * their case. Empty text leaves `current` as it is.
+ */
+export function appended(
+  target: ProposalField | 'outline',
+  current: FieldValue,
+  added: FieldValue,
+): FieldValue {
+  if (Array.isArray(current) || Array.isArray(added)) {
+    const list = Array.isArray(current) ? [...current] : [];
+    const has = (item: string) =>
+      list.some((l) => l.toLocaleLowerCase() === item.toLocaleLowerCase());
+    for (const item of Array.isArray(added) ? added : []) {
+      const text = item.trim();
+      if (text && !has(text)) list.push(text);
+    }
+    return list;
+  }
+  const text = (added ?? '').trim();
+  if (!text) return current;
+  if (!current?.trim()) return text;
+  const separator =
+    target === 'description' || target === 'appearance' || target === 'outline'
+      ? '\n'
+      : ', ';
+  return `${current.trimEnd()}${separator}${text}`;
+}
+
+/**
+ * Whether an accept that `replaced` a value with the one it `wrote` was the
+ * Author's Append of the Proposal as proposed, neither replacing nor edited.
+ */
+export function wasAppended(
+  change: ProposalChange,
+  replaced: FieldValue | undefined,
+  wrote: ProposedValue,
+): boolean {
+  if (change.kind === 'new-entry' || !canAppend(change)) return false;
+  if (replaced === undefined) return false;
+  const target = change.kind === 'field' ? change.field : 'outline';
+  return (
+    !sameValue(wrote, change.proposed) &&
+    sameValue(wrote, appended(target, replaced, change.proposed))
+  );
 }
 
 /**
@@ -380,33 +526,54 @@ export function asNewEntry(value: unknown): NewEntry | null {
 /**
  * The change a block proposes to `outline`, as it is now, or null when it
  * proposes none: a block names the Outline by the id of its Chapter or
- * Scene, or `PROJECT_OUTLINE`, and gives the whole new body as `value`.
+ * Scene, or `PROJECT_OUTLINE`, and gives the whole new body as `value`, or
+ * text to `append`, unless the body ends with it already.
  */
 export function outlineChangeOf(
   block: unknown,
   outline: OutlineValue,
 ): OutlineChange | null {
   if (typeof block !== 'object' || block === null) return null;
-  const { outline: outlineId, value } = block as Record<string, unknown>;
-  if (outlineId !== outline.id || typeof value !== 'string') return null;
-  if (value === outline.body) return null;
+  const {
+    outline: outlineId,
+    value,
+    append,
+  } = block as Record<string, unknown>;
+  if (outlineId !== outline.id) return null;
+  if (append !== undefined) {
+    if (typeof append !== 'string') return null;
+    const change: OutlineChange = {
+      kind: 'outline',
+      outlineId,
+      operation: 'append',
+      proposed: append.trim(),
+    };
+    return holdsAppended(change, outline.body) ? null : change;
+  }
+  if (typeof value !== 'string' || value === outline.body) return null;
   return { kind: 'outline', outlineId, base: outline.body, proposed: value };
 }
 
 /** A Proposal as the Assistant would write it, for the Conversation sent back to it. */
 export function proposalBlock(change: ProposalChange): string {
-  const json = JSON.stringify(
+  if (change.kind === 'new-entry') {
+    const { type, name, description } = change.proposed;
+    return fencedProposal({ create: type, name, description });
+  }
+  const target =
     change.kind === 'field'
-      ? { entry: change.entryId, field: change.field, value: change.proposed }
-      : change.kind === 'new-entry'
-        ? {
-            create: change.proposed.type,
-            name: change.proposed.name,
-            description: change.proposed.description,
-          }
-        : { outline: change.outlineId, value: change.proposed },
-  );
-  return `\`\`\`proposal\n${json}\n\`\`\``;
+      ? { entry: change.entryId, field: change.field }
+      : { outline: change.outlineId };
+  const { operation, proposed } = change;
+  if (operation === 'add') {
+    return fencedProposal({ ...target, add: (proposed as string[])[0] });
+  }
+  return fencedProposal({ ...target, [operation ?? 'value']: proposed });
+}
+
+/** A `proposal` block holding `json`, as the Assistant writes one. */
+function fencedProposal(json: object): string {
+  return `\`\`\`proposal\n${JSON.stringify(json)}\n\`\`\``;
 }
 
 /** A piece of a field's diff: kept from the base, removed from it, or added. */
@@ -443,6 +610,11 @@ export function fieldDiff(
       ['removed', was],
       ['added', now],
     ]);
+  return textDiff(was, now);
+}
+
+/** How text changes from `was` to `now`: by what differs between the words they start and end with. */
+export function textDiff(was: string, now: string): DiffPart[] {
   let start = 0;
   while (start < was.length && start < now.length && was[start] === now[start])
     start++;

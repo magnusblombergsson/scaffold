@@ -2,6 +2,7 @@ import {
   _electron as electron,
   test,
   type ElectronApplication,
+  type Page,
 } from '@playwright/test';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -119,16 +120,28 @@ export async function chooseExport(app: ElectronApplication) {
   });
 }
 
-/** Chooses File → Prose Language → `label` in the menu, as the Author would in the first window. */
-export async function chooseProseLanguage(
+/**
+ * Chooses an item of the menu bar by its labels, such as File → New
+ * Project…, as the Author would in `page`'s window, or else the first.
+ */
+export async function chooseMenu(
   app: ElectronApplication,
-  label: 'English' | 'Swedish',
+  labels: string[],
+  page?: Page,
 ) {
-  await app.evaluate(({ BrowserWindow, Menu }, label) => {
-    const menu = Menu.getApplicationMenu()?.getMenuItemById('language');
-    if (!menu?.enabled) throw new Error('File → Prose Language is disabled');
-    const item = menu.submenu?.items.find((i) => i.label === label);
-    if (!item) throw new Error(`No Prose Language ${label}`);
-    item.click(undefined, BrowserWindow.getAllWindows()[0]);
-  }, label);
+  const window = page && (await app.browserWindow(page));
+  await app.evaluate(
+    ({ BrowserWindow, Menu }, [labels, window]) => {
+      let items = Menu.getApplicationMenu()?.items ?? [];
+      let item: Electron.MenuItem | undefined;
+      for (const label of labels) {
+        item = items.find((i) => i.label === label);
+        if (!item) throw new Error(`No menu item ${labels.join(' → ')}`);
+        items = item.submenu?.items ?? [];
+      }
+      if (!item?.enabled) throw new Error(`${labels.join(' → ')} is disabled`);
+      item.click(undefined, window ?? BrowserWindow.getAllWindows()[0]);
+    },
+    [labels, window] as const,
+  );
 }

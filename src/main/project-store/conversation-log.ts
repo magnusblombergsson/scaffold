@@ -17,7 +17,10 @@ import {
 } from '../../shared/finding';
 import {
   asNewEntry,
+  isAppending,
+  isChoiceField,
   isFieldValue,
+  isListField,
   isProposalField,
   type FieldValue,
   type NewEntry,
@@ -53,8 +56,24 @@ export type ProposedEvent = {
 };
 
 /**
+ * An Append or an Add as logged: its operation, its target, and the text or
+ * the one list item it lands on whatever the field or Outline `body` holds
+ * when accepted, with no base. A Replace is logged as proposed, which the MVP
+ * reads too; it skips this event, so it never applies the text alone as a
+ * Replace (ADR 0006).
+ */
+export type OfferedEvent = {
+  type: 'proposal.offered';
+  id: string;
+  operation: 'append' | 'add';
+  target: { kind: 'entry' | 'outline'; id: string };
+  fields: Record<string, { proposed: string }>;
+  at: number;
+};
+
+/**
  * An accept as logged: per field, the value it replaced and the one it
- * wrote; a new Entry replaced nothing.
+ * wrote, whatever its operation; a new Entry replaced nothing.
  */
 export type AcceptedEvent = {
   type: 'proposal.accepted';
@@ -107,6 +126,7 @@ export type ConversationEvent =
   | RenamedEvent
   | TrashMoveEvent
   | ProposedEvent
+  | OfferedEvent
   | AcceptedEvent
   | RejectedEvent
   | UndoneEvent;
@@ -222,8 +242,14 @@ export function parseLog(log: string): LoggedConversation | null {
     }
     if (typeof event?.id !== 'string') continue;
     const known = proposals.get(event.id);
-    if (event.type === 'proposal.proposed') {
-      const proposal = loggedProposal(event as Partial<ProposedEvent>);
+    if (
+      event.type === 'proposal.proposed' ||
+      event.type === 'proposal.offered'
+    ) {
+      const proposal =
+        event.type === 'proposal.proposed'
+          ? loggedProposal(event as Partial<ProposedEvent>)
+          : loggedOffer(event as Partial<OfferedEvent>);
       if (proposal && !known && messages.length > 0) {
         proposals.set(proposal.id, {
           ...proposal,
@@ -259,9 +285,31 @@ export function parseLog(log: string): LoggedConversation | null {
   };
 }
 
-/** The event that logs a Proposal the Assistant made. */
-export function proposedEvent(proposal: Proposal, at: number): ProposedEvent {
+/** The event that logs a Proposal the Assistant made: an Append or an Add as offered. */
+export function proposedEvent(
+  proposal: Proposal,
+  at: number,
+): ProposedEvent | OfferedEvent {
   const { id } = proposal;
+  if (isAppending(proposal)) {
+    const { operation, proposed } = proposal;
+    const [kind, targetId, field] =
+      proposal.kind === 'field'
+        ? (['entry', proposal.entryId, proposal.field] as const)
+        : (['outline', proposal.outlineId, 'body'] as const);
+    return {
+      type: 'proposal.offered',
+      id,
+      operation,
+      target: { kind, id: targetId },
+      fields: {
+        [field]: {
+          proposed: Array.isArray(proposed) ? proposed[0] : (proposed ?? ''),
+        },
+      },
+      at,
+    };
+  }
   if (proposal.kind === 'field') {
     const { entryId, field, base, proposed } = proposal;
     return {
@@ -362,6 +410,37 @@ function loggedProposal(event: Partial<ProposedEvent>): Proposal | null {
     return null;
   }
   return { kind: 'field', id, entryId: target.id, field, base, proposed };
+}
+
+/**
+ * The Append or Add an event logs, if this app can take it: text appended to
+ * a text field of an Entry that a Proposal may change and that isn't a
+ * choice, or to an Outline's body; or one item added to a list. Never Prose,
+ * Notes, private notes or a Voice's example lines.
+ */
+function loggedOffer(event: Partial<OfferedEvent>): Proposal | null {
+  const { id, operation, target, fields } = event;
+  if (typeof id !== 'string' || typeof target?.id !== 'string' || !fields) {
+    return null;
+  }
+  const changed = Object.keys(fields);
+  const [field] = changed;
+  const proposed = fields[field]?.proposed;
+  if (changed.length !== 1 || typeof proposed !== 'string') return null;
+  if (target.kind === 'outline') {
+    if (field !== 'body' || operation !== 'append') return null;
+    return { kind: 'outline', id, outlineId: target.id, operation, proposed };
+  }
+  if (target.kind !== 'entry' || !isProposalField(field)) return null;
+  const change = { kind: 'field', id, entryId: target.id, field } as const;
+  if (isListField(field)) {
+    return operation === 'add'
+      ? { ...change, operation, proposed: [proposed] }
+      : null;
+  }
+  return operation === 'append' && !isChoiceField(field)
+    ? { ...change, operation, proposed }
+    : null;
 }
 
 /** The accept an event logs of `proposal`, if it can be read. */

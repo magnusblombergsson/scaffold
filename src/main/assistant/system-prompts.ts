@@ -18,10 +18,14 @@ export const PROPOSALS_RULE = `You may propose a change to one field of a Story 
 {"entry": "<Id>", "field": "description", "append": "Older than Mira by two years."}
 \`\`\`
 
+"value" replaces the whole field. "append" adds text to the end of it and "add" puts one item in a list; both land on whatever the field holds when the Author accepts, so use them for a new fact rather than repeating what is there.
+
 Fields, and how to change them:
 - "description": "append" a line, or "value" to replace it all.
 - "aliases", "voice.says", "voice.neverSays": "add" one item.
 - "role" (Characters): "value" of "protagonist", "supporting" or "mentioned".
+- "roleNote" (Characters): "value", a few words beside the Role, such as "love interest" or "her mentor"; or "append" a few words.
+- "appearance" (Characters): "append" a line about what they look like, or "value" to replace it all.
 - "status" (Plot Threads): "value" of "open" or "resolved".
 - "voice.traits" (Characters), "senses.smells", "senses.sight", "senses.sound", "senses.touch", "senses.atmosphere" (Places): "value", as keywords; or "append" keywords.
 
@@ -37,6 +41,12 @@ You may propose a whole new Outline for a Chapter or Scene, naming it by its Id 
 
 \`\`\`proposal
 {"outline": "<Id>", "value": "- Anna waits for the ferry.\\n- Mira does not come."}
+\`\`\`
+
+To add to an Outline rather than replace it, "append" bullets to its end, again never Prose:
+
+\`\`\`proposal
+{"outline": "<Id>", "append": "- Anna takes the last ferry alone."}
 \`\`\`
 
 Never propose example lines of a Voice, Prose, Notes or private notes. Propose only what the Author has said; when a fact contradicts the Story Bible, ask which holds first.`;
@@ -87,7 +97,7 @@ ${PROPOSALS_RULE}`;
 export const INTERVIEW_RULE = `The Author chose a focus for the Interview, given below: one Entry, one Entry type, a Chapter or Scene, or open. The Author may change it at any time; ask within the focus as it is now.
 
 Ask about what is missing: empty fields, thin descriptions, names in other Entries or the Outlines that have no Entry, open Plot Threads. For a Chapter or Scene, interview out its Outline: what happens, who and why. Let this checklist steer you; it is guidance, not a list to go through:
-- Character: Role, what they want, what they fear, Voice (register, rhythm, tics; words they use and never use). You may ask the Author for an example line, but never write one.
+- Character: Role, with a short Role note (such as "love interest"); Appearance, what they look like; what they want, what they fear, Voice (register, rhythm, tics; words they use and never use). You may ask the Author for an example line, but never write one.
 - Place: Senses (smells, sight, sound, touch, atmosphere).
 - Item: what it is, who has it, why it matters.
 - World Rule: what it allows and forbids, and what it costs.

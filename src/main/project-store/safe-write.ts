@@ -15,7 +15,7 @@ export async function safeWrite(
   fs: FileSystem,
   clock: Clock,
   target: string,
-  data: string,
+  data: string | Uint8Array,
 ): Promise<void> {
   const temp = `${target}.${randomUUID()}.tmp`;
   await fs.writeFileDurable(temp, data);
@@ -27,7 +27,8 @@ export async function safeWrite(
   }
 }
 
-async function renameWithRetry(
+/** Renames, trying again while Windows briefly locks the file. */
+export async function renameWithRetry(
   fs: FileSystem,
   clock: Clock,
   from: string,

@@ -260,8 +260,20 @@ describe('a bad or newer settings file', () => {
             windowBounds: { x: 1, y: 2, width: 'wide', height: 4 },
             panelWidths: { binder: 300 },
             outlineNotesOpen: 'yes',
+            overviewOpen: 'yes',
           },
-          c: { outlineNotesOpen: false },
+          c: {
+            outlineNotesOpen: false,
+            overviewOpen: true,
+            pinnedNotes: [
+              { entryId: 'e1', x: 10, y: 20, folded: true },
+              { entryId: 'e2', x: 'left', y: 20, folded: false },
+              { entryId: 'e1', x: 30, y: 40, folded: false },
+              { x: 1, y: 2, folded: false },
+              'e3',
+            ],
+          },
+          d: { pinnedNotes: 'e1' },
           b: 'nonsense',
         },
         recent: [valid, { path: 'C:/B' }, null],
@@ -276,7 +288,13 @@ describe('a bad or newer settings file', () => {
     expect(settings.welcomed()).toBe(false);
     expect(settings.project('a')).toEqual({ panelWidths: { binder: 300 } });
     expect(settings.project('b')).toEqual({});
-    expect(settings.project('c')).toEqual({ outlineNotesOpen: false });
+    expect(settings.project('c')).toEqual({
+      outlineNotesOpen: false,
+      overviewOpen: true,
+      // One note per Entry: the first one kept.
+      pinnedNotes: [{ entryId: 'e1', x: 10, y: 20, folded: true }],
+    });
+    expect(settings.project('d')).toEqual({});
   });
 
   it('reads a newer version leniently and never overwrites it', async () => {

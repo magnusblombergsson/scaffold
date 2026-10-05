@@ -11,15 +11,16 @@ import {
 } from '../../shared/project-types';
 
 // How an Entry's type-specific fields sit in the frontmatter of
-// `bible/<id>.md`: `role`, `voice` and `senses`, each left out while it has
-// no value, and `status`, always written for a Plot Thread. As everywhere,
-// what this app doesn't know is kept.
+// `bible/<id>.md`: `role`, `roleNote`, `appearance`, `voice` and
+// `senses`, each left out while it has no value, and `status`, always
+// written for a Plot Thread. As everywhere, what this app doesn't know is
+// kept.
 
 type Frontmatter = Record<string, unknown>;
 
 /** The frontmatter key each type's fields are stored under. */
 const FIELD_KEYS: Record<EntryType, readonly (keyof EntryFields)[]> = {
-  character: ['role', 'voice'],
+  character: ['role', 'roleNote', 'appearance', 'voice'],
   place: ['senses'],
   item: [],
   'world-rule': [],
@@ -28,6 +29,8 @@ const FIELD_KEYS: Record<EntryType, readonly (keyof EntryFields)[]> = {
   other: [],
 };
 
+/** The free-text fields. */
+const TEXT_KEYS = ['roleNote', 'appearance'] as const;
 const VOICE_KEYS = ['traits', 'says', 'neverSays', 'examples'] as const;
 const SENSE_KEYS = ['smells', 'sight', 'sound', 'touch', 'atmosphere'] as const;
 
@@ -44,6 +47,9 @@ export function readEntryFields(
     fields.role = ROLES.includes(frontmatter.role as Role)
       ? (frontmatter.role as Role)
       : null;
+  }
+  for (const key of TEXT_KEYS) {
+    if (fields[key] !== undefined) fields[key] = text(frontmatter[key]);
   }
   if (fields.voice) {
     const voice = asObject(frontmatter.voice);
@@ -98,6 +104,13 @@ export function entryFieldsFrontmatter(
         : undefined);
     if (role) written.role = role;
   }
+  for (const key of TEXT_KEYS) {
+    if (!own.has(key)) continue;
+    const value =
+      fields[key] ||
+      (typeof previous[key] === 'string' ? undefined : previous[key]);
+    if (value) written[key] = value;
+  }
   if (own.has('voice')) {
     setIfAny(
       written,
@@ -142,6 +155,9 @@ function notUnderstood(key: keyof EntryFields, value: unknown): unknown {
   }
   if (key === 'status') {
     return THREAD_STATUSES.includes(value as ThreadStatus) ? undefined : value;
+  }
+  if (key === 'roleNote' || key === 'appearance') {
+    return typeof value === 'string' ? undefined : value;
   }
   const unknown = nested(
     undefined,

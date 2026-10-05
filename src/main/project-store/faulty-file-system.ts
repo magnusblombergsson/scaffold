@@ -48,6 +48,10 @@ export function faultyFileSystem() {
       check('readFile', path);
       return base.readFile(path);
     },
+    async readBytes(path) {
+      check('readFile', path);
+      return base.readBytes(path);
+    },
     async writeFileDurable(path, data) {
       check('writeFileDurable', path);
       return base.writeFileDurable(path, data);
@@ -108,6 +112,7 @@ export function crashingFileSystem(survive = Infinity) {
     };
   const fs: FileSystem = {
     readFile: guarded(nodeFileSystem.readFile),
+    readBytes: guarded(nodeFileSystem.readBytes),
     exists: guarded(nodeFileSystem.exists),
     stat: guarded(nodeFileSystem.stat),
     readdir: guarded(nodeFileSystem.readdir),

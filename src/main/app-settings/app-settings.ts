@@ -3,7 +3,7 @@ import type { Clock } from '../project-store/clock';
 import type { FileSystem } from '../project-store/file-system';
 import type { ProjectLookup } from '../project-store/project-store';
 import { safeWrite, setAside } from '../project-store/safe-write';
-import type { PanelWidths, Tip } from '../../shared/api';
+import type { PanelWidths, PinnedNote, Tip } from '../../shared/api';
 import { DEFAULT_MODEL, isModelId, type ModelId } from '../../shared/models';
 
 export const SETTINGS_VERSION = 1;
@@ -33,6 +33,10 @@ export type ProjectSettings = {
   /** Where the cursor was in the last Scene. */
   cursor?: number;
   outlineNotesOpen?: boolean;
+  /** Whether the Overview pane beside the Prose is open. */
+  overviewOpen?: boolean;
+  /** The Pinned notes, the one on top last. */
+  pinnedNotes?: PinnedNote[];
   dismissedTips?: Tip[];
 };
 
@@ -138,7 +142,32 @@ function parseProjectSettings(raw: JsonObject): ProjectSettings & JsonObject {
   if (typeof settings.outlineNotesOpen !== 'boolean') {
     delete settings.outlineNotesOpen;
   }
+  if (typeof settings.overviewOpen !== 'boolean') delete settings.overviewOpen;
+  if (Array.isArray(settings.pinnedNotes)) {
+    settings.pinnedNotes = pinnedNotes(settings.pinnedNotes);
+  } else {
+    delete settings.pinnedNotes;
+  }
   return settings;
+}
+
+/** The valid Pinned notes, one per Entry: the first one kept. */
+function pinnedNotes(raw: unknown[]): PinnedNote[] {
+  const notes: PinnedNote[] = [];
+  for (const note of raw) {
+    if (
+      isJsonObject(note) &&
+      typeof note.entryId === 'string' &&
+      isFiniteNumber(note.x) &&
+      isFiniteNumber(note.y) &&
+      typeof note.folded === 'boolean' &&
+      !notes.some((kept) => kept.entryId === note.entryId)
+    ) {
+      const { entryId, x, y, folded } = note;
+      notes.push({ entryId, x, y, folded });
+    }
+  }
+  return notes;
 }
 
 function isFiniteNumber(value: unknown): value is number {
