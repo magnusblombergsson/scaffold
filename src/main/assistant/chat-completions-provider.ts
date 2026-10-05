@@ -3,6 +3,7 @@ import type { ListedModel, Price, ProviderStatus } from '../../shared/models';
 import type { Usage } from '../../shared/usage';
 import {
   ProviderError,
+  statusOfFailure,
   type Finish,
   type ListingProvider,
   type PromptMessage,
@@ -382,14 +383,16 @@ async function statusOf(
     await check();
     return 'connected';
   } catch (error) {
-    if (error instanceof ProviderError && error.kind === 'key') {
-      return 'key-rejected';
-    }
-    if (!(error instanceof ProviderError && error.kind === 'offline')) {
+    const status = statusOfFailure(error);
+    if (status === 'unreachable' && !isOffline(error)) {
       console.error('Can’t check the Provider:', error);
     }
-    return 'unreachable';
+    return status;
   }
+}
+
+function isOffline(error: unknown): boolean {
+  return error instanceof ProviderError && error.kind === 'offline';
 }
 
 async function httpError(response: Response): Promise<ProviderError> {

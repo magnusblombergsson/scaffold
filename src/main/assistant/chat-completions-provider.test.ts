@@ -549,6 +549,7 @@ describe('openRouterProvider', () => {
   it.each([
     [200, 'connected'],
     [401, 'key-rejected'],
+    [402, 'no-credit'],
   ] as const)(
     'reports a key check answered %i as %s',
     async (status, expected) => {

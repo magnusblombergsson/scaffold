@@ -6,7 +6,13 @@ import {
   type Page,
 } from '@playwright/test';
 import path from 'node:path';
-import { answerDialogs, chooseMenu, launch, useTempDir } from './app';
+import {
+  addAnthropicKey,
+  answerDialogs,
+  chooseMenu,
+  launch,
+  useTempDir,
+} from './app';
 import { useFakeAnthropic } from './fake-anthropic';
 
 const tempDir = useTempDir();
@@ -55,19 +61,6 @@ function pencil(label: Locator) {
   );
 }
 
-/** Adds a key the fake Anthropic accepts, so the Assistant's actions show. */
-async function addKey(page: Page) {
-  const assistant = page.getByRole('complementary', { name: 'Assistant' });
-  await assistant.getByRole('button', { name: 'Add API key' }).click();
-  await page
-    .getByRole('textbox', { name: 'API key' })
-    .fill('sk-ant-api03-good-abcd');
-  await page.getByRole('button', { name: 'Check and save' }).click();
-  const settings = page.getByRole('dialog', { name: 'Settings' });
-  await expect(settings.getByLabel('Key in use')).toBeVisible();
-  await settings.getByRole('button', { name: 'Done' }).click();
-}
-
 /** Parts that change from run to run, hidden from the screenshots. */
 const changing = (page: Page) => [page.locator('.save-status')];
 
@@ -85,7 +78,7 @@ for (const theme of ['light', 'dark'] as const) {
       await page
         .getByLabel('Prose')
         .pressSequentially('Anna packed in the rain.');
-      await addKey(page);
+      await addAnthropicKey(page);
 
       // Writing: the panes are the desk and the centre is the sheet.
       await expect(page.locator('body')).toHaveCSS(
@@ -169,6 +162,9 @@ for (const theme of ['light', 'dark'] as const) {
       await chooseMenu(app, ['Tools', 'Settings…'], page);
       const settings = page.getByRole('dialog', { name: 'Settings' });
       await expect(settings).toHaveCSS('background-color', look.sheet);
+      await expect(settings.getByLabel('Anthropic status')).toHaveText(
+        'Connected',
+      );
       const dropdown = settings.locator('select').first();
       await expect(dropdown).toHaveCSS('border-top-width', '0px');
       await expect(dropdown).toHaveCSS('border-bottom-style', 'solid');

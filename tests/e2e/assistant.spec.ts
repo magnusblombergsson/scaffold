@@ -1,25 +1,11 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { answerDialogs, launch, useTempDir } from './app';
+import { addAnthropicKey, answerDialogs, launch, useTempDir } from './app';
 import { useFakeAnthropic } from './fake-anthropic';
 
 const tempDir = useTempDir();
 const anthropic = useFakeAnthropic();
-
-/** Adds a key, which the stand-in for Anthropic takes. */
-async function addKey(page: Page) {
-  const assistant = page.getByRole('complementary', { name: 'Assistant' });
-  await assistant.getByRole('button', { name: 'Add API key' }).click();
-  await page
-    .getByRole('textbox', { name: 'API key' })
-    .fill('sk-ant-api03-good-abcd');
-  await page.getByRole('button', { name: 'Check and save' }).click();
-  const settings = page.getByRole('dialog', { name: 'Settings' });
-  await expect(settings.getByLabel('Key in use')).toBeVisible();
-  await settings.getByRole('button', { name: 'Done' }).click();
-  return assistant;
-}
 
 async function logs(projectPath: string) {
   const dir = path.join(projectPath, 'conversations');
@@ -45,7 +31,7 @@ test('the Author asks about the Scene in focus, sees the reply stream in, and re
   const page = await first.firstWindow();
   await page.getByRole('button', { name: 'New Project…' }).click();
   await page.getByLabel('Prose').pressSequentially('Anna packed in the rain.');
-  const assistant = await addKey(page);
+  const assistant = await addAnthropicKey(page);
 
   await assistant
     .getByRole('textbox', { name: 'Message' })
@@ -146,7 +132,7 @@ test('a refused key shows inline with Retry and Open Settings, and logs no turn'
   await answerDialogs(app, projectPath);
   const page = await app.firstWindow();
   await page.getByRole('button', { name: 'New Project…' }).click();
-  const assistant = await addKey(page);
+  const assistant = await addAnthropicKey(page);
   await assistant.getByRole('textbox', { name: 'Message' }).fill('Why?');
   await assistant.getByRole('button', { name: 'Send' }).click();
 
@@ -187,13 +173,13 @@ test('a reply cut short is kept as interrupted, and Retry adds a new turn', asyn
   await answerDialogs(app, projectPath);
   const page = await app.firstWindow();
   await page.getByRole('button', { name: 'New Project…' }).click();
-  const assistant = await addKey(page);
+  const assistant = await addAnthropicKey(page);
   await assistant.getByRole('textbox', { name: 'Message' }).fill('Why?');
   await assistant.getByRole('button', { name: 'Send' }).click();
 
   const messages = assistant.getByRole('log', { name: 'Messages' });
   const failed = messages.getByRole('article', { name: 'System' });
-  await expect(failed).toContainText("Can't reach Anthropic");
+  await expect(failed).toContainText("Can't reach the Provider");
   await expect(
     failed.getByRole('button', { name: 'Open Settings' }),
   ).toHaveCount(0);
@@ -238,7 +224,7 @@ test('a Claude reply ending on max_tokens shows Cut short and makes no Proposals
   await answerDialogs(app, projectPath);
   const page = await app.firstWindow();
   await page.getByRole('button', { name: 'New Project…' }).click();
-  const assistant = await addKey(page);
+  const assistant = await addAnthropicKey(page);
   const messages = assistant.getByRole('log', { name: 'Messages' });
   const replies = messages.getByRole('article', { name: 'Assistant' });
   async function send(text: string, count: number) {
@@ -324,7 +310,7 @@ test('the Author asks for a Review of the Chapter, sees its Findings in order, a
   await page.getByRole('menuitem', { name: 'New Scene', exact: true }).click();
   await expect(page.getByLabel('Prose')).toBeFocused();
   await page.keyboard.type('The letter came on Tuesday.');
-  const assistant = await addKey(page);
+  const assistant = await addAnthropicKey(page);
 
   await assistant.getByRole('button', { name: 'Review Chapter' }).click();
 
@@ -389,7 +375,7 @@ test('the Author picks another Scene for a question by typing @, and its Prose i
   await page.getByRole('menuitem', { name: 'New Scene', exact: true }).click();
   await expect(page.getByLabel('Prose')).toBeFocused();
   await page.keyboard.type('Anna burned it unread.');
-  const assistant = await addKey(page);
+  const assistant = await addAnthropicKey(page);
 
   const message = assistant.getByRole('textbox', { name: 'Message' });
   await message.pressSequentially('Does this follow from @sc');

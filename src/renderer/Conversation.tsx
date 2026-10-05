@@ -88,12 +88,12 @@ function titleOf(message: string): string {
 
 /** What the Author is told when the Assistant couldn't answer. */
 const FAILURES: Record<AssistantFailure, string> = {
-  key: "Anthropic didn't accept the API key. Check it in Settings, then retry.",
+  key: "The Provider didn't accept the API key. Check it in Settings, then retry.",
   credit:
-    'Your Anthropic account is out of credit. Add credit in Anthropic Console, then retry.',
+    "The Provider's account is out of credit. Add credit there, then retry.",
   'rate-limit':
-    'Anthropic is getting too many calls from this key. Wait a moment, then retry.',
-  offline: "Can't reach Anthropic. Check the connection, then retry.",
+    'The Provider is getting too many calls from this key. Wait a moment, then retry.',
+  offline: "Can't reach the Provider. Check the connection, then retry.",
   other: "The Assistant couldn't answer. Retry, or try again later.",
 };
 

@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { expect, it } from 'vitest';
 import { DEFAULT_MODEL, isClaudeModelId } from '../../shared/models';
-import { claudeProvider } from './claude-provider';
+import { connectProvider } from './connect-provider';
 import { reviewSheet, runNeverProseEval } from './never-prose-eval';
 
 // Asks Claude every request of the never-Prose eval set in each Mode, and
@@ -20,7 +20,7 @@ it.skipIf(!key)(
     const dir = await mkdtemp(path.join(tmpdir(), 'scaffold-eval-'));
     try {
       const results = await runNeverProseEval({
-        provider: claudeProvider({ apiKey: () => key ?? null }),
+        provider: connectProvider('anthropic', () => ({ secret: key ?? null })),
         model: { provider: 'anthropic', id: model },
         dir,
       });

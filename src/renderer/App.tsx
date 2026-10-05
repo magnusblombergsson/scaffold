@@ -87,12 +87,8 @@ export function App() {
   const [error, setError] = useState<string | null>(null);
   /** Undefined until main says whether to welcome the Author. */
   const [welcome, setWelcome] = useState<WelcomeReason | null>();
-  /** Open while set; `addKey` opens it at the form for adding a key. */
-  const [settingsDialog, setSettingsDialog] = useState<{
-    addKey: boolean;
-  } | null>(null);
-  const openSettings = () => setSettingsDialog({ addKey: false });
-  const addKey = useCallback(() => setSettingsDialog({ addKey: true }), []);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const openSettings = useCallback(() => setSettingsOpen(true), []);
   /** Whether the Keyboard Shortcuts cheat sheet is open. */
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   /** The file being imported, while the Author previews its split. */
@@ -200,7 +196,7 @@ export function App() {
           project={project}
           error={error}
           onError={setError}
-          onAddKey={addKey}
+          onAddProvider={openSettings}
         />
       ) : welcome ? (
         <Welcome reason={welcome} onDone={() => setWelcome(null)} />
@@ -214,11 +210,8 @@ export function App() {
           onClose={() => setImporting(null)}
         />
       )}
-      {settingsDialog && (
-        <SettingsDialog
-          addKey={settingsDialog.addKey}
-          onClose={() => setSettingsDialog(null)}
-        />
+      {settingsOpen && (
+        <SettingsDialog onClose={() => setSettingsOpen(false)} />
       )}
       {shortcutsOpen && (
         <ShortcutsDialog onClose={() => setShortcutsOpen(false)} />
@@ -244,13 +237,13 @@ function ProjectView({
   project,
   error,
   onError,
-  onAddKey,
+  onAddProvider,
 }: {
   project: OpenedProject;
   error: string | null;
   onError(message: string | null): void;
   /** Opens Settings to add an API key for the Assistant. */
-  onAddKey(): void;
+  onAddProvider(): void;
 }) {
   const [manuscript, setManuscript] = useState(project.manuscript);
   const [selected, setSelected] = useState<Selection | null>(() => {
@@ -888,7 +881,7 @@ function ProjectView({
                   active={mode === 'brainstorm'}
                   names={{ manuscript, entries }}
                   pane={pane}
-                  onAddKey={onAddKey}
+                  onAddProvider={onAddProvider}
                   onOpenEntry={openEntryInWriting}
                   onChange={change}
                 />
@@ -900,7 +893,7 @@ function ProjectView({
                   active={mode === 'interview'}
                   names={{ manuscript, entries }}
                   pane={pane}
-                  onAddKey={onAddKey}
+                  onAddProvider={onAddProvider}
                   onOpenEntry={openEntryInWriting}
                   onChange={change}
                 />
@@ -1199,7 +1192,7 @@ function ProjectView({
                 <AssistantPanel
                   active={mode === 'writing'}
                   width={pane('assistant').width}
-                  onAddKey={onAddKey}
+                  onAddProvider={onAddProvider}
                   sceneId={open && !open.scene.missing ? open.scene.id : null}
                   names={{ manuscript, entries }}
                   show={showProposal}

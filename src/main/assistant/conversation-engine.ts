@@ -37,8 +37,12 @@ import {
   type CompactionPolicy,
 } from './compaction';
 import { buildContext, defaultRequest, readableScene } from './context-builder';
-import { ProviderError, type Finish, type ProviderRequest } from './provider';
-import type { ProviderFor } from './providers';
+import {
+  ProviderError,
+  type Finish,
+  type ProviderFor,
+  type ProviderRequest,
+} from './provider';
 import { finishReply } from './reply-finishing';
 
 /** What a message is about: the Scene open in the editor when it was sent, if any. */

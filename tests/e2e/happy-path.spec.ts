@@ -32,9 +32,9 @@ test('the MVP hangs together: welcome, key, Project, Prose, Review Scene, a Prop
   await expect(
     page.getByRole('heading', { name: 'Welcome to Scaffold' }),
   ).toBeVisible();
-  await page.getByRole('button', { name: 'Add API key' }).click();
+  await page.getByRole('button', { name: 'Add Anthropic key' }).click();
   await page
-    .getByRole('textbox', { name: 'API key' })
+    .getByRole('textbox', { name: 'Anthropic API key' })
     .fill('sk-ant-api03-good-abcd');
   await page.getByRole('button', { name: 'Check and save' }).click();
   await expect(page.getByText('Welcome to Scaffold')).toHaveCount(0);

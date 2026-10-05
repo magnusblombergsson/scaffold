@@ -1,23 +1,17 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { answerDialogs, answerQuestions, launch, useTempDir } from './app';
+import {
+  addAnthropicKey,
+  answerDialogs,
+  answerQuestions,
+  launch,
+  useTempDir,
+} from './app';
 import { useFakeAnthropic } from './fake-anthropic';
 
 const tempDir = useTempDir();
 const anthropic = useFakeAnthropic();
-
-async function addKey(page: Page) {
-  const assistant = page.getByRole('complementary', { name: 'Assistant' });
-  await assistant.getByRole('button', { name: 'Add API key' }).click();
-  await page
-    .getByRole('textbox', { name: 'API key' })
-    .fill('sk-ant-api03-good-abcd');
-  await page.getByRole('button', { name: 'Check and save' }).click();
-  const settings = page.getByRole('dialog', { name: 'Settings' });
-  await expect(settings.getByLabel('Key in use')).toBeVisible();
-  await settings.getByRole('button', { name: 'Done' }).click();
-}
 
 async function switchTo(page: Page, mode: 'Writing' | 'Brainstorm') {
   await page
@@ -38,7 +32,7 @@ test('the Author renames a Conversation, deletes it to Trash and restores it, an
   const page = await app.firstWindow();
   await page.getByRole('button', { name: 'New Project…' }).click();
   await expect(page.getByLabel('Prose')).toBeFocused();
-  await addKey(page);
+  await addAnthropicKey(page);
   await switchTo(page, 'Brainstorm');
   anthropic.calls.push({ reply: ['A sister could pull her back.'] });
   const room = page.getByRole('main', { name: 'Brainstorm' });

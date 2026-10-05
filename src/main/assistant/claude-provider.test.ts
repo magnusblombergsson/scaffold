@@ -270,6 +270,28 @@ describe('claudeProvider', () => {
     expect(calls).toHaveLength(0);
   });
 
+  it('lists the built-in Claude models with their prices, without calling Anthropic', async () => {
+    const provider = claudeProvider({ apiKey: () => null, baseURL });
+
+    const models = await provider.models();
+
+    expect(models.map((model) => model.id)).toContain('claude-opus-5-5');
+    expect(models.find((model) => model.id === 'claude-haiku-4-5')).toEqual({
+      id: 'claude-haiku-4-5',
+      name: 'Haiku 4.5',
+      contextWindow: 200_000,
+      outputLimit: 64_000,
+      price: { input: 1, cached: 0.1, written: 1.25, output: 5 },
+    });
+    expect(calls).toHaveLength(0);
+  });
+
+  it('says the key is rejected when there is none, without calling Anthropic', async () => {
+    const provider = claudeProvider({ apiKey: () => null, baseURL });
+    expect(await provider.status()).toBe('key-rejected');
+    expect(calls).toHaveLength(0);
+  });
+
   it('streams what came before an error partway, then fails typed', async () => {
     answer = (response) => {
       sse(

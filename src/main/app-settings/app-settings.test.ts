@@ -134,13 +134,96 @@ describe('saving', () => {
     });
   });
 
-  it('reads a model this app doesn’t offer as the default', async () => {
+  it('reads a Claude model this app doesn’t offer as the default', async () => {
+    const settings = await load();
+
+    settings.setModel({ provider: 'anthropic', id: 'claude-gone-1' });
+    await settings.flush();
+
+    expect((await load()).model()).toEqual(DEFAULT_MODEL);
+  });
+
+  it('remembers a Model of another Provider', async () => {
     const settings = await load();
 
     settings.setModel({ provider: 'lmstudio', id: 'qwen3-8b' });
     await settings.flush();
 
-    expect((await load()).model()).toEqual(DEFAULT_MODEL);
+    expect((await load()).model()).toEqual({
+      provider: 'lmstudio',
+      id: 'qwen3-8b',
+    });
+  });
+
+  it('has no LM Studio address until the Author adds one, and forgets it when removed', async () => {
+    const settings = await load();
+    expect(settings.lmStudioAddress()).toBeNull();
+
+    settings.setLmStudioAddress('http://localhost:1234');
+    await settings.flush();
+    const reloaded = await load();
+    expect(reloaded.lmStudioAddress()).toBe('http://localhost:1234');
+
+    reloaded.setLmStudioAddress(null);
+    await reloaded.flush();
+    expect((await load()).lmStudioAddress()).toBeNull();
+  });
+
+  it('has no shortlist until the Author chooses one, then remembers it per Provider', async () => {
+    const settings = await load();
+    expect(settings.shortlist('openrouter')).toBeNull();
+
+    const qwen = {
+      id: 'qwen/qwen3-235b',
+      name: 'Qwen3 235B',
+      contextWindow: 131_072,
+      outputLimit: null,
+      price: { input: 0.2, cached: 0.2, written: 0.2, output: 0.6 },
+    };
+    settings.setShortlist('openrouter', [qwen]);
+    settings.setShortlist('anthropic', []);
+    await settings.flush();
+
+    const reloaded = await load();
+    expect(reloaded.shortlist('openrouter')).toEqual([qwen]);
+    expect(reloaded.shortlist('anthropic')).toEqual([]);
+    expect(reloaded.shortlist('lmstudio')).toBeNull();
+  });
+
+  it('reads a bad shortlist as none chosen, and keeps only the Models in it that it can read', async () => {
+    await writeFile(
+      file,
+      JSON.stringify({
+        version: 1,
+        global: {
+          providers: {
+            lmstudio: { address: 7 },
+            shortlists: {
+              openrouter: 'all',
+              lmstudio: [
+                { id: 'qwen3-8b', name: 'Qwen3 8B', contextWindow: 32768 },
+                { name: 'No id' },
+              ],
+            },
+          },
+        },
+        projects: {},
+        recent: [],
+      }),
+    );
+
+    const settings = await load();
+    expect(settings.lmStudioAddress()).toBeNull();
+    expect(settings.shortlist('openrouter')).toBeNull();
+    expect(settings.shortlist('lmstudio')).toEqual([
+      {
+        id: 'qwen3-8b',
+        name: 'Qwen3 8B',
+        contextWindow: 32768,
+        outputLimit: null,
+        price: null,
+      },
+    ]);
   });
 
   it('welcomes the Author until they have been welcomed once', async () => {

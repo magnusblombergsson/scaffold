@@ -47,6 +47,9 @@ export interface Provider {
   stream(request: ProviderRequest): AsyncIterable<ProviderEvent>;
 }
 
+/** Which Provider a Model is reached through. */
+export type ProviderFor = (model: Model) => Provider;
+
 /** A Provider that also says which Models it has, and whether it answers. */
 export interface ListingProvider extends Provider {
   /** Throws a `ProviderError` when the list can't be had. */
@@ -64,4 +67,13 @@ export class ProviderError extends Error {
     super(message, options);
     this.name = 'ProviderError';
   }
+}
+
+/** What a failed key check or listing says of the Provider. */
+export function statusOfFailure(error: unknown): ProviderStatus {
+  if (error instanceof ProviderError) {
+    if (error.kind === 'key') return 'key-rejected';
+    if (error.kind === 'credit') return 'no-credit';
+  }
+  return 'unreachable';
 }

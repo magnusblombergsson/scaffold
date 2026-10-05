@@ -1,6 +1,5 @@
 import Anthropic from '@anthropic-ai/sdk';
-import type { KeyCheck } from '../../shared/api';
-import type { CheckKey } from './key-store';
+import type { ProviderStatus } from '../../shared/models';
 
 const CHECK_TIMEOUT_MS = 15_000;
 
@@ -8,9 +7,9 @@ const CHECK_TIMEOUT_MS = 15_000;
  * Checks a key by listing the models, which costs no tokens. `baseURL` stands
  * in for Anthropic in tests.
  */
-export function anthropicKeyCheck({
-  baseURL,
-}: { baseURL?: string } = {}): CheckKey {
+export function anthropicKeyCheck({ baseURL }: { baseURL?: string } = {}): (
+  key: string,
+) => Promise<ProviderStatus> {
   return async (key) => {
     const client = new Anthropic({
       apiKey: key,
@@ -21,24 +20,24 @@ export function anthropicKeyCheck({
     });
     try {
       await client.models.list({ limit: 1 });
-      return 'ok';
+      return 'connected';
     } catch (error) {
       return checkFromError(error);
     }
   };
 }
 
-function checkFromError(error: unknown): KeyCheck {
+function checkFromError(error: unknown): ProviderStatus {
   // A connection error is an APIError too, so it goes first.
   if (error instanceof Anthropic.APIConnectionError) return 'unreachable';
   if (
     error instanceof Anthropic.AuthenticationError ||
     error instanceof Anthropic.PermissionDeniedError
   ) {
-    return 'invalid';
+    return 'key-rejected';
   }
   // Rate limits are per key, so Anthropic knew it.
-  if (error instanceof Anthropic.RateLimitError) return 'ok';
+  if (error instanceof Anthropic.RateLimitError) return 'connected';
   if (
     error instanceof Anthropic.APIError &&
     (error.status === 402 || error.type === 'billing_error')

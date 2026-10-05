@@ -25,27 +25,82 @@ export type ListedModel = {
   loaded?: boolean;
 };
 
-/** Whether a Provider answers: with the credential given, rejecting it, or not at all. */
-export type ProviderStatus = 'connected' | 'key-rejected' | 'unreachable';
+/**
+ * Whether a Provider answers: with the credential given, rejecting it, taking
+ * it but out of credit, or not at all.
+ */
+export type ProviderStatus =
+  | 'connected'
+  | 'key-rejected'
+  | 'no-credit'
+  | 'unreachable';
 
-/** The Claude models the Author can choose from, in the order offered, with what each costs. */
+export const PROVIDER_NAMES: Record<ProviderId, string> = {
+  anthropic: 'Anthropic',
+  openrouter: 'OpenRouter',
+  lmstudio: 'LM Studio',
+};
+
+/** The Providers in the order offered. */
+export const PROVIDER_IDS: readonly ProviderId[] = PROVIDERS;
+
+/** Where LM Studio's server is unless the Author says otherwise. */
+export const LMSTUDIO_ADDRESS = 'http://localhost:1234';
+
+/**
+ * The Claude models the Author can shortlist, in the order offered, with
+ * what each costs from Anthropic's pricing. The `current` three are
+ * shortlisted until the Author chooses.
+ */
 export const CLAUDE_MODELS = [
+  {
+    id: 'claude-fable-5-1',
+    label: 'Fable 5.1',
+    contextWindow: 1_000_000,
+    outputLimit: 128_000,
+    price: { input: 10, cached: 0.25, written: 12.5, output: 50 },
+    current: false,
+  },
   {
     id: 'claude-opus-5-5',
     label: 'Opus 5.5',
+    contextWindow: 1_000_000,
+    outputLimit: 128_000,
     price: { input: 4, cached: 0.2, written: 5, output: 20 },
+    current: true,
+  },
+  {
+    id: 'claude-sonnet-5-5',
+    label: 'Sonnet 5.5',
+    contextWindow: 1_000_000,
+    outputLimit: 128_000,
+    price: { input: 2, cached: 0.2, written: 2.5, output: 10 },
+    current: false,
   },
   {
     id: 'claude-sonnet-5',
     label: 'Sonnet 5',
+    contextWindow: 1_000_000,
+    outputLimit: 128_000,
     price: { input: 2, cached: 0.2, written: 2.5, output: 10 },
+    current: true,
   },
   {
     id: 'claude-haiku-4-5',
     label: 'Haiku 4.5',
+    contextWindow: 200_000,
+    outputLimit: 64_000,
     price: { input: 1, cached: 0.1, written: 1.25, output: 5 },
+    current: true,
   },
-] as const satisfies readonly { id: string; label: string; price: Price }[];
+] as const satisfies readonly {
+  id: string;
+  label: string;
+  contextWindow: number;
+  outputLimit: number;
+  price: Price;
+  current: boolean;
+}[];
 
 export type ClaudeModelId = (typeof CLAUDE_MODELS)[number]['id'];
 
@@ -80,4 +135,29 @@ export function loggedModel(id: string): Model {
 export function priceOf(model: Model): Price | null {
   if (model.provider !== 'anthropic') return null;
   return CLAUDE_MODELS.find((claude) => claude.id === model.id)?.price ?? null;
+}
+
+/** The built-in Claude models as Anthropic's listing, for the Author to shortlist. */
+export function claudeListing(): ListedModel[] {
+  return CLAUDE_MODELS.map(
+    ({ id, label, contextWindow, outputLimit, price }) => ({
+      id,
+      name: label,
+      contextWindow,
+      outputLimit,
+      price: { ...price },
+    }),
+  );
+}
+
+/** Whether `value` names a Provider. */
+export function isProviderId(value: unknown): value is ProviderId {
+  return (PROVIDERS as readonly unknown[]).includes(value);
+}
+
+/** The Claude models shortlisted until the Author chooses: the current ones. */
+export function currentClaudeModels(): ListedModel[] {
+  return claudeListing().filter((model) =>
+    CLAUDE_MODELS.some((claude) => claude.id === model.id && claude.current),
+  );
 }

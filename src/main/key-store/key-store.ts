@@ -1,10 +1,4 @@
-import type {
-  KeyCheck,
-  KeyKeeping,
-  KeyOptions,
-  KeyResult,
-  KeyStatus,
-} from '../../shared/api';
+import type { KeyKeeping } from '../../shared/api';
 import type { Clock } from '../project-store/clock';
 import type { FileSystem } from '../project-store/file-system';
 import { safeWrite, setAside } from '../project-store/safe-write';
@@ -17,29 +11,35 @@ export type Encryption = {
   decrypt(data: Buffer): string;
 };
 
-/** Asks Anthropic what it makes of a key. */
-export type CheckKey = (key: string) => Promise<KeyCheck>;
-
 export type KeyStoreDeps = {
   fs: FileSystem;
   clock: Clock;
   encryption: Encryption;
-  check: CheckKey;
 };
+
+/** A key as a window may know it: masked, and how it is kept. */
+export type KeyStatus = { masked: string | null; kept: KeyKeeping | null };
+
+/**
+ * Whether to save a key unencrypted where it can't be encrypted; ignored
+ * where it can.
+ */
+export type KeyOptions = { unencrypted: boolean };
 
 /** The key file: the key encrypted, or plain where the Author said so. */
 type KeyFile =
   | { version: 1; encrypted: string }
   | { version: 1; unencrypted: string };
 
-const PREFIX = 'sk-ant-';
+/** The prefixes Anthropic's and OpenRouter's keys start with, which say nothing secret. */
+const PREFIXES = ['sk-ant-', 'sk-or-v1-', 'sk-or-'];
 
 /**
  * A key as the Author may see it: `sk-ant-…abcd`. A key too short to hide
  * its end shows none of it.
  */
 export function maskKey(key: string): string {
-  const prefix = key.startsWith(PREFIX) ? PREFIX : '';
+  const prefix = PREFIXES.find((start) => key.startsWith(start)) ?? '';
   const rest = key.slice(prefix.length);
   return `${prefix}…${rest.length >= 12 ? rest.slice(-4) : ''}`;
 }
@@ -58,7 +58,7 @@ export async function loadKeyStore(
     const kept = readKeyFile(await deps.fs.readFile(file), deps.encryption);
     return new KeyStore(file, kept, deps);
   } catch (error) {
-    console.error("Can't read the API key:", error);
+    console.error(`Can't read the key in ${file}:`, error);
     return new KeyStore(file, null, deps, true);
   }
 }
@@ -80,8 +80,9 @@ function readKeyFile(text: string, encryption: Encryption): KeptKey | null {
 }
 
 /**
- * The Author's Anthropic API key, which stays in main: windows only ever see
- * it masked.
+ * A key or token of the Author's, such as their Anthropic API key, which
+ * stays in main: windows only ever see it masked. It is kept as given;
+ * whether the Provider takes it is for the caller to check.
  */
 export class KeyStore {
   constructor(
@@ -109,7 +110,7 @@ export class KeyStore {
     await setAside(this.deps.fs, this.deps.clock, this.file);
   }
 
-  /** The key for the next call to Claude. */
+  /** The key for the next call. */
   key(): string | null {
     return this.kept?.key ?? null;
   }
@@ -118,21 +119,11 @@ export class KeyStore {
     return {
       masked: this.kept && maskKey(this.kept.key),
       kept: this.kept?.keeping ?? null,
-      canEncrypt: this.deps.encryption.available(),
     };
   }
 
-  /**
-   * Checks the key and keeps it unless Anthropic says it is invalid, as one
-   * Anthropic couldn't be asked about may well be good.
-   */
-  async setKey(
-    entered: string,
-    { unencrypted }: KeyOptions,
-  ): Promise<KeyResult> {
-    const key = entered.trim();
-    const check = key === '' ? 'invalid' : await this.deps.check(key);
-    if (check === 'invalid') return { check, status: this.status() };
+  /** Keeps `key` in place of any before, encrypted where it can be. */
+  async keep(key: string, { unencrypted }: KeyOptions): Promise<void> {
     const keeping = this.keepingFor(unencrypted);
     if (keeping === 'untilQuit') {
       // One saved before mustn't come back at the next launch.
@@ -149,12 +140,12 @@ export class KeyStore {
         this.deps.fs,
         this.deps.clock,
         this.file,
-        `${JSON.stringify(data, null, 2)}\n`,
+        `${JSON.stringify(data, null, 2)}
+`,
       );
     }
     this.kept = { key, keeping };
     this.hasUnreadable = false;
-    return { check, status: this.status() };
   }
 
   private keepingFor(unencrypted: boolean): KeyKeeping {
@@ -162,11 +153,10 @@ export class KeyStore {
     return unencrypted ? 'unencrypted' : 'untilQuit';
   }
 
-  async removeKey(): Promise<KeyStatus> {
+  async remove(): Promise<void> {
     await this.deleteFile();
     this.kept = null;
     this.hasUnreadable = false;
-    return this.status();
   }
 
   private async deleteFile(): Promise<void> {

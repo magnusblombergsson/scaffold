@@ -16,12 +16,10 @@ import type { InterviewFocus, Mode } from '../shared/conversation';
 import type { ReviewCommand } from '../shared/finding';
 import { PROSE_LANGUAGES, type ProseLanguage } from '../shared/project-types';
 import { createConversationEngine } from './assistant/conversation-engine';
-import { claudeProvider } from './assistant/claude-provider';
-import { providersOf } from './assistant/providers';
 import { entryImageOf, imageDataUrl } from './entry-image';
 import { systemClock } from './project-store/clock';
 import type { ProjectStore } from './project-store/project-store';
-import { assistantKey, assistantModel, storeOf } from './shell';
+import { assistantModel, assistantProvider, storeOf } from './shell';
 import { trashConversationQuestion } from './trash-question';
 
 /**
@@ -127,19 +125,11 @@ export function registerProjectIpc(): void {
   );
 }
 
-const providerFor = providersOf({
-  anthropic: claudeProvider({
-    apiKey: assistantKey,
-    // End-to-end tests stand in for Anthropic.
-    baseURL: process.env.SCAFFOLD_ANTHROPIC_URL,
-  }),
-});
-
 /** The engine for the Project of the window `sender` belongs to. */
 function engineOf(sender: WebContents) {
   return createConversationEngine({
     store: storeOfWindow(sender),
-    providerFor,
+    providerFor: assistantProvider,
     model: assistantModel,
     clock: systemClock,
   });

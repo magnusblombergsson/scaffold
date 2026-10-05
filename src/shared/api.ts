@@ -11,7 +11,7 @@ import type {
 } from './project-types';
 import type { ReviewCommand } from './finding';
 import type { ImportBlock, ImportConvention } from './manuscript-import';
-import type { Model } from './models';
+import type { ListedModel, Model, ProviderId, ProviderStatus } from './models';
 import type { Command } from './shortcuts';
 import type { PendingProposal, ProposedValue } from './proposal';
 
@@ -365,36 +365,53 @@ export type RecentProject = {
 };
 
 /**
- * What Anthropic said of a key when it was checked: `unreachable` when it
- * couldn't be asked, as when offline.
- */
-export type KeyCheck = 'ok' | 'invalid' | 'no-credit' | 'unreachable';
-
-/**
- * How the API key is kept: `encrypted` on disk, `unencrypted` on disk because
- * the Author said so, or in memory `untilQuit`.
+ * How a key or token is kept: `encrypted` on disk, `unencrypted` on disk
+ * because the Author said so, or in memory `untilQuit`.
  */
 export type KeyKeeping = 'encrypted' | 'unencrypted' | 'untilQuit';
 
 /**
- * The Author's Anthropic API key as a window may know it, which is never the
- * key itself: `masked` shows only its start and end, as `sk-ant-…abcd`.
+ * A Provider as a window may know it, which never holds its key or token:
+ * `masked` shows only the start and end, as `sk-ant-…abcd`.
  */
-export type KeyStatus = {
+export type ProviderView = {
+  /** Whether the Author has added it: its key, or for LM Studio its address. */
+  added: boolean;
+  /** The key, or LM Studio's token, masked; null when there is none. */
   masked: string | null;
   kept: KeyKeeping | null;
+  /** Where LM Studio's server is; null for the other Providers or before it is added. */
+  address: string | null;
+};
+
+/** Every Provider as a window may know it. */
+export type ProvidersView = {
+  providers: Record<ProviderId, ProviderView>;
   /** Whether this computer can encrypt a key it keeps, which Linux can't without a keyring. */
   canEncrypt: boolean;
 };
 
 /**
- * Whether to save a key unencrypted where it can't be encrypted; ignored where
- * it can.
+ * What the Author entered to add a Provider: its key, or for LM Studio its
+ * address and an optional token. `unencrypted` says to save the secret
+ * unencrypted where it can't be encrypted; ignored where it can.
  */
-export type KeyOptions = { unencrypted: boolean };
+export type ProviderEntry = {
+  secret: string;
+  address?: string;
+  unencrypted: boolean;
+};
 
-/** A key the Author entered: what checking it said, and the key kept now. */
-export type KeyResult = { check: KeyCheck; status: KeyStatus };
+/**
+ * A Provider the Author entered: what checking it said, and every Provider
+ * as kept now. One whose key was rejected isn't kept.
+ */
+export type ProviderResult = { status: ProviderStatus; view: ProvidersView };
+
+/** A Provider's Models for the Author to shortlist, or why it can't list them. */
+export type ModelListing =
+  | { ok: true; models: ListedModel[] }
+  | { ok: false; status: ProviderStatus };
 
 /** Why the Author is welcomed: the first launch, or a saved key that couldn't be read. */
 export type WelcomeReason = 'firstLaunch' | 'keyUnreadable';
@@ -402,24 +419,35 @@ export type WelcomeReason = 'firstLaunch' | 'keyUnreadable';
 /** Settings that hold on this computer for every Project. */
 export interface SettingsApi {
   /**
-   * Why to welcome the Author, if at all; none once they have added a key or
-   * skipped.
+   * Why to welcome the Author, if at all; none once they have added a
+   * Provider or skipped.
    */
   showWelcome(): Promise<WelcomeReason | null>;
   dismissWelcome(): void;
-  keyStatus(): Promise<KeyStatus>;
+  providers(): Promise<ProvidersView>;
+  /** Asks the Provider whether it answers; null when it hasn't been added. */
+  providerStatus(provider: ProviderId): Promise<ProviderStatus | null>;
   /**
-   * Checks the key with Anthropic and keeps it unless it is invalid; the
-   * next call to Claude uses it. Without encryption it is kept until the app
-   * quits, unless `unencrypted` says to save it anyway.
+   * Checks what the Author entered with the Provider and keeps it unless the
+   * key is rejected; the next call uses it. Without encryption a secret is
+   * kept until the app quits, unless `unencrypted` says to save it anyway.
    */
-  setKey(key: string, options: KeyOptions): Promise<KeyResult>;
-  removeKey(): Promise<KeyStatus>;
+  addProvider(
+    provider: ProviderId,
+    entry: ProviderEntry,
+  ): Promise<ProviderResult>;
+  /** Forgets the Provider's key, or LM Studio's address and token. */
+  removeProvider(provider: ProviderId): Promise<ProvidersView>;
   /**
-   * Calls `listener` when the key is added, replaced or removed, from any
+   * Calls `listener` when a Provider is added, replaced or removed, from any
    * window. Returns an unsubscribe function.
    */
-  onKeyStatus(listener: (status: KeyStatus) => void): () => void;
+  onProviders(listener: (view: ProvidersView) => void): () => void;
+  /** The Models the Provider offers to shortlist. */
+  listModels(provider: ProviderId): Promise<ModelListing>;
+  /** The Author's Model shortlist of each Provider. */
+  shortlists(): Promise<Record<ProviderId, ListedModel[]>>;
+  setShortlist(provider: ProviderId, models: ListedModel[]): Promise<void>;
   /** The Model the next call uses. */
   model(): Promise<Model>;
   setModel(model: Model): void;
@@ -592,10 +620,14 @@ export const channel = {
   flushRequest: 'shell:flushRequest',
   showWelcome: 'settings:showWelcome',
   dismissWelcome: 'settings:dismissWelcome',
-  keyStatus: 'settings:keyStatus',
-  setKey: 'settings:setKey',
-  removeKey: 'settings:removeKey',
-  keyStatusChanged: 'settings:keyStatusChanged',
+  providers: 'settings:providers',
+  providerStatus: 'settings:providerStatus',
+  addProvider: 'settings:addProvider',
+  removeProvider: 'settings:removeProvider',
+  providersChanged: 'settings:providersChanged',
+  listModels: 'settings:listModels',
+  shortlists: 'settings:shortlists',
+  setShortlist: 'settings:setShortlist',
   model: 'settings:model',
   setModel: 'settings:setModel',
   flushed: 'shell:flushed',

@@ -3,7 +3,7 @@ import {
   channel,
   type AssistantApi,
   type ProjectApi,
-  type KeyStatus,
+  type ProvidersView,
   type ProjectEvent,
   type SettingsApi,
   type ShellApi,
@@ -132,16 +132,24 @@ const shell: ShellApi = {
 const settings: SettingsApi = {
   showWelcome: () => ipcRenderer.invoke(channel.showWelcome),
   dismissWelcome: () => ipcRenderer.send(channel.dismissWelcome),
-  keyStatus: () => ipcRenderer.invoke(channel.keyStatus),
-  setKey: (key, options) => ipcRenderer.invoke(channel.setKey, key, options),
-  removeKey: () => ipcRenderer.invoke(channel.removeKey),
-  onKeyStatus(listener) {
-    const forward = (_event: unknown, status: KeyStatus) => listener(status);
-    ipcRenderer.on(channel.keyStatusChanged, forward);
+  providers: () => ipcRenderer.invoke(channel.providers),
+  providerStatus: (provider) =>
+    ipcRenderer.invoke(channel.providerStatus, provider),
+  addProvider: (provider, entry) =>
+    ipcRenderer.invoke(channel.addProvider, provider, entry),
+  removeProvider: (provider) =>
+    ipcRenderer.invoke(channel.removeProvider, provider),
+  onProviders(listener) {
+    const forward = (_event: unknown, view: ProvidersView) => listener(view);
+    ipcRenderer.on(channel.providersChanged, forward);
     return () => {
-      ipcRenderer.off(channel.keyStatusChanged, forward);
+      ipcRenderer.off(channel.providersChanged, forward);
     };
   },
+  listModels: (provider) => ipcRenderer.invoke(channel.listModels, provider),
+  shortlists: () => ipcRenderer.invoke(channel.shortlists),
+  setShortlist: (provider, models) =>
+    ipcRenderer.invoke(channel.setShortlist, provider, models),
   model: () => ipcRenderer.invoke(channel.model),
   setModel: (model) => ipcRenderer.send(channel.setModel, model),
 };

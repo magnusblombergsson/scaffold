@@ -1,24 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { answerDialogs, launch, useTempDir } from './app';
+import { addAnthropicKey, answerDialogs, launch, useTempDir } from './app';
 import { useFakeAnthropic } from './fake-anthropic';
 
 const tempDir = useTempDir();
 const anthropic = useFakeAnthropic();
-
-async function addKey(page: Page) {
-  const assistant = page.getByRole('complementary', { name: 'Assistant' });
-  await assistant.getByRole('button', { name: 'Add API key' }).click();
-  await page
-    .getByRole('textbox', { name: 'API key' })
-    .fill('sk-ant-api03-good-abcd');
-  await page.getByRole('button', { name: 'Check and save' }).click();
-  const settings = page.getByRole('dialog', { name: 'Settings' });
-  await expect(settings.getByLabel('Key in use')).toBeVisible();
-  await settings.getByRole('button', { name: 'Done' }).click();
-  return assistant;
-}
 
 /** Replaces the text of an editor field. */
 async function fill(page: Page, label: string, text: string) {
@@ -46,7 +33,7 @@ test('the Assistant proposes changes to an Entry, and the Author accepts, edits 
   const page = await app.firstWindow();
   await page.getByRole('button', { name: 'New Project…' }).click();
   await expect(page.getByLabel('Prose')).toBeFocused();
-  const assistant = await addKey(page);
+  const assistant = await addAnthropicKey(page);
 
   await page.getByRole('tab', { name: 'Story Bible' }).click();
   await page.getByRole('button', { name: 'New Entry' }).click();
@@ -150,7 +137,7 @@ test('the Assistant proposes a new Entry and a Scene’s Outline, and the Author
   await fill(page, 'Outline', '- She waits.');
   await page.keyboard.press('ControlOrMeta+s');
   await expect(page.locator('.save-status.confirmed')).toBeVisible();
-  const assistant = await addKey(page);
+  const assistant = await addAnthropicKey(page);
   const { tree } = JSON.parse(
     await readFile(path.join(projectPath, 'project.json'), 'utf8'),
   ) as { tree: { chapters: { scenes: { id: string }[] }[] } };
@@ -229,7 +216,7 @@ test('the Author undoes accepted Proposals from their cards, while their targets
   const page = await app.firstWindow();
   await page.getByRole('button', { name: 'New Project…' }).click();
   await expect(page.getByLabel('Prose')).toBeFocused();
-  const assistant = await addKey(page);
+  const assistant = await addAnthropicKey(page);
   await page.getByRole('tab', { name: 'Story Bible' }).click();
   await page.getByRole('button', { name: 'New Entry' }).click();
   await page.getByRole('menuitem', { name: 'Character', exact: true }).click();
@@ -340,7 +327,7 @@ test('the Author appends a Replace Proposal, stale or edited, and undoes it', as
   const page = await app.firstWindow();
   await page.getByRole('button', { name: 'New Project…' }).click();
   await expect(page.getByLabel('Prose')).toBeFocused();
-  const assistant = await addKey(page);
+  const assistant = await addAnthropicKey(page);
   await page.getByRole('tab', { name: 'Story Bible' }).click();
   await page.getByRole('button', { name: 'New Entry' }).click();
   await page.getByRole('menuitem', { name: 'Character', exact: true }).click();
@@ -409,7 +396,7 @@ test('a Proposal shown from an Entry opens at its card in the Conversation', asy
   const page = await app.firstWindow();
   await page.getByRole('button', { name: 'New Project…' }).click();
   await expect(page.getByLabel('Prose')).toBeFocused();
-  const assistant = await addKey(page);
+  const assistant = await addAnthropicKey(page);
   await page.getByRole('tab', { name: 'Story Bible' }).click();
   await page.getByRole('button', { name: 'New Entry' }).click();
   await page.getByRole('menuitem', { name: 'Place', exact: true }).click();

@@ -1,7 +1,7 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { answerDialogs, launch, useTempDir } from './app';
+import { addAnthropicKey, answerDialogs, launch, useTempDir } from './app';
 import { useFakeAnthropic } from './fake-anthropic';
 
 // The never-Prose guard (MVP spec §4): no UI path puts what the Assistant
@@ -10,19 +10,6 @@ import { useFakeAnthropic } from './fake-anthropic';
 
 const tempDir = useTempDir();
 const anthropic = useFakeAnthropic();
-
-async function addKey(page: Page) {
-  const assistant = page.getByRole('complementary', { name: 'Assistant' });
-  await assistant.getByRole('button', { name: 'Add API key' }).click();
-  await page
-    .getByRole('textbox', { name: 'API key' })
-    .fill('sk-ant-api03-good-abcd');
-  await page.getByRole('button', { name: 'Check and save' }).click();
-  const settings = page.getByRole('dialog', { name: 'Settings' });
-  await expect(settings.getByLabel('Key in use')).toBeVisible();
-  await settings.getByRole('button', { name: 'Done' }).click();
-  return assistant;
-}
 
 /** Replaces the text of an editor field. */
 async function fill(page: Page, label: string, text: string) {
@@ -132,7 +119,7 @@ test('nothing the Assistant writes reaches the Manuscript, in any Mode or room',
   const page = await app.firstWindow();
   await page.getByRole('button', { name: 'New Project…' }).click();
   await page.getByLabel('Prose').pressSequentially(AUTHORED);
-  const assistant = await addKey(page);
+  const assistant = await addAnthropicKey(page);
   const [sceneFile] = await readdir(path.join(projectPath, 'scenes'));
   const sceneId = path.basename(sceneFile, '.md');
 
