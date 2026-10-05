@@ -420,6 +420,33 @@ export function canAppend(change: ProposalChange): boolean {
 }
 
 /**
+ * Where a Proposal's title takes the Author: a field of an Entry, a new
+ * Entry, or an Outline of a Scene, a Chapter or the Project.
+ */
+export type ProposalTarget =
+  | { kind: 'entry'; entryId: string; field?: ProposalField }
+  | { kind: 'outline'; outlineId: string };
+
+/**
+ * Where a Proposal's title takes the Author, decided or not; null while
+ * there is nowhere to go: a new Entry not accepted, or a target in Trash,
+ * gone, or without the field.
+ */
+export function proposalTarget(proposal: ProposalView): ProposalTarget | null {
+  const { state } = proposal;
+  if (state.kind === 'pending' && 'orphaned' in state) return null;
+  if (proposal.kind === 'new-entry') {
+    return state.kind === 'accepted'
+      ? { kind: 'entry', entryId: proposal.entryId }
+      : null;
+  }
+  if (proposal.kind === 'outline') {
+    return { kind: 'outline', outlineId: proposal.outlineId };
+  }
+  return { kind: 'entry', entryId: proposal.entryId, field: proposal.field };
+}
+
+/**
  * `current` with `added` appended, as the Author's Append on a Proposal: a
  * Description, Appearance or Outline gets the text on a line of its own,
  * other text after ", ", and a list the items it doesn't hold yet, whatever

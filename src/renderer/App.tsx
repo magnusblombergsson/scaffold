@@ -26,6 +26,7 @@ import {
   type UnitValue,
 } from '../shared/project-types';
 import { MODE_LABELS, type Mode } from '../shared/conversation';
+import type { ProposalTarget, ProposalView } from '../shared/proposal';
 import type { ImportConvention } from '../shared/manuscript-import';
 import { upgradedMessage } from '../shared/format-gate';
 import {
@@ -52,6 +53,8 @@ import { OverviewPane } from './OverviewPane';
 import { usePaneCycle } from './pane-focus';
 import { PanelResizer, type PaneSize } from './PanelResizer';
 import { ProjectSettingsDialog } from './ProjectSettingsDialog';
+import { ProposalTargetContext } from './ProposalCard';
+import { ProposalPeek, type TargetPeek } from './ProposalPeek';
 import { PinnedNotes } from './PinnedNotes';
 import { applyChange, togglePin, withoutTrashed } from './pinned-notes';
 import {
@@ -64,6 +67,7 @@ import { MentionPeek } from './MentionPeek';
 import { MAC } from './platform';
 import { flushPendingEdits } from './pending-edits';
 import { ReadOnlyContext } from './read-only';
+import type { Reveal } from './reveal';
 import { SaveFailureBanner, useSaveStatus } from './SaveStatus';
 import { SceneEditor, type QuoteJump } from './SceneEditor';
 import { SettingsDialog } from './SettingsDialog';
@@ -316,6 +320,7 @@ function ProjectView({
 
   function select(selection: Selection) {
     setJump(undefined);
+    setRevealing(null);
     setFocusName(null);
     setResolving(null);
     setPeek(null);
@@ -365,6 +370,7 @@ function ProjectView({
   function switchMode(next: Mode) {
     flushPendingEdits();
     setPeek(null);
+    setTargetPeek(null);
     setMode(next);
     setVisited((visited) => new Set(visited).add(next));
   }
@@ -380,6 +386,74 @@ function ProjectView({
     switchMode('writing');
     showEntry(id);
   }
+
+  /**
+   * The Entry or Outline a Proposal's title went to in Writing, by its id,
+   * and the field there to go to.
+   */
+  const [revealing, setRevealing] = useState<{
+    id: string;
+    reveal: Reveal;
+  } | null>(null);
+  const revealCount = useRef(0);
+  /** What the Author goes to in its unit, if it is `id`'s. */
+  const revealIn = (id: string) =>
+    revealing?.id === id ? revealing.reveal : undefined;
+
+  /**
+   * Goes to a Proposal's target in Writing: its Entry, at the field, or the
+   * Outline of its Scene, Chapter or the Project. The Conversation stays
+   * open beside it. Nothing happens once the target is in Trash or gone.
+   */
+  function goToTarget(target: ProposalTarget, proposalId: string) {
+    if (!reachable(target)) return;
+    const count = ++revealCount.current;
+    if (target.kind === 'entry') {
+      setTab('bible');
+      select({ kind: 'entry', id: target.entryId });
+      setRevealing({
+        id: target.entryId,
+        reveal: { field: target.field, proposalId, count },
+      });
+      return;
+    }
+    const selection = selectionOf(
+      { kind: 'outline', id: target.outlineId },
+      manuscript,
+    );
+    setTab('manuscript');
+    select(selection);
+    if (selection.kind === 'scene' && !outlineNotesOpen) toggleOutlineNotes();
+    setRevealing({ id: target.outlineId, reveal: { proposalId, count } });
+  }
+
+  /** Whether a Proposal's target is still in the Story Bible or Manuscript. */
+  function reachable(target: ProposalTarget): boolean {
+    if (target.kind === 'entry') {
+      return entries.some((entry) => entry.id === target.entryId);
+    }
+    const id = target.outlineId;
+    return (
+      id === PROJECT_OUTLINE ||
+      manuscript.chapters.some((chapter) => chapter.id === id) ||
+      allScenes(manuscript).some(({ scene }) => scene.id === id)
+    );
+  }
+
+  /** The Proposal target the Author Peeks at from its title, in a room. */
+  const [targetPeek, setTargetPeek] = useState<TargetPeek | null>(null);
+  const closeTargetPeek = useCallback(() => setTargetPeek(null), []);
+  const peekAtTarget = (
+    proposal: ProposalView,
+    target: ProposalTarget,
+    anchor: DOMRect,
+  ) =>
+    setTargetPeek({
+      target,
+      proposalId: proposal.id,
+      name: proposal.name,
+      anchor,
+    });
 
   function toggleOutlineNotes() {
     setOutlineNotesOpen(!outlineNotesOpen);
@@ -807,30 +881,32 @@ function ProjectView({
         />
         {error && <p role="alert">{error}</p>}
         <div className="project-body">
-          {visited.has('brainstorm') && (
-            <div className="room" hidden={mode !== 'brainstorm'}>
-              <BrainstormRoom
-                active={mode === 'brainstorm'}
-                names={{ manuscript, entries }}
-                pane={pane}
-                onAddKey={onAddKey}
-                onOpenEntry={openEntryInWriting}
-                onChange={change}
-              />
-            </div>
-          )}
-          {visited.has('interview') && (
-            <div className="room" hidden={mode !== 'interview'}>
-              <InterviewRoom
-                active={mode === 'interview'}
-                names={{ manuscript, entries }}
-                pane={pane}
-                onAddKey={onAddKey}
-                onOpenEntry={openEntryInWriting}
-                onChange={change}
-              />
-            </div>
-          )}
+          <ProposalTargetContext.Provider value={peekAtTarget}>
+            {visited.has('brainstorm') && (
+              <div className="room" hidden={mode !== 'brainstorm'}>
+                <BrainstormRoom
+                  active={mode === 'brainstorm'}
+                  names={{ manuscript, entries }}
+                  pane={pane}
+                  onAddKey={onAddKey}
+                  onOpenEntry={openEntryInWriting}
+                  onChange={change}
+                />
+              </div>
+            )}
+            {visited.has('interview') && (
+              <div className="room" hidden={mode !== 'interview'}>
+                <InterviewRoom
+                  active={mode === 'interview'}
+                  names={{ manuscript, entries }}
+                  pane={pane}
+                  onAddKey={onAddKey}
+                  onOpenEntry={openEntryInWriting}
+                  onChange={change}
+                />
+              </div>
+            )}
+          </ProposalTargetContext.Provider>
           {visited.has('writing') && (
             <div className="room" hidden={mode !== 'writing'} ref={writingRoom}>
               <aside className="left-pane" style={{ width: binderWidth }}>
@@ -993,6 +1069,7 @@ function ProjectView({
                   <ProjectCorkboard
                     manuscript={manuscript}
                     language={language}
+                    reveal={revealIn(PROJECT_OUTLINE)}
                     onOpenScene={(id) => select({ kind: 'scene', id })}
                     onOpenChapter={(id) => select({ kind: 'chapter', id })}
                   />
@@ -1010,6 +1087,7 @@ function ProjectView({
                         ? focusName.count
                         : undefined
                     }
+                    reveal={revealIn(openEntry.id)}
                     onType={(type) =>
                       change(
                         () => window.project.setEntryType(openEntry.id, type),
@@ -1042,6 +1120,7 @@ function ProjectView({
                   <ChapterCorkboard
                     chapter={openChapter}
                     language={language}
+                    reveal={revealIn(openChapter.id)}
                     onOpenScene={(id) => select({ kind: 'scene', id })}
                   />
                 </main>
@@ -1084,6 +1163,7 @@ function ProjectView({
                         unitId={open.scene.id}
                         language={language}
                         withNotes
+                        reveal={revealIn(open.scene.id)}
                       />
                     )}
                   </section>
@@ -1092,6 +1172,8 @@ function ProjectView({
                     key={language}
                     sceneId={open.scene.id}
                     language={language}
+                    // Focus goes to the Outline instead, as a Proposal's title asks.
+                    autofocus={!revealIn(open.scene.id)}
                     focusAt={
                       jump?.sceneId === open.scene.id ? jump.cursor : undefined
                     }
@@ -1111,16 +1193,20 @@ function ProjectView({
                 min={220}
                 max={640}
               />
-              <AssistantPanel
-                active={mode === 'writing'}
-                width={pane('assistant').width}
-                onAddKey={onAddKey}
-                sceneId={open && !open.scene.missing ? open.scene.id : null}
-                names={{ manuscript, entries }}
-                show={showProposal}
-                onQuote={showQuote}
-                onChange={change}
-              />
+              <ProposalTargetContext.Provider
+                value={(proposal, target) => goToTarget(target, proposal.id)}
+              >
+                <AssistantPanel
+                  active={mode === 'writing'}
+                  width={pane('assistant').width}
+                  onAddKey={onAddKey}
+                  sceneId={open && !open.scene.missing ? open.scene.id : null}
+                  names={{ manuscript, entries }}
+                  show={showProposal}
+                  onQuote={showQuote}
+                  onChange={change}
+                />
+              </ProposalTargetContext.Provider>
             </div>
           )}
         </div>
@@ -1160,6 +1246,16 @@ function ProjectView({
               )
             }
             onClose={closePeek}
+          />
+        )}
+        {targetPeek && mode !== 'writing' && (
+          <ProposalPeek
+            peek={targetPeek}
+            onOpenInWriting={() => {
+              switchMode('writing');
+              goToTarget(targetPeek.target, targetPeek.proposalId);
+            }}
+            onClose={closeTargetPeek}
           />
         )}
         {/* Writing only: hidden in the other Modes, back on return. */}

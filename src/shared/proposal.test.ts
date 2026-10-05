@@ -11,11 +11,14 @@ import {
   outlineChangeOf,
   proposalBlock,
   proposalOf,
+  proposalTarget,
   replyText,
   splitReply,
   withField,
   type ProposalChange,
   type ProposalField,
+  type ProposalState,
+  type ProposalView,
 } from './proposal';
 
 const anna: EntryValue = {
@@ -528,5 +531,73 @@ describe('canAppend', () => {
         proposed: 'Older.',
       }),
     ).toBe(false);
+  });
+});
+
+describe('proposalTarget', () => {
+  const pending: ProposalState = { kind: 'pending', current: '', stale: false };
+  const view = (
+    change: ProposalChange,
+    state: ProposalState = pending,
+  ): ProposalView => ({ ...change, id: 'p1', name: 'Anna', state });
+
+  it('is the field of an Entry, decided or not', () => {
+    const change: ProposalChange = {
+      kind: 'field',
+      entryId: 'anna',
+      field: 'voice.traits',
+      base: '',
+      proposed: 'Clipped',
+    };
+    for (const state of [
+      pending,
+      { kind: 'accepted', edited: false },
+      { kind: 'rejected' },
+    ] satisfies ProposalState[]) {
+      expect(proposalTarget(view(change, state))).toEqual({
+        kind: 'entry',
+        entryId: 'anna',
+        field: 'voice.traits',
+      });
+    }
+  });
+
+  it('is an Outline, of a Scene, a Chapter or the Project', () => {
+    expect(
+      proposalTarget(
+        view({
+          kind: 'outline',
+          outlineId: 's1',
+          operation: 'append',
+          proposed: '- x',
+        }),
+      ),
+    ).toEqual({ kind: 'outline', outlineId: 's1' });
+  });
+
+  it('is a new Entry only once it is accepted', () => {
+    const change: ProposalChange = {
+      kind: 'new-entry',
+      entryId: 'e1',
+      proposed: { type: 'item', name: 'Key', description: '' },
+    };
+    expect(proposalTarget(view(change))).toBeNull();
+    expect(proposalTarget(view(change, { kind: 'rejected' }))).toBeNull();
+    expect(
+      proposalTarget(view(change, { kind: 'accepted', edited: false })),
+    ).toEqual({ kind: 'entry', entryId: 'e1' });
+  });
+
+  it('is out of reach while its target is in Trash, gone, or without the field', () => {
+    for (const orphaned of ['trashed', 'gone', 'field'] as const) {
+      expect(
+        proposalTarget(
+          view(
+            { kind: 'outline', outlineId: 's1', base: '', proposed: 'x' },
+            { kind: 'pending', orphaned },
+          ),
+        ),
+      ).toBeNull();
+    }
   });
 });

@@ -1630,6 +1630,31 @@ h2.binder-title > button:hover::after {
   text-decoration: underline;
 }
 
+/* A Proposal's target, Peeked at from a room: going to it in Writing. */
+.peek-open-in-writing {
+  display: block;
+  margin-top: 0.75rem;
+  padding-top: 0.5rem;
+  width: 100%;
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  color: var(--accent);
+  background: transparent;
+  border: none;
+  border-top: 1px solid var(--line);
+  cursor: pointer;
+}
+
+.peek-open-in-writing:hover {
+  text-decoration: underline;
+}
+
+.peek-gone {
+  margin: 0;
+  color: var(--muted);
+}
+
 /* The Pinned notes float over everything in Writing, the Overview pane too;
    each stacks within this layer, the one used last on top. */
 .pinned-notes {
@@ -2197,6 +2222,13 @@ button.finding-quote:hover {
   font-weight: 600;
 }
 
+/* A title that goes to the Proposal's target, as a link. */
+.proposal-title-link {
+  font-size: inherit;
+  font-weight: inherit;
+  text-align: left;
+}
+
 .proposal-decided {
   margin: 0;
   font-size: 0.9em;
@@ -2311,6 +2343,10 @@ button.finding-quote:hover {
   border: 1px dashed var(--line);
   border-radius: 6px;
   color: var(--muted);
+}
+
+.ghost-value.highlighted {
+  outline: 2px solid var(--accent);
 }
 
 .ghost-text {

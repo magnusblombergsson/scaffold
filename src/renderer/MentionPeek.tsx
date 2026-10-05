@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { EntryValue } from '../shared/project-types';
 import { PeekCard } from './PeekCard';
 import type { MentionClick } from './mention-highlight';
@@ -27,7 +27,6 @@ export function MentionPeek({
   onClose(): void;
 }) {
   const [entries, setEntries] = useState<EntryValue[] | null>(null);
-  const peekRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let current = true;
@@ -44,6 +43,44 @@ export function MentionPeek({
     };
   }, [peek]);
 
+  return (
+    <PeekFrame label="Story Bible peek" anchor={peek.anchor} onClose={onClose}>
+      {entries?.map((entry) => (
+        <PeekCard
+          key={entry.id}
+          entry={entry}
+          onOpen={onOpen}
+          pin={{
+            pinned: pinned.includes(entry.id),
+            toggle(entryId, card) {
+              onTogglePin(entryId, card);
+              if (entries.length === 1 && !pinned.includes(entryId)) {
+                onClose();
+              }
+            },
+          }}
+        />
+      ))}
+    </PeekFrame>
+  );
+}
+
+/**
+ * Where a Peek's cards float, below `anchor` and within the window. Escape,
+ * a click elsewhere, or scrolling closes it.
+ */
+export function PeekFrame({
+  label,
+  anchor,
+  onClose,
+  children,
+}: {
+  label: string;
+  anchor: DOMRect;
+  onClose(): void;
+  children: ReactNode;
+}) {
+  const peekRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === 'Escape') onClose();
@@ -62,7 +99,6 @@ export function MentionPeek({
     };
   }, [onClose]);
 
-  const { anchor } = peek;
   const left = Math.max(
     8,
     Math.min(anchor.left, window.innerWidth - PEEK_WIDTH - 8),
@@ -72,25 +108,10 @@ export function MentionPeek({
       ref={peekRef}
       className="mention-peek"
       role="dialog"
-      aria-label="Story Bible peek"
+      aria-label={label}
       style={{ top: anchor.bottom + 4, left, width: PEEK_WIDTH }}
     >
-      {entries?.map((entry) => (
-        <PeekCard
-          key={entry.id}
-          entry={entry}
-          onOpen={onOpen}
-          pin={{
-            pinned: pinned.includes(entry.id),
-            toggle(entryId, card) {
-              onTogglePin(entryId, card);
-              if (entries.length === 1 && !pinned.includes(entryId)) {
-                onClose();
-              }
-            },
-          }}
-        />
-      ))}
+      {children}
     </div>
   );
 }

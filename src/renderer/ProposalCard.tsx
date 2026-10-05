@@ -1,4 +1,4 @@
-import { useContext, useState } from 'react';
+import { createContext, useContext, useState } from 'react';
 import {
   ENTRY_TYPE_LABELS,
   ENTRY_TYPES,
@@ -17,12 +17,14 @@ import {
   isAppending,
   isChoiceField,
   orphanedText,
+  proposalTarget,
   textDiff,
   textValue,
   type DiffPart,
   type FieldValue,
   type NewEntry,
   type ProposalField,
+  type ProposalTarget,
   type ProposalView,
   type ProposedValue,
 } from '../shared/proposal';
@@ -46,6 +48,42 @@ export function proposalTitle(proposal: ProposalView): string {
 }
 
 /**
+ * What clicking a Proposal's title does where its card is: in Writing, go
+ * to its target; in Brainstorm and Interview, Peek at it below `anchor`,
+ * the title's place. Unset, a title is plain.
+ */
+export const ProposalTargetContext = createContext<
+  | ((proposal: ProposalView, target: ProposalTarget, anchor: DOMRect) => void)
+  | null
+>(null);
+
+/** A Proposal's title, a link to its target while it has one to go to. */
+function Title({
+  proposal,
+  as: Tag,
+}: {
+  proposal: ProposalView;
+  as: 'header' | 'span';
+}) {
+  const goTo = useContext(ProposalTargetContext);
+  const title = proposalTitle(proposal);
+  const target = proposalTarget(proposal);
+  if (!goTo || !target) return <Tag className="proposal-title">{title}</Tag>;
+  return (
+    <Tag className="proposal-title">
+      <button
+        className="link-button proposal-title-link"
+        onClick={(event) =>
+          goTo(proposal, target, event.currentTarget.getBoundingClientRect())
+        }
+      >
+        {title}
+      </button>
+    </Tag>
+  );
+}
+
+/**
  * What the Author edits a proposed value as, until accepted or cancelled: a
  * field's or an Outline's text, or a new Entry's type, name and description.
  */
@@ -61,7 +99,8 @@ type Draft = string | NewEntry;
  * current value too, in warning style; an orphaned one can only be
  * rejected. Decided, it collapses to a line; an accepted one offers Undo,
  * disabled with the reason while its target no longer holds what the accept
- * wrote. Nothing is decided or undone in a read-only Project.
+ * wrote. Nothing is decided or undone in a read-only Project. Its title
+ * goes to its target, as `ProposalTargetContext` has it.
  */
 export function ProposalCard({
   conversationId,
@@ -111,7 +150,7 @@ export function ProposalCard({
         aria-label={`Proposal: ${title}`}
       >
         <p className="proposal-decided">
-          <span className="proposal-title">{title}</span>{' '}
+          <Title proposal={proposal} as="span" />{' '}
           {state.kind === 'accepted'
             ? state.appended
               ? '✓ Appended'
@@ -181,7 +220,7 @@ export function ProposalCard({
         .join(' ')}
       aria-label={`Proposal: ${title}`}
     >
-      <header className="proposal-title">{title}</header>
+      <Title proposal={proposal} as="header" />
       {orphaned ? (
         <p className="proposal-warning">
           {orphanedText(proposal, orphaned)} This Proposal can only be rejected.

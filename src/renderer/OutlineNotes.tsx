@@ -5,6 +5,7 @@ import type {
   ProseLanguage,
 } from '../shared/project-types';
 import { MentionHighlight } from './mention-highlight';
+import { useReveal, type Reveal } from './reveal';
 import { docToText, plainTextExtensions, textToDoc } from './plain-text-editor';
 import { UnitEditor } from './UnitEditor';
 
@@ -12,18 +13,23 @@ type Loaded = { outline: OutlineValue; notes: NotesValue | null };
 
 /**
  * The Outline and Notes of a Chapter or Scene, or the Project Outline,
- * which has no Notes. Each autosaves on its own.
+ * which has no Notes. Each autosaves on its own. A Proposal's title in
+ * Writing brings the Author to the Outline, focused.
  */
 export function OutlineNotes({
   unitId,
   language,
   withNotes,
+  reveal,
 }: {
   unitId: string;
   language: ProseLanguage;
   withNotes: boolean;
+  /** Set to go to the Outline, as a Proposal's title asks. */
+  reveal?: Reveal;
 }) {
   const [loaded, setLoaded] = useState<Loaded | null>(null);
+  const fields = useRef<HTMLDivElement>(null);
   /** The Outline's metadata, which the Outline editor doesn't show, as main last had it. */
   const meta = useRef<OutlineValue['meta']>({});
 
@@ -53,11 +59,14 @@ export function OutlineNotes({
     };
   }, [unitId, withNotes]);
 
+  // The Outline is the first field.
+  useReveal(fields, reveal, loaded !== null, '.plain-text-field');
+
   if (!loaded)
     return <div className="outline-notes-fields loading" aria-busy="true" />;
   const { outline, notes } = loaded;
   return (
-    <div className="outline-notes-fields">
+    <div className="outline-notes-fields" ref={fields}>
       <PlainTextField
         label="Outline"
         unitKey={`outline:${unitId}`}

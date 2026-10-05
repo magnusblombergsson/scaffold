@@ -95,20 +95,21 @@ function controlsIn(messages: Locator): Promise<string[]> {
 }
 
 /**
- * Checks the messages have no control but deciding Proposals, retrying, and
- * Finding quotes, which only show a line in its Scene, then accepts every
- * Proposal.
+ * Checks the messages have no control but deciding Proposals, retrying,
+ * Finding quotes, which only show a line in its Scene, and Proposal titles,
+ * which only go to their target, then accepts every Proposal.
  */
 async function decideAll(messages: Locator) {
-  const quotes = await messages
-    .locator('button.finding-quote')
-    .allTextContents();
-  const controls = await controlsIn(messages);
-  expect(
-    controls.filter(
-      (c) => !ALLOWED_CONTROLS.includes(c) && !quotes.includes(c),
-    ),
-  ).toEqual([]);
+  /** The controls not allowed, by what they say. */
+  const disallowed = async () => {
+    const goes = await messages
+      .locator('button.finding-quote, button.proposal-title-link')
+      .allTextContents();
+    return (await controlsIn(messages)).filter(
+      (c) => !ALLOWED_CONTROLS.includes(c) && !goes.includes(c),
+    );
+  };
+  expect(await disallowed()).toEqual([]);
 
   // A card's first of these: Accept, or the one button of an Append or an Add.
   const decide = { name: /^(Accept|Append|Add)$/ };
@@ -119,12 +120,9 @@ async function decideAll(messages: Locator) {
     if ((await button.count()) > 0) await button.click();
   }
   await expect(messages.getByRole('button', decide)).toHaveCount(0);
-  // Undo is the only control an accepted Proposal adds.
-  expect(
-    (await controlsIn(messages)).filter(
-      (c) => !ALLOWED_CONTROLS.includes(c) && !quotes.includes(c),
-    ),
-  ).toEqual([]);
+  // Undo, and a new Entry's title, are the only controls an accepted
+  // Proposal adds.
+  expect(await disallowed()).toEqual([]);
 }
 
 test('nothing the Assistant writes reaches the Manuscript, in any Mode or room', async () => {

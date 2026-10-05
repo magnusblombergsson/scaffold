@@ -7,26 +7,35 @@ import {
   type ProseLanguage,
 } from '../shared/project-types';
 import { OutlineNotes } from './OutlineNotes';
+import type { Reveal } from './reveal';
 import { UNPLACED } from './overview';
 
 /**
  * A Chapter as index cards: its own Outline and Notes in a wide card, then
- * its Scenes as numbered cards, each editable in place.
+ * its Scenes as numbered cards, each editable in place. `reveal` goes to
+ * the Chapter's Outline.
  */
 export function ChapterCorkboard({
   chapter,
   language,
+  reveal,
   onOpenScene,
 }: {
   chapter: ManuscriptChapter;
   language: ProseLanguage;
+  reveal?: Reveal;
   onOpenScene(id: string): void;
 }) {
   return (
     <div className="corkboard">
       <h2 className="centre-title">{chapter.title}</h2>
       <article className="card wide own" aria-label={chapter.title}>
-        <OutlineNotes unitId={chapter.id} language={language} withNotes />
+        <OutlineNotes
+          unitId={chapter.id}
+          language={language}
+          withNotes
+          reveal={reveal}
+        />
       </article>
       <div className="scene-cards">
         <SceneCards
@@ -43,15 +52,18 @@ export function ChapterCorkboard({
  * The Project Outline in a wide card, then a lane per Chapter: the
  * Chapter's card, opening sideways to its Scenes' cards. The Unplaced Scenes
  * come last, as a lane of their own. Lanes start with their Scenes hidden.
+ * `reveal` goes to the Project Outline.
  */
 export function ProjectCorkboard({
   manuscript,
   language,
+  reveal,
   onOpenScene,
   onOpenChapter,
 }: {
   manuscript: Manuscript;
   language: ProseLanguage;
+  reveal?: Reveal;
   onOpenScene(id: string): void;
   onOpenChapter(id: string): void;
 }) {
@@ -74,6 +86,7 @@ export function ProjectCorkboard({
           unitId={PROJECT_OUTLINE}
           language={language}
           withNotes={false}
+          reveal={reveal}
         />
       </article>
       <div className="corkboard-heading">

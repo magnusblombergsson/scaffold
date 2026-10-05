@@ -14,14 +14,16 @@ import { UnitEditor } from './UnitEditor';
 export type QuoteJump = { text: string; count: number };
 
 /**
- * Loads a Scene's Prose, then hands it to the editor. `focusAt` puts the
- * cursor there, `quote` selects the quote where it is, and `onCursor` hears
+ * Loads a Scene's Prose, then hands it to the editor, which takes focus
+ * unless `autofocus` is false, as while focus goes to its Outline.
+ * `focusAt` puts the cursor there, `quote` selects the quote where it is, and `onCursor` hears
  * where the Author moves it. `onProse` hears the Prose as it changes, and
  * `onSelection` the text selected in it.
  */
 export function SceneEditor({
   sceneId,
   language,
+  autofocus = true,
   focusAt,
   quote,
   onCursor,
@@ -30,6 +32,7 @@ export function SceneEditor({
 }: {
   sceneId: string;
   language: ProseLanguage;
+  autofocus?: boolean;
   focusAt?: number;
   quote?: QuoteJump;
   onCursor?(position: number): void;
@@ -79,7 +82,7 @@ export function SceneEditor({
         spellcheck: 'true',
         lang: language,
       }}
-      autofocus
+      autofocus={autofocus}
       focusAt={focusAt}
       select={select}
       onCursor={onCursor}
