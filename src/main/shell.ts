@@ -277,13 +277,27 @@ function rememberOpenProjects(): void {
 }
 
 function openedProject(store: ProjectStore): OpenedProject {
-  const { lastSceneId, cursor, panelWidths, outlineNotesOpen, overviewOpen } =
-    settings.project(store.id);
+  const {
+    lastSceneId,
+    cursor,
+    panelWidths,
+    outlineNotesOpen,
+    overviewOpen,
+    pinnedNotes,
+  } = settings.project(store.id);
   return {
     displayName: store.displayName,
     language: store.language,
+    foldedNoteImage: store.foldedNoteImage,
     manuscript: store.manuscript(),
-    view: { lastSceneId, cursor, panelWidths, outlineNotesOpen, overviewOpen },
+    view: {
+      lastSceneId,
+      cursor,
+      panelWidths,
+      outlineNotesOpen,
+      overviewOpen,
+      pinnedNotes,
+    },
     sessions: store.sessionNotice(),
     dropped: store.takeDropped(),
     readOnly: store.readOnly(),

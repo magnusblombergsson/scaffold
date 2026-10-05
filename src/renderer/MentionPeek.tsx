@@ -7,16 +7,23 @@ const PEEK_WIDTH = 340;
 
 /**
  * The Peek: a shortened card for each Entry a clicked highlight names, below
- * it, each with Read more and an icon that opens the full Entry. Escape, a
- * click elsewhere, or scrolling the highlight away closes it.
+ * it, each with Read more, an icon that opens the full Entry and one that
+ * pins it, or unpins it. Escape, a click elsewhere, or scrolling the
+ * highlight away closes it; so does pinning its only Entry, whose Pinned
+ * note is then where it was.
  */
 export function MentionPeek({
   peek,
+  pinned,
   onOpen,
+  onTogglePin,
   onClose,
 }: {
   peek: MentionClick;
+  /** The ids of the Entries pinned. */
+  pinned: readonly string[];
   onOpen(entryId: string): void;
+  onTogglePin(entryId: string, card: DOMRect): void;
   onClose(): void;
 }) {
   const [entries, setEntries] = useState<EntryValue[] | null>(null);
@@ -69,7 +76,20 @@ export function MentionPeek({
       style={{ top: anchor.bottom + 4, left, width: PEEK_WIDTH }}
     >
       {entries?.map((entry) => (
-        <PeekCard key={entry.id} entry={entry} onOpen={onOpen} />
+        <PeekCard
+          key={entry.id}
+          entry={entry}
+          onOpen={onOpen}
+          pin={{
+            pinned: pinned.includes(entry.id),
+            toggle(entryId, card) {
+              onTogglePin(entryId, card);
+              if (entries.length === 1 && !pinned.includes(entryId)) {
+                onClose();
+              }
+            },
+          }}
+        />
       ))}
     </div>
   );

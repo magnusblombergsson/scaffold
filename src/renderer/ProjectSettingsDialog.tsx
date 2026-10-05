@@ -9,12 +9,15 @@ import { PROSE_LANGUAGES, type ProseLanguage } from '../shared/project-types';
 export function ProjectSettingsDialog({
   displayName,
   language,
+  foldedNoteImage,
   readOnly,
   onClose,
 }: {
   displayName: string;
   /** The Prose language as main last said. */
   language: ProseLanguage;
+  /** Whether a folded Pinned note shows its Entry's image, as main last said. */
+  foldedNoteImage: boolean;
   readOnly: boolean;
   onClose(): void;
 }) {
@@ -23,6 +26,8 @@ export function ProjectSettingsDialog({
   const opener = useRef(document.activeElement);
   /** The language chosen, while main saves it. */
   const [saving, setSaving] = useState<ProseLanguage | null>(null);
+  /** Whether a folded Pinned note shows its image, as chosen, while main saves it. */
+  const [savingImage, setSavingImage] = useState<boolean | null>(null);
   useEffect(() => dialogRef.current?.showModal(), []);
 
   async function chooseLanguage(chosen: ProseLanguage) {
@@ -31,6 +36,13 @@ export function ProjectSettingsDialog({
     await window.project.setLanguage(chosen);
     // A later choice is still being saved.
     setSaving((latest) => (latest === chosen ? null : latest));
+  }
+
+  async function chooseFoldedImage(on: boolean) {
+    setSavingImage(on);
+    // Saved, `foldedNoteImage` follows from main before this resolves.
+    await window.project.setFoldedNoteImage(on);
+    setSavingImage((latest) => (latest === on ? null : latest));
   }
 
   return (
@@ -73,6 +85,18 @@ export function ProjectSettingsDialog({
         <p id="prose-language-hint" className="field-hint">
           Used for spellchecking and Export.
         </p>
+      </section>
+      <section aria-labelledby="pinned-notes-heading">
+        <h3 id="pinned-notes-heading">Pinned notes</h3>
+        <label className="setting">
+          <input
+            type="checkbox"
+            checked={savingImage ?? foldedNoteImage}
+            disabled={readOnly}
+            onChange={(event) => void chooseFoldedImage(event.target.checked)}
+          />
+          Show the image when a Pinned note is folded
+        </label>
       </section>
       <div className="settings-close">
         <button onClick={() => dialogRef.current?.close()}>Close</button>

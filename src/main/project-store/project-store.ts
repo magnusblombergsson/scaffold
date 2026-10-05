@@ -113,6 +113,8 @@ type Manifest = {
   format: number;
   id: string;
   language: string;
+  /** Whether a folded Pinned note shows its Entry's image; on unless false. */
+  foldedNoteImage?: unknown;
   tree: ProjectTree;
 };
 
@@ -1138,6 +1140,7 @@ export class ProjectStore {
   updateSession(change: ProjectView): void {
     const view = { ...change };
     delete view.overviewOpen;
+    delete view.pinnedNotes;
     if (view.panelWidths) {
       view.panelWidths = { ...view.panelWidths };
       delete view.panelWidths.overview;
@@ -1259,18 +1262,22 @@ export class ProjectStore {
     const units = await scanUnits(this.path, manifest.tree, this.deps.fs, {
       repair: false,
     });
-    // The language has its own event; it isn't a change of structure.
+    // The Project settings have their own events; they aren't changes of
+    // structure.
     const structure = () =>
       JSON.stringify([
-        { ...this.manifest, language: null },
+        { ...this.manifest, language: null, foldedNoteImage: null },
         this.manuscript(),
         this.listTrash(),
       ]);
     const before = structure();
-    const language = this.language;
+    const { language, foldedNoteImage } = this;
     this.manifest = manifest;
     if (this.language !== language) {
       this.emit({ type: 'languageChanged', language: this.language });
+    }
+    if (this.foldedNoteImage !== foldedNoteImage) {
+      this.emit({ type: 'foldedNoteImageChanged', on: this.foldedNoteImage });
     }
     replaceAll(this.files, units.files);
     this.trash.clear();
@@ -1576,6 +1583,19 @@ export class ProjectStore {
       if (this.language === language) return;
       await this.writeManifest({ ...this.manifest, language });
       this.emit({ type: 'languageChanged', language });
+    });
+  }
+
+  /** Whether a folded Pinned note shows its Entry's image, a Project setting. */
+  get foldedNoteImage(): boolean {
+    return this.manifest.foldedNoteImage !== false;
+  }
+
+  setFoldedNoteImage(on: boolean): Promise<void> {
+    return this.enqueueWrite(async () => {
+      if (this.foldedNoteImage === on) return;
+      await this.writeManifest({ ...this.manifest, foldedNoteImage: on });
+      this.emit({ type: 'foldedNoteImageChanged', on });
     });
   }
 

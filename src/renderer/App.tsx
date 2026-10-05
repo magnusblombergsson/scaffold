@@ -8,6 +8,7 @@ import type {
   OpenedProject,
   OpenResult,
   PanelWidths,
+  PinnedNote,
   Tip,
   WelcomeReason,
 } from '../shared/api';
@@ -51,6 +52,8 @@ import { OverviewPane } from './OverviewPane';
 import { usePaneCycle } from './pane-focus';
 import { PanelResizer, type PaneSize } from './PanelResizer';
 import { ProjectSettingsDialog } from './ProjectSettingsDialog';
+import { PinnedNotes } from './PinnedNotes';
+import { applyChange, togglePin, withoutTrashed } from './pinned-notes';
 import {
   onMentionClick,
   setMentionEntries,
@@ -366,11 +369,16 @@ function ProjectView({
     setVisited((visited) => new Set(visited).add(next));
   }
 
+  /** Opens an Entry in the Story Bible tab, from a Peek or a Pinned note. */
+  function showEntry(id: string) {
+    setTab('bible');
+    select({ kind: 'entry', id });
+  }
+
   /** Opens an Entry in Writing, from a room. */
   function openEntryInWriting(id: string) {
     switchMode('writing');
-    setTab('bible');
-    select({ kind: 'entry', id });
+    showEntry(id);
   }
 
   function toggleOutlineNotes() {
@@ -387,8 +395,13 @@ function ProjectView({
   const writingRoom = useRef<HTMLDivElement>(null);
   usePaneCycle(writingRoom, mode === 'writing');
   const [entries, setEntries] = useState<EntrySummary[]>([]);
+  /** Set once `entries` holds the Story Bible, not the empty list before it. */
+  const entriesLoaded = useRef(false);
   useEffect(() => {
-    void window.project.listEntries().then(setEntries);
+    void window.project.listEntries().then((listed) => {
+      entriesLoaded.current = true;
+      setEntries(listed);
+    });
   }, []);
   useEffect(() => setMentionEntries(entries), [entries]);
   const [highlight, setHighlight] = useState(true);
@@ -404,6 +417,35 @@ function ProjectView({
     setMentionHighlighting(highlight);
     if (!highlight) setPeek(null);
   }, [highlight]);
+  const [pinnedNotes, setPinnedNotes] = useState<PinnedNote[]>(
+    project.view.pinnedNotes ?? [],
+  );
+  /** The Pinned notes as last changed, for changes made before React renders. */
+  const notesNow = useRef(pinnedNotes);
+  /**
+   * Changes the Pinned notes; `save` remembers them on this computer. Nothing
+   * happens when they are the same notes.
+   */
+  const changePinnedNotes = useCallback((next: PinnedNote[], save = true) => {
+    if (next === notesNow.current) return;
+    notesNow.current = next;
+    setPinnedNotes(next);
+    if (save) window.shell.saveView({ pinnedNotes: next });
+  }, []);
+  useEffect(() => {
+    // A trashed Entry's note goes.
+    if (!entriesLoaded.current) return;
+    changePinnedNotes(
+      withoutTrashed(
+        notesNow.current,
+        entries.map((entry) => entry.id),
+      ),
+    );
+  }, [entries, changePinnedNotes]);
+  /** Whether a folded Pinned note shows its Entry's image, a Project setting. */
+  const [foldedNoteImage, setFoldedNoteImage] = useState(
+    project.foldedNoteImage,
+  );
   const openEntry =
     selected?.kind === 'entry'
       ? entries.find((e) => e.id === selected.id)
@@ -488,6 +530,7 @@ function ProjectView({
           // A Conversation may have gone to Trash, or come out.
           void refreshTrash();
         } else if (event.type === 'entriesChanged') {
+          entriesLoaded.current = true;
           setEntries(event.entries);
           // An Entry may have gone to Trash, or come out, as by a Proposal's undo.
           void refreshTrash();
@@ -495,6 +538,8 @@ function ProjectView({
           // Prose editors are made anew in it; their edits reach main first.
           flushPendingEdits();
           setLanguage(event.language);
+        } else if (event.type === 'foldedNoteImageChanged') {
+          setFoldedNoteImage(event.on);
         } else if (event.type === 'readOnly') {
           // Main still takes edits for a moment: these are the last.
           flushPendingEdits();
@@ -1107,17 +1152,36 @@ function ProjectView({
         {peek && (
           <MentionPeek
             peek={peek}
-            onOpen={(id) => {
-              setTab('bible');
-              select({ kind: 'entry', id });
-            }}
+            pinned={pinnedNotes.map((note) => note.entryId)}
+            onOpen={showEntry}
+            onTogglePin={(id, card) =>
+              changePinnedNotes(
+                togglePin(notesNow.current, id, { x: card.left, y: card.top }),
+              )
+            }
             onClose={closePeek}
+          />
+        )}
+        {/* Writing only: hidden in the other Modes, back on return. */}
+        {mode === 'writing' && (
+          <PinnedNotes
+            notes={pinnedNotes}
+            entries={entries}
+            foldedImage={foldedNoteImage}
+            onChange={(entryId, change, save) =>
+              changePinnedNotes(
+                applyChange(notesNow.current, entryId, change),
+                save,
+              )
+            }
+            onOpen={showEntry}
           />
         )}
         {projectSettingsOpen && (
           <ProjectSettingsDialog
             displayName={project.displayName}
             language={language}
+            foldedNoteImage={foldedNoteImage}
             readOnly={readOnly !== null}
             onClose={() => setProjectSettingsOpen(false)}
           />

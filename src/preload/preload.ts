@@ -62,6 +62,8 @@ const project: ProjectApi = {
   emptyTrash: () => ipcRenderer.invoke(channel.project('emptyTrash')),
   setLanguage: (language) =>
     ipcRenderer.invoke(channel.project('setLanguage'), language),
+  setFoldedNoteImage: (on) =>
+    ipcRenderer.invoke(channel.project('setFoldedNoteImage'), on),
   listConflicts: () => ipcRenderer.invoke(channel.project('listConflicts')),
   readConflictVersion: (ref, versionId) =>
     ipcRenderer.invoke(channel.project('readConflictVersion'), ref, versionId),

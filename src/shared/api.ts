@@ -145,6 +145,12 @@ export type LanguageChanged = {
   language: ProseLanguage;
 };
 
+/** A folded Pinned note now shows its Entry's image, or doesn't. */
+export type FoldedNoteImageChanged = {
+  type: 'foldedNoteImageChanged';
+  on: boolean;
+};
+
 /** What main tells a window about its Project as it happens. */
 export type ProjectEvent =
   | UnitSaveStatus
@@ -156,7 +162,8 @@ export type ProjectEvent =
   | ProposalsChanged
   | ConversationsChanged
   | ReadOnly
-  | LanguageChanged;
+  | LanguageChanged
+  | FoldedNoteImageChanged;
 
 /** Mirrors the main-process ProjectStore of this window's Project. */
 export interface ProjectApi {
@@ -255,6 +262,11 @@ export interface ProjectApi {
    * setting. False when it can't be saved, which main has told the Author.
    */
   setLanguage(language: ProseLanguage): Promise<boolean>;
+  /**
+   * Whether a folded Pinned note shows its Entry's image, a Project setting.
+   * False when it can't be saved, which main has told the Author.
+   */
+  setFoldedNoteImage(on: boolean): Promise<boolean>;
 }
 
 /**
@@ -271,10 +283,23 @@ export type PanelWidths = {
 };
 
 /**
+ * A Pinned note: the Entry it shows, where its top left corner was left in
+ * the window in CSS pixels, and whether it is folded to its title.
+ */
+export type PinnedNote = {
+  entryId: string;
+  x: number;
+  y: number;
+  folded: boolean;
+};
+
+/**
  * How the Author left a Project's window on this computer; `cursor` is where
  * it was in the last Scene, `outlineNotesOpen` says whether the Outline &
  * Notes box above the Prose is open, and `overviewOpen` whether the Overview
- * pane beside it is. The Overview pane's state is never kept in the Project.
+ * pane beside it is. `pinnedNotes` are the Pinned notes, the one on top last.
+ * The Overview pane's state and the Pinned notes are never kept in the
+ * Project.
  */
 export type ProjectView = {
   lastSceneId?: string;
@@ -282,6 +307,7 @@ export type ProjectView = {
   panelWidths?: PanelWidths;
   outlineNotesOpen?: boolean;
   overviewOpen?: boolean;
+  pinnedNotes?: PinnedNote[];
 };
 
 /**
@@ -298,6 +324,8 @@ export type SessionNotice = {
 export type OpenedProject = {
   displayName: string;
   language: ProseLanguage;
+  /** Whether a folded Pinned note shows its Entry's image. */
+  foldedNoteImage: boolean;
   manuscript: Manuscript;
   view: ProjectView;
   sessions: SessionNotice;

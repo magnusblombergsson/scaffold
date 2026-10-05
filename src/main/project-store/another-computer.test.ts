@@ -295,6 +295,19 @@ describe('project.json changed on another computer', () => {
     expect(events).toEqual([{ type: 'languageChanged', language: 'sv-SE' }]);
   });
 
+  it('takes the folded-image setting set there, and says only that', async () => {
+    await newProject();
+    const here = await open('BETA');
+    const there = await open('ALPHA');
+    const events = eventsOf(here);
+
+    await there.setFoldedNoteImage(false);
+    await here.checkForChanges();
+
+    expect(here.foldedNoteImage).toBe(false);
+    expect(events).toEqual([{ type: 'foldedNoteImageChanged', on: false }]);
+  });
+
   it('shows a Scene that arrives before the tree as Unplaced, then placed', async () => {
     const { chapterId } = await newProject();
     const here = await open('BETA');
@@ -441,8 +454,9 @@ describe('session markers', () => {
       cursor: 12,
       outlineNotesOpen: false,
       panelWidths: { binder: 300, overview: 320 },
-      // The Overview pane's state stays on this computer.
+      // The Overview pane's state and Pinned notes stay on this computer.
       overviewOpen: true,
+      pinnedNotes: [{ entryId: 'e1', x: 10, y: 20, folded: false }],
     });
     await store.close();
 

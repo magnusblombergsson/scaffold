@@ -24,13 +24,17 @@ import { assistantKey, assistantModel, storeOf } from './shell';
 import { trashConversationQuestion } from './trash-question';
 
 /**
- * Every method but `emptyTrash`, which asks the Author first, `setLanguage`,
- * which may warn them, `chooseEntryImage`, which asks for a file, and
- * `subscribe`, whose events the shell sends to the window.
+ * Every method but `emptyTrash`, which asks the Author first, the Project
+ * settings, which may warn them, `chooseEntryImage`, which asks for a file,
+ * and `subscribe`, whose events the shell sends to the window.
  */
 type StoreMethod = Exclude<
   keyof ProjectApi,
-  'emptyTrash' | 'setLanguage' | 'chooseEntryImage' | 'subscribe'
+  | 'emptyTrash'
+  | 'setLanguage'
+  | 'setFoldedNoteImage'
+  | 'chooseEntryImage'
+  | 'subscribe'
 >;
 
 type Handlers = {
@@ -107,6 +111,18 @@ export function registerProjectIpc(): void {
     channel.project('setLanguage'),
     (event, language: ProseLanguage) =>
       setLanguage(event.sender, storeOfWindow(event.sender), language),
+  );
+  ipcMain.handle(
+    channel.project('setFoldedNoteImage'),
+    (event, on: boolean) => {
+      const store = storeOfWindow(event.sender);
+      return saveProjectSetting(
+        event.sender,
+        store,
+        `The Pinned notes setting of ${store.displayName}`,
+        () => store.setFoldedNoteImage(on === true),
+      );
+    },
   );
 }
 
@@ -336,15 +352,33 @@ async function setLanguage(
   if (!PROSE_LANGUAGES.some((offered) => offered.language === language)) {
     return false;
   }
+  return saveProjectSetting(
+    sender,
+    store,
+    `The Prose language of ${store.displayName}`,
+    () => store.setLanguage(language),
+  );
+}
+
+/**
+ * Saves a Project setting, warning the Author that `setting` can't be
+ * changed now when it can't be saved.
+ */
+async function saveProjectSetting(
+  sender: WebContents,
+  store: ProjectStore,
+  setting: string,
+  save: () => Promise<void>,
+): Promise<boolean> {
   try {
-    await store.setLanguage(language);
+    await save();
     return true;
   } catch (error) {
-    console.error(`Can't set the language of ${store.path}:`, error);
+    console.error(`Can't save a Project setting of ${store.path}:`, error);
     const options = {
       type: 'warning' as const,
       buttons: ['OK'],
-      message: `The Prose language of ${store.displayName} can't be changed now.`,
+      message: `${setting} can't be changed now.`,
       detail: error instanceof Error ? error.message : String(error),
     };
     const window = BrowserWindow.fromWebContents(sender);

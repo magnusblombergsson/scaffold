@@ -16,6 +16,7 @@ import {
   mvpReadEntry,
   mvpWriteEntry,
 } from './mvp-entry-file';
+import { mvpReadManifest, mvpWriteManifest } from './mvp-manifest-file';
 import { createProject, FORMAT, openProject } from './project-store';
 
 // What an MVP app still open on another computer does with what this app
@@ -139,5 +140,26 @@ it('ignores the image an MVP app left in images/ when it moved its Entry to Tras
   await reopened.emptyTrash();
   expect(await readdir(images)).toEqual([`${id}.jpg`]);
   expect(await readdir(path.join(projectPath, 'trash'))).toEqual([]);
+  await reopened.close();
+});
+
+it('an MVP app keeps the folded-image Project setting when it rewrites project.json', async () => {
+  const store = await createProject(projectPath, deps());
+  await store.setFoldedNoteImage(false);
+  await store.close();
+  const file = path.join(projectPath, 'project.json');
+
+  const read = mvpReadManifest(await readFile(file, 'utf8'));
+  expect(read.format).toBe(1);
+  await writeFile(
+    file,
+    mvpWriteManifest(read, {
+      ...read.tree,
+      chapters: [...read.tree.chapters].reverse(),
+    }),
+  );
+
+  const reopened = await openProject(projectPath, deps());
+  expect(reopened.foldedNoteImage).toBe(false);
   await reopened.close();
 });

@@ -301,6 +301,43 @@ describe('ProjectStore', () => {
     expect(events).toEqual([]);
   });
 
+  it('shows the image of a folded Pinned note unless project.json says not to', async () => {
+    const projectPath = path.join(dir, 'My Novel');
+    const store = await createProject(projectPath, deps());
+    expect(store.foldedNoteImage).toBe(true);
+    const events: unknown[] = [];
+    store.subscribe((event) => events.push(event));
+
+    await store.setFoldedNoteImage(false);
+    await store.setFoldedNoteImage(false);
+
+    expect(store.foldedNoteImage).toBe(false);
+    expect(events).toEqual([{ type: 'foldedNoteImageChanged', on: false }]);
+    await store.close();
+    const manifest = JSON.parse(
+      await readFile(path.join(projectPath, 'project.json'), 'utf8'),
+    );
+    expect(manifest).toMatchObject({
+      language: 'en-US',
+      foldedNoteImage: false,
+    });
+    expect((await openProject(projectPath, deps())).foldedNoteImage).toBe(
+      false,
+    );
+  });
+
+  it("reads a folded-image setting that isn't true or false as on", async () => {
+    const projectPath = path.join(dir, 'My Novel');
+    await (await createProject(projectPath, deps())).close();
+    const manifestPath = path.join(projectPath, 'project.json');
+    const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+    await writeFile(
+      manifestPath,
+      JSON.stringify({ ...manifest, foldedNoteImage: 'no' }),
+    );
+    expect((await openProject(projectPath, deps())).foldedNoteImage).toBe(true);
+  });
+
   it('takes a new id when a copied folder becomes a separate Project, keeping the rest', async () => {
     const original = path.join(dir, 'My Novel');
     await (await createProject(original, deps())).close();

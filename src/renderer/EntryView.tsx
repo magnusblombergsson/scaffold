@@ -36,6 +36,7 @@ import {
 } from './plain-text-editor';
 import { entryTitle } from './StoryBible';
 import { UnitEditor } from './UnitEditor';
+import { tellEntryWritten } from './entry-written';
 
 export const VISIBILITY_LABELS: Record<Visibility, string> = {
   always: 'Always',
@@ -219,6 +220,7 @@ export function EntryView({
   async function save(change: Partial<EntryValue>): Promise<void> {
     if (!value.current) return;
     value.current = { ...value.current, ...change };
+    tellEntryWritten(value.current);
     return window.project.write({ kind: 'entry', id: entryId }, value.current);
   }
 
