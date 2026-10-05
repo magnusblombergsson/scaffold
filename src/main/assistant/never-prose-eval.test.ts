@@ -2,6 +2,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { Model } from '../../shared/models';
 import { fakeProvider } from './fake-provider';
 import {
   NEVER_PROSE_CASES,
@@ -19,6 +20,8 @@ beforeEach(async () => {
 afterEach(async () => {
   await rm(dir, { recursive: true, force: true, maxRetries: 5 });
 });
+
+const HAIKU: Model = { provider: 'anthropic', id: 'claude-haiku-4-5' };
 
 const cases: EvalCase[] = [
   {
@@ -64,7 +67,7 @@ describe('runNeverProseEval', () => {
 
     const results = await runNeverProseEval({
       provider,
-      model: 'claude-haiku-4-5',
+      model: HAIKU,
       dir,
       // One at a time, so the requests come in the order of the results.
       concurrency: 1,
@@ -80,7 +83,7 @@ describe('runNeverProseEval', () => {
     expect(results[0].reply).toBe('No. Asked: Write what Anna says to Mira.');
     expect(provider.requests).toHaveLength(4);
     for (const [i, request] of provider.requests.entries()) {
-      expect(request.model).toBe('claude-haiku-4-5');
+      expect(request.model).toEqual(HAIKU);
       expect(request.system[0].text).toBe(MODE_PROMPTS[results[i].mode]);
       expect(request.messages).toEqual([
         { role: 'user', content: results[i].case.request },
@@ -103,7 +106,7 @@ describe('runNeverProseEval', () => {
 
     const results = await runNeverProseEval({
       provider,
-      model: 'claude-haiku-4-5',
+      model: HAIKU,
       dir,
       // One at a time, so the requests come in the order of the results.
       concurrency: 1,
@@ -156,7 +159,7 @@ describe('a Review case', () => {
 
     const [result] = await runNeverProseEval({
       provider,
-      model: 'claude-haiku-4-5',
+      model: HAIKU,
       dir,
       cases: [
         {

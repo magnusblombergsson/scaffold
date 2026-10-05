@@ -1,5 +1,5 @@
 import type { AssistantFailure } from '../../shared/conversation';
-import type { ModelId } from '../../shared/models';
+import type { Model } from '../../shared/models';
 import type { Usage } from '../../shared/usage';
 
 // The provider interface: how the Conversation engine talks to a model. The
@@ -20,20 +20,25 @@ export type PromptMessage = {
 
 /** What is sent to the model, built in main; the renderer never builds it. */
 export type ProviderRequest = {
-  model: ModelId;
+  model: Model;
   /** The system prompt's blocks, in order. */
   system: PromptBlock[];
   /** The Conversation so far, ending with the Author's new message. */
   messages: PromptMessage[];
 };
 
+/** How a reply ended: complete, or stopped at the length limit. */
+export type Finish = 'complete' | 'length';
+
 /**
- * What the model streams: pieces of the reply, and what the call has used so
- * far, which each `usage` event gives in full rather than as a difference.
+ * What the model streams: pieces of the reply, what the call has used so
+ * far, which each `usage` event gives in full rather than as a difference,
+ * and once the reply has ended, how it finished.
  */
 export type ProviderEvent =
   | { type: 'text'; text: string }
-  | { type: 'usage'; usage: Usage };
+  | { type: 'usage'; usage: Usage }
+  | { type: 'finish'; finish: Finish };
 
 export interface Provider {
   /** Throws a `ProviderError` when the call fails, before or while streaming. */

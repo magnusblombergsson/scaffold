@@ -4,7 +4,12 @@ import type { FileSystem } from '../project-store/file-system';
 import type { ProjectLookup } from '../project-store/project-store';
 import { safeWrite, setAside } from '../project-store/safe-write';
 import type { PanelWidths, PinnedNote, Tip } from '../../shared/api';
-import { DEFAULT_MODEL, isModelId, type ModelId } from '../../shared/models';
+import {
+  DEFAULT_MODEL,
+  isClaudeModelId,
+  isModel,
+  type Model,
+} from '../../shared/models';
 
 export const SETTINGS_VERSION = 1;
 const RECENT_LIMIT = 20;
@@ -45,8 +50,11 @@ type SettingsFile = {
   global: {
     openAtQuit?: string[];
     highlightMentions?: boolean;
-    /** Any string: one this app doesn't offer reads as the default. */
-    model?: string;
+    /**
+     * Any value: one that names no Model reads as the default. Older
+     * settings name a Claude model by its id alone.
+     */
+    model?: unknown;
     /** Set once the Author has added a key or skipped the welcome. */
     welcomed?: boolean;
   } & Record<string, unknown>;
@@ -326,14 +334,20 @@ export class AppSettings {
     this.changed();
   }
 
-  /** The Claude model for the next call, in every Project. */
-  model(): ModelId {
+  /**
+   * The Model for the next call, in every Project; one this app doesn't
+   * offer reads as the default.
+   */
+  model(): Model {
     const model = this.data.global.model;
-    return isModelId(model) ? model : DEFAULT_MODEL;
+    // Older settings name the Claude model by its id alone.
+    const id =
+      isModel(model) && model.provider === 'anthropic' ? model.id : model;
+    return isClaudeModelId(id) ? { provider: 'anthropic', id } : DEFAULT_MODEL;
   }
 
-  setModel(model: ModelId): void {
-    this.data.global.model = model;
+  setModel(model: Model): void {
+    this.data.global.model = { provider: model.provider, id: model.id };
     this.changed();
   }
 

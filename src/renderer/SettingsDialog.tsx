@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { KeyKeeping, KeyResult } from '../shared/api';
-import { MODELS, type ModelId } from '../shared/models';
+import { CLAUDE_MODELS, type Model } from '../shared/models';
 import { GetKeyHint, KeyForm, KeyMessage, useKeyStatus } from './ApiKey';
 
 const KEPT_LABELS: Record<KeyKeeping, string> = {
@@ -25,7 +25,7 @@ export function SettingsDialog({
   const status = useKeyStatus();
   const [editing, setEditing] = useState(addKey);
   const [saved, setSaved] = useState<KeyResult>();
-  const [model, setModel] = useState<ModelId>();
+  const [model, setModel] = useState<Model>();
 
   useEffect(() => {
     dialogRef.current?.showModal();
@@ -96,14 +96,17 @@ export function SettingsDialog({
         {model && (
           <select
             aria-labelledby="model-heading"
-            value={model}
+            value={model.id}
             onChange={(event) => {
-              const chosen = event.target.value as ModelId;
+              const chosen: Model = {
+                provider: 'anthropic',
+                id: event.target.value,
+              };
               setModel(chosen);
               window.settings.setModel(chosen);
             }}
           >
-            {MODELS.map(({ id, label }) => (
+            {CLAUDE_MODELS.map(({ id, label }) => (
               <option key={id} value={id}>
                 {label}
               </option>

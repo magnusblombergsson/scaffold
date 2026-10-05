@@ -17,7 +17,7 @@ import {
   type Finding,
   type ReviewCommand,
 } from '../../shared/finding';
-import type { ModelId } from '../../shared/models';
+import type { Model } from '../../shared/models';
 import { PROJECT_OUTLINE, unitText } from '../../shared/project-types';
 import {
   newEntryOf,
@@ -38,7 +38,8 @@ import {
   type CompactionPolicy,
 } from './compaction';
 import { buildContext, defaultRequest, readableScene } from './context-builder';
-import { ProviderError, type Provider, type ProviderRequest } from './provider';
+import { ProviderError, type ProviderRequest } from './provider';
+import type { ProviderFor } from './providers';
 
 /** What a message is about: the Scene open in the editor when it was sent, if any. */
 export type Focus = { sceneId: string | null };
@@ -53,9 +54,10 @@ export type EngineDeps = {
     | 'appendProposal'
     | 'appendSummary'
   >;
-  provider: Provider;
-  /** The model the next call uses, as chosen in Settings. */
-  model: () => ModelId;
+  /** The Provider each Model is reached through. */
+  providerFor: ProviderFor;
+  /** The Model the next call uses, as chosen in Settings. */
+  model: () => Model;
   clock: Clock;
   /** When a long Conversation is compacted; tests make it short. */
   compaction?: CompactionPolicy;
@@ -68,7 +70,7 @@ export type EngineDeps = {
  */
 export function createConversationEngine({
   store,
-  provider,
+  providerFor,
   model,
   clock,
   compaction = DEFAULT_COMPACTION,
@@ -177,10 +179,10 @@ export function createConversationEngine({
     let usage: Usage | undefined;
     let failure: AssistantFailure | null = null;
     try {
-      for await (const event of provider.stream(request)) {
+      for await (const event of providerFor(chosen).stream(request)) {
         if (event.type === 'usage') {
           usage = event.usage;
-        } else {
+        } else if (event.type === 'text') {
           text += event.text;
           onText(event.text);
         }
@@ -202,7 +204,7 @@ export function createConversationEngine({
       text: replyText(text),
       focus,
       at: clock.now(),
-      model: chosen,
+      model: chosen.id,
       ...(usage && { usage }),
       ...(failure && { interrupted: true as const }),
       saw: context.saw,
@@ -228,7 +230,7 @@ export function createConversationEngine({
     conversationId: string,
     messages: ConversationMessage[],
     latest: Compaction | undefined,
-    chosen: ModelId,
+    chosen: Model,
   ): Promise<Compaction | undefined> {
     const covers = compactionPoint(messages, latest, compaction);
     if (covers === null) return latest;
@@ -236,9 +238,9 @@ export function createConversationEngine({
     let usage: Usage | undefined;
     try {
       const request = summaryRequest(chosen, messages, covers, latest);
-      for await (const event of provider.stream(request)) {
+      for await (const event of providerFor(chosen).stream(request)) {
         if (event.type === 'usage') usage = event.usage;
-        else text += event.text;
+        else if (event.type === 'text') text += event.text;
       }
     } catch (error) {
       console.error('Compacting the Conversation failed:', error);
@@ -249,7 +251,7 @@ export function createConversationEngine({
       text: text.trim(),
       covers,
       at: clock.now(),
-      model: chosen,
+      model: chosen.id,
       ...(usage && { usage }),
     };
     await store.appendSummary(conversationId, summary);

@@ -27,7 +27,7 @@ import {
   splitManuscript,
   type ImportConvention,
 } from '../shared/manuscript-import';
-import { isModelId, type ModelId } from '../shared/models';
+import { isModel, type Model } from '../shared/models';
 import type { ProseLanguage } from '../shared/project-types';
 import { unitName } from '../shared/unit-name';
 import {
@@ -83,8 +83,8 @@ export function storeOf(contents: WebContents): ProjectStore | undefined {
   return stores.get(contents.id);
 }
 
-/** The Claude model the next call to the Assistant uses, as chosen in Settings. */
-export function assistantModel(): ModelId {
+/** The Model the next call to the Assistant uses, as chosen in Settings. */
+export function assistantModel(): Model {
   return settings.model();
 }
 
@@ -564,7 +564,7 @@ export function registerSettingsIpc(): void {
   ipcMain.handle(channel.model, () => settings.model());
 
   ipcMain.on(channel.setModel, (_event, model: unknown) => {
-    if (isModelId(model)) settings.setModel(model);
+    if (isModel(model)) settings.setModel(model);
   });
 }
 

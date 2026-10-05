@@ -13,6 +13,7 @@ import { instantClock, type Clock } from '../project-store/clock';
 import { nodeFileSystem, type FileSystem } from '../project-store/file-system';
 import { projectLookup } from '../project-store/project-store';
 import { loadAppSettings, type AppSettings } from './app-settings';
+import { DEFAULT_MODEL } from '../../shared/models';
 
 let dir: string;
 let file: string;
@@ -99,15 +100,47 @@ describe('saving', () => {
 
   it('uses Opus 5.5 until the Author chooses another model, and remembers it', async () => {
     const settings = await load();
-    expect(settings.model()).toBe('claude-opus-5-5');
+    expect(settings.model()).toEqual({
+      provider: 'anthropic',
+      id: 'claude-opus-5-5',
+    });
 
-    settings.setModel('claude-haiku-4-5');
+    settings.setModel({ provider: 'anthropic', id: 'claude-haiku-4-5' });
     await settings.flush();
 
-    expect((await load()).model()).toBe('claude-haiku-4-5');
-    expect(JSON.parse(await readFile(file, 'utf8')).global).toMatchObject({
-      model: 'claude-haiku-4-5',
+    expect((await load()).model()).toEqual({
+      provider: 'anthropic',
+      id: 'claude-haiku-4-5',
     });
+    expect(JSON.parse(await readFile(file, 'utf8')).global).toMatchObject({
+      model: { provider: 'anthropic', id: 'claude-haiku-4-5' },
+    });
+  });
+
+  it('reads a model saved by its Claude id alone as that Claude model', async () => {
+    await writeFile(
+      file,
+      JSON.stringify({
+        version: 1,
+        global: { model: 'claude-sonnet-5' },
+        projects: {},
+        recent: [],
+      }),
+    );
+
+    expect((await load()).model()).toEqual({
+      provider: 'anthropic',
+      id: 'claude-sonnet-5',
+    });
+  });
+
+  it('reads a model this app doesn’t offer as the default', async () => {
+    const settings = await load();
+
+    settings.setModel({ provider: 'lmstudio', id: 'qwen3-8b' });
+    await settings.flush();
+
+    expect((await load()).model()).toEqual(DEFAULT_MODEL);
   });
 
   it('welcomes the Author until they have been welcomed once', async () => {
@@ -284,7 +317,7 @@ describe('a bad or newer settings file', () => {
     expect(settings.recent()).toEqual([valid]);
     expect(settings.openAtQuit()).toEqual([]);
     expect(settings.highlightMentions()).toBe(true);
-    expect(settings.model()).toBe('claude-opus-5-5');
+    expect(settings.model()).toEqual(DEFAULT_MODEL);
     expect(settings.welcomed()).toBe(false);
     expect(settings.project('a')).toEqual({ panelWidths: { binder: 300 } });
     expect(settings.project('b')).toEqual({});

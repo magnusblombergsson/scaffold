@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { MODE_LABELS, type Mode } from '../../shared/conversation';
 import type { ReviewCommand } from '../../shared/finding';
-import type { ModelId } from '../../shared/models';
+import type { Model } from '../../shared/models';
 import type { EntryValue } from '../../shared/project-types';
 import { instantClock } from '../project-store/clock';
 import { nodeFileSystem } from '../project-store/file-system';
@@ -140,7 +140,7 @@ export async function runNeverProseEval({
   concurrency = 4,
 }: {
   provider: Provider;
-  model: ModelId;
+  model: Model;
   dir: string;
   cases?: EvalCase[];
   concurrency?: number;

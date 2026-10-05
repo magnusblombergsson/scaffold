@@ -24,6 +24,7 @@ import {
   type Finding,
   type ReviewCommand,
 } from '../shared/finding';
+import { loggedModel } from '../shared/models';
 import type {
   EntrySummary,
   Manuscript,
@@ -360,7 +361,9 @@ export function useConversation({
   const total = current
     ? describeTotal(
         [...current.messages, ...(current.compactions ?? [])].flatMap((m) =>
-          m.model && m.usage ? [{ model: m.model, usage: m.usage }] : [],
+          m.model && m.usage
+            ? [{ model: loggedModel(m.model), usage: m.usage }]
+            : [],
         ),
       )
     : null;
@@ -678,7 +681,7 @@ function Message({
 }) {
   const used = model && usage && (
     <span className="message-usage" aria-label="Usage">
-      {describeUsage(model, usage)}
+      {describeUsage(loggedModel(model), usage)}
     </span>
   );
   return (

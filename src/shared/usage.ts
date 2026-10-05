@@ -1,7 +1,8 @@
-import { isModelId, type ModelId } from './models';
+import { priceOf, type Model } from './models';
 
 // What the Assistant's turns used, and what that costs. The log keeps tokens
-// only; money is worked out here, when it is shown, from the price table.
+// only; money is worked out here, when it is shown, from the price each
+// built-in Model carries.
 
 /**
  * The tokens one call used: `input` counts every token sent, of which
@@ -14,28 +15,18 @@ export type Usage = {
   output: number;
 };
 
-/** USD per million tokens of each kind, from Anthropic's pricing (5-minute cache writes). */
-type Price = Usage;
-
-/** What each model the Author can choose costs, as Anthropic lists it. */
-const PRICES: Record<ModelId, Price> = {
-  'claude-opus-5-5': { input: 4, cached: 0.2, written: 5, output: 20 },
-  'claude-sonnet-5': { input: 2, cached: 0.2, written: 2.5, output: 10 },
-  'claude-haiku-4-5': { input: 1, cached: 0.1, written: 1.25, output: 5 },
-};
-
 /**
  * A turn as far as its cost goes: the model it ran on, which an older log may
  * name though it is no longer offered, and what it used.
  */
-export type MeteredTurn = { model: string; usage: Usage };
+export type MeteredTurn = { model: Model; usage: Usage };
 
 export const NO_USAGE: Usage = { input: 0, cached: 0, written: 0, output: 0 };
 
 /** What a call cost in USD, or null for a model with no known price. */
 function costOf({ model, usage }: MeteredTurn): number | null {
-  if (!isModelId(model)) return null;
-  const price = PRICES[model];
+  const price = priceOf(model);
+  if (!price) return null;
   const sent = usage.input - usage.cached - usage.written;
   return (
     (sent * price.input +
@@ -68,7 +59,7 @@ function describe(usage: Usage, cost: number | null): string {
 }
 
 /** One reply's usage, as "≈ 18k in (12k cached) · 900 out · ≈ $0.04". */
-export function describeUsage(model: string, usage: Usage): string {
+export function describeUsage(model: Model, usage: Usage): string {
   return describe(usage, costOf({ model, usage }));
 }
 

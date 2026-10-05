@@ -209,7 +209,10 @@ test('the model is Opus 5.5 until the Author chooses another, which is remembere
   const saved = JSON.parse(
     await readFile(path.join(userData(), 'settings.json'), 'utf8'),
   );
-  expect(saved.global.model).toBe('claude-haiku-4-5');
+  expect(saved.global.model).toEqual({
+    provider: 'anthropic',
+    id: 'claude-haiku-4-5',
+  });
   const second = await launch(tempDir(), { anthropicUrl });
   const again = await openSettings(await second.firstWindow());
   await expect(again.getByRole('combobox', { name: 'Model' })).toHaveValue(

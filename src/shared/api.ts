@@ -11,7 +11,7 @@ import type {
 } from './project-types';
 import type { ReviewCommand } from './finding';
 import type { ImportBlock, ImportConvention } from './manuscript-import';
-import type { ModelId } from './models';
+import type { Model } from './models';
 import type { Command } from './shortcuts';
 import type { PendingProposal, ProposedValue } from './proposal';
 
@@ -420,9 +420,9 @@ export interface SettingsApi {
    * window. Returns an unsubscribe function.
    */
   onKeyStatus(listener: (status: KeyStatus) => void): () => void;
-  /** The Claude model the next call uses. */
-  model(): Promise<ModelId>;
-  setModel(model: ModelId): void;
+  /** The Model the next call uses. */
+  model(): Promise<Model>;
+  setModel(model: Model): void;
 }
 
 /** A Word or Markdown file read for an Import: its name without extension, and its blocks. */

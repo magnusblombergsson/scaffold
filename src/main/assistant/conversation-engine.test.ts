@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { Model } from '../../shared/models';
 import { instantClock } from '../project-store/clock';
 import { nodeFileSystem, type FileSystem } from '../project-store/file-system';
 import { createProject, openProject } from '../project-store/project-store';
@@ -11,6 +12,8 @@ import {
 } from './conversation-engine';
 import { fakeProvider, type FakeReply } from './fake-provider';
 import type { ProviderRequest } from './provider';
+
+const OPUS: Model = { provider: 'anthropic', id: 'claude-opus-5-5' };
 
 let dir: string;
 
@@ -36,8 +39,8 @@ async function setUp(
   const provider = fakeProvider((request, n) => reply(n, request));
   const engine = createConversationEngine({
     store,
-    provider,
-    model: () => 'claude-opus-5-5',
+    providerFor: () => provider,
+    model: () => OPUS,
     clock,
     compaction,
   });
@@ -108,6 +111,39 @@ describe('askAssistant', () => {
     });
   });
 
+  it('asks the Provider of the Model chosen for each call', async () => {
+    const { store, sceneId, clock } = await setUp();
+    const local: Model = { provider: 'lmstudio', id: 'qwen3-8b' };
+    let chosen = OPUS;
+    const asked: Model[] = [];
+    const engine = createConversationEngine({
+      store,
+      providerFor: (model) => {
+        asked.push(model);
+        return fakeProvider(() => ({
+          text: [`From ${model.id}.`],
+          finish: 'length',
+        }));
+      },
+      model: () => chosen,
+      clock,
+    });
+    const { id } = await store.startConversation('writing', 'Anna');
+
+    await engine.askAssistant(id, 'Why?', { sceneId }, () => {});
+    chosen = local;
+    await engine.askAssistant(id, 'And?', { sceneId }, () => {});
+
+    expect(asked).toEqual([OPUS, local]);
+    const replies = (await store.readConversation(id)).messages.filter(
+      (m) => m.role === 'assistant',
+    );
+    expect(replies.map((m) => [m.text, m.model])).toEqual([
+      ['From claude-opus-5-5.', 'claude-opus-5-5'],
+      ['From qwen3-8b.', 'qwen3-8b'],
+    ]);
+  });
+
   it('sends the Writing context for the Scene in focus and this Conversation only', async () => {
     const { store, sceneId, engine, provider } = await setUp((n) => [
       `Reply ${n}`,
@@ -134,7 +170,7 @@ describe('askAssistant', () => {
     await engine.askAssistant(id, 'And the rain?', { sceneId }, () => {});
 
     const request = provider.requests.at(-1)!;
-    expect(request.model).toBe('claude-opus-5-5');
+    expect(request.model).toEqual(OPUS);
     expect(request.system).toHaveLength(4);
     expect(request.system[0].text).toMatch(/advise the Author, who is writing/);
     expect(request.system[0].text).toMatch(/You never write Prose/);
@@ -215,7 +251,7 @@ describe('askAssistant', () => {
     const onDisk: string[] = [];
     const engine = createConversationEngine({
       store,
-      provider: {
+      providerFor: () => ({
         async *stream() {
           onDisk.push(
             await readFile(
@@ -225,8 +261,8 @@ describe('askAssistant', () => {
           );
           yield { type: 'text', text: 'Hm.' };
         },
-      },
-      model: () => 'claude-opus-5-5',
+      }),
+      model: () => OPUS,
       clock,
     });
     const { id } = await store.startConversation('writing', 'Anna');
@@ -834,8 +870,8 @@ describe('Reviews', () => {
     const provider = fakeProvider(() => ['Hm.']);
     const engine = createConversationEngine({
       store,
-      provider,
-      model: () => 'claude-opus-5-5',
+      providerFor: () => provider,
+      model: () => OPUS,
       clock,
     });
     const { id } = await store.startConversation('writing', 'Review');

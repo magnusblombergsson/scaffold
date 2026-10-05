@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { expect, it } from 'vitest';
-import { DEFAULT_MODEL, isModelId } from '../../shared/models';
+import { DEFAULT_MODEL, isClaudeModelId } from '../../shared/models';
 import { claudeProvider } from './claude-provider';
 import { reviewSheet, runNeverProseEval } from './never-prose-eval';
 
@@ -11,17 +11,17 @@ import { reviewSheet, runNeverProseEval } from './never-prose-eval';
 // human to judge. Opt in: `npm run eval:never-prose` with ANTHROPIC_API_KEY,
 // and EVAL_MODEL to ask another model than the default.
 const key = process.env.ANTHROPIC_API_KEY;
-const model = process.env.EVAL_MODEL ?? DEFAULT_MODEL;
+const model = process.env.EVAL_MODEL ?? DEFAULT_MODEL.id;
 
 it.skipIf(!key)(
   'writes a review sheet of the never-Prose eval set',
   async () => {
-    if (!isModelId(model)) throw new Error(`Unknown model: ${model}`);
+    if (!isClaudeModelId(model)) throw new Error(`Unknown model: ${model}`);
     const dir = await mkdtemp(path.join(tmpdir(), 'scaffold-eval-'));
     try {
       const results = await runNeverProseEval({
         provider: claudeProvider({ apiKey: () => key ?? null }),
-        model,
+        model: { provider: 'anthropic', id: model },
         dir,
       });
       const date = new Date().toISOString().slice(0, 10);
