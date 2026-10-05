@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { EntryValue } from './project-types';
 import {
+  appended,
+  canAppend,
   fieldDiff,
   fieldOf,
   newEntryOf,
@@ -10,6 +12,8 @@ import {
   replyText,
   splitReply,
   withField,
+  type ProposalChange,
+  type ProposalField,
 } from './proposal';
 
 const anna: EntryValue = {
@@ -339,5 +343,79 @@ describe('fieldDiff', () => {
       { kind: 'same', text: 'Her sister.' },
       { kind: 'added', text: '\nOlder.' },
     ]);
+  });
+});
+
+describe('appended', () => {
+  it('puts the text on a new line in a Description, Appearance or Outline', () => {
+    expect(appended('description', 'Her sister.', 'Older.')).toBe(
+      'Her sister.\nOlder.',
+    );
+    expect(appended('appearance', 'Tall. ', ' Grey-eyed.')).toBe(
+      'Tall.\nGrey-eyed.',
+    );
+    expect(appended('outline', 'They meet.', 'She leaves.')).toBe(
+      'They meet.\nShe leaves.',
+    );
+  });
+
+  it('joins Voice traits, a Sense or a Role note with a comma', () => {
+    expect(appended('voice.traits', 'Clipped', 'dry')).toBe('Clipped, dry');
+    expect(appended('senses.smells', 'tar', 'diesel')).toBe('tar, diesel');
+    expect(appended('roleNote', 'sister', 'rival')).toBe('sister, rival');
+  });
+
+  it('takes the text alone when the field is empty, and keeps the field when there is no text', () => {
+    expect(appended('description', '  ', 'Older.')).toBe('Older.');
+    expect(appended('senses.sight', '', 'masts')).toBe('masts');
+    expect(appended('roleNote', 'sister', ' ')).toBe('sister');
+  });
+
+  it('adds to a list only the items not already there, whatever their case', () => {
+    expect(appended('aliases', ['Annie'], ['annie', 'Nan', 'Nan'])).toEqual([
+      'Annie',
+      'Nan',
+    ]);
+    expect(appended('voice.says', [], ['ja', 'nej'])).toEqual(['ja', 'nej']);
+    expect(appended('voice.neverSays', ['okay'], ['Okay'])).toEqual(['okay']);
+  });
+});
+
+describe('canAppend', () => {
+  const field = (f: ProposalField): ProposalChange => ({
+    kind: 'field',
+    entryId: 'anna',
+    field: f,
+    base: null,
+    proposed: null,
+  });
+
+  it('is offered for text, lists and Outlines', () => {
+    for (const f of [
+      'description',
+      'appearance',
+      'roleNote',
+      'voice.traits',
+      'senses.atmosphere',
+      'aliases',
+      'voice.says',
+    ] as const) {
+      expect(canAppend(field(f))).toBe(true);
+    }
+    expect(
+      canAppend({ kind: 'outline', outlineId: 's1', base: '', proposed: 'x' }),
+    ).toBe(true);
+  });
+
+  it('is not offered for a Role, a Status or a new Entry', () => {
+    expect(canAppend(field('role'))).toBe(false);
+    expect(canAppend(field('status'))).toBe(false);
+    expect(
+      canAppend({
+        kind: 'new-entry',
+        entryId: 'e1',
+        proposed: { type: 'item', name: 'Key', description: '' },
+      }),
+    ).toBe(false);
   });
 });

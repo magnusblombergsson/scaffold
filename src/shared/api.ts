@@ -17,9 +17,14 @@ import type { PendingProposal, ProposedValue } from './proposal';
 
 /**
  * How the Author accepts a Proposal: with the value they `edited` it to,
- * and `anyway` when they saw it was stale.
+ * `anyway` when they saw it was stale, and `append` to add it to what its
+ * target holds now rather than replace that.
  */
-export type AcceptOptions = { edited?: ProposedValue; anyway?: boolean };
+export type AcceptOptions = {
+  edited?: ProposedValue;
+  anyway?: boolean;
+  append?: boolean;
+};
 import type {
   AskResult,
   Conversation,
@@ -547,8 +552,8 @@ export interface AssistantApi {
   /**
    * Accepts a pending Proposal, as proposed or as the Author edited it:
    * main writes its target, an Entry or Outline, then logs the accept. Refused for one already
-   * decided, an orphaned one, a stale one unless accepted anyway, and in a
-   * read-only Project.
+   * decided, an orphaned one, a stale one unless accepted anyway or
+   * appended, one appended that can't be, and in a read-only Project.
    */
   acceptProposal(
     conversationId: string,

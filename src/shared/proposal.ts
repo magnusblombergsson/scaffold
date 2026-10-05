@@ -112,8 +112,9 @@ export type ProposedValue = FieldValue | NewEntry;
  * longer holds the base, and `orphaned` when its Entry, Chapter or Scene is
  * in Trash or gone, or the Entry is no longer of a type with the field; then
  * it can only be rejected. A new Entry is never either, and its `current`
- * value is null. An accepted one says whether the Author `edited` it first;
- * one found already applied on load, as after a crash between writing the
+ * value is null. An accepted one says whether the Author `edited` it first,
+ * or `appended` it as proposed to what its target held; one found already
+ * applied on load, as after a crash between writing the
  * target and logging the accept, counts as accepted. An accepted one can be
  * undone unless `undoBlocked` says why not: its target no longer holds what
  * the accept wrote, or what it replaced isn't known.
@@ -121,7 +122,12 @@ export type ProposedValue = FieldValue | NewEntry;
 export type ProposalState =
   | { kind: 'pending'; current: FieldValue; stale: boolean }
   | { kind: 'pending'; orphaned: 'trashed' | 'gone' | 'field' }
-  | { kind: 'accepted'; edited: boolean; undoBlocked?: string }
+  | {
+      kind: 'accepted';
+      edited: boolean;
+      appended?: true;
+      undoBlocked?: string;
+    }
   | { kind: 'rejected' };
 
 /**
@@ -346,19 +352,69 @@ export function proposalOf(
   if (base === undefined) return null;
   let proposed: unknown = value;
   if (typeof append === 'string' && typeof base === 'string') {
-    const text = append.trim();
-    const separator =
-      field === 'description' || field === 'appearance' ? '\n' : ', ';
-    proposed = base.trim() ? `${base.trimEnd()}${separator}${text}` : text;
+    proposed = appended(field, base, append);
   } else if (typeof add === 'string' && Array.isArray(base)) {
-    const item = add.trim();
-    const has = base.some(
-      (b) => b.toLocaleLowerCase() === item.toLocaleLowerCase(),
-    );
-    proposed = item && !has ? [...base, item] : base;
+    proposed = appended(field, base, [add]);
   }
   if (!isFieldValue(field, proposed) || sameValue(proposed, base)) return null;
   return { kind: 'field', entryId: entry.id, field, base, proposed };
+}
+
+/**
+ * Whether a Proposal may be appended to its target rather than replace it:
+ * any text, list or Outline; never a choice, such as a Role, nor a new Entry.
+ */
+export function canAppend(change: ProposalChange): boolean {
+  if (change.kind === 'new-entry') return false;
+  return change.kind === 'outline' || !isChoiceField(change.field);
+}
+
+/**
+ * `current` with `added` appended, as the Author's Append on a Proposal: a
+ * Description, Appearance or Outline gets the text on a line of its own,
+ * other text after ", ", and a list the items it doesn't hold yet, whatever
+ * their case. Empty text leaves `current` as it is.
+ */
+export function appended(
+  target: ProposalField | 'outline',
+  current: FieldValue,
+  added: FieldValue,
+): FieldValue {
+  if (Array.isArray(current) || Array.isArray(added)) {
+    const list = Array.isArray(current) ? [...current] : [];
+    const has = (item: string) =>
+      list.some((l) => l.toLocaleLowerCase() === item.toLocaleLowerCase());
+    for (const item of Array.isArray(added) ? added : []) {
+      const text = item.trim();
+      if (text && !has(text)) list.push(text);
+    }
+    return list;
+  }
+  const text = (added ?? '').trim();
+  if (!text) return current;
+  if (!current?.trim()) return text;
+  const separator =
+    target === 'description' || target === 'appearance' || target === 'outline'
+      ? '\n'
+      : ', ';
+  return `${current.trimEnd()}${separator}${text}`;
+}
+
+/**
+ * Whether an accept that `replaced` a value with the one it `wrote` was the
+ * Author's Append of the Proposal as proposed, neither replacing nor edited.
+ */
+export function wasAppended(
+  change: ProposalChange,
+  replaced: FieldValue | undefined,
+  wrote: ProposedValue,
+): boolean {
+  if (change.kind === 'new-entry' || replaced === undefined) return false;
+  const target = change.kind === 'field' ? change.field : 'outline';
+  return (
+    !sameValue(wrote, change.proposed) &&
+    sameValue(wrote, appended(target, replaced, change.proposed))
+  );
 }
 
 /**

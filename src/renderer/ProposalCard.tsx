@@ -9,6 +9,7 @@ import {
   type EntryType,
 } from '../shared/project-types';
 import {
+  canAppend,
   FIELD_LABELS,
   fieldDiff,
   fieldText,
@@ -48,13 +49,13 @@ type Draft = string | NewEntry;
 
 /**
  * A Proposal inline in the reply that made it: what it changes, and Accept,
- * Edit… and Reject while it is pending. A field shows a diff, an Outline its
- * body before and after side by side, a new Entry its description. A stale
- * one shows the target's current value too, in warning style; an orphaned
- * one can only be rejected. Decided, it collapses to a line; an accepted
- * one offers Undo, disabled with the reason while its target no longer
- * holds what the accept wrote. Nothing is decided or undone in a read-only
- * Project.
+ * Append (but for a choice or a new Entry), Edit… and Reject while it is
+ * pending. A field shows a diff, an Outline its body before and after side
+ * by side, a new Entry its description. A stale one shows the target's
+ * current value too, in warning style; an orphaned one can only be
+ * rejected. Decided, it collapses to a line; an accepted one offers Undo,
+ * disabled with the reason while its target no longer holds what the accept
+ * wrote. Nothing is decided or undone in a read-only Project.
  */
 export function ProposalCard({
   conversationId,
@@ -99,7 +100,9 @@ export function ProposalCard({
         <p className="proposal-decided">
           <span className="proposal-title">{title}</span>{' '}
           {state.kind === 'accepted'
-            ? `✓ Accepted${state.edited ? ' (edited)' : ''}`
+            ? state.appended
+              ? '✓ Appended'
+              : `✓ Accepted${state.edited ? ' (edited)' : ''}`
             : '✕ Rejected'}
           {state.kind === 'accepted' && (
             <button
@@ -132,14 +135,16 @@ export function ProposalCard({
   const current = 'current' in state ? state.current : null;
   const stale = 'stale' in state && state.stale;
 
-  const accept = (edited?: ProposedValue) =>
+  const accept = (edited?: ProposedValue, append = false) =>
     decide(() =>
       window.assistant.acceptProposal(conversationId, id, {
         edited,
         // The Author sees a stale one as such, and may accept it anyway.
         anyway: stale,
+        append,
       }),
     );
+  const appendable = canAppend(proposal);
   const reject = () =>
     decide(() => window.assistant.rejectProposal(conversationId, id));
 
@@ -199,6 +204,14 @@ export function ProposalCard({
             >
               Accept edited
             </button>
+            {appendable && (
+              <button
+                onClick={() => void accept(editedValue(draft), true)}
+                disabled={readOnly || busy}
+              >
+                Append edited
+              </button>
+            )}
             <button onClick={() => setDraft(null)} disabled={busy}>
               Cancel
             </button>
@@ -214,6 +227,14 @@ export function ProposalCard({
                 >
                   {stale ? 'Accept anyway' : 'Accept'}
                 </button>
+                {appendable && (
+                  <button
+                    onClick={() => void accept(undefined, true)}
+                    disabled={readOnly || busy}
+                  >
+                    Append
+                  </button>
+                )}
                 <button
                   onClick={() => setDraft(draftOf(proposal))}
                   disabled={readOnly || busy}

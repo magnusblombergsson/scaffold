@@ -53,12 +53,15 @@ import {
   revertEntryType,
 } from '../../shared/entry';
 import {
+  appended,
   asNewEntry,
+  canAppend,
   FIELD_LABELS,
   fieldOf,
   isFieldValue,
   orphanedText,
   sameValue,
+  wasAppended,
   withField,
   type EntryCreation,
   type EntryFieldChange,
@@ -127,6 +130,9 @@ type Accepted = {
   wrote: ProposedValue;
   reloaded?: { ref: UnitRef; value: UnitValue };
 };
+
+/** How the Author accepts a change to a target: `anyway` when stale, or to `append`. */
+type AcceptHow = Required<Pick<AcceptOptions, 'anyway' | 'append'>>;
 
 /** A unit the Assistant may read: anything but an Entry's private notes. */
 export type AssistantRef = Exclude<UnitRef, { kind: 'private' }>;
@@ -3065,24 +3071,29 @@ ${text}`);
    * writes its target first, an Entry or an Outline, and waits until it is
    * saved, then logs the accept with the value the target held and the one
    * written. A stale Proposal is accepted only `anyway`, and then replaces
-   * what the target holds now. Refuses one already decided or found
-   * applied, one whose target is in Trash or gone or whose Entry has no such
-   * field now, and any once a newer app has upgraded the Project.
+   * what the target holds now. One the Author chose to `append` lands on
+   * what the target holds now, so it may be stale. Refuses one already
+   * decided or found applied, one whose target is in Trash or gone or whose
+   * Entry has no such field now, one appended that can't be, a choice or a
+   * new Entry, and any once a newer app has upgraded the Project.
    */
   acceptProposal(
     conversationId: string,
     proposalId: string,
-    { edited, anyway = false }: AcceptOptions = {},
+    { edited, anyway = false, append = false }: AcceptOptions = {},
   ): Promise<void> {
     return this.inLog(conversationId, async () => {
       await this.passFormatGate();
       const proposal = await this.undecided(conversationId, proposalId);
+      if (append && !canAppend(proposal)) {
+        throw new Error('This Proposal can’t be appended');
+      }
       const value = edited === undefined ? proposal.proposed : edited;
       const { replaced, wrote, reloaded } =
         proposal.kind === 'field'
-          ? await this.acceptField(proposal, value, anyway)
+          ? await this.acceptField(proposal, value, { anyway, append })
           : proposal.kind === 'outline'
-            ? await this.acceptOutline(proposal, value, anyway)
+            ? await this.acceptOutline(proposal, value, { anyway, append })
             : await this.acceptNewEntry(proposal, value);
       await this.appendEvent(
         conversationId,
@@ -3098,10 +3109,10 @@ ${text}`);
   /** Writes a field of an Entry, as `acceptProposal`. */
   private async acceptField(
     { entryId, field, base }: EntryFieldChange,
-    wrote: ProposedValue,
-    anyway: boolean,
+    value: ProposedValue,
+    { anyway, append }: AcceptHow,
   ): Promise<Accepted> {
-    if (!isFieldValue(field, wrote)) {
+    if (!isFieldValue(field, value)) {
       throw new Error(`${FIELD_LABELS[field]} can't hold that value`);
     }
     if (!this.entries.has(entryId)) {
@@ -3113,22 +3124,25 @@ ${text}`);
       );
     }
     let replaced: FieldValue | undefined;
+    let wrote = value;
     const ref = entryRef(entryId);
-    const { after } = await this.changeUnit(ref, (value) => {
-      replaced = fieldOf(value, field);
+    const { after } = await this.changeUnit(ref, (entry) => {
+      replaced = fieldOf(entry, field);
       if (replaced === undefined) {
         throw new ProjectError(
           'orphaned',
-          `${value.name} has no ${FIELD_LABELS[field]} now`,
+          `${entry.name} has no ${FIELD_LABELS[field]} now`,
         );
       }
-      if (!anyway && !sameValue(replaced, base)) {
+      if (append) {
+        wrote = appended(field, replaced, value);
+      } else if (!anyway && !sameValue(replaced, base)) {
         throw new ProjectError(
           'stale',
           `${FIELD_LABELS[field]} has changed since this was proposed`,
         );
       }
-      return withField(value, field, wrote);
+      return withField(entry, field, wrote);
     });
     this.refuseUnsaved(ref, after.name);
     return {
@@ -3141,10 +3155,10 @@ ${text}`);
   /** Writes a whole Outline body, keeping its metadata, as `acceptProposal`. */
   private async acceptOutline(
     { outlineId, base }: OutlineChange,
-    wrote: ProposedValue,
-    anyway: boolean,
+    value: ProposedValue,
+    { anyway, append }: AcceptHow,
   ): Promise<Accepted> {
-    if (typeof wrote !== 'string') {
+    if (typeof value !== 'string') {
       throw new Error("An Outline can't hold that value");
     }
     const orphaned = this.outlineOrphaned(outlineId);
@@ -3157,16 +3171,19 @@ ${text}`);
       );
     }
     let replaced = '';
+    let wrote = value;
     const ref = outlineRef(outlineId);
-    const { after } = await this.changeUnit(ref, (value) => {
-      replaced = value.body;
-      if (!anyway && replaced !== base) {
+    const { after } = await this.changeUnit(ref, (outline) => {
+      replaced = outline.body;
+      if (append) {
+        wrote = appended('outline', replaced, value) as string;
+      } else if (!anyway && replaced !== base) {
         throw new ProjectError(
           'stale',
           'The Outline has changed since this was proposed',
         );
       }
-      return { ...value, body: wrote };
+      return { ...outline, body: wrote };
     });
     this.refuseUnsaved(ref, unitName(ref, this.manuscript()));
     return {
@@ -3383,9 +3400,16 @@ ${text}`);
     proposal: Proposal,
     decision: Extract<Decision, { kind: 'accepted' }>,
   ): Promise<ProposalState> {
+    const appendedAsProposed = wasAppended(
+      proposal,
+      decision.replaced,
+      decision.wrote,
+    );
     const accepted = (undoBlocked: string | null): ProposalState => ({
       kind: 'accepted',
-      edited: !sameValue(decision.wrote, proposal.proposed),
+      edited:
+        !appendedAsProposed && !sameValue(decision.wrote, proposal.proposed),
+      ...(appendedAsProposed && { appended: true }),
       ...(undoBlocked && { undoBlocked }),
     });
     if (proposal.kind === 'new-entry') {

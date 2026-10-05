@@ -319,6 +319,75 @@ test('the Author undoes accepted Proposals from their cards, while their targets
   await app.close();
 });
 
+test('the Author appends a Replace Proposal, stale or edited, and undoes it', async () => {
+  const projectPath = path.join(tempDir(), 'My Novel');
+  const app = await launch(tempDir(), { anthropicUrl: anthropic.url });
+  await answerDialogs(app, projectPath);
+  const page = await app.firstWindow();
+  await page.getByRole('button', { name: 'New Project…' }).click();
+  await expect(page.getByLabel('Prose')).toBeFocused();
+  const assistant = await addKey(page);
+  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await page.getByRole('button', { name: 'New Entry' }).click();
+  await page.getByRole('menuitem', { name: 'Character', exact: true }).click();
+  await fill(page, 'Name', 'Anna');
+  await fill(page, 'Description', 'Her sister.');
+  await page.keyboard.press('ControlOrMeta+s');
+  await expect(page.locator('.save-status.confirmed')).toBeVisible();
+  const [file] = await readdir(path.join(projectPath, 'bible'));
+  const annaId = path.basename(file, '.md');
+
+  anthropic.calls.push({
+    reply: [
+      'Two ideas.\n\n',
+      block({ entry: annaId, field: 'description', value: 'Older.' }),
+      '\n',
+      block({ entry: annaId, field: 'description', value: 'Quiet.' }),
+      '\n',
+      block({ entry: annaId, field: 'role', value: 'supporting' }),
+    ],
+  });
+  await assistant
+    .getByRole('textbox', { name: 'Message' })
+    .fill('Anna is older, and quiet.');
+  await assistant.getByRole('button', { name: 'Send' }).click();
+  const reply = assistant.getByRole('article', { name: 'Assistant' });
+  const descriptions = reply.getByRole('region', {
+    name: 'Proposal: Anna › Description',
+  });
+  const older = descriptions.nth(0);
+  const quiet = descriptions.nth(1);
+  const role = reply.getByRole('region', { name: 'Proposal: Anna › Role' });
+  const editor = page.getByLabel('Description', { exact: true });
+
+  await expect(role.getByRole('button', { name: 'Accept' })).toBeVisible();
+  await expect(role.getByRole('button', { name: 'Append' })).toHaveCount(0);
+
+  await older.getByRole('button', { name: 'Append' }).click();
+  await expect(older).toContainText('✓ Appended');
+  await expect(editor).toHaveText(/Her sister\.\s*Older\./);
+
+  // The other one on the field goes stale, and may still be appended.
+  await expect(quiet).toContainText('has changed since this was proposed');
+  for (const name of ['Accept anyway', 'Append', 'Reject']) {
+    await expect(
+      quiet.getByRole('button', { name, exact: true }),
+    ).toBeVisible();
+  }
+  await quiet.getByRole('button', { name: 'Edit…' }).click();
+  await quiet
+    .getByRole('textbox', { name: 'Edited value' })
+    .fill('Very quiet.');
+  await quiet.getByRole('button', { name: 'Append edited' }).click();
+  await expect(quiet).toContainText('✓ Accepted (edited)');
+  await expect(editor).toHaveText(/Her sister\.\s*Older\.\s*Very quiet\./);
+
+  await quiet.getByRole('button', { name: 'Undo' }).click();
+  await expect(editor).toHaveText(/^Her sister\.\s*Older\.$/);
+  await expect(older.getByRole('button', { name: 'Undo' })).toBeEnabled();
+  await app.close();
+});
+
 test('a Proposal shown from an Entry opens at its card in the Conversation', async () => {
   const projectPath = path.join(tempDir(), 'My Novel');
   const app = await launch(tempDir(), { anthropicUrl: anthropic.url });
