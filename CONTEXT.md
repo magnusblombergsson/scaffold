@@ -116,7 +116,7 @@ Where deleted Scenes, Chapters, Entries and Conversations go within a Project; t
 _Avoid_: Bin, archive
 
 **Export**:
-A copy of the whole Manuscript's Prose written outside the Project for others to read: Chapter titles as headings, Scenes separated by a break, nothing else from the Project (no Scene titles, Outlines, Notes, Story Bible or Conversations).
+A copy written outside the Project for others to read, of either the Manuscript's Prose or the Story Bible. A Manuscript Export holds the Prose of the Scenes the Author ticks, with Chapter titles as headings and Scenes separated by a break, and nothing else from the Project. A Story Bible Export holds the chosen Entries grouped by type, with their images, and their private notes only if the Author asks. Neither includes Outlines, Notes or Conversations.
 _Avoid_: Compile, publish, backup
 
 **Import**:
