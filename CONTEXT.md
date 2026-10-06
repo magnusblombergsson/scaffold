@@ -103,6 +103,10 @@ _Avoid_: Label, stage, state
 A free word or phrase the Author attaches to Scenes, Chapters and Entries to say what they concern, such as "Mara" or "flashback"; a unit may have any number, and the Project's Tags are simply those in use.
 _Avoid_: Keyword, label, category
 
+**Word target**:
+The number of words the Author aims for in a Scene, a Chapter or the Manuscript, shown beside its count; each unit has one or none. A Chapter's or the Manuscript's Word target is its own, not the sum of its parts. Never sent to the Assistant.
+_Avoid_: Goal, quota, target (that is what a Proposal changes)
+
 **Filter**:
 A narrowing of one list or view to the units matching chosen Statuses, Tags or Entry types; it changes only what the Author sees, never what the Assistant sees.
 _Avoid_: Search
