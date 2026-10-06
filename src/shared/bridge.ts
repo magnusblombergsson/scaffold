@@ -199,7 +199,7 @@ export function bridge<Apis, T extends Tables<Apis>>(tables: T) {
     },
 
     renderer(transport: RendererTransport) {
-      async function invoke(channel: string, args: unknown[]) {
+      async function call(channel: string, args: unknown[]) {
         const outcome = (await transport.invoke(channel, args)) as Outcome;
         if (outcome.ok) return outcome.value;
         const { message, reason } = outcome;
@@ -216,7 +216,7 @@ export function bridge<Apis, T extends Tables<Apis>>(tables: T) {
           for (const [method, kind] of methodsOf(api)) {
             const channel = channelOf(api, method);
             if (kind === 'invoke') {
-              built[method] = (...args: unknown[]) => invoke(channel, args);
+              built[method] = (...args: unknown[]) => call(channel, args);
             } else if (kind === 'send') {
               built[method] = (...args: unknown[]) =>
                 transport.send(channel, args);
@@ -226,6 +226,20 @@ export function bridge<Apis, T extends Tables<Apis>>(tables: T) {
             }
           }
           return built as Built<Apis[A], T[A]>;
+        },
+
+        /**
+         * Invokes `method` of `api` with `args` as they cross, for a method
+         * built by hand.
+         */
+        invoke<A extends Name, M extends keyof Apis[A] & string>(
+          api: A,
+          method: M,
+          args: unknown[],
+        ): Promise<Awaited<Result<Apis[A][M]>>> {
+          return call(channelOf(api, method), args) as Promise<
+            Awaited<Result<Apis[A][M]>>
+          >;
         },
       };
     },

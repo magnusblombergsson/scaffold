@@ -1,20 +1,13 @@
+import { BrowserWindow, dialog, nativeImage, type WebContents } from 'electron';
 import {
-  BrowserWindow,
-  dialog,
-  ipcMain,
-  nativeImage,
-  type WebContents,
-} from 'electron';
-import {
-  channel,
+  assistantMethods,
   projectMethods,
-  type AcceptOptions,
+  replyTextChannel,
+  type AssistantApi,
   type Changed,
   type ProjectApi,
 } from '../shared/api';
 import type { Handlers } from '../shared/bridge';
-import type { InterviewFocus, Mode } from '../shared/conversation';
-import type { ReviewCommand } from '../shared/finding';
 import { PROSE_LANGUAGES, type ProseLanguage } from '../shared/project-types';
 import { createConversationEngine } from './assistant/conversation-engine';
 import { createImagePrompts } from './assistant/image-prompt';
@@ -99,143 +92,85 @@ export function registerProjectIpc(): void {
   }));
 }
 
-/** The engine for the Project of the window `sender` belongs to. */
-function engineOf(sender: WebContents) {
-  return createConversationEngine({
-    store: storeOfWindow(sender),
-    providerFor: assistantProvider,
-    defaultModel,
-    clock: systemClock,
-  });
-}
+/**
+ * What an `assistant` handler works with: the window's Project, the engine
+ * of its Conversations, and the window.
+ */
+type AssistantContext = {
+  store: ProjectStore;
+  engine: ReturnType<typeof createConversationEngine>;
+  sender: WebContents;
+};
 
 /** Streams each piece of the reply to `askId` to the window that asked. */
 function replyTo(sender: WebContents, askId: number) {
   return (text: string) => {
-    if (!sender.isDestroyed()) sender.send(channel.replyText, askId, text);
+    if (!sender.isDestroyed()) sender.send(replyTextChannel, askId, text);
   };
 }
 
-/** Connects each window's `assistant` calls to the Conversations of its Project. */
-export function registerAssistantIpc(): void {
-  ipcMain.handle(channel.listConversations, (event) =>
-    storeOfWindow(event.sender).listConversations(),
-  );
-  ipcMain.handle(channel.readConversation, (event, id: string) =>
-    storeOfWindow(event.sender).readConversation(id),
-  );
-  ipcMain.handle(
-    channel.startConversation,
-    async (event, mode: Mode, title: string, model: unknown) => {
-      if (!isModel(model)) throw new Error('A Conversation needs a Model');
-      const started = await storeOfWindow(event.sender).startConversation(
-        mode,
-        title,
-        model,
-      );
-      rememberModel(model);
-      return started;
-    },
-  );
-  ipcMain.handle(
-    channel.chooseModel,
-    async (event, conversationId: string, model: unknown) => {
-      if (!isModel(model)) throw new Error('No such Model');
-      await storeOfWindow(event.sender).chooseModel(conversationId, model);
-      rememberModel(model);
-    },
-  );
-  ipcMain.handle(
-    channel.renameConversation,
-    (event, conversationId: string, title: string) =>
-      storeOfWindow(event.sender).renameConversation(conversationId, title),
-  );
-  ipcMain.handle(channel.trashConversation, (event, conversationId: string) =>
-    trashConversation(
-      event.sender,
-      storeOfWindow(event.sender),
+const assistantHandlers: Handlers<
+  AssistantApi,
+  typeof assistantMethods,
+  AssistantContext
+> = {
+  listConversations: ({ store }) => store.listConversations(),
+  readConversation: ({ store }, id) => store.readConversation(id),
+  startConversation: async ({ store }, mode, title, model) => {
+    if (!isModel(model)) throw new Error('A Conversation needs a Model');
+    const started = await store.startConversation(mode, title, model);
+    rememberModel(model);
+    return started;
+  },
+  chooseModel: async ({ store }, conversationId, model) => {
+    if (!isModel(model)) throw new Error('No such Model');
+    await store.chooseModel(conversationId, model);
+    rememberModel(model);
+  },
+  renameConversation: ({ store }, conversationId, title) =>
+    store.renameConversation(conversationId, title),
+  trashConversation: ({ store, sender }, conversationId) =>
+    trashConversation(sender, store, conversationId),
+  setInterviewFocus: ({ store }, conversationId, focus) =>
+    store.setInterviewFocus(conversationId, focus),
+  ask: ({ engine, sender }, askId, conversationId, message, sceneId) =>
+    engine.askAssistant(
       conversationId,
+      message,
+      { sceneId },
+      replyTo(sender, askId),
     ),
-  );
-  ipcMain.handle(
-    channel.setInterviewFocus,
-    (event, conversationId: string, focus: InterviewFocus) =>
-      storeOfWindow(event.sender).setInterviewFocus(conversationId, focus),
-  );
-  ipcMain.handle(
-    channel.ask,
-    (
-      event,
-      askId: number,
-      conversationId: string,
-      message: string,
-      sceneId: string | null,
-    ) =>
-      engineOf(event.sender).askAssistant(
-        conversationId,
-        message,
-        { sceneId },
-        replyTo(event.sender, askId),
-      ),
-  );
-  ipcMain.handle(
-    channel.review,
-    (
-      event,
-      askId: number,
-      conversationId: string,
-      command: ReviewCommand,
-      sceneId: string | null,
-    ) =>
-      engineOf(event.sender).review(
-        conversationId,
-        command,
-        { sceneId },
-        replyTo(event.sender, askId),
-      ),
-  );
-  ipcMain.handle(
-    channel.acceptProposal,
-    (
-      event,
-      conversationId: string,
-      proposalId: string,
-      options: AcceptOptions | undefined,
-    ) =>
-      storeOfWindow(event.sender).acceptProposal(
-        conversationId,
-        proposalId,
-        options,
-      ),
-  );
-  ipcMain.handle(
-    channel.rejectProposal,
-    (event, conversationId: string, proposalId: string) =>
-      storeOfWindow(event.sender).rejectProposal(conversationId, proposalId),
-  );
-  ipcMain.handle(
-    channel.undoProposal,
-    (event, conversationId: string, proposalId: string) =>
-      storeOfWindow(event.sender).undoProposal(conversationId, proposalId),
-  );
-  ipcMain.handle(channel.pendingProposals, (event, entryId: string) =>
-    storeOfWindow(event.sender).pendingProposals(entryId),
-  );
-  ipcMain.handle(channel.imagePrompt, (event, entryId: string) =>
+  review: ({ engine, sender }, askId, conversationId, command, sceneId) =>
+    engine.review(conversationId, command, { sceneId }, replyTo(sender, askId)),
+  retry: ({ engine, sender }, askId, conversationId) =>
+    engine.retry(conversationId, replyTo(sender, askId)),
+  acceptProposal: ({ store }, conversationId, proposalId, options) =>
+    store.acceptProposal(conversationId, proposalId, options),
+  rejectProposal: ({ store }, conversationId, proposalId) =>
+    store.rejectProposal(conversationId, proposalId),
+  undoProposal: ({ store }, conversationId, proposalId) =>
+    store.undoProposal(conversationId, proposalId),
+  pendingProposals: ({ store }, entryId) => store.pendingProposals(entryId),
+  imagePrompt: ({ store }, entryId) =>
     createImagePrompts({
-      store: storeOfWindow(event.sender),
+      store,
       providerFor: assistantProvider,
       defaultModel,
     }).write(entryId),
-  );
-  ipcMain.handle(
-    channel.retry,
-    (event, askId: number, conversationId: string) =>
-      engineOf(event.sender).retry(
-        conversationId,
-        replyTo(event.sender, askId),
-      ),
-  );
+};
+
+/** Connects each window's `assistant` calls to the Conversations of its Project. */
+export function registerAssistantIpc(): void {
+  register('assistant', assistantHandlers, (sender) => {
+    const store = storeOfWindow(sender);
+    const engine = createConversationEngine({
+      store,
+      providerFor: assistantProvider,
+      defaultModel,
+      clock: systemClock,
+    });
+    return { store, engine, sender };
+  });
 }
 
 function storeOfWindow(sender: WebContents): ProjectStore {

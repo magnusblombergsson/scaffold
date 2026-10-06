@@ -2,6 +2,7 @@ import { contextBridge, ipcRenderer } from 'electron';
 import {
   appBridge,
   channel,
+  replyTextChannel,
   type AssistantApi,
   type ProjectApi,
   type ProvidersView,
@@ -24,7 +25,7 @@ const transport: RendererTransport = {
   },
 };
 
-const { build } = appBridge.renderer(transport);
+const { build, invoke } = appBridge.renderer(transport);
 
 const project: ProjectApi = build('project');
 
@@ -107,50 +108,19 @@ const settings: SettingsApi = {
 let asked = 0;
 
 const assistant: AssistantApi = {
-  listConversations: () => ipcRenderer.invoke(channel.listConversations),
-  readConversation: (id) => ipcRenderer.invoke(channel.readConversation, id),
-  startConversation: (mode, title, model) =>
-    ipcRenderer.invoke(channel.startConversation, mode, title, model),
-  chooseModel: (conversationId, model) =>
-    ipcRenderer.invoke(channel.chooseModel, conversationId, model),
-  renameConversation: (conversationId, title) =>
-    ipcRenderer.invoke(channel.renameConversation, conversationId, title),
-  trashConversation: (conversationId) =>
-    ipcRenderer.invoke(channel.trashConversation, conversationId),
-  setInterviewFocus: (conversationId, focus) =>
-    ipcRenderer.invoke(channel.setInterviewFocus, conversationId, focus),
+  ...build('assistant'),
   ask: (conversationId, message, sceneId, onText) =>
     streamReply(onText, (askId) =>
-      ipcRenderer.invoke(channel.ask, askId, conversationId, message, sceneId),
+      invoke('assistant', 'ask', [askId, conversationId, message, sceneId]),
     ),
   review: (conversationId, command, sceneId, onText) =>
     streamReply(onText, (askId) =>
-      ipcRenderer.invoke(
-        channel.review,
-        askId,
-        conversationId,
-        command,
-        sceneId,
-      ),
+      invoke('assistant', 'review', [askId, conversationId, command, sceneId]),
     ),
   retry: (conversationId, onText) =>
     streamReply(onText, (askId) =>
-      ipcRenderer.invoke(channel.retry, askId, conversationId),
+      invoke('assistant', 'retry', [askId, conversationId]),
     ),
-  acceptProposal: (conversationId, proposalId, options) =>
-    ipcRenderer.invoke(
-      channel.acceptProposal,
-      conversationId,
-      proposalId,
-      options,
-    ),
-  rejectProposal: (conversationId, proposalId) =>
-    ipcRenderer.invoke(channel.rejectProposal, conversationId, proposalId),
-  undoProposal: (conversationId, proposalId) =>
-    ipcRenderer.invoke(channel.undoProposal, conversationId, proposalId),
-  pendingProposals: (entryId) =>
-    ipcRenderer.invoke(channel.pendingProposals, entryId),
-  imagePrompt: (entryId) => ipcRenderer.invoke(channel.imagePrompt, entryId),
 };
 
 /** Makes the call `invoke` with an id, passing on the pieces of its reply. */
@@ -163,9 +133,9 @@ function streamReply<T>(
     if (id === askId) onText(text);
   };
   // IPC keeps message order, so every piece arrives before the reply.
-  ipcRenderer.on(channel.replyText, forward);
+  ipcRenderer.on(replyTextChannel, forward);
   return invoke(askId).finally(() => {
-    ipcRenderer.off(channel.replyText, forward);
+    ipcRenderer.off(replyTextChannel, forward);
   });
 }
 

@@ -680,15 +680,41 @@ export const projectMethods = {
   setFoldedNoteImage: 'invoke',
 } as const satisfies MethodTable<ProjectApi>;
 
+export const assistantMethods = {
+  listConversations: 'invoke',
+  readConversation: 'invoke',
+  startConversation: 'invoke',
+  chooseModel: 'invoke',
+  renameConversation: 'invoke',
+  trashConversation: 'invoke',
+  setInterviewFocus: 'invoke',
+  ask: 'stream',
+  review: 'stream',
+  retry: 'stream',
+  acceptProposal: 'invoke',
+  rejectProposal: 'invoke',
+  undoProposal: 'invoke',
+  pendingProposals: 'invoke',
+  imagePrompt: 'invoke',
+} as const satisfies MethodTable<AssistantApi>;
+
+/**
+ * Where main streams the pieces of a reply, each with the `askId` its call
+ * was given.
+ */
+export const replyTextChannel = 'assistant:replyText';
+
 /** The APIs a window sees, by the name it sees each under. */
 export type Apis = {
   project: ProjectApi;
+  assistant: AssistantApi;
 };
 
 /** Main and the preload both cross between them on this. */
-export const appBridge = bridge<Apis, { project: typeof projectMethods }>({
-  project: projectMethods,
-});
+export const appBridge = bridge<
+  Apis,
+  { project: typeof projectMethods; assistant: typeof assistantMethods }
+>({ project: projectMethods, assistant: assistantMethods });
 
 export const channel = {
   currentProject: 'shell:currentProject',
@@ -720,22 +746,6 @@ export const channel = {
   setShortlist: 'settings:setShortlist',
   defaultModel: 'settings:defaultModel',
   flushed: 'shell:flushed',
-  listConversations: 'assistant:listConversations',
-  readConversation: 'assistant:readConversation',
-  startConversation: 'assistant:startConversation',
-  chooseModel: 'assistant:chooseModel',
-  renameConversation: 'assistant:renameConversation',
-  trashConversation: 'assistant:trashConversation',
-  setInterviewFocus: 'assistant:setInterviewFocus',
-  ask: 'assistant:ask',
-  review: 'assistant:review',
-  retry: 'assistant:retry',
-  acceptProposal: 'assistant:acceptProposal',
-  rejectProposal: 'assistant:rejectProposal',
-  undoProposal: 'assistant:undoProposal',
-  pendingProposals: 'assistant:pendingProposals',
-  replyText: 'assistant:replyText',
-  imagePrompt: 'assistant:imagePrompt',
 } as const;
 
 declare global {

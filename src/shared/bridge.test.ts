@@ -8,12 +8,15 @@ interface NotesApi {
   read(id: string): Promise<string>;
   write(id: string, text: string): void;
   onChanged(listener: (id: string) => void): () => void;
+  /** Built by hand, as a reply that streams is. */
+  summarize(id: string, onText: (text: string) => void): Promise<string>;
 }
 
 const notesMethods = {
   read: 'invoke',
   write: 'send',
   onChanged: 'event',
+  summarize: 'stream',
 } as const satisfies MethodTable<NotesApi>;
 
 const notesBridge = bridge<{ notes: NotesApi }, { notes: typeof notesMethods }>(
@@ -38,6 +41,8 @@ function setUp(texts: Record<string, string>) {
           throw new ProjectError('trashed', 'It is in Trash');
         texts[id] = text;
       },
+      summarize: async ({ owner }, askId, id) =>
+        `${owner} summarized ${id} for ask ${askId}`,
     },
     (window) => ({ owner: `window ${window.id}` }),
   );
@@ -45,7 +50,12 @@ function setUp(texts: Record<string, string>) {
     main,
     open() {
       const { window, renderer } = transport.open();
-      return { window, notes: notesBridge.renderer(renderer).build('notes') };
+      const { build, invoke } = notesBridge.renderer(renderer);
+      const notes: NotesApi = {
+        ...build('notes'),
+        summarize: (id) => invoke('notes', 'summarize', [7, id]),
+      };
+      return { window, notes };
     },
   };
 }
@@ -56,6 +66,14 @@ describe('bridge', () => {
     const { window, notes } = open();
 
     expect(await notes.read('a')).toBe(`window ${window.id}: Chapter one`);
+  });
+
+  it('answers a hand-built call to a method main handles', async () => {
+    const { window, notes } = setUp({}).open();
+
+    expect(await notes.summarize('a', () => {})).toBe(
+      `window ${window.id} summarized a for ask 7`,
+    );
   });
 
   it('rejects with the clean message and reason of a ProjectError', async () => {
