@@ -3,6 +3,11 @@ import { ENTRY_TYPE_LABELS, type EntryValue } from '../shared/project-types';
 import { VISIBILITY_LABELS } from './EntryView';
 import { entryFields, type CardField } from './card-fields';
 import { entryTitle } from './StoryBible';
+import { EntryThumbnail } from './EntryImage';
+import {
+  TagChips,
+  useEntryLayout,
+} from './prototype-entry-layout/EntryLayoutPrototype';
 
 /**
  * An Entry's fields at a glance, read-only, as the Brainstorm and Interview
@@ -15,11 +20,23 @@ export function EntryCard({
   entry: EntryValue;
   onOpen(entryId: string): void;
 }) {
+  const layout = useEntryLayout();
   return (
     <article className="entry-card" aria-label={entryTitle(entry)}>
       <header>
         <span className="entry-card-type">{ENTRY_TYPE_LABELS[entry.type]}</span>
-        <h2>{entryTitle(entry)}</h2>
+        {layout === '0' ? (
+          <h2>{entryTitle(entry)}</h2>
+        ) : (
+          // PROTOTYPE (#124): a small thumbnail right of the name, Tags under it.
+          <>
+            <h2 className="el-card-name">
+              {entryTitle(entry)}
+              <EntryThumbnail entry={entry} />
+            </h2>
+            <TagChips entryId={entry.id} />
+          </>
+        )}
         <button
           className="entry-card-open"
           aria-label={`Open “${entryTitle(entry)}”`}

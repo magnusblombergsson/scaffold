@@ -318,12 +318,46 @@ function HeaderTabs({ p }: { p: EntryPieces }) {
 
 /** Tags, in memory only: the real ones are not built yet. */
 const stubTags = new Map<string, string[]>();
+const tagListeners = new Set<() => void>();
+const NO_TAGS: string[] = [];
 const VOCABULARY = ['act one', 'family', 'needs research', 'north', 'secret'];
 
+/** An Entry's stub Tags, shared by its view, its list row and its card. */
+export function useStubTags(
+  entryId: string,
+): [string[], (tags: string[]) => void] {
+  const tags = useSyncExternalStore(
+    (l) => {
+      tagListeners.add(l);
+      return () => tagListeners.delete(l);
+    },
+    () => stubTags.get(entryId) ?? NO_TAGS,
+  );
+  const setTags = (next: string[]) => {
+    stubTags.set(entryId, next);
+    tagListeners.forEach((l) => l());
+  };
+  return [tags, setTags];
+}
+
+/** An Entry's Tags, read-only and small, as its list row and card show them. */
+export function TagChips({ entryId }: { entryId: string }) {
+  const [tags] = useStubTags(entryId);
+  if (tags.length === 0) return null;
+  return (
+    <span className="el-chips">
+      {tags.map((tag) => (
+        <span className="el-chip" key={tag}>
+          {tag}
+        </span>
+      ))}
+    </span>
+  );
+}
+
 export function TagsStub({ entryId }: { entryId: string }) {
-  const [tags, setTags] = useState(() => stubTags.get(entryId) ?? []);
+  const [tags, setTags] = useStubTags(entryId);
   const [draft, setDraft] = useState('');
-  useEffect(() => void stubTags.set(entryId, tags), [entryId, tags]);
   const add = () => {
     const tag = draft.trim().toLowerCase();
     if (tag && !tags.includes(tag)) setTags([...tags, tag]);

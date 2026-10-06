@@ -13,6 +13,10 @@ import { ImagePromptDialog } from './ImagePromptDialog';
 import type { Row } from './binder-keys';
 import { useListKeys } from './list-keys';
 import { MAC } from './platform';
+import {
+  TagChips,
+  useEntryLayout,
+} from './prototype-entry-layout/EntryLayoutPrototype';
 
 const GROUP_TITLES: Record<EntryType, string> = {
   character: 'Characters',
@@ -62,6 +66,7 @@ export function StoryBible({
   highlight: boolean;
   onHighlight(on: boolean): void;
 }) {
+  const layout = useEntryLayout();
   // The Entries in the order they show, grouped by type.
   const rows = ENTRY_TYPES.flatMap((type) =>
     entries
@@ -136,8 +141,19 @@ export function StoryBible({
                     aria-current={entry.id === openId ? 'true' : undefined}
                     onClick={() => onOpen(entry.id)}
                   >
-                    <EntryThumbnail entry={entry} />
-                    {entryTitle(entry)}
+                    {layout === '0' ? (
+                      <>
+                        <EntryThumbnail entry={entry} />
+                        {entryTitle(entry)}
+                      </>
+                    ) : (
+                      // PROTOTYPE (#124): the name, its Tags, the thumbnail right.
+                      <span className="el-row">
+                        <span className="el-row-name">{entryTitle(entry)}</span>
+                        <TagChips entryId={entry.id} />
+                        <EntryThumbnail entry={entry} />
+                      </span>
+                    )}
                     <ConflictMarker shown={conflicted.has(entry.id)} />
                   </button>
                   <Menu
