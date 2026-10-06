@@ -138,8 +138,9 @@ export function createConversationEngine({
    * The reply is logged once it has come, without its thinking: as
    * interrupted if the call fails partway, or cut short at the length limit,
    * or as empty if nothing is left of it; a call that fails before any reply
-   * logs nothing. Only a complete reply makes Proposals, and a Review's
-   * reply holds Findings, never Proposals.
+   * logs nothing, unless it said what it used, which still counts. Only a
+   * complete reply makes Proposals, and a Review's reply holds Findings,
+   * never Proposals.
    */
   async function answer(
     conversationId: string,
@@ -175,7 +176,10 @@ export function createConversationEngine({
     const { usage, cost, finish, failure } = streamed;
     const finished = finishReply(streamed);
     if (finished.ending === 'empty') {
-      if (failure) return { reply: null, failure };
+      // A failed call that said nothing of what it used has nothing to count.
+      if (failure && !usage && cost === undefined) {
+        return { reply: null, failure };
+      }
       const empty: EmptyReply = {
         focus,
         at: clock.now(),
@@ -183,15 +187,16 @@ export function createConversationEngine({
         provider: chosen.provider,
         ...(usage && { usage }),
         ...(cost !== undefined && { cost }),
+        ...(failure && { failed: true as const }),
         before: messages.length,
       };
       await store.appendEmptyReply(
         conversationId,
         empty,
         chosen,
-        finish ?? 'complete',
+        failure ? 'failed' : (finish ?? 'complete'),
       );
-      return { reply: null, empty, failure: null };
+      return { reply: null, empty, failure };
     }
     const findings =
       mode === 'writing'

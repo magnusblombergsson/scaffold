@@ -226,7 +226,7 @@ it('an MVP app skips an Append or an Add, and its accept, applying nothing; it s
   ]);
 });
 
-it('an MVP app skips an empty reply, counting the same messages, and reads the message of one cut short as interrupted', async () => {
+it('an MVP app skips an empty reply, or a failed one, counting the same messages, and reads the message of one cut short as interrupted', async () => {
   const store = await createProject(projectPath, deps());
   const { id } = await store.startConversation('writing', 'Anna');
   const usage = { input: 2_000, cached: 0, written: 0, output: 4_096 };
@@ -241,6 +241,12 @@ it('an MVP app skips an empty reply, counting the same messages, and reads the m
     { focus: [], at: 2, usage },
     { provider: 'anthropic', id: 'claude-opus-5-5' },
     'length',
+  );
+  await store.appendEmptyReply(
+    id,
+    { focus: [], at: 2, usage },
+    { provider: 'anthropic', id: 'claude-opus-5-5' },
+    'failed',
   );
   await store.appendMessage(id, {
     role: 'assistant',
@@ -292,6 +298,15 @@ it('an MVP app skips an empty reply, counting the same messages, and reads the m
       model: 'claude-opus-5-5',
       provider: 'anthropic',
       usage,
+      before: 1,
+    },
+    {
+      focus: [],
+      at: 2,
+      model: 'claude-opus-5-5',
+      provider: 'anthropic',
+      usage,
+      failed: true,
       before: 1,
     },
   ]);

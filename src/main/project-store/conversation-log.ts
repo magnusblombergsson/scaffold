@@ -107,7 +107,8 @@ export type UndoneEvent = {
  * A reply that came back with no text, or none once its thinking was
  * stripped: which Model wrote it, what it used and, when the Provider said,
  * what it cost, so its cost counts, and how the Provider said it finished as
- * its `reason`. It is never sent back as context. The MVP skips it (ADR 0006).
+ * its `reason`, or `failed` if the call failed after only thinking. It is
+ * never sent back as context. The MVP skips it (ADR 0006).
  */
 export type EmptyReplyEvent = {
   type: 'reply.empty';
@@ -115,7 +116,7 @@ export type EmptyReplyEvent = {
   provider: Model['provider'];
   usage?: Usage;
   cost?: number;
-  reason: Finish;
+  reason: Finish | 'failed';
   focus: string[];
   at: number;
 };
@@ -555,7 +556,7 @@ function messageOf(event: MessageEvent): ConversationMessage {
 export function emptyReplyEvent(
   { focus, at, usage, cost }: Omit<EmptyReply, 'model' | 'provider' | 'before'>,
   model: Model,
-  reason: Finish,
+  reason: EmptyReplyEvent['reason'],
 ): EmptyReplyEvent {
   return {
     type: 'reply.empty',
@@ -576,7 +577,7 @@ export function modelChosenEvent(model: Model, at: number): ModelChosenEvent {
 
 /** The empty reply an event holds, before the message `before`. */
 function emptyReplyOf(
-  { model, provider, usage, cost, focus, at }: EmptyReplyEvent,
+  { model, provider, usage, cost, reason, focus, at }: EmptyReplyEvent,
   before: number,
 ): EmptyReply {
   return {
@@ -586,6 +587,7 @@ function emptyReplyOf(
     provider,
     ...(isUsage(usage) && { usage }),
     ...(isCost(cost) && { cost }),
+    ...(reason === 'failed' && { failed: true as const }),
     before,
   };
 }

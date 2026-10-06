@@ -915,6 +915,55 @@ describe('Empty replies', () => {
     expect(conversation.emptyReplies).toEqual([result.empty]);
   });
 
+  it('logs a call that failed after only thinking as a failed reply.empty, so what it used still counts', async () => {
+    const usage = { input: 2_000, cached: 0, written: 0, output: 900 };
+    const { projectPath, store, sceneId, engine, clock } = await setUp(() => ({
+      text: ['<think>Hm, the quay'],
+      usage,
+      cost: 0.01,
+      fail: 'offline',
+    }));
+    const { id } = await store.startConversation('writing', 'Anna', ROUTED);
+
+    const result = await engine.askAssistant(id, 'Why?', { sceneId }, () => {});
+
+    const empty = {
+      focus: [sceneId],
+      at: clock.now(),
+      model: ROUTED.id,
+      provider: ROUTED.provider,
+      usage,
+      cost: 0.01,
+      failed: true,
+      before: 1,
+    };
+    expect(result).toEqual({ reply: null, empty, failure: 'offline' });
+    const conversation = await store.readConversation(id);
+    expect(conversation.messages.map((m) => m.role)).toEqual(['author']);
+    expect(conversation.emptyReplies).toEqual([empty]);
+    const log = await readFile(
+      path.join(projectPath, 'conversations', `${id}.jsonl`),
+      'utf8',
+    );
+    expect(JSON.parse(log.trim().split('\n').at(-1)!)).toMatchObject({
+      type: 'reply.empty',
+      reason: 'failed',
+    });
+  });
+
+  it('logs nothing for a call that failed after only thinking and used nothing it said', async () => {
+    const { store, sceneId, engine } = await setUp(() => ({
+      text: ['<think>Hm'],
+      fail: 'offline',
+    }));
+    const { id } = await store.startConversation('writing', 'Anna');
+
+    const result = await engine.askAssistant(id, 'Why?', { sceneId }, () => {});
+
+    expect(result).toEqual({ reply: null, failure: 'offline' });
+    expect((await store.readConversation(id)).emptyReplies ?? []).toEqual([]);
+  });
+
   it('never sends an empty reply back, and a retry answers the Author’s message afresh', async () => {
     const { store, sceneId, engine, provider } = await setUp((n) =>
       n === 0 ? [] : ['Because.'],

@@ -582,8 +582,9 @@ export function MessageLog({
 }
 
 /**
- * The replies that came back empty before the message `before`, each with
- * what it used; the last offers `onRetry`, if given.
+ * The replies that came back empty, or failed before any text, before
+ * the message `before`, each with what it used; the last offers `onRetry`,
+ * if given.
  */
 function EmptyReplies({
   conversation: { emptyReplies = [] },
@@ -605,8 +606,9 @@ function EmptyReplies({
       aria-label="Assistant"
     >
       <p className="message-note">
-        No reply: the Model used its whole length limit thinking. Try again or
-        choose another Model.
+        {reply.failed
+          ? 'No reply: the call failed before the Model wrote anything.'
+          : 'No reply: the Model used its whole length limit thinking. Try again or choose another Model.'}
       </p>
       {onRetry && i === here.length - 1 && (
         <div className="message-actions">

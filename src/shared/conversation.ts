@@ -132,7 +132,9 @@ export type AssistantFailure =
  * stripped. It isn't a message: it is never sent back, and stands before
  * the message `before`, which is the number of messages before it. It says
  * which `model` wrote it, through which `provider`, and what it used and,
- * when the Provider said, cost, so its cost counts.
+ * when the Provider said, cost, so its cost counts. A call that `failed`
+ * before any text but thinking is logged as one too, when it said what it
+ * used.
  */
 export type EmptyReply = {
   focus: string[];
@@ -142,14 +144,16 @@ export type EmptyReply = {
   provider: ProviderId;
   usage?: Usage;
   cost?: number;
+  failed?: true;
   before: number;
 };
 
 /**
  * How asking the Assistant went: the reply as logged, if any, or the `empty`
  * one, and why the call failed, if it did. A call that fails partway logs
- * what came as an interrupted reply; one that fails before any reply, or
- * before any but thinking, logs nothing.
+ * what came as an interrupted reply; one that fails before any reply logs
+ * nothing, unless the Provider said what it used: then it logs an `empty`
+ * one, so its cost counts.
  */
 export type AskResult = {
   reply: ConversationMessage | null;
