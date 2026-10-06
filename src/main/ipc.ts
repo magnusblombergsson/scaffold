@@ -1,22 +1,17 @@
+import { BrowserWindow, dialog, nativeImage, type WebContents } from 'electron';
 import {
-  BrowserWindow,
-  dialog,
-  ipcMain,
-  nativeImage,
-  type IpcMainInvokeEvent,
-  type WebContents,
-} from 'electron';
-import {
-  channel,
-  type AcceptOptions,
+  assistantMethods,
+  projectMethods,
+  replyTextChannel,
+  type AssistantApi,
   type Changed,
   type ProjectApi,
 } from '../shared/api';
-import type { InterviewFocus, Mode } from '../shared/conversation';
-import type { ReviewCommand } from '../shared/finding';
+import type { Handlers } from '../shared/bridge';
 import { PROSE_LANGUAGES, type ProseLanguage } from '../shared/project-types';
 import { createConversationEngine } from './assistant/conversation-engine';
 import { createImagePrompts } from './assistant/image-prompt';
+import { register } from './electron-transport';
 import { entryImageOf, imageDataUrl } from './entry-image';
 import { systemClock } from './project-store/clock';
 import type { ProjectStore } from './project-store/project-store';
@@ -29,246 +24,153 @@ import {
 } from './shell';
 import { trashConversationQuestion } from './trash-question';
 
-/**
- * Every method but `emptyTrash`, which asks the Author first, the Project
- * settings, which may warn them, `chooseEntryImage`, which asks for a file,
- * and `subscribe`, whose events the shell sends to the window.
- */
-type StoreMethod = Exclude<
-  keyof ProjectApi,
-  | 'emptyTrash'
-  | 'setLanguage'
-  | 'setFoldedNoteImage'
-  | 'chooseEntryImage'
-  | 'subscribe'
->;
+/** What a `project` handler works with: the window's Project, and the window. */
+type ProjectContext = { store: ProjectStore; sender: WebContents };
 
-type Handlers = {
-  [K in StoreMethod]: (
-    store: ProjectStore,
-    ...args: Parameters<ProjectApi[K]>
-  ) => ReturnType<ProjectApi[K]>;
-};
-
-const projectHandlers: Handlers = {
-  manuscript: async (store) => store.manuscript(),
-  read: (store, ref) => store.read(ref),
-  write: (store, ref, value) => store.write(ref, value),
-  reloadTaken: async (store, ref) => store.reloadTaken(ref),
-  keepEditsOverReload: async (store, ref) => store.keepEditsOverReload(ref),
-  flush: (store) => store.flush(),
-  hasUnsaved: async (store) => store.hasUnsaved(),
-  saveStatuses: async (store) => store.saveStatuses(),
-  createChapter: (store, index, title) => store.createChapter(index, title),
-  createScene: (store, chapterId, index, title) =>
+const projectHandlers: Handlers<
+  ProjectApi,
+  typeof projectMethods,
+  ProjectContext
+> = {
+  manuscript: async ({ store }) => store.manuscript(),
+  read: ({ store }, ref) => store.read(ref),
+  write: ({ store }, ref, value) => store.write(ref, value),
+  reloadTaken: async ({ store }, ref) => store.reloadTaken(ref),
+  keepEditsOverReload: async ({ store }, ref) => store.keepEditsOverReload(ref),
+  flush: ({ store }) => store.flush(),
+  hasUnsaved: async ({ store }) => store.hasUnsaved(),
+  saveStatuses: async ({ store }) => store.saveStatuses(),
+  createChapter: ({ store }, index, title) => store.createChapter(index, title),
+  createScene: ({ store }, chapterId, index, title) =>
     store.createScene(chapterId, index, title),
-  renameChapter: (store, chapterId, title) =>
+  renameChapter: ({ store }, chapterId, title) =>
     store.renameChapter(chapterId, title),
-  renameScene: (store, sceneId, title) => store.renameScene(sceneId, title),
-  moveChapter: (store, chapterId, index) => store.moveChapter(chapterId, index),
-  moveScene: (store, sceneId, chapterId, index) =>
+  renameScene: ({ store }, sceneId, title) => store.renameScene(sceneId, title),
+  moveChapter: ({ store }, chapterId, index) =>
+    store.moveChapter(chapterId, index),
+  moveScene: ({ store }, sceneId, chapterId, index) =>
     store.moveScene(sceneId, chapterId, index),
-  trashScene: (store, sceneId) => store.trashScene(sceneId),
-  trashChapter: (store, chapterId) => store.trashChapter(chapterId),
-  listEntries: async (store) => store.listEntries(),
-  createEntry: (store, type, name) => store.createEntry(type, name),
-  trashEntry: (store, entryId) => store.trashEntry(entryId),
-  setEntryVisibility: (store, entryId, visibility) =>
+  trashScene: ({ store }, sceneId) => store.trashScene(sceneId),
+  trashChapter: ({ store }, chapterId) => store.trashChapter(chapterId),
+  listEntries: async ({ store }) => store.listEntries(),
+  createEntry: ({ store }, type, name) => store.createEntry(type, name),
+  trashEntry: ({ store }, entryId) => store.trashEntry(entryId),
+  setEntryVisibility: ({ store }, entryId, visibility) =>
     store.setEntryVisibility(entryId, visibility),
-  setEntryType: (store, entryId, type) => store.setEntryType(entryId, type),
-  removeEntryImage: (store, entryId) => store.removeEntryImage(entryId),
-  entryImage: async (store, entryId) => {
+  setEntryType: ({ store }, entryId, type) => store.setEntryType(entryId, type),
+  chooseEntryImage: ({ store, sender }, entryId) =>
+    chooseEntryImage(sender, store, entryId),
+  removeEntryImage: ({ store }, entryId) => store.removeEntryImage(entryId),
+  entryImage: async ({ store }, entryId) => {
     const image = await store.readEntryImage(entryId);
     return image && imageDataUrl(image);
   },
-  restore: (store, id) => store.restore(id),
-  undo: (store, step) => store.undo(step),
-  listTrash: async (store) => store.listTrash(),
-  listConflicts: async (store) => store.listConflicts(),
-  readConflictVersion: (store, ref, versionId) =>
+  restore: ({ store }, id) => store.restore(id),
+  undo: ({ store }, step) => store.undo(step),
+  listTrash: async ({ store }) => store.listTrash(),
+  listConflicts: async ({ store }) => store.listConflicts(),
+  readConflictVersion: ({ store }, ref, versionId) =>
     store.readConflictVersion(ref, versionId),
-  resolveConflict: (store, ref, kept) => store.resolveConflict(ref, kept),
+  resolveConflict: ({ store }, ref, kept) => store.resolveConflict(ref, kept),
+  emptyTrash: ({ store, sender }) => emptyTrash(sender, store),
+  setLanguage: ({ store, sender }, language) =>
+    setLanguage(sender, store, language),
+  setFoldedNoteImage: ({ store, sender }, on) =>
+    saveProjectSetting(
+      sender,
+      store,
+      `The Pinned notes setting of ${store.displayName}`,
+      () => store.setFoldedNoteImage(on === true),
+    ),
 };
 
 /** Connects each window's `project` calls to the store of its Project. */
 export function registerProjectIpc(): void {
-  for (const method of Object.keys(projectHandlers) as StoreMethod[]) {
-    ipcMain.handle(
-      channel.project(method),
-      (event: IpcMainInvokeEvent, ...args: unknown[]) => {
-        const store = storeOfWindow(event.sender);
-        const handler = projectHandlers[method] as (
-          store: ProjectStore,
-          ...args: unknown[]
-        ) => unknown;
-        return handler(store, ...args);
-      },
-    );
-  }
-  ipcMain.handle(channel.project('emptyTrash'), (event) =>
-    emptyTrash(event.sender, storeOfWindow(event.sender)),
-  );
-  ipcMain.handle(
-    channel.project('chooseEntryImage'),
-    (event, entryId: string) =>
-      chooseEntryImage(event.sender, storeOfWindow(event.sender), entryId),
-  );
-  ipcMain.handle(
-    channel.project('setLanguage'),
-    (event, language: ProseLanguage) =>
-      setLanguage(event.sender, storeOfWindow(event.sender), language),
-  );
-  ipcMain.handle(
-    channel.project('setFoldedNoteImage'),
-    (event, on: boolean) => {
-      const store = storeOfWindow(event.sender);
-      return saveProjectSetting(
-        event.sender,
-        store,
-        `The Pinned notes setting of ${store.displayName}`,
-        () => store.setFoldedNoteImage(on === true),
-      );
-    },
-  );
+  register('project', projectHandlers, (sender) => ({
+    store: storeOfWindow(sender),
+    sender,
+  }));
 }
 
-/** The engine for the Project of the window `sender` belongs to. */
-function engineOf(sender: WebContents) {
-  return createConversationEngine({
-    store: storeOfWindow(sender),
-    providerFor: assistantProvider,
-    defaultModel,
-    clock: systemClock,
-  });
-}
+/**
+ * What an `assistant` handler works with: the window's Project, the engine
+ * of its Conversations, and the window.
+ */
+type AssistantContext = {
+  store: ProjectStore;
+  engine: ReturnType<typeof createConversationEngine>;
+  sender: WebContents;
+};
 
 /** Streams each piece of the reply to `askId` to the window that asked. */
 function replyTo(sender: WebContents, askId: number) {
   return (text: string) => {
-    if (!sender.isDestroyed()) sender.send(channel.replyText, askId, text);
+    if (!sender.isDestroyed()) sender.send(replyTextChannel, askId, text);
   };
 }
 
-/** Connects each window's `assistant` calls to the Conversations of its Project. */
-export function registerAssistantIpc(): void {
-  ipcMain.handle(channel.listConversations, (event) =>
-    storeOfWindow(event.sender).listConversations(),
-  );
-  ipcMain.handle(channel.readConversation, (event, id: string) =>
-    storeOfWindow(event.sender).readConversation(id),
-  );
-  ipcMain.handle(
-    channel.startConversation,
-    async (event, mode: Mode, title: string, model: unknown) => {
-      if (!isModel(model)) throw new Error('A Conversation needs a Model');
-      const started = await storeOfWindow(event.sender).startConversation(
-        mode,
-        title,
-        model,
-      );
-      rememberModel(model);
-      return started;
-    },
-  );
-  ipcMain.handle(
-    channel.chooseModel,
-    async (event, conversationId: string, model: unknown) => {
-      if (!isModel(model)) throw new Error('No such Model');
-      await storeOfWindow(event.sender).chooseModel(conversationId, model);
-      rememberModel(model);
-    },
-  );
-  ipcMain.handle(
-    channel.renameConversation,
-    (event, conversationId: string, title: string) =>
-      storeOfWindow(event.sender).renameConversation(conversationId, title),
-  );
-  ipcMain.handle(channel.trashConversation, (event, conversationId: string) =>
-    trashConversation(
-      event.sender,
-      storeOfWindow(event.sender),
+const assistantHandlers: Handlers<
+  AssistantApi,
+  typeof assistantMethods,
+  AssistantContext
+> = {
+  listConversations: ({ store }) => store.listConversations(),
+  readConversation: ({ store }, id) => store.readConversation(id),
+  startConversation: async ({ store }, mode, title, model) => {
+    if (!isModel(model)) throw new Error('A Conversation needs a Model');
+    const started = await store.startConversation(mode, title, model);
+    rememberModel(model);
+    return started;
+  },
+  chooseModel: async ({ store }, conversationId, model) => {
+    if (!isModel(model)) throw new Error('No such Model');
+    await store.chooseModel(conversationId, model);
+    rememberModel(model);
+  },
+  renameConversation: ({ store }, conversationId, title) =>
+    store.renameConversation(conversationId, title),
+  trashConversation: ({ store, sender }, conversationId) =>
+    trashConversation(sender, store, conversationId),
+  setInterviewFocus: ({ store }, conversationId, focus) =>
+    store.setInterviewFocus(conversationId, focus),
+  ask: ({ engine, sender }, askId, conversationId, message, sceneId) =>
+    engine.askAssistant(
       conversationId,
+      message,
+      { sceneId },
+      replyTo(sender, askId),
     ),
-  );
-  ipcMain.handle(
-    channel.setInterviewFocus,
-    (event, conversationId: string, focus: InterviewFocus) =>
-      storeOfWindow(event.sender).setInterviewFocus(conversationId, focus),
-  );
-  ipcMain.handle(
-    channel.ask,
-    (
-      event,
-      askId: number,
-      conversationId: string,
-      message: string,
-      sceneId: string | null,
-    ) =>
-      engineOf(event.sender).askAssistant(
-        conversationId,
-        message,
-        { sceneId },
-        replyTo(event.sender, askId),
-      ),
-  );
-  ipcMain.handle(
-    channel.review,
-    (
-      event,
-      askId: number,
-      conversationId: string,
-      command: ReviewCommand,
-      sceneId: string | null,
-    ) =>
-      engineOf(event.sender).review(
-        conversationId,
-        command,
-        { sceneId },
-        replyTo(event.sender, askId),
-      ),
-  );
-  ipcMain.handle(
-    channel.acceptProposal,
-    (
-      event,
-      conversationId: string,
-      proposalId: string,
-      options: AcceptOptions | undefined,
-    ) =>
-      storeOfWindow(event.sender).acceptProposal(
-        conversationId,
-        proposalId,
-        options,
-      ),
-  );
-  ipcMain.handle(
-    channel.rejectProposal,
-    (event, conversationId: string, proposalId: string) =>
-      storeOfWindow(event.sender).rejectProposal(conversationId, proposalId),
-  );
-  ipcMain.handle(
-    channel.undoProposal,
-    (event, conversationId: string, proposalId: string) =>
-      storeOfWindow(event.sender).undoProposal(conversationId, proposalId),
-  );
-  ipcMain.handle(channel.pendingProposals, (event, entryId: string) =>
-    storeOfWindow(event.sender).pendingProposals(entryId),
-  );
-  ipcMain.handle(channel.imagePrompt, (event, entryId: string) =>
+  review: ({ engine, sender }, askId, conversationId, command, sceneId) =>
+    engine.review(conversationId, command, { sceneId }, replyTo(sender, askId)),
+  retry: ({ engine, sender }, askId, conversationId) =>
+    engine.retry(conversationId, replyTo(sender, askId)),
+  acceptProposal: ({ store }, conversationId, proposalId, options) =>
+    store.acceptProposal(conversationId, proposalId, options),
+  rejectProposal: ({ store }, conversationId, proposalId) =>
+    store.rejectProposal(conversationId, proposalId),
+  undoProposal: ({ store }, conversationId, proposalId) =>
+    store.undoProposal(conversationId, proposalId),
+  pendingProposals: ({ store }, entryId) => store.pendingProposals(entryId),
+  imagePrompt: ({ store }, entryId) =>
     createImagePrompts({
-      store: storeOfWindow(event.sender),
+      store,
       providerFor: assistantProvider,
       defaultModel,
     }).write(entryId),
-  );
-  ipcMain.handle(
-    channel.retry,
-    (event, askId: number, conversationId: string) =>
-      engineOf(event.sender).retry(
-        conversationId,
-        replyTo(event.sender, askId),
-      ),
-  );
+};
+
+/** Connects each window's `assistant` calls to the Conversations of its Project. */
+export function registerAssistantIpc(): void {
+  register('assistant', assistantHandlers, (sender) => {
+    const store = storeOfWindow(sender);
+    const engine = createConversationEngine({
+      store,
+      providerFor: assistantProvider,
+      defaultModel,
+      clock: systemClock,
+    });
+    return { store, engine, sender };
+  });
 }
 
 function storeOfWindow(sender: WebContents): ProjectStore {

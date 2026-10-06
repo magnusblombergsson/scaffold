@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
+  CallFailure,
   Changed,
   Conflict,
   Created,
@@ -632,7 +633,7 @@ function ProjectView({
       changeLatest({ message, step: result.step });
       onError(null);
     } catch (error) {
-      onError(`Can't make that change: ${(error as Error).message}`);
+      onError(`Can't make that change: ${(error as CallFailure).message}`);
     }
     await refreshTrash();
   }
@@ -786,7 +787,7 @@ function ProjectView({
       setManuscript(await window.project.undo(step));
       onError(null);
     } catch (error) {
-      onError(`Can't undo: ${(error as Error).message}`);
+      onError(`Can't undo: ${(error as CallFailure).message}`);
     }
     await refreshTrash();
   }
@@ -798,7 +799,7 @@ function ProjectView({
       await window.project.resolveConflict(ref, kept);
       onError(null);
     } catch (error) {
-      onError(`Can't resolve the Conflict: ${(error as Error).message}`);
+      onError(`Can't resolve the Conflict: ${(error as CallFailure).message}`);
       return;
     }
     await refreshTrash();

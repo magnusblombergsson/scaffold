@@ -12,22 +12,23 @@ import { access, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type {
   ImportChoice,
-  ImportFile,
-  ProviderEntry,
   ProvidersView,
   OpenedProject,
   OpenResult,
-  ProjectView,
   RecentProject,
+  SettingsApi,
+  ShellApi,
   Tip,
-  WelcomeReason,
 } from '../shared/api';
-import { channel } from '../shared/api';
 import {
-  splitManuscript,
-  type ImportConvention,
-} from '../shared/manuscript-import';
-import { isProviderId, type ListedModel, type Model } from '../shared/models';
+  flushedChannel,
+  flushRequestChannel,
+  settingsMethods,
+  shellMethods,
+} from '../shared/api';
+import type { Handlers } from '../shared/bridge';
+import { splitManuscript } from '../shared/manuscript-import';
+import { isProviderId, type Model } from '../shared/models';
 import type { ProseLanguage } from '../shared/project-types';
 import { unitName } from '../shared/unit-name';
 import {
@@ -67,6 +68,12 @@ import {
 } from './project-store/project-store';
 import { writeFailureReason } from './project-store/safe-write';
 import { menuTemplate, type MenuState } from './menu';
+import {
+  emit,
+  register,
+  windowContext,
+  type WindowContext,
+} from './electron-transport';
 
 // The app shell: its windows, the Project each one shows, and the settings
 // that remember them on this computer.
@@ -252,7 +259,7 @@ function attach(contents: WebContents, store: ProjectStore): void {
     contents.id,
     store.subscribe((event) => {
       if (contents.isDestroyed()) return;
-      contents.send(channel.projectEvent, event);
+      emit(contents, 'project', 'subscribe', event);
       // Which also spellchecks in the new language.
       if (event.type === 'languageChanged' || event.type === 'readOnly') {
         updateMenu();
@@ -337,7 +344,7 @@ function openFailure(projectPath: string, error: unknown): OpenResult {
 }
 
 async function openPath(
-  sender: WebContents,
+  ctx: WindowContext,
   projectPath: string,
 ): Promise<OpenResult> {
   const showing = windowShowing(projectPath);
@@ -348,11 +355,11 @@ async function openPath(
   let store: ProjectStore;
   try {
     store = await openProject(projectPath, deps);
-    await separateIfCopied(sender, store);
+    await separateIfCopied(ctx, store);
   } catch (error) {
     return openFailure(projectPath, error);
   }
-  return showOpened(sender, store);
+  return showOpened(ctx.sender, store);
 }
 
 /**
@@ -361,7 +368,7 @@ async function openPath(
  * recent list with that id.
  */
 async function separateIfCopied(
-  sender: WebContents,
+  ctx: WindowContext,
   store: ProjectStore,
 ): Promise<void> {
   const original = await settings.originalOf(store.path, store.id);
@@ -374,7 +381,7 @@ async function separateIfCopied(
     message: 'Treat it as a separate Project?',
     detail: `${store.displayName} holds the same Project as ${original}, so it is probably a copy of that folder. A separate Project keeps its own settings on this computer.`,
   };
-  const { response } = await dialog.showMessageBox(windowOf(sender), options);
+  const { response } = await dialog.showMessageBox(windowOf(ctx), options);
   if (response === 0) await store.assignNewId();
 }
 
@@ -389,110 +396,87 @@ function recentProjects(): Promise<RecentProject[]> {
   );
 }
 
-export function registerShellIpc(): void {
-  ipcMain.handle(channel.currentProject, (event) => {
-    const store = stores.get(event.sender.id);
+const shellHandlers: Handlers<ShellApi, typeof shellMethods, WindowContext> = {
+  currentProject: ({ sender }) => {
+    const store = stores.get(sender.id);
     return store ? openedProject(store) : null;
-  });
-
-  ipcMain.handle(channel.createProject, async (event) => {
-    const { canceled, filePath } = await dialog.showSaveDialog(
-      windowOf(event.sender),
-      {
-        title: 'Create Project',
-        buttonLabel: 'Create',
-        nameFieldLabel: 'Project name',
-        properties: ['createDirectory', 'showOverwriteConfirmation'],
-      },
-    );
+  },
+  createProject: async (ctx) => {
+    const { canceled, filePath } = await dialog.showSaveDialog(windowOf(ctx), {
+      title: 'Create Project',
+      buttonLabel: 'Create',
+      nameFieldLabel: 'Project name',
+      properties: ['createDirectory', 'showOverwriteConfirmation'],
+    });
     if (canceled || !filePath) return null;
     try {
-      return showOpened(event.sender, await createProject(filePath, deps));
+      return showOpened(ctx.sender, await createProject(filePath, deps));
     } catch (error) {
       return openFailure(filePath, error);
     }
-  });
-
-  ipcMain.handle(channel.openProject, async (event) => {
-    const chosen = await chooseFolder(event.sender, 'Open Project');
-    return chosen && openPath(event.sender, chosen);
-  });
-
-  ipcMain.handle(channel.chooseImport, async (event): Promise<ImportChoice> => {
-    const { canceled, filePaths } = await dialog.showOpenDialog(
-      windowOf(event.sender),
-      {
-        title: 'Import',
-        buttonLabel: 'Import',
-        filters: [
-          {
-            name: 'Word or Markdown',
-            extensions: [
-              ...IMPORT_FORMATS.docx.extensions,
-              ...IMPORT_FORMATS.markdown.extensions,
-            ],
-          },
-        ],
-        properties: ['openFile'],
-      },
-    );
+  },
+  openProject: async (ctx) => {
+    const chosen = await chooseFolder(ctx, 'Open Project');
+    return chosen ? openPath(ctx, chosen) : null;
+  },
+  chooseImport: async (ctx): Promise<ImportChoice> => {
+    const { canceled, filePaths } = await dialog.showOpenDialog(windowOf(ctx), {
+      title: 'Import',
+      buttonLabel: 'Import',
+      filters: [
+        {
+          name: 'Word or Markdown',
+          extensions: [
+            ...IMPORT_FORMATS.docx.extensions,
+            ...IMPORT_FORMATS.markdown.extensions,
+          ],
+        },
+      ],
+      properties: ['openFile'],
+    });
     if (canceled || filePaths.length === 0) return null;
     return readImportFile(filePaths[0]);
-  });
-
+  },
   // An Import always makes a new Project.
-  ipcMain.handle(
-    channel.importProject,
-    async (event, file: ImportFile, convention: ImportConvention) => {
-      const { canceled, filePath } = await dialog.showSaveDialog(
-        windowOf(event.sender),
-        {
-          title: 'Import into a New Project',
-          buttonLabel: 'Create',
-          nameFieldLabel: 'Project name',
-          defaultPath: path.join(app.getPath('documents'), file.name),
-          properties: ['createDirectory', 'showOverwriteConfirmation'],
-        },
+  importProject: async (ctx, file, convention) => {
+    const { canceled, filePath } = await dialog.showSaveDialog(windowOf(ctx), {
+      title: 'Import into a New Project',
+      buttonLabel: 'Create',
+      nameFieldLabel: 'Project name',
+      defaultPath: path.join(app.getPath('documents'), file.name),
+      properties: ['createDirectory', 'showOverwriteConfirmation'],
+    });
+    if (canceled || !filePath) return 'canceled';
+    const manuscript = newChapters(splitManuscript(file.blocks, convention));
+    try {
+      return showOpened(
+        ctx.sender,
+        await createProject(filePath, deps, { manuscript }),
       );
-      if (canceled || !filePath) return 'canceled';
-      const manuscript = newChapters(splitManuscript(file.blocks, convention));
-      try {
-        return showOpened(
-          event.sender,
-          await createProject(filePath, deps, { manuscript }),
-        );
-      } catch (error) {
-        return openFailure(filePath, error);
-      }
-    },
-  );
-
-  ipcMain.handle(channel.openRecent, (event, projectPath: string) =>
-    openPath(event.sender, projectPath),
-  );
-
-  ipcMain.handle(channel.locateProject, async (event, oldPath: string) => {
-    const chosen = await chooseFolder(event.sender, 'Locate Project');
+    } catch (error) {
+      return openFailure(filePath, error);
+    }
+  },
+  openRecent: (ctx, projectPath) => openPath(ctx, projectPath),
+  locateProject: async (ctx, oldPath) => {
+    const chosen = await chooseFolder(ctx, 'Locate Project');
     if (!chosen) return null;
-    const result = await openPath(event.sender, chosen);
+    const result = await openPath(ctx, chosen);
     // Null here means it opened in another window, or was open already.
     if (result?.ok !== false && !samePath(chosen, oldPath)) {
       settings.remove(oldPath);
       updateMenu();
     }
     return result;
-  });
-
-  ipcMain.handle(channel.recentProjects, () => recentProjects());
-
-  ipcMain.handle(channel.removeRecent, (_event, projectPath: string) => {
+  },
+  recentProjects: () => recentProjects(),
+  removeRecent: (_ctx, projectPath) => {
     settings.remove(projectPath);
     updateMenu();
     return recentProjects();
-  });
-
-  ipcMain.on(channel.saveView, (event, change: ProjectView) => {
-    const store = stores.get(event.sender.id);
+  },
+  saveView: ({ sender }, change) => {
+    const store = stores.get(sender.id);
     if (!store) return;
     const view = { ...change };
     // A cursor is where it was in the last Scene, so it goes with it: the
@@ -506,101 +490,95 @@ export function registerShellIpc(): void {
     }
     settings.updateProject(store.id, view);
     store.updateSession(view);
-  });
-
-  ipcMain.handle(channel.tips, async (event): Promise<Tip[]> => {
-    const store = stores.get(event.sender.id);
+  },
+  tips: async ({ sender }): Promise<Tip[]> => {
+    const store = stores.get(sender.id);
     if (!store) return [];
     const dismissed = settings.project(store.id).dismissedTips ?? [];
     if (dismissed.includes('keep-on-device')) return [];
     return (await store.hasOnlineOnlyFiles()) ? ['keep-on-device'] : [];
-  });
-
-  ipcMain.handle(channel.highlightMentions, () => settings.highlightMentions());
-
-  ipcMain.on(channel.setHighlightMentions, (_event, on: boolean) => {
-    settings.setHighlightMentions(on);
-    for (const window of BrowserWindow.getAllWindows()) {
-      window.webContents.send(channel.highlightMentionsChanged, on);
-    }
-  });
-
-  ipcMain.on(channel.dismissTip, (event, tip: Tip) => {
-    const store = stores.get(event.sender.id);
+  },
+  dismissTip: ({ sender }, tip) => {
+    const store = stores.get(sender.id);
     if (!store) return;
     const dismissed = settings.project(store.id).dismissedTips ?? [];
     if (!dismissed.includes(tip)) {
-      settings.updateProject(store.id, { dismissedTips: [...dismissed, tip] });
+      settings.updateProject(store.id, {
+        dismissedTips: [...dismissed, tip],
+      });
     }
-  });
+  },
+  highlightMentions: () => settings.highlightMentions(),
+  setHighlightMentions: (_ctx, on) => {
+    settings.setHighlightMentions(on);
+    for (const window of BrowserWindow.getAllWindows()) {
+      emit(window.webContents, 'shell', 'onHighlightMentions', on);
+    }
+  },
+};
+
+export function registerShellIpc(): void {
+  register('shell', shellHandlers, windowContext);
 }
 
-/** Settings for every Project on this computer: the welcome, the Providers and the Model. */
-export function registerSettingsIpc(): void {
-  ipcMain.handle(channel.showWelcome, (): WelcomeReason | null => {
+const settingsHandlers: Handlers<
+  SettingsApi,
+  typeof settingsMethods,
+  WindowContext
+> = {
+  showWelcome: () => {
     if (providers.anyAdded()) return null;
     if (providers.unreadable()) return 'keyUnreadable';
     return settings.welcomed() ? null : 'firstLaunch';
-  });
-
-  ipcMain.on(channel.dismissWelcome, () => {
+  },
+  dismissWelcome: () => {
     settings.setWelcomed();
     providers
       .setAsideUnreadable()
       .catch((error) => console.error("Can't set the API key aside:", error));
-  });
-
-  ipcMain.handle(channel.providers, () => providers.view());
-
-  ipcMain.handle(channel.providerStatus, (_event, id: unknown) =>
+  },
+  providers: () => providers.view(),
+  providerStatus: (_ctx, id) =>
     isProviderId(id) ? providers.status(id) : null,
-  );
-
-  ipcMain.handle(
-    channel.addProvider,
-    async (_event, id: unknown, entry: ProviderEntry) => {
-      if (!isProviderId(id)) throw new Error(`No Provider ${String(id)}`);
-      const result = await providers.add(id, entry);
-      if (result.status !== 'key-rejected') {
-        settings.setWelcomed();
-        announceProviders(result.view);
-      }
-      return result;
-    },
-  );
-
-  ipcMain.handle(channel.removeProvider, async (_event, id: unknown) => {
+  addProvider: async (_ctx, id, entry) => {
+    if (!isProviderId(id)) throw new Error(`No Provider ${String(id)}`);
+    const result = await providers.add(id, entry);
+    if (result.status !== 'key-rejected') {
+      settings.setWelcomed();
+      announceProviders(result.view);
+    }
+    return result;
+  },
+  removeProvider: async (_ctx, id) => {
     if (!isProviderId(id)) throw new Error(`No Provider ${String(id)}`);
     const view = await providers.remove(id);
     announceProviders(view);
     return view;
-  });
-
-  ipcMain.handle(channel.listModels, (_event, id: unknown) => {
+  },
+  listModels: (_ctx, id) => {
     if (!isProviderId(id)) throw new Error(`No Provider ${String(id)}`);
     return providers.models(id);
-  });
+  },
+  shortlists: () => providers.shortlists(),
+  setShortlist: (_ctx, id, models) => {
+    if (isProviderId(id) && Array.isArray(models)) {
+      providers.setShortlist(id, models);
+      // The Conversations' dropdowns offer it.
+      announceProviders(providers.view());
+    }
+  },
+  defaultModel: () => defaultModel(),
+};
 
-  ipcMain.handle(channel.shortlists, () => providers.shortlists());
-
-  ipcMain.handle(
-    channel.setShortlist,
-    (_event, id: unknown, models: ListedModel[]) => {
-      if (isProviderId(id) && Array.isArray(models)) {
-        providers.setShortlist(id, models);
-        // The Conversations' dropdowns offer it.
-        announceProviders(providers.view());
-      }
-    },
-  );
-
-  ipcMain.handle(channel.defaultModel, () => defaultModel());
+/** Settings for every Project on this computer: the welcome, the Providers and the Model. */
+export function registerSettingsIpc(): void {
+  register('settings', settingsHandlers, windowContext);
 }
 
 /** Tells every window the Providers changed, so the Assistant shows or asks for one. */
 function announceProviders(view: ProvidersView): void {
   for (const window of BrowserWindow.getAllWindows()) {
-    window.webContents.send(channel.providersChanged, view);
+    emit(window.webContents, 'settings', 'onProviders', view);
   }
 }
 
@@ -620,12 +598,12 @@ function setApplicationMenu(): void {
       menuTemplate(state, {
         send: (command, window) => {
           if (window instanceof BrowserWindow) {
-            window.webContents.send(channel.command, command);
+            emit(window.webContents, 'shell', 'onCommand', command);
           } else if (!command.byKey) {
             // No window, as on macOS: a start screen takes it.
             const start = createWindow(null);
             start.webContents.once('did-finish-load', () =>
-              start.webContents.send(channel.command, command),
+              emit(start.webContents, 'shell', 'onCommand', command),
             );
           }
         },
@@ -728,24 +706,20 @@ async function exportFrom(window: BrowserWindow): Promise<void> {
   }
 }
 
-/** The window of an IPC sender; dialogs are attached to it. */
-function windowOf(sender: WebContents): BrowserWindow {
-  const window = BrowserWindow.fromWebContents(sender);
+/** The window that called; dialogs are attached to it. */
+function windowOf({ window }: WindowContext): BrowserWindow {
   if (!window) throw new Error('The window that asked has closed');
   return window;
 }
 
 async function chooseFolder(
-  sender: WebContents,
+  ctx: WindowContext,
   title: string,
 ): Promise<string | null> {
-  const { canceled, filePaths } = await dialog.showOpenDialog(
-    windowOf(sender),
-    {
-      title,
-      properties: ['openDirectory'],
-    },
-  );
+  const { canceled, filePaths } = await dialog.showOpenDialog(windowOf(ctx), {
+    title,
+    properties: ['openDirectory'],
+  });
   return canceled || filePaths.length === 0 ? null : filePaths[0];
 }
 
@@ -882,10 +856,10 @@ function requestRendererFlush(contents: WebContents): Promise<void> {
     const timeout = setTimeout(finish, RENDERER_FLUSH_TIMEOUT_MS);
     function finish() {
       clearTimeout(timeout);
-      ipcMain.off(channel.flushed, done);
+      ipcMain.off(flushedChannel, done);
       resolve();
     }
-    ipcMain.on(channel.flushed, done);
-    contents.send(channel.flushRequest);
+    ipcMain.on(flushedChannel, done);
+    contents.send(flushRequestChannel);
   });
 }

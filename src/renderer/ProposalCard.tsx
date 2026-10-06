@@ -1,4 +1,5 @@
 import { createContext, useContext, useState } from 'react';
+import type { CallFailure } from '../shared/api';
 import {
   ENTRY_TYPE_LABELS,
   ENTRY_TYPES,
@@ -135,7 +136,7 @@ export function ProposalCard({
       await run();
       setDraft(null);
     } catch (error) {
-      setError((error as Error).message);
+      setError((error as CallFailure).message);
     } finally {
       setBusy(false);
     }

@@ -15,6 +15,9 @@ import type { ListedModel, Model, ProviderId, ProviderStatus } from './models';
 import type { Command } from './shortcuts';
 import type { PendingProposal, ProposedValue } from './proposal';
 import type { MeteredTurn } from './usage';
+import { bridge, type MethodTable } from './bridge';
+
+export type { CallFailure } from './bridge';
 
 /**
  * How the Author accepts a Proposal: with the value they `edited` it to,
@@ -35,8 +38,10 @@ import type {
   Mode,
 } from './conversation';
 
-// The preload exposes these four objects on `window`. Main registers a handler
-// per method, and both sides are checked against these interfaces.
+// The preload exposes these four objects on `window`, built from the method
+// table of each. Main registers a handler per method, and both sides are
+// checked against these interfaces. A call that fails rejects with a
+// `CallFailure`, not an Error.
 
 /**
  * What a structure operation resolves with once it is on disk: the Manuscript,
@@ -641,55 +646,131 @@ export type ImagePromptResult = MeteredTurn &
     | { ok: false; failure: ImagePromptFailure }
   );
 
-export const channel = {
-  project: (method: keyof ProjectApi) => `project:${method}`,
-  currentProject: 'shell:currentProject',
-  createProject: 'shell:createProject',
-  openProject: 'shell:openProject',
-  chooseImport: 'shell:chooseImport',
-  importProject: 'shell:importProject',
-  command: 'shell:command',
-  openRecent: 'shell:openRecent',
-  locateProject: 'shell:locateProject',
-  recentProjects: 'shell:recentProjects',
-  removeRecent: 'shell:removeRecent',
-  saveView: 'shell:saveView',
-  tips: 'shell:tips',
-  dismissTip: 'shell:dismissTip',
-  highlightMentions: 'shell:highlightMentions',
-  setHighlightMentions: 'shell:setHighlightMentions',
-  highlightMentionsChanged: 'shell:highlightMentionsChanged',
-  flushRequest: 'shell:flushRequest',
-  showWelcome: 'settings:showWelcome',
-  dismissWelcome: 'settings:dismissWelcome',
-  providers: 'settings:providers',
-  providerStatus: 'settings:providerStatus',
-  addProvider: 'settings:addProvider',
-  removeProvider: 'settings:removeProvider',
-  providersChanged: 'settings:providersChanged',
-  listModels: 'settings:listModels',
-  shortlists: 'settings:shortlists',
-  setShortlist: 'settings:setShortlist',
-  defaultModel: 'settings:defaultModel',
-  flushed: 'shell:flushed',
-  projectEvent: 'project:event',
-  listConversations: 'assistant:listConversations',
-  readConversation: 'assistant:readConversation',
-  startConversation: 'assistant:startConversation',
-  chooseModel: 'assistant:chooseModel',
-  renameConversation: 'assistant:renameConversation',
-  trashConversation: 'assistant:trashConversation',
-  setInterviewFocus: 'assistant:setInterviewFocus',
-  ask: 'assistant:ask',
-  review: 'assistant:review',
-  retry: 'assistant:retry',
-  acceptProposal: 'assistant:acceptProposal',
-  rejectProposal: 'assistant:rejectProposal',
-  undoProposal: 'assistant:undoProposal',
-  pendingProposals: 'assistant:pendingProposals',
-  replyText: 'assistant:replyText',
-  imagePrompt: 'assistant:imagePrompt',
-} as const;
+export const projectMethods = {
+  manuscript: 'invoke',
+  read: 'invoke',
+  write: 'invoke',
+  reloadTaken: 'invoke',
+  keepEditsOverReload: 'invoke',
+  flush: 'invoke',
+  hasUnsaved: 'invoke',
+  saveStatuses: 'invoke',
+  subscribe: 'event',
+  createChapter: 'invoke',
+  createScene: 'invoke',
+  renameChapter: 'invoke',
+  renameScene: 'invoke',
+  moveChapter: 'invoke',
+  moveScene: 'invoke',
+  trashScene: 'invoke',
+  trashChapter: 'invoke',
+  listEntries: 'invoke',
+  createEntry: 'invoke',
+  trashEntry: 'invoke',
+  setEntryVisibility: 'invoke',
+  setEntryType: 'invoke',
+  chooseEntryImage: 'invoke',
+  removeEntryImage: 'invoke',
+  entryImage: 'invoke',
+  restore: 'invoke',
+  undo: 'invoke',
+  listTrash: 'invoke',
+  listConflicts: 'invoke',
+  readConflictVersion: 'invoke',
+  resolveConflict: 'invoke',
+  emptyTrash: 'invoke',
+  setLanguage: 'invoke',
+  setFoldedNoteImage: 'invoke',
+} as const satisfies MethodTable<ProjectApi>;
+
+export const assistantMethods = {
+  listConversations: 'invoke',
+  readConversation: 'invoke',
+  startConversation: 'invoke',
+  chooseModel: 'invoke',
+  renameConversation: 'invoke',
+  trashConversation: 'invoke',
+  setInterviewFocus: 'invoke',
+  ask: 'stream',
+  review: 'stream',
+  retry: 'stream',
+  acceptProposal: 'invoke',
+  rejectProposal: 'invoke',
+  undoProposal: 'invoke',
+  pendingProposals: 'invoke',
+  imagePrompt: 'invoke',
+} as const satisfies MethodTable<AssistantApi>;
+
+export const settingsMethods = {
+  showWelcome: 'invoke',
+  dismissWelcome: 'send',
+  providers: 'invoke',
+  providerStatus: 'invoke',
+  addProvider: 'invoke',
+  removeProvider: 'invoke',
+  onProviders: 'event',
+  listModels: 'invoke',
+  shortlists: 'invoke',
+  setShortlist: 'invoke',
+  defaultModel: 'invoke',
+} as const satisfies MethodTable<SettingsApi>;
+
+export const shellMethods = {
+  currentProject: 'invoke',
+  createProject: 'invoke',
+  openProject: 'invoke',
+  chooseImport: 'invoke',
+  importProject: 'invoke',
+  onCommand: 'event',
+  openRecent: 'invoke',
+  locateProject: 'invoke',
+  recentProjects: 'invoke',
+  removeRecent: 'invoke',
+  saveView: 'send',
+  tips: 'invoke',
+  dismissTip: 'send',
+  highlightMentions: 'invoke',
+  setHighlightMentions: 'send',
+  onHighlightMentions: 'event',
+  onFlushRequest: 'flush',
+} as const satisfies MethodTable<ShellApi>;
+
+/**
+ * Where main streams the pieces of a reply, each with the `askId` its call
+ * was given.
+ */
+export const replyTextChannel = 'assistant:replyText';
+
+/**
+ * Where main asks a window for its pending edits before it closes, and the
+ * window answers once it has sent them.
+ */
+export const flushRequestChannel = 'shell:flushRequest';
+export const flushedChannel = 'shell:flushed';
+
+/** The APIs a window sees, by the name it sees each under. */
+export type Apis = {
+  project: ProjectApi;
+  assistant: AssistantApi;
+  settings: SettingsApi;
+  shell: ShellApi;
+};
+
+/** Main and the preload both cross between them on this. */
+export const appBridge = bridge<
+  Apis,
+  {
+    project: typeof projectMethods;
+    assistant: typeof assistantMethods;
+    settings: typeof settingsMethods;
+    shell: typeof shellMethods;
+  }
+>({
+  project: projectMethods,
+  assistant: assistantMethods,
+  settings: settingsMethods,
+  shell: shellMethods,
+});
 
 declare global {
   interface Window {
