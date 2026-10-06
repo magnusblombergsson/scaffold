@@ -1,4 +1,5 @@
 import {
+  DEFAULT_VISIBILITY,
   ROLE_LABELS,
   type Role,
   STATUS_LABELS,
@@ -27,6 +28,24 @@ export function emptyFields(type: EntryType): EntryFields {
     default:
       return {};
   }
+}
+
+/** A new Entry, seen when mentioned, with the empty fields of its type. */
+export function newEntryValue(
+  id: string,
+  type: EntryType,
+  name: string,
+  description = '',
+): EntryValue {
+  return {
+    id,
+    type,
+    name,
+    aliases: [],
+    visibility: DEFAULT_VISIBILITY,
+    description,
+    fields: emptyFields(type),
+  };
 }
 
 /**

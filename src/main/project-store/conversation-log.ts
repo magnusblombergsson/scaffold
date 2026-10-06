@@ -10,6 +10,7 @@ import {
   type InterviewFocus,
   type Mode,
   type Saw,
+  type UnusedSummary,
 } from '../../shared/conversation';
 import {
   isFinding,
@@ -18,11 +19,14 @@ import {
 } from '../../shared/finding';
 import {
   asNewEntry,
+  decided,
   isAppending,
   isChoiceField,
   isFieldValue,
   isListField,
   isProposalField,
+  type Decision,
+  type DecisionEvent,
   type FieldValue,
   type NewEntry,
   type Proposal,
@@ -145,6 +149,13 @@ export type FocusChangedEvent = {
  */
 export type SummaryEvent = { type: 'summary' } & Compaction;
 
+/**
+ * A summary that wasn't used, as its call failed, came back empty or was cut
+ * short, logged for what it used and cost, so that counts. It is never
+ * shown. The MVP skips it (ADR 0006).
+ */
+export type UnusedSummaryEvent = { type: 'summary.unused' } & UnusedSummary;
+
 /** The Author gave the Conversation a new title. */
 export type RenamedEvent = { type: 'renamed'; title: string; at: number };
 
@@ -162,6 +173,7 @@ export type ConversationEvent =
   | ModelChosenEvent
   | FocusChangedEvent
   | SummaryEvent
+  | UnusedSummaryEvent
   | RenamedEvent
   | TrashMoveEvent
   | ProposedEvent
@@ -169,16 +181,6 @@ export type ConversationEvent =
   | AcceptedEvent
   | RejectedEvent
   | UndoneEvent;
-
-/**
- * What the log says of a Proposal: undecided, accepted with the value it
- * replaced, if any, and the one it wrote, or rejected. An accept that was
- * undone leaves it undecided again, with what that accept wrote as `undid`.
- */
-export type Decision =
-  | { kind: 'pending'; undid?: ProposedValue }
-  | { kind: 'accepted'; replaced?: FieldValue; wrote: ProposedValue }
-  | { kind: 'rejected' };
 
 /** A Proposal in a log: the message it came with, by index, and the latest decision on it. */
 export type LoggedProposal = Proposal & { message: number; decision: Decision };
@@ -255,6 +257,7 @@ export function parseLog(log: string): LoggedConversation | null {
   const proposals = new Map<string, LoggedProposal>();
   const focusChanges: FocusChange[] = [];
   const compactions: Compaction[] = [];
+  const unusedSummaries: UnusedSummary[] = [];
   let chosen: Model | undefined;
   let { title } = header;
   let trashedAt: number | undefined;
@@ -289,6 +292,10 @@ export function parseLog(log: string): LoggedConversation | null {
       compactions.push(compactionOf(event));
       continue;
     }
+    if (isUnusedSummary(event)) {
+      unusedSummaries.push(unusedSummaryOf(event));
+      continue;
+    }
     if (typeof event?.id !== 'string') continue;
     const known = proposals.get(event.id);
     if (
@@ -306,15 +313,9 @@ export function parseLog(log: string): LoggedConversation | null {
           decision: { kind: 'pending' },
         });
       }
-    } else if (known && event.type === 'proposal.accepted') {
-      const accepted = acceptedOf(known, event as Partial<AcceptedEvent>);
-      if (accepted) known.decision = accepted;
-    } else if (known && event.type === 'proposal.rejected') {
-      known.decision = { kind: 'rejected' };
-    } else if (known && event.type === 'proposal.undone') {
-      if (known.decision.kind === 'accepted') {
-        known.decision = { kind: 'pending', undid: known.decision.wrote };
-      }
+    } else if (known) {
+      const decision = decisionEventOf(known, event);
+      if (decision) known.decision = decided(known.decision, decision);
     }
   }
   const { id, mode, created } = header;
@@ -335,6 +336,7 @@ export function parseLog(log: string): LoggedConversation | null {
     messages,
     ...(emptyReplies.length > 0 && { emptyReplies }),
     ...(compactions.length > 0 && { compactions }),
+    ...(unusedSummaries.length > 0 && { unusedSummaries }),
     proposals: [...proposals.values()],
   };
 }
@@ -497,11 +499,22 @@ function loggedOffer(event: Partial<OfferedEvent>): Proposal | null {
     : null;
 }
 
+/** The accept, reject or undo an event logs of `proposal`, if it can be read. */
+function decisionEventOf(
+  proposal: Proposal,
+  event: { type?: unknown },
+): DecisionEvent | null {
+  if (event.type === 'proposal.rejected') return { kind: 'rejected' };
+  if (event.type === 'proposal.undone') return { kind: 'undone' };
+  if (event.type !== 'proposal.accepted') return null;
+  return acceptedOf(proposal, event as Partial<AcceptedEvent>);
+}
+
 /** The accept an event logs of `proposal`, if it can be read. */
 function acceptedOf(
   proposal: Proposal,
   event: Partial<AcceptedEvent>,
-): Decision | null {
+): Extract<Decision, { kind: 'accepted' }> | null {
   const { fields } = event;
   if (!fields) return null;
   if (proposal.kind === 'new-entry') {
@@ -549,14 +562,16 @@ function messageOf(event: MessageEvent): ConversationMessage {
   };
 }
 
-/**
- * The event that logs an empty reply, written by `model`, which finished
- * for `reason`.
- */
+/** The event that logs an empty reply, written by `model`. */
 export function emptyReplyEvent(
-  { focus, at, usage, cost }: Omit<EmptyReply, 'model' | 'provider' | 'before'>,
+  {
+    focus,
+    at,
+    usage,
+    cost,
+    reason,
+  }: Omit<EmptyReply, 'model' | 'provider' | 'before'>,
   model: Model,
-  reason: EmptyReplyEvent['reason'],
 ): EmptyReplyEvent {
   return {
     type: 'reply.empty',
@@ -587,8 +602,31 @@ function emptyReplyOf(
     provider,
     ...(isUsage(usage) && { usage }),
     ...(isCost(cost) && { cost }),
-    ...(reason === 'failed' && { failed: true as const }),
+    reason: isEmptyReason(reason) ? reason : 'complete',
     before,
+  };
+}
+
+function isEmptyReason(value: unknown): value is EmptyReply['reason'] {
+  return value === 'complete' || value === 'length' || value === 'failed';
+}
+
+/** The unused summary an event holds; what is known of its cost is kept if readable. */
+function unusedSummaryOf({
+  at,
+  model,
+  provider,
+  usage,
+  cost,
+  reason,
+}: UnusedSummaryEvent): UnusedSummary {
+  return {
+    at,
+    model,
+    provider,
+    ...(isUsage(usage) && { usage }),
+    ...(isCost(cost) && { cost }),
+    reason,
   };
 }
 
@@ -705,6 +743,16 @@ function isModelChosen(value: unknown): value is ModelChosenEvent {
   return (
     event?.type === 'modelChosen' &&
     isModel({ provider: event.provider, id: event.model }) &&
+    typeof event.at === 'number'
+  );
+}
+
+function isUnusedSummary(value: unknown): value is UnusedSummaryEvent {
+  const event = value as Partial<UnusedSummaryEvent> | null;
+  return (
+    event?.type === 'summary.unused' &&
+    isModel({ provider: event.provider, id: event.model }) &&
+    ['failed', 'empty', 'cut-short'].includes(event.reason as string) &&
     typeof event.at === 'number'
   );
 }

@@ -3,7 +3,7 @@ import type { Model } from '../../shared/models';
 import { ENTRY_TYPE_LABELS, type EntryValue } from '../../shared/project-types';
 import type { ProjectStore } from '../project-store/project-store';
 import type { ProviderFor, ProviderRequest } from './provider';
-import { finishReply, streamCall } from './reply-finishing';
+import { finishedCall } from './reply-finishing';
 import { IMAGE_PROMPT } from './system-prompts';
 
 // The Image prompt (spec v2 §6): a one-off request about one Entry, outside
@@ -83,16 +83,11 @@ export function createImagePrompts({
       const request = imagePromptRequest(model, entry);
       if (!request) return { ok: false, model, failure: 'nothing' };
 
-      const streamed = await streamCall(providerFor(model), request);
-      const { usage, cost, failure } = streamed;
-      const metered = {
-        model,
-        ...(usage && { usage }),
-        ...(cost !== undefined && { cost }),
-      };
-      if (failure) return { ok: false, ...metered, failure };
-      const finished = finishReply(streamed);
-      if (finished.ending === 'empty') {
+      const finished = await finishedCall(providerFor(model), request);
+      const { failure } = finished;
+      const metered = { model, ...finished.metered };
+      if (failure) return { ok: false, ...metered, failure: failure.kind };
+      if (finished.kind !== 'reply') {
         return { ok: false, ...metered, failure: 'empty' };
       }
       return {

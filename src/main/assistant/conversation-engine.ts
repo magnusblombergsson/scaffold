@@ -7,6 +7,7 @@ import {
   type ConversationMessage,
   type EmptyReply,
   type Saw,
+  type UnusedSummary,
 } from '../../shared/conversation';
 import {
   findingOf,
@@ -18,7 +19,6 @@ import {
 } from '../../shared/finding';
 import type { Model } from '../../shared/models';
 import { unitText } from '../../shared/project-types';
-import type { Usage } from '../../shared/usage';
 import type { Clock } from '../project-store/clock';
 import type { ProjectStore } from '../project-store/project-store';
 import {
@@ -30,7 +30,7 @@ import {
 import { buildContext, defaultRequest, readableScene } from './context-builder';
 import type { ProviderFor, ProviderRequest } from './provider';
 import { readProposals } from './proposal-blocks';
-import { finishReply, streamCall } from './reply-finishing';
+import { finishedCall } from './reply-finishing';
 
 /** What a message is about: the Scene open in the editor when it was sent, if any. */
 export type Focus = { sceneId: string | null };
@@ -45,6 +45,7 @@ export type EngineDeps = {
     | 'appendEmptyReply'
     | 'appendProposal'
     | 'appendSummary'
+    | 'appendUnusedSummary'
   >;
   /** The Provider each Model is reached through. */
   providerFor: ProviderFor;
@@ -172,30 +173,21 @@ export function createConversationEngine({
       system: context.system,
       messages: context.messages,
     };
-    const streamed = await streamCall(providerFor(chosen), request, onText);
-    const { usage, cost, finish, failure } = streamed;
-    const finished = finishReply(streamed);
-    if (finished.ending === 'empty') {
-      // A failed call that said nothing of what it used has nothing to count.
-      if (failure && !usage && cost === undefined) {
-        return { reply: null, failure };
-      }
+    const finished = await finishedCall(providerFor(chosen), request, onText);
+    const { metered } = finished;
+    const failure = finished.failure?.kind ?? null;
+    if (finished.kind === 'nothing') return { reply: null, failure };
+    if (finished.kind === 'empty') {
       const empty: EmptyReply = {
         focus,
         at: clock.now(),
         model: chosen.id,
         provider: chosen.provider,
-        ...(usage && { usage }),
-        ...(cost !== undefined && { cost }),
-        ...(failure && { failed: true as const }),
+        ...metered,
+        reason: finished.reason,
         before: messages.length,
       };
-      await store.appendEmptyReply(
-        conversationId,
-        empty,
-        chosen,
-        failure ? 'failed' : (finish ?? 'complete'),
-      );
+      await store.appendEmptyReply(conversationId, empty, chosen);
       return { reply: null, empty, failure };
     }
     const findings =
@@ -215,8 +207,7 @@ export function createConversationEngine({
       at: clock.now(),
       model: chosen.id,
       provider: chosen.provider,
-      ...(usage && { usage }),
-      ...(cost !== undefined && { cost }),
+      ...metered,
       ...(finished.ending !== 'complete' && { interrupted: true as const }),
       ...(finished.ending === 'cut-short' && { cutShort: true as const }),
       ...(unreadable > 0 && { unreadable }),
@@ -233,8 +224,10 @@ export function createConversationEngine({
   /**
    * The summary that stands in for the older `messages` when the Assistant
    * is asked: the `latest` one, or once the messages since are past the
-   * threshold, a new one, logged before it is used. If the summary call
-   * fails, the messages since the latest are sent in full instead.
+   * threshold, a new one, without its thinking, logged before it is used.
+   * A summary that failed, came back empty or was cut short isn't used: the
+   * messages since the latest are sent in full instead, and what its call
+   * used and cost, if it said, is logged so it counts.
    */
   async function summaryToSend(
     conversationId: string,
@@ -244,31 +237,35 @@ export function createConversationEngine({
   ): Promise<Compaction | undefined> {
     const covers = compactionPoint(messages, latest, compaction);
     if (covers === null) return latest;
-    let text = '';
-    let usage: Usage | undefined;
-    let cost: number | undefined;
-    try {
-      const request = summaryRequest(chosen, messages, covers, latest);
-      for await (const event of providerFor(chosen).stream(request)) {
-        if (event.type === 'usage') ({ usage, cost } = event);
-        else if (event.type === 'text') text += event.text;
-      }
-    } catch (error) {
-      console.error('Compacting the Conversation failed:', error);
-      return latest;
-    }
-    if (text.trim() === '') return latest;
-    const summary: Compaction = {
-      text: text.trim(),
-      covers,
+    const finished = await finishedCall(
+      providerFor(chosen),
+      summaryRequest(chosen, messages, covers, latest),
+    );
+    const { metered, failure } = finished;
+    const made = {
       at: clock.now(),
       model: chosen.id,
       provider: chosen.provider,
-      ...(usage && { usage }),
-      ...(cost !== undefined && { cost }),
+      ...metered,
     };
-    await store.appendSummary(conversationId, summary);
-    return summary;
+    if (
+      finished.kind === 'reply' &&
+      finished.ending === 'complete' &&
+      finished.text !== ''
+    ) {
+      const summary: Compaction = { text: finished.text, covers, ...made };
+      await store.appendSummary(conversationId, summary);
+      return summary;
+    }
+    if (metered.usage || metered.cost !== undefined) {
+      const reason: UnusedSummary['reason'] = failure
+        ? 'failed'
+        : finished.kind === 'reply' && finished.ending === 'cut-short'
+          ? 'cut-short'
+          : 'empty';
+      await store.appendUnusedSummary(conversationId, { ...made, reason });
+    }
+    return latest;
   }
 
   /**

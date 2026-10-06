@@ -132,9 +132,10 @@ export type AssistantFailure =
  * stripped. It isn't a message: it is never sent back, and stands before
  * the message `before`, which is the number of messages before it. It says
  * which `model` wrote it, through which `provider`, and what it used and,
- * when the Provider said, cost, so its cost counts. A call that `failed`
- * before any text but thinking is logged as one too, when it said what it
- * used.
+ * when the Provider said, cost, so its cost counts. Its `reason` says how it
+ * ended: complete with only thinking, at the length limit, or `failed`: a
+ * call that failed before any text but thinking is logged as one too, when
+ * it said what it used.
  */
 export type EmptyReply = {
   focus: string[];
@@ -144,7 +145,7 @@ export type EmptyReply = {
   provider: ProviderId;
   usage?: Usage;
   cost?: number;
-  failed?: true;
+  reason: 'complete' | 'length' | 'failed';
   before: number;
 };
 
@@ -179,11 +180,27 @@ export type Compaction = {
 };
 
 /**
+ * A summary that wasn't used, as its call failed, came back empty or was
+ * cut short: the messages since the latest summary were sent in full
+ * instead. It is kept only for what it used and cost, which count, and is
+ * never shown. It says which `model` wrote it, through which `provider`.
+ */
+export type UnusedSummary = {
+  /** When it came, in ms since the epoch. */
+  at: number;
+  model: string;
+  provider: ProviderId;
+  usage?: Usage;
+  cost?: number;
+  reason: 'failed' | 'empty' | 'cut-short';
+};
+
+/**
  * A Conversation's messages, the replies that came back empty between them,
  * and in an Interview, each time its focus was set; once it is long, the
- * summaries made of it, the latest last. Its `model` is the Model chosen for
- * it last, or for one that never had one chosen, the Model of its latest
- * reply; none before then.
+ * summaries made of it, the latest last, and those that weren't used. Its
+ * `model` is the Model chosen for it last, or for one that never had one
+ * chosen, the Model of its latest reply; none before then.
  */
 export type Conversation = ConversationSummary & {
   model?: Model;
@@ -191,4 +208,5 @@ export type Conversation = ConversationSummary & {
   emptyReplies?: EmptyReply[];
   focusChanges?: FocusChange[];
   compactions?: Compaction[];
+  unusedSummaries?: UnusedSummary[];
 };

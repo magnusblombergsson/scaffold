@@ -1,20 +1,25 @@
 import { describe, expect, it } from 'vitest';
 import type { EntryValue } from './project-types';
 import {
-  appended,
+  accept,
   appendedOnto,
   canAppend,
-  fieldDiff,
+  decided,
   fieldOf,
-  holdsAppended,
   newEntryOf,
   outlineChangeOf,
   proposalBlock,
   proposalOf,
   proposalTarget,
-  replyText,
-  splitReply,
+  reject,
+  stateOf,
+  undo,
   withField,
+  type AppendingChange,
+  type DecidedProposal,
+  type Decision,
+  type FieldValue,
+  type NewEntry,
   type ProposalChange,
   type ProposalField,
   type ProposalState,
@@ -50,80 +55,6 @@ const harbour: EntryValue = {
     senses: { smells: '', sight: '', sound: '', touch: '', atmosphere: '' },
   },
 };
-
-describe('splitReply', () => {
-  it('takes proposal blocks out of the reply text, in order', () => {
-    const reply = [
-      'So Anna is older.',
-      '',
-      '```proposal',
-      '{"entry": "anna", "field": "description", "append": "Older by two years."}',
-      '```',
-      '',
-      'Does she know?',
-      '```proposal',
-      '{"entry": "anna", "field": "aliases", "add": "Nan"}',
-      '```',
-    ].join('\n');
-
-    expect(splitReply(reply)).toEqual({
-      text: 'So Anna is older.\n\nDoes she know?',
-      proposals: [
-        { entry: 'anna', field: 'description', append: 'Older by two years.' },
-        { entry: 'anna', field: 'aliases', add: 'Nan' },
-      ],
-      findings: [],
-      unreadable: 0,
-    });
-  });
-
-  it('takes finding blocks out apart from proposal blocks', () => {
-    const reply = [
-      'Two things.',
-      '```finding',
-      '{"type": "missing", "comment": "No ferry."}',
-      '```',
-      '```proposal',
-      '{"entry": "anna", "field": "aliases", "add": "Nan"}',
-      '```',
-      '```finding',
-      '{"type": "voice", "comment": "Not Mira."}',
-      '```',
-      'There are more.',
-    ].join('\n');
-
-    expect(splitReply(reply)).toEqual({
-      text: 'Two things.\n\nThere are more.',
-      proposals: [{ entry: 'anna', field: 'aliases', add: 'Nan' }],
-      findings: [
-        { type: 'missing', comment: 'No ferry.' },
-        { type: 'voice', comment: 'Not Mira.' },
-      ],
-      unreadable: 0,
-    });
-  });
-
-  it('skips a block that is not JSON, counting it, and leaves other code blocks alone', () => {
-    const reply = '```proposal\n{oops\n```\n```\nnot a proposal\n```';
-
-    expect(splitReply(reply)).toEqual({
-      text: '```\nnot a proposal\n```',
-      proposals: [],
-      findings: [],
-      unreadable: 1,
-    });
-  });
-});
-
-describe('replyText', () => {
-  it('hides a proposal block still streaming in', () => {
-    expect(replyText('Older?\n```proposal\n{"entry": "an')).toBe('Older?');
-  });
-
-  it('hides a finding block still streaming in', () => {
-    expect(replyText('Three.\n```finding\n{"type": "vo')).toBe('Three.');
-  });
-});
 
 describe('fieldOf and withField', () => {
   it('reads and writes the fields an Entry of its type has', () => {
@@ -420,90 +351,141 @@ describe('proposalBlock', () => {
   });
 });
 
-describe('fieldDiff', () => {
-  it('keeps what is the same, and marks what goes and what comes', () => {
-    expect(
-      fieldDiff('description', 'Her sister.', 'Her older sister.'),
-    ).toEqual([
-      { kind: 'same', text: 'Her ' },
-      { kind: 'added', text: 'older ' },
-      { kind: 'same', text: 'sister.' },
-    ]);
-    expect(fieldDiff('aliases', ['Annie', 'Nan'], ['Annie', 'Ann'])).toEqual([
-      { kind: 'same', text: 'Annie' },
-      { kind: 'removed', text: 'Nan' },
-      { kind: 'added', text: 'Ann' },
-    ]);
-    expect(fieldDiff('role', null, 'supporting')).toEqual([
-      { kind: 'added', text: 'Supporting' },
-    ]);
-  });
+/** Why a Proposal found applied, with no accept logged, can't be undone. */
+const NOT_LOGGED = 'It was found applied, so what it replaced is not known.';
 
-  it('keeps the whole base when text is only added after it', () => {
-    expect(
-      fieldDiff('description', 'Her sister.', 'Her sister.\nOlder.'),
-    ).toEqual([
-      { kind: 'same', text: 'Her sister.' },
-      { kind: 'added', text: '\nOlder.' },
-    ]);
-  });
-});
+/** A Proposal as the log has it, named as its card names its target. */
+function logged<P extends ProposalChange>(
+  change: P,
+  decision: Decision = { kind: 'pending' },
+): DecidedProposal {
+  return { ...change, id: 'p1', name: 'Anna', decision } as DecidedProposal;
+}
 
-describe('appended', () => {
+const description: ProposalChange = {
+  kind: 'field',
+  entryId: 'anna',
+  field: 'description',
+  base: 'Her sister.',
+  proposed: 'Her older sister.',
+};
+const appendToDescription: ProposalChange = {
+  kind: 'field',
+  entryId: 'anna',
+  field: 'description',
+  operation: 'append',
+  proposed: 'Older.',
+};
+const addAlias: ProposalChange = {
+  kind: 'field',
+  entryId: 'anna',
+  field: 'aliases',
+  operation: 'add',
+  proposed: ['Nan'],
+};
+const outline: ProposalChange = {
+  kind: 'outline',
+  outlineId: 's1',
+  base: 'They meet.',
+  proposed: 'They part.',
+};
+const ferry: ProposalChange = {
+  kind: 'new-entry',
+  entryId: 'ferry',
+  proposed: { type: 'item', name: 'The ferry', description: 'Rusty.' },
+};
+/** The ferry as accepting it created it. */
+const ferryEntry: EntryValue = {
+  id: 'ferry',
+  type: 'item',
+  name: 'The ferry',
+  aliases: [],
+  visibility: 'mentioned',
+  description: 'Rusty.',
+  fields: {},
+};
+
+/** What the Author's Append of a replacing Proposal writes onto `current`. */
+function appendedBy(
+  field: ProposalField | 'outline',
+  current: FieldValue,
+  added: FieldValue,
+) {
+  const change: ProposalChange =
+    field === 'outline'
+      ? {
+          kind: 'outline',
+          outlineId: 's1',
+          base: current as string,
+          proposed: added as string,
+        }
+      : {
+          kind: 'field',
+          entryId: 'anna',
+          field,
+          base: current,
+          proposed: added,
+        };
+  return accept(logged(change), { current }, added, { append: true });
+}
+
+describe('the Author appending a replacing Proposal', () => {
   it('puts the text on a new line in a Description, Appearance or Outline', () => {
-    expect(appended('description', 'Her sister.', 'Older.')).toBe(
-      'Her sister.\nOlder.',
-    );
-    expect(appended('appearance', 'Tall. ', ' Grey-eyed.')).toBe(
-      'Tall.\nGrey-eyed.',
-    );
-    expect(appended('outline', 'They meet.', 'She leaves.')).toBe(
-      'They meet.\nShe leaves.',
-    );
+    expect(appendedBy('description', 'Her sister.', 'Older.')).toEqual({
+      wrote: 'Her sister.\nOlder.',
+    });
+    expect(appendedBy('appearance', 'Tall. ', ' Grey-eyed.')).toEqual({
+      wrote: 'Tall.\nGrey-eyed.',
+    });
+    expect(appendedBy('outline', 'They meet.', 'She leaves.')).toEqual({
+      wrote: 'They meet.\nShe leaves.',
+    });
   });
 
   it('joins Voice traits, a Sense or a Role note with a comma', () => {
-    expect(appended('voice.traits', 'Clipped', 'dry')).toBe('Clipped, dry');
-    expect(appended('senses.smells', 'tar', 'diesel')).toBe('tar, diesel');
-    expect(appended('roleNote', 'sister', 'rival')).toBe('sister, rival');
+    expect(appendedBy('voice.traits', 'Clipped', 'dry')).toEqual({
+      wrote: 'Clipped, dry',
+    });
+    expect(appendedBy('senses.smells', 'tar', 'diesel')).toEqual({
+      wrote: 'tar, diesel',
+    });
+    expect(appendedBy('roleNote', 'sister', 'rival')).toEqual({
+      wrote: 'sister, rival',
+    });
   });
 
   it('takes the text alone when the field is empty, and keeps the field when there is no text', () => {
-    expect(appended('description', '  ', 'Older.')).toBe('Older.');
-    expect(appended('senses.sight', '', 'masts')).toBe('masts');
-    expect(appended('roleNote', 'sister', ' ')).toBe('sister');
+    expect(appendedBy('description', '  ', 'Older.')).toEqual({
+      wrote: 'Older.',
+    });
+    expect(appendedBy('senses.sight', '', 'masts')).toEqual({
+      wrote: 'masts',
+    });
+    expect(appendedBy('roleNote', 'sister', ' ')).toEqual({ wrote: 'sister' });
   });
 
   it('adds to a list only the items not already there, whatever their case', () => {
-    expect(appended('aliases', ['Annie'], ['annie', 'Nan', 'Nan'])).toEqual([
-      'Annie',
-      'Nan',
-    ]);
-    expect(appended('voice.says', [], ['ja', 'nej'])).toEqual(['ja', 'nej']);
-    expect(appended('voice.neverSays', ['okay'], ['Okay'])).toEqual(['okay']);
+    expect(appendedBy('aliases', ['Annie'], ['annie', 'Nan', 'Nan'])).toEqual({
+      wrote: ['Annie', 'Nan'],
+    });
+    expect(appendedBy('voice.says', [], ['ja', 'nej'])).toEqual({
+      wrote: ['ja', 'nej'],
+    });
+    expect(appendedBy('voice.neverSays', ['okay'], ['Okay'])).toEqual({
+      wrote: ['okay'],
+    });
   });
 });
 
-describe('appendedOnto and holdsAppended', () => {
-  const append: ProposalChange = {
-    kind: 'field',
-    entryId: 'anna',
-    field: 'description',
-    operation: 'append',
-    proposed: 'Older.',
-  };
-  const add: ProposalChange = {
-    kind: 'field',
-    entryId: 'anna',
-    field: 'aliases',
-    operation: 'add',
-    proposed: ['Nan'],
-  };
-
+describe('appendedOnto', () => {
   it('lands an Append or an Add on whatever the target holds', () => {
+    const append = appendToDescription as AppendingChange;
     expect(appendedOnto(append, 'Her sister.')).toBe('Her sister.\nOlder.');
     expect(appendedOnto(append, 'Twin.')).toBe('Twin.\nOlder.');
-    expect(appendedOnto(add, ['Annie'])).toEqual(['Annie', 'Nan']);
+    expect(appendedOnto(addAlias as AppendingChange, ['Annie'])).toEqual([
+      'Annie',
+      'Nan',
+    ]);
     expect(
       appendedOnto(
         {
@@ -516,12 +498,537 @@ describe('appendedOnto and holdsAppended', () => {
       ),
     ).toBe('a\nb');
   });
+});
 
-  it('says a target holds an Append when it ends with its text, and an Add when the list has its item', () => {
-    expect(holdsAppended(append, 'Her sister.\nOlder. ')).toBe(true);
-    expect(holdsAppended(append, 'Older. Her sister.')).toBe(false);
-    expect(holdsAppended(add, ['nan'])).toBe(true);
-    expect(holdsAppended(add, ['Annie'])).toBe(false);
+describe('stateOf', () => {
+  const applied = { kind: 'accepted', edited: false, undoBlocked: NOT_LOGGED };
+
+  describe('of a pending Proposal', () => {
+    it('is pending while its target holds the base, and stale once it holds something else', () => {
+      expect(stateOf(logged(description), { current: 'Her sister.' })).toEqual({
+        kind: 'pending',
+        current: 'Her sister.',
+        stale: false,
+      });
+      expect(stateOf(logged(description), { current: 'Twin.' })).toEqual({
+        kind: 'pending',
+        current: 'Twin.',
+        stale: true,
+      });
+      expect(stateOf(logged(outline), { current: 'They fight.' })).toEqual({
+        kind: 'pending',
+        current: 'They fight.',
+        stale: true,
+      });
+    });
+
+    it('counts as applied when its target holds the proposed value, as after a crash before the accept was logged', () => {
+      expect(
+        stateOf(logged(description), { current: 'Her older sister.' }),
+      ).toEqual(applied);
+      expect(stateOf(logged(outline), { current: 'They part.' })).toEqual(
+        applied,
+      );
+    });
+
+    it('never goes stale as an Append or an Add, and is applied once its target ends with it', () => {
+      expect(
+        stateOf(logged(appendToDescription), { current: 'Twin.' }),
+      ).toEqual({ kind: 'pending', current: 'Twin.', stale: false });
+      expect(
+        stateOf(logged(appendToDescription), {
+          current: 'Her sister.\nOlder. ',
+        }),
+      ).toEqual(applied);
+      expect(
+        stateOf(logged(appendToDescription), {
+          current: 'Older. Her sister.',
+        }),
+      ).toMatchObject({ kind: 'pending' });
+      expect(stateOf(logged(addAlias), { current: ['nan'] })).toEqual(applied);
+      expect(stateOf(logged(addAlias), { current: ['Annie'] })).toMatchObject({
+        kind: 'pending',
+      });
+    });
+
+    it('is orphaned when its target is in Trash, gone, or without the field', () => {
+      expect(stateOf(logged(description), { orphaned: 'trashed' })).toEqual({
+        kind: 'pending',
+        orphaned: 'trashed',
+      });
+      expect(stateOf(logged(outline), { orphaned: 'gone' })).toEqual({
+        kind: 'pending',
+        orphaned: 'gone',
+      });
+    });
+
+    it('is rejected once rejected, whatever its target holds', () => {
+      expect(
+        stateOf(logged(description, { kind: 'rejected' }), {
+          current: 'Her older sister.',
+        }),
+      ).toEqual({ kind: 'rejected' });
+    });
+  });
+
+  describe('of an accepted Proposal', () => {
+    const accepted = (
+      wrote: FieldValue,
+      replaced: FieldValue = 'Her sister.',
+    ) => ({ kind: 'accepted', replaced, wrote }) as const;
+
+    it('is accepted while its target holds what the accept wrote, edited when that was not as proposed', () => {
+      expect(
+        stateOf(logged(description, accepted('Her older sister.')), {
+          current: 'Her older sister.',
+        }),
+      ).toEqual({ kind: 'accepted', edited: false });
+      expect(
+        stateOf(logged(description, accepted('Her elder sister.')), {
+          current: 'Her elder sister.',
+        }),
+      ).toEqual({ kind: 'accepted', edited: true });
+    });
+
+    it('is appended when the Author appended it as proposed', () => {
+      const wrote = 'Her sister.\nHer older sister.';
+      expect(
+        stateOf(logged(description, accepted(wrote)), { current: wrote }),
+      ).toEqual({ kind: 'accepted', edited: false, appended: true });
+    });
+
+    it('is edited when the Author appended text of their own instead', () => {
+      const wrote = 'Her sister.\nKind.';
+      expect(
+        stateOf(logged(description, accepted(wrote)), { current: wrote }),
+      ).toEqual({ kind: 'accepted', edited: true });
+    });
+
+    it('is an Append or an Add as proposed when it landed on what its target held', () => {
+      expect(
+        stateOf(
+          logged(appendToDescription, accepted('Twin.\nOlder.', 'Twin.')),
+          {
+            current: 'Twin.\nOlder.',
+          },
+        ),
+      ).toEqual({ kind: 'accepted', edited: false });
+      expect(
+        stateOf(
+          logged(
+            appendToDescription,
+            accepted('Twin.\nOlder, by far.', 'Twin.'),
+          ),
+          { current: 'Twin.\nOlder, by far.' },
+        ),
+      ).toEqual({ kind: 'accepted', edited: true });
+      expect(
+        stateOf(logged(addAlias, accepted(['Annie', 'Nan'], ['Annie'])), {
+          current: ['Annie', 'Nan'],
+        }),
+      ).toEqual({ kind: 'accepted', edited: false });
+    });
+
+    it('cannot be undone once its target holds something else, or is out of reach', () => {
+      const decision = accepted('Her older sister.');
+      expect(
+        stateOf(logged(description, decision), { current: 'Twin.' }),
+      ).toEqual({
+        kind: 'accepted',
+        edited: false,
+        undoBlocked: 'Description has changed since it was accepted.',
+      });
+      expect(
+        stateOf(logged(outline, accepted('They part.', 'They meet.')), {
+          current: 'They fight.',
+        }),
+      ).toMatchObject({
+        undoBlocked: 'The Outline has changed since it was accepted.',
+      });
+      expect(
+        stateOf(logged(description, decision), { orphaned: 'trashed' }),
+      ).toMatchObject({ undoBlocked: 'Anna is in Trash.' });
+    });
+
+    it('counts as undone when its target holds what the accept replaced, as after a crash before the undo was logged', () => {
+      expect(
+        stateOf(logged(description, accepted('Her older sister.')), {
+          current: 'Her sister.',
+        }),
+      ).toEqual({ kind: 'pending', current: 'Her sister.', stale: false });
+      expect(
+        stateOf(logged(description, accepted('Her older sister.', 'Twin.')), {
+          current: 'Twin.',
+        }),
+      ).toEqual({ kind: 'pending', current: 'Twin.', stale: true });
+    });
+  });
+
+  describe('of a new Entry', () => {
+    const wrote = ferry.proposed;
+    const inBible = (entry = ferryEntry, privateNotes = '') =>
+      ({ where: 'bible', entry, privateNotes }) as const;
+    const inTrash = (entry = ferryEntry, privateNotes = '') =>
+      ({ where: 'trash', entry, privateNotes }) as const;
+    const pending = { kind: 'pending', current: null, stale: false };
+
+    it('is pending while no Entry of its id exists, and applied once one is in the Story Bible', () => {
+      expect(stateOf(logged(ferry), { where: 'gone' })).toEqual(pending);
+      expect(stateOf(logged(ferry), inBible())).toEqual(applied);
+    });
+
+    it('counts as applied when its Entry is in Trash with no undo logged', () => {
+      expect(stateOf(logged(ferry), inTrash())).toEqual(applied);
+    });
+
+    it('is pending again once undone, while its Entry is in Trash untouched; changed there, it can only be rejected', () => {
+      const undone: Decision = { kind: 'pending', undid: wrote };
+      expect(stateOf(logged(ferry, undone), inTrash())).toEqual(pending);
+      expect(
+        stateOf(
+          logged(ferry, undone),
+          inTrash({ ...ferryEntry, name: 'Ferry' }),
+        ),
+      ).toEqual({ kind: 'pending', orphaned: 'trashed' });
+      expect(
+        stateOf(logged(ferry, undone), inTrash(ferryEntry, 'Mine.')),
+      ).toEqual({ kind: 'pending', orphaned: 'trashed' });
+    });
+
+    it('once accepted, can be undone while its Entry is untouched in the Story Bible', () => {
+      const accepted: Decision = { kind: 'accepted', wrote };
+      expect(stateOf(logged(ferry, accepted), inBible())).toEqual({
+        kind: 'accepted',
+        edited: false,
+      });
+      expect(
+        stateOf(
+          logged(ferry, accepted),
+          inBible({ ...ferryEntry, name: 'Ferry' }),
+        ),
+      ).toEqual({
+        kind: 'accepted',
+        edited: false,
+        undoBlocked: 'Ferry has changed since it was created.',
+      });
+      expect(
+        stateOf(logged(ferry, accepted), inBible(ferryEntry, 'Mine.')),
+      ).toMatchObject({
+        undoBlocked: 'The ferry has changed since it was created.',
+      });
+    });
+
+    it('once accepted, takes no notice of the order its Entry’s keys are in', () => {
+      const { fields, ...rest } = ferryEntry;
+      const reordered = { fields, ...rest };
+      expect(
+        stateOf(logged(ferry, { kind: 'accepted', wrote }), inBible(reordered)),
+      ).toEqual({ kind: 'accepted', edited: false });
+    });
+
+    it('once accepted, is edited when the Author changed it first', () => {
+      const edited = { ...wrote, name: 'Ferry' };
+      expect(
+        stateOf(
+          logged(ferry, { kind: 'accepted', wrote: edited }),
+          inBible({ ...ferryEntry, name: 'Ferry' }),
+        ),
+      ).toEqual({ kind: 'accepted', edited: true });
+    });
+
+    it('counts as undone when its Entry is in Trash untouched, as after a crash before the undo was logged', () => {
+      expect(
+        stateOf(logged(ferry, { kind: 'accepted', wrote }), inTrash()),
+      ).toEqual(pending);
+    });
+
+    it('once accepted, cannot be undone while its Entry, changed, is in Trash, or is gone', () => {
+      const accepted: Decision = { kind: 'accepted', wrote };
+      expect(
+        stateOf(
+          logged(ferry, accepted),
+          inTrash({ ...ferryEntry, name: 'Ferry' }),
+        ),
+      ).toMatchObject({ undoBlocked: 'Ferry is in Trash.' });
+      expect(stateOf(logged(ferry, accepted), { where: 'gone' })).toMatchObject(
+        { undoBlocked: 'The ferry is no longer in the Story Bible.' },
+      );
+    });
+  });
+});
+
+describe('accept', () => {
+  it('writes the value proposed, or as the Author edited it', () => {
+    expect(
+      accept(
+        logged(description),
+        { current: 'Her sister.' },
+        'Her older sister.',
+      ),
+    ).toEqual({ wrote: 'Her older sister.' });
+    expect(
+      accept(logged(description), { current: 'Her sister.' }, 'Elder.'),
+    ).toEqual({ wrote: 'Elder.' });
+  });
+
+  it('refuses a stale one unless accepted anyway, which replaces what the target holds', () => {
+    expect(
+      accept(logged(description), { current: 'Twin.' }, 'Her older sister.'),
+    ).toEqual({
+      refused: 'stale',
+      text: 'Description has changed since this was proposed',
+    });
+    expect(
+      accept(logged(outline), { current: 'They fight.' }, 'They part.'),
+    ).toEqual({
+      refused: 'stale',
+      text: 'The Outline has changed since this was proposed',
+    });
+    expect(
+      accept(logged(description), { current: 'Twin.' }, 'Her older sister.', {
+        anyway: true,
+      }),
+    ).toEqual({ wrote: 'Her older sister.' });
+  });
+
+  it('lands an Append or an Add on whatever the target holds', () => {
+    expect(
+      accept(logged(appendToDescription), { current: 'Twin.' }, 'Older.'),
+    ).toEqual({ wrote: 'Twin.\nOlder.' });
+    expect(accept(logged(addAlias), { current: ['Annie'] }, ['Nan'])).toEqual({
+      wrote: ['Annie', 'Nan'],
+    });
+  });
+
+  it('appends a stale one, which needs no accept anyway', () => {
+    expect(
+      accept(logged(description), { current: 'Twin.' }, 'Older.', {
+        append: true,
+      }),
+    ).toEqual({ wrote: 'Twin.\nOlder.' });
+  });
+
+  it('refuses a value the target cannot hold', () => {
+    expect(
+      accept(logged(description), { current: 'Her sister.' }, ['Her']),
+    ).toEqual({
+      refused: 'cannot-hold',
+      text: "Description can't hold that value",
+    });
+    expect(accept(logged(outline), { current: 'They meet.' }, null)).toEqual({
+      refused: 'cannot-hold',
+      text: "An Outline can't hold that value",
+    });
+    expect(
+      accept(logged(ferry), { where: 'gone' }, {
+        type: 'item',
+        name: ' ',
+      } as NewEntry),
+    ).toEqual({
+      refused: 'cannot-hold',
+      text: 'A new Entry needs a type and a name',
+    });
+  });
+
+  it('refuses to append a choice, a new Entry, or an Append', () => {
+    const role: ProposalChange = {
+      kind: 'field',
+      entryId: 'anna',
+      field: 'role',
+      base: null,
+      proposed: 'supporting',
+    };
+    const refused = {
+      refused: 'cannot-append',
+      text: 'This Proposal can’t be appended',
+    };
+    expect(
+      accept(logged(role), { current: null }, 'supporting', { append: true }),
+    ).toEqual(refused);
+    expect(
+      accept(logged(ferry), { where: 'gone' }, ferry.proposed, {
+        append: true,
+      }),
+    ).toEqual(refused);
+    expect(
+      accept(logged(appendToDescription), { current: 'Twin.' }, 'Older.', {
+        append: true,
+      }),
+    ).toEqual(refused);
+  });
+
+  it('refuses one whose target is out of reach', () => {
+    expect(
+      accept(logged(description), { orphaned: 'trashed' }, 'Her older sister.'),
+    ).toEqual({ refused: 'orphaned', text: 'Anna is in Trash.' });
+    expect(
+      accept(logged(description), { orphaned: 'field' }, 'Her older sister.'),
+    ).toEqual({ refused: 'orphaned', text: 'Anna has no Description now.' });
+  });
+
+  it('refuses one already decided, or found applied', () => {
+    expect(
+      accept(
+        logged(description, { kind: 'rejected' }),
+        { current: 'Her sister.' },
+        'Her older sister.',
+      ),
+    ).toEqual({
+      refused: 'decided',
+      text: 'The Proposal was already rejected',
+    });
+    expect(
+      accept(logged(description), { current: 'Her older sister.' }, 'Elder.'),
+    ).toEqual({
+      refused: 'decided',
+      text: 'The Proposal was already accepted',
+    });
+  });
+
+  it('creates a new Entry with its name trimmed and its description on one line', () => {
+    expect(
+      accept(
+        logged(ferry),
+        { where: 'gone' },
+        {
+          type: 'item',
+          name: ' Ferry ',
+          description: 'Rusty,\n  slow.',
+        },
+      ),
+    ).toEqual({
+      wrote: { type: 'item', name: 'Ferry', description: 'Rusty, slow.' },
+    });
+  });
+
+  it('creates a new Entry again once undone, unless its Entry was changed in Trash since', () => {
+    const undone: Decision = { kind: 'pending', undid: ferry.proposed };
+    const trashed = (entry: EntryValue) =>
+      ({ where: 'trash', entry, privateNotes: '' }) as const;
+    expect(
+      accept(logged(ferry, undone), trashed(ferryEntry), ferry.proposed),
+    ).toEqual({ wrote: ferry.proposed });
+    expect(
+      accept(
+        logged(ferry, undone),
+        trashed({ ...ferryEntry, name: 'Ferry' }),
+        ferry.proposed,
+      ),
+    ).toEqual({
+      refused: 'orphaned',
+      text: 'Ferry is in Trash, changed since it was created.',
+    });
+  });
+});
+
+describe('reject', () => {
+  it('rejects a pending one, stale or orphaned too, and refuses one decided or found applied', () => {
+    expect(reject(logged(description), { current: 'Twin.' })).toEqual({
+      rejected: true,
+    });
+    expect(reject(logged(description), { orphaned: 'gone' })).toEqual({
+      rejected: true,
+    });
+    expect(
+      reject(logged(description, { kind: 'rejected' }), {
+        current: 'Her sister.',
+      }),
+    ).toEqual({
+      refused: 'decided',
+      text: 'The Proposal was already rejected',
+    });
+    expect(
+      reject(logged(description), { current: 'Her older sister.' }),
+    ).toEqual({
+      refused: 'decided',
+      text: 'The Proposal was already accepted',
+    });
+  });
+});
+
+describe('undo', () => {
+  const accepted: Decision = {
+    kind: 'accepted',
+    replaced: 'Her sister.',
+    wrote: 'Her older sister.',
+  };
+
+  it('writes back what the accept replaced while the target holds what it wrote', () => {
+    expect(
+      undo(logged(description, accepted), { current: 'Her older sister.' }),
+    ).toEqual({ restore: 'Her sister.' });
+  });
+
+  it('moves an untouched new Entry to Trash', () => {
+    expect(
+      undo(logged(ferry, { kind: 'accepted', wrote: ferry.proposed }), {
+        where: 'bible',
+        entry: ferryEntry,
+        privateNotes: '',
+      }),
+    ).toEqual({ trash: true });
+  });
+
+  it('refuses once the target holds something else, or is out of reach', () => {
+    expect(undo(logged(description, accepted), { current: 'Twin.' })).toEqual({
+      refused: 'changed',
+      text: 'Description has changed since it was accepted.',
+    });
+    expect(
+      undo(logged(description, accepted), { orphaned: 'trashed' }),
+    ).toEqual({ refused: 'changed', text: 'Anna is in Trash.' });
+  });
+
+  it('refuses one found applied, whose accept was never logged', () => {
+    expect(undo(logged(description), { current: 'Her older sister.' })).toEqual(
+      { refused: 'changed', text: NOT_LOGGED },
+    );
+  });
+
+  it('refuses one not accepted', () => {
+    const notAccepted = {
+      refused: 'not-accepted',
+      text: "The Proposal isn't accepted",
+    };
+    expect(undo(logged(description), { current: 'Her sister.' })).toEqual(
+      notAccepted,
+    );
+    expect(
+      undo(logged(description, { kind: 'rejected' }), {
+        current: 'Her sister.',
+      }),
+    ).toEqual(notAccepted);
+  });
+});
+
+describe('decided', () => {
+  const accepted: Decision = {
+    kind: 'accepted',
+    replaced: 'Her sister.',
+    wrote: 'Her older sister.',
+  };
+
+  it('takes the latest accept or reject', () => {
+    expect(decided({ kind: 'pending' }, accepted)).toEqual(accepted);
+    expect(decided({ kind: 'pending' }, { kind: 'rejected' })).toEqual({
+      kind: 'rejected',
+    });
+  });
+
+  it('leaves an undone accept pending again, with what it wrote as `undid`', () => {
+    expect(decided(accepted, { kind: 'undone' })).toEqual({
+      kind: 'pending',
+      undid: 'Her older sister.',
+    });
+  });
+
+  it('takes no notice of an undo of what was not accepted', () => {
+    expect(decided({ kind: 'pending' }, { kind: 'undone' })).toEqual({
+      kind: 'pending',
+    });
+    expect(decided({ kind: 'rejected' }, { kind: 'undone' })).toEqual({
+      kind: 'rejected',
+    });
   });
 });
 

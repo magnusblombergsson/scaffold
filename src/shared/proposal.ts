@@ -13,6 +13,7 @@ import {
   type ThreadStatus,
   type Voice,
 } from './project-types';
+import { newEntryValue } from './entry';
 
 // Proposals (MVP spec §7): changes to the Story Bible or an Outline the
 // Assistant suggests in a reply, which take effect only when the Author
@@ -267,7 +268,7 @@ export function isFieldValue(
   return typeof value === 'string';
 }
 
-export function sameValue(
+function sameValue(
   a: ProposedValue | undefined,
   b: ProposedValue | undefined,
 ): boolean {
@@ -292,76 +293,6 @@ export function textValue(field: ProposalField, text: string): FieldValue {
       .filter(Boolean);
   }
   return text;
-}
-
-// How the Assistant writes a Proposal or a Finding in its reply: a fenced
-// `proposal` or `finding` block holding one JSON object, which the engine
-// takes out of the text.
-
-const BLOCK = /```(proposal|finding)[^\n]*\n([\s\S]*?)\n?```/g;
-const OPEN_BLOCK = /```(?:proposal|finding)[\s\S]*$/;
-const OPEN_PROPOSAL = /```proposal[\s\S]*$/;
-
-/**
- * A reply's text without its blocks, and what each block held, in order:
- * the proposal blocks as `proposals`, the finding blocks as `findings`, and
- * how many proposal blocks weren't JSON, or one at the end never closed, as
- * `unreadable`.
- */
-export function splitReply(reply: string): {
-  text: string;
-  proposals: unknown[];
-  findings: unknown[];
-  unreadable: number;
-} {
-  const proposals: unknown[] = [];
-  const findings: unknown[] = [];
-  let unreadable = 0;
-  const text = reply.replace(BLOCK, (_, kind: string, json: string) => {
-    try {
-      (kind === 'finding' ? findings : proposals).push(JSON.parse(json));
-    } catch {
-      // The Assistant wrote it badly: there is nothing to take.
-      if (kind === 'proposal') unreadable++;
-    }
-    return '';
-  });
-  if (OPEN_PROPOSAL.test(text)) unreadable++;
-  return {
-    text: text === reply ? text : tidy(text),
-    proposals,
-    findings,
-    unreadable,
-  };
-}
-
-// A model may think aloud in its reply text, between <think> and </think>;
-// that is never shown, nor searched for blocks.
-const THINKING = /<think>[\s\S]*?(?:<\/think>|$)/g;
-/** The start of a <think> still streaming in. */
-const OPENING_THINK = /<(?:t(?:h(?:i(?:n(?:k)?)?)?)?)?$/;
-
-/** A reply's text without its thinking, even thinking not yet finished. */
-export function withoutThinking(reply: string): string {
-  const text = reply.replace(THINKING, '');
-  return text === reply ? text : tidy(text);
-}
-
-/** A reply's text without its thinking or its blocks, even one not finished. */
-export function replyText(reply: string): string {
-  const { text } = splitReply(withoutThinking(reply));
-  const open = text.replace(OPEN_BLOCK, '');
-  return open === text ? text : tidy(open);
-}
-
-/** A reply's text as it streams in, as `replyText`, nor a <think> not yet whole. */
-export function streamingText(reply: string): string {
-  return replyText(reply.replace(OPENING_THINK, ''));
-}
-
-/** Without the blank lines a block left, and without space at either end. */
-function tidy(text: string): string {
-  return text.replace(/\n{3,}/g, '\n\n').trim();
 }
 
 /**
@@ -449,10 +380,7 @@ export function appendedOnto(
  * ends with the text exactly, or its list has the item, whatever its case.
  * Appending it again would only repeat it.
  */
-export function holdsAppended(
-  change: AppendingChange,
-  current: FieldValue,
-): boolean {
+function holdsAppended(change: AppendingChange, current: FieldValue): boolean {
   if (Array.isArray(change.proposed)) {
     return sameValue(appendedOnto(change, current), current);
   }
@@ -503,7 +431,7 @@ export function proposalTarget(proposal: ProposalView): ProposalTarget | null {
  * other text after ", ", and a list the items it doesn't hold yet, whatever
  * their case. Empty text leaves `current` as it is.
  */
-export function appended(
+function appended(
   target: ProposalField | 'outline',
   current: FieldValue,
   added: FieldValue,
@@ -532,7 +460,7 @@ export function appended(
  * Whether an accept that `replaced` a value with the one it `wrote` was the
  * Author's Append of the Proposal as proposed, neither replacing nor edited.
  */
-export function wasAppended(
+function wasAppended(
   change: ProposalChange,
   replaced: FieldValue | undefined,
   wrote: ProposedValue,
@@ -629,84 +557,377 @@ function fencedProposal(json: object): string {
   return `\`\`\`proposal\n${JSON.stringify(json)}\n\`\`\``;
 }
 
-/** A piece of a field's diff: kept from the base, removed from it, or added. */
-export type DiffPart = { kind: 'same' | 'removed' | 'added'; text: string };
+// Where a Proposal stands, and what accepting or undoing it writes: decided
+// here from what the log says of it and a snapshot of its target, which the
+// store reads and writes.
 
 /**
- * How a field changes from `base` to `proposed`: text by what differs between
- * the words they start and end with, a list item by item, a choice whole.
+ * What the log says of a Proposal: undecided, accepted with the value it
+ * replaced, if any, and the one it wrote, or rejected. An accept that was
+ * undone leaves it undecided again, with what that accept wrote as `undid`.
  */
-export function fieldDiff(
-  field: ProposalField,
-  base: FieldValue,
-  proposed: FieldValue,
-): DiffPart[] {
-  if (Array.isArray(base) || Array.isArray(proposed)) {
-    const was = Array.isArray(base) ? base : [];
-    const now = Array.isArray(proposed) ? proposed : [];
-    return [
-      ...was.map(
-        (text): DiffPart => ({
-          kind: now.includes(text) ? 'same' : 'removed',
-          text,
-        }),
-      ),
-      ...now
-        .filter((text) => !was.includes(text))
-        .map((text): DiffPart => ({ kind: 'added', text })),
-    ];
-  }
-  const was = fieldText(field, base);
-  const now = fieldText(field, proposed);
-  if (isChoiceField(field))
-    return parts([
-      ['removed', was],
-      ['added', now],
-    ]);
-  return textDiff(was, now);
+export type Decision =
+  | { kind: 'pending'; undid?: ProposedValue }
+  | { kind: 'accepted'; replaced?: FieldValue; wrote: ProposedValue }
+  | { kind: 'rejected' };
+
+/** What an event logs of a Proposal once made: an accept, a reject, or an undo. */
+export type DecisionEvent =
+  | Extract<Decision, { kind: 'accepted' }>
+  | { kind: 'rejected' }
+  | { kind: 'undone' };
+
+/**
+ * The decision on a Proposal once `event` is logged: the latest accept or
+ * reject; an undo leaves an accepted one pending again, with what the accept
+ * wrote as `undid`, and is no undo of anything else.
+ */
+export function decided(decision: Decision, event: DecisionEvent): Decision {
+  if (event.kind !== 'undone') return event;
+  return decision.kind === 'accepted'
+    ? { kind: 'pending', undid: decision.wrote }
+    : decision;
 }
 
-/** How text changes from `was` to `now`: by what differs between the words they start and end with. */
-export function textDiff(was: string, now: string): DiffPart[] {
-  let start = 0;
-  while (start < was.length && start < now.length && was[start] === now[start])
-    start++;
-  // Whole words only.
-  while (start > 0 && !(atBreak(was, start) && atBreak(now, start))) start--;
-  let end = 0;
-  while (
-    end < was.length - start &&
-    end < now.length - start &&
-    was[was.length - 1 - end] === now[now.length - 1 - end]
-  ) {
-    end++;
-  }
-  while (
-    end > 0 &&
-    !(atBreak(was, was.length - end) && atBreak(now, now.length - end))
-  ) {
-    end--;
-  }
-  return parts([
-    ['same', was.slice(0, start)],
-    ['removed', was.slice(start, was.length - end)],
-    ['added', now.slice(start, now.length - end)],
-    ['same', was.slice(was.length - end)],
-  ]);
+/** A Proposal as logged, the latest decision on it, and the `name` of its target now. */
+export type DecidedProposal = Proposal & { decision: Decision; name: string };
+
+/**
+ * What the field of an Entry or the Outline a Proposal changes holds now; or
+ * why it holds nothing: in Trash, gone, or an Entry without the field.
+ */
+export type Target =
+  | { current: FieldValue }
+  | { orphaned: 'trashed' | 'gone' | 'field' };
+
+/**
+ * Where an Entry of a new Entry's id is now: in the Story Bible or in Trash,
+ * as it is there with its private notes, or nowhere.
+ */
+export type NewEntryPlace =
+  | { where: 'bible' | 'trash'; entry: EntryValue; privateNotes: string }
+  | { where: 'gone' };
+
+/** A Proposal's target as the store read it: a Target, or where a new Entry is. */
+export type Snapshot = Target | NewEntryPlace;
+
+/** Why a Proposal can't be accepted or undone now, in words for the Author. */
+export type Refusal = {
+  refused:
+    | 'decided'
+    | 'stale'
+    | 'cannot-hold'
+    | 'cannot-append'
+    | 'orphaned'
+    | 'not-accepted'
+    | 'changed';
+  text: string;
+};
+
+/** Why a Proposal found applied, with no accept logged, can't be undone. */
+const NOT_LOGGED = 'It was found applied, so what it replaced is not known.';
+
+/**
+ * Where a Proposal stands now, against its target as it is. A pending one is
+ * applied when its target already holds the proposed value, or ends with an
+ * Append, or its new Entry exists, as after a crash between writing the
+ * target and logging the accept. An accepted one is undone when its target
+ * holds again what the accept replaced, or its new Entry is in Trash
+ * untouched, as after a crash between undoing it and logging the undo.
+ */
+export function stateOf(
+  logged: DecidedProposal,
+  snapshot: Snapshot,
+): ProposalState {
+  const { decision } = logged;
+  if (decision.kind === 'rejected') return { kind: 'rejected' };
+  return decision.kind === 'accepted'
+    ? acceptedState(logged, decision, snapshot)
+    : undecidedState(logged, decision.undid, snapshot);
 }
 
-function parts(list: [DiffPart['kind'], string][]): DiffPart[] {
-  return list
-    .filter(([, text]) => text !== '')
-    .map(([kind, text]) => ({ kind, text }));
+/**
+ * What accepting a pending Proposal writes to a target as the store just
+ * read it: `value`, which is what was proposed or the Author's edit; landed
+ * on what the target holds as an Append or an Add, or when the Author chose
+ * to `append` a replacing one. A stale one is accepted only `anyway`, and
+ * then replaces what the target holds. A new Entry is written with its name
+ * trimmed and its description on one line.
+ */
+export function accept(
+  logged: DecidedProposal,
+  snapshot: Snapshot,
+  value: ProposedValue,
+  {
+    anyway = false,
+    append = false,
+  }: { anyway?: boolean; append?: boolean } = {},
+): { wrote: ProposedValue } | Refusal {
+  const state = stateOf(logged, snapshot);
+  if (state.kind !== 'pending') return alreadyDecided(state);
+  if (append && !canAppend(logged)) {
+    return {
+      refused: 'cannot-append',
+      text: 'This Proposal can’t be appended',
+    };
+  }
+  if (logged.kind === 'new-entry') {
+    const entry = asNewEntry(value);
+    if (!entry) {
+      return {
+        refused: 'cannot-hold',
+        text: 'A new Entry needs a type and a name',
+      };
+    }
+    if ('orphaned' in state) {
+      const place = placeOf(snapshot);
+      const { name } = place.where === 'gone' ? entry : place.entry;
+      return {
+        refused: 'orphaned',
+        text: `${name} is in Trash, changed since it was created.`,
+      };
+    }
+    // The Author's edit too: a name, and a description on one line.
+    return {
+      wrote: {
+        ...entry,
+        name: entry.name.trim(),
+        description: entry.description.replace(/\s+/g, ' ').trim(),
+      },
+    };
+  }
+  const holds =
+    logged.kind === 'field'
+      ? isFieldValue(logged.field, value)
+      : typeof value === 'string';
+  if (!holds) {
+    return {
+      refused: 'cannot-hold',
+      text:
+        logged.kind === 'field'
+          ? `${FIELD_LABELS[logged.field]} can't hold that value`
+          : "An Outline can't hold that value",
+    };
+  }
+  if ('orphaned' in state) {
+    return { refused: 'orphaned', text: orphanedText(logged, state.orphaned) };
+  }
+  if (append || isAppending(logged)) {
+    return {
+      wrote: appended(targetOf(logged), state.current, value as FieldValue),
+    };
+  }
+  if (state.stale && !anyway) {
+    return {
+      refused: 'stale',
+      text: `${targetLabel(logged)} has changed since this was proposed`,
+    };
+  }
+  return { wrote: value };
 }
 
-/** Whether `at` in `text` falls between words: at either end, or by a space. */
-function atBreak(text: string, at: number): boolean {
-  return (
-    at === 0 ||
-    at === text.length ||
-    /\s/.test(text[at - 1]) ||
-    /\s/.test(text[at])
+/**
+ * Whether a Proposal may be rejected: only while pending, stale or orphaned
+ * too; its target is left alone.
+ */
+export function reject(
+  logged: DecidedProposal,
+  snapshot: Snapshot,
+): { rejected: true } | Refusal {
+  const state = stateOf(logged, snapshot);
+  return state.kind === 'pending' ? { rejected: true } : alreadyDecided(state);
+}
+
+/**
+ * What undoing an accepted Proposal does to a target as the store just read
+ * it: `restore` what the accept replaced, or move its new Entry to `trash`.
+ * Only while the target holds what the accept wrote, and a new Entry is
+ * untouched since.
+ */
+export function undo(
+  logged: DecidedProposal,
+  snapshot: Snapshot,
+): { restore: FieldValue } | { trash: true } | Refusal {
+  const state = stateOf(logged, snapshot);
+  if (state.kind !== 'accepted') {
+    return { refused: 'not-accepted', text: "The Proposal isn't accepted" };
+  }
+  const { decision } = logged;
+  if (state.undoBlocked || decision.kind !== 'accepted') {
+    return { refused: 'changed', text: state.undoBlocked ?? NOT_LOGGED };
+  }
+  if (logged.kind === 'new-entry') return { trash: true };
+  return { restore: decision.replaced ?? null };
+}
+
+/** Where a Proposal the log says is accepted stands, as `stateOf`. */
+function acceptedState(
+  logged: DecidedProposal,
+  decision: Extract<Decision, { kind: 'accepted' }>,
+  snapshot: Snapshot,
+): ProposalState {
+  const appendedAsProposed = wasAppended(
+    logged,
+    decision.replaced,
+    decision.wrote,
   );
+  // What accepting as proposed would have written.
+  const asProposed =
+    isAppending(logged) && decision.replaced !== undefined
+      ? appendedOnto(logged, decision.replaced)
+      : logged.proposed;
+  const accepted = (undoBlocked: string | null): ProposalState => ({
+    kind: 'accepted',
+    edited: !appendedAsProposed && !sameValue(decision.wrote, asProposed),
+    ...(appendedAsProposed && { appended: true }),
+    ...(undoBlocked && { undoBlocked }),
+  });
+  if (logged.kind === 'new-entry') {
+    const place = placeOf(snapshot);
+    const wrote = decision.wrote as NewEntry;
+    if (place.where === 'trash' && asCreated(place, wrote)) {
+      return undecidedState(logged, wrote, place);
+    }
+    return accepted(newEntryUndoBlocked(place, wrote));
+  }
+  const target = heldIn(snapshot);
+  if ('orphaned' in target) {
+    return accepted(orphanedText(logged, target.orphaned));
+  }
+  const { current } = target;
+  if (sameValue(current, decision.wrote)) return accepted(null);
+  if (sameValue(current, decision.replaced)) {
+    return undecidedState(logged, decision.wrote, target);
+  }
+  return accepted(`${targetLabel(logged)} has changed since it was accepted.`);
+}
+
+/**
+ * Where a Proposal the log leaves undecided stands, as `stateOf`. A new Entry
+ * an undo moved to Trash, `undid` being what its accept wrote, is no sign of
+ * an accept; changed there since, it is the Author's, and the Proposal can
+ * only be rejected.
+ */
+function undecidedState(
+  logged: DecidedProposal,
+  undid: ProposedValue | undefined,
+  snapshot: Snapshot,
+): ProposalState {
+  const applied: ProposalState = {
+    kind: 'accepted',
+    edited: false,
+    undoBlocked: NOT_LOGGED,
+  };
+  if (logged.kind === 'new-entry') {
+    const place = placeOf(snapshot);
+    if (place.where === 'bible') return applied;
+    const pending: ProposalState = {
+      kind: 'pending',
+      current: null,
+      stale: false,
+    };
+    if (place.where === 'gone') return pending;
+    if (undid === undefined) return applied;
+    return asCreated(place, undid as NewEntry)
+      ? pending
+      : { kind: 'pending', orphaned: 'trashed' };
+  }
+  const target = heldIn(snapshot);
+  if ('orphaned' in target) {
+    return { kind: 'pending', orphaned: target.orphaned };
+  }
+  const { current } = target;
+  if (isAppending(logged)) {
+    if (holdsAppended(logged, current)) return applied;
+    return { kind: 'pending', current, stale: false };
+  }
+  if (sameValue(current, logged.proposed)) return applied;
+  return { kind: 'pending', current, stale: !sameValue(current, logged.base) };
+}
+
+/**
+ * Why undoing a new Entry's accept isn't possible now, or null when it is:
+ * the Entry must be in the Story Bible and untouched, as written, with no
+ * private notes.
+ */
+function newEntryUndoBlocked(
+  place: NewEntryPlace,
+  wrote: NewEntry,
+): string | null {
+  if (place.where === 'gone') {
+    return `${wrote.name} is no longer in the Story Bible.`;
+  }
+  const { name } = place.entry;
+  if (place.where === 'trash') return `${name} is in Trash.`;
+  return asCreated(place, wrote)
+    ? null
+    : `${name} has changed since it was created.`;
+}
+
+/** Whether an Entry, with its private notes, is just as an accept created it, `wrote`. */
+function asCreated(
+  { entry, privateNotes }: { entry: EntryValue; privateNotes: string },
+  { type, name, description }: NewEntry,
+): boolean {
+  return (
+    sameJson(entry, newEntryValue(entry.id, type, name, description)) &&
+    privateNotes.trim() === ''
+  );
+}
+
+/** Why a Proposal accepted or rejected can't be decided again. */
+function alreadyDecided(state: ProposalState): Refusal {
+  return { refused: 'decided', text: `The Proposal was already ${state.kind}` };
+}
+
+/**
+ * Whether two JSON values are equal, whatever order their keys are in, as
+ * node:util's isDeepStrictEqual, which shared code can't use.
+ */
+function sameJson(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== 'object' || typeof b !== 'object') return false;
+  if (a === null || b === null || Array.isArray(a) !== Array.isArray(b)) {
+    return false;
+  }
+  const keys = Object.keys(a);
+  return (
+    keys.length === Object.keys(b).length &&
+    keys.every(
+      (key) =>
+        Object.hasOwn(b, key) &&
+        sameJson(
+          (a as Record<string, unknown>)[key],
+          (b as Record<string, unknown>)[key],
+        ),
+    )
+  );
+}
+
+/** What a refusal calls the field or Outline a Proposal changes. */
+function targetLabel(change: EntryFieldChange | OutlineChange): string {
+  return change.kind === 'field' ? FIELD_LABELS[change.field] : 'The Outline';
+}
+
+/** The field a Proposal changes, or `'outline'`, as `appended` takes it. */
+function targetOf(
+  change: EntryFieldChange | OutlineChange,
+): ProposalField | 'outline' {
+  return change.kind === 'field' ? change.field : 'outline';
+}
+
+/** A new Entry's snapshot: where its Entry is. */
+function placeOf(snapshot: Snapshot): NewEntryPlace {
+  if (!('where' in snapshot)) {
+    throw new Error('A new Entry’s snapshot says where its Entry is');
+  }
+  return snapshot;
+}
+
+/** A field's or an Outline's snapshot: what it holds. */
+function heldIn(snapshot: Snapshot): Target {
+  if ('where' in snapshot) {
+    throw new Error('A snapshot of a field or an Outline is what it holds');
+  }
+  return snapshot;
 }

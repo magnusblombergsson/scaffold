@@ -38,7 +38,7 @@ import {
   type AtMention,
 } from './at-mention';
 import type { MenuItem } from './Binder';
-import { streamingText } from '../shared/proposal';
+import { streamingText } from '../shared/reply';
 import {
   describeTotal,
   describeUsage,
@@ -49,6 +49,7 @@ import { focusLabel } from './interview-focus';
 import { proposalCardId, ProposalCard } from './ProposalCard';
 import { flushPendingEdits } from './pending-edits';
 import { modelName } from './model-listing';
+import { emptyReplyNote } from './empty-reply-note';
 import { failureMessage } from './provider-messages';
 import { NO_SHORTLISTS, useProviders, useShortlists } from './Providers';
 import { ReadOnlyContext } from './read-only';
@@ -422,14 +423,16 @@ export function useConversation({
     setFailure(failure && on ? { kind: failure, model: on } : null);
   }
 
-  // Summarising a long Conversation is a call too, and counts. A turn with
-  // no usage counts too, as one whose price isn't known.
+  // Summarising a long Conversation is a call too, and counts, even when
+  // the summary wasn't used. A turn with no usage counts too, as one whose
+  // price isn't known.
   const total = current
     ? describeTotal(
         [
           ...current.messages,
           ...(current.emptyReplies ?? []),
           ...(current.compactions ?? []),
+          ...(current.unusedSummaries ?? []),
         ].flatMap((m) =>
           m.model ? [meteredTurn({ ...m, model: m.model })] : [],
         ),
@@ -611,11 +614,7 @@ function EmptyReplies({
       className="message message-assistant"
       aria-label="Assistant"
     >
-      <p className="message-note">
-        {reply.failed
-          ? 'No reply: the call failed before the Model wrote anything.'
-          : 'No reply: the Model used its whole length limit thinking. Try again or choose another Model.'}
-      </p>
+      <p className="message-note">{emptyReplyNote(reply.reason)}</p>
       {onRetry && i === here.length - 1 && (
         <div className="message-actions">
           <button onClick={onRetry} disabled={readOnly}>
