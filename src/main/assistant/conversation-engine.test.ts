@@ -324,6 +324,7 @@ describe('askAssistant', () => {
             ),
           );
           yield { type: 'text', text: 'Hm.' };
+          yield { type: 'finish', finish: 'complete' };
         },
       }),
       defaultModel: () => OPUS,
@@ -872,6 +873,7 @@ describe('Empty replies', () => {
       model: 'claude-opus-5-5',
       provider: 'anthropic',
       usage,
+      reason: 'length',
       before: 1,
     };
     expect(result).toEqual({ reply: null, empty, failure: null });
@@ -917,7 +919,7 @@ describe('Empty replies', () => {
 
   it('logs a call that failed after only thinking as a failed reply.empty, so what it used still counts', async () => {
     const usage = { input: 2_000, cached: 0, written: 0, output: 900 };
-    const { projectPath, store, sceneId, engine, clock } = await setUp(() => ({
+    const { store, sceneId, engine, clock } = await setUp(() => ({
       text: ['<think>Hm, the quay'],
       usage,
       cost: 0.01,
@@ -934,20 +936,42 @@ describe('Empty replies', () => {
       provider: ROUTED.provider,
       usage,
       cost: 0.01,
-      failed: true,
+      reason: 'failed',
       before: 1,
     };
     expect(result).toEqual({ reply: null, empty, failure: 'offline' });
     const conversation = await store.readConversation(id);
     expect(conversation.messages.map((m) => m.role)).toEqual(['author']);
     expect(conversation.emptyReplies).toEqual([empty]);
-    const log = await readFile(
-      path.join(projectPath, 'conversations', `${id}.jsonl`),
-      'utf8',
-    );
-    expect(JSON.parse(log.trim().split('\n').at(-1)!)).toMatchObject({
-      type: 'reply.empty',
-      reason: 'failed',
+  });
+
+  it('logs a reply that finished with only thinking as complete, not at the length limit', async () => {
+    const { store, sceneId, engine } = await setUp(() => [
+      '<think>Hm.</think>',
+    ]);
+    const { id } = await store.startConversation('writing', 'Anna');
+
+    const result = await engine.askAssistant(id, 'Why?', { sceneId }, () => {});
+
+    expect(result.empty).toMatchObject({ reason: 'complete' });
+    const conversation = await store.readConversation(id);
+    expect(conversation.emptyReplies).toEqual([result.empty]);
+  });
+
+  it('logs a reply that stopped with only thinking and no finish as failed', async () => {
+    const usage = { input: 2_000, cached: 0, written: 0, output: 900 };
+    const { store, sceneId, engine } = await setUp(() => ({
+      text: ['<think>Hm'],
+      usage,
+      finish: null,
+    }));
+    const { id } = await store.startConversation('writing', 'Anna');
+
+    const result = await engine.askAssistant(id, 'Why?', { sceneId }, () => {});
+
+    expect(result).toMatchObject({
+      empty: { reason: 'failed', usage },
+      failure: 'other',
     });
   });
 
@@ -1383,5 +1407,107 @@ describe('Compaction of a long Conversation', () => {
     expect(result).toMatchObject({ reply: { text: 'Reply 3' }, failure: null });
     expect(provider.requests.at(-1)!.messages).toHaveLength(5);
     expect((await store.readConversation(id)).compactions).toBeUndefined();
+  });
+
+  /**
+   * A Conversation past the threshold whose summary call gets `summary`, once
+   * asked again: how that went, what the Conversation then holds, and what
+   * was sent for the reply.
+   */
+  async function summarisedWith(summary: FakeReply) {
+    const { store, engine, provider, clock } = await setUp(
+      (n, request) =>
+        /summarise/.test(request.system[0].text) ? summary : [`Reply ${n}`],
+      { compaction },
+    );
+    const { id } = await store.startConversation('brainstorm', 'Anna', ROUTED);
+    await engine.askAssistant(id, long('Anna'), { sceneId: null }, () => {});
+    await engine.askAssistant(id, long('Mira'), { sceneId: null }, () => {});
+    const result = await engine.askAssistant(
+      id,
+      'And then?',
+      { sceneId: null },
+      () => {},
+    );
+    return {
+      result,
+      conversation: await store.readConversation(id),
+      asked: provider.requests.at(-1)!,
+      clock,
+    };
+  }
+
+  const usage = { input: 900, cached: 0, written: 0, output: 50 };
+
+  it('logs what a failed summary used and cost, so it counts, and sends the messages in full', async () => {
+    const { result, conversation, asked, clock } = await summarisedWith({
+      text: ['Anna wants'],
+      usage,
+      cost: 0.001,
+      fail: 'offline',
+    });
+
+    expect(result).toMatchObject({ reply: { text: 'Reply 3' }, failure: null });
+    expect(asked.messages).toHaveLength(5);
+    expect(conversation.compactions).toBeUndefined();
+    expect(conversation.unusedSummaries).toEqual([
+      {
+        at: clock.now(),
+        model: ROUTED.id,
+        provider: ROUTED.provider,
+        usage,
+        cost: 0.001,
+        reason: 'failed',
+      },
+    ]);
+  });
+
+  it('doesn’t use a summary cut short at the length limit, and sends the messages in full', async () => {
+    const { conversation, asked } = await summarisedWith({
+      text: ['Anna wants to'],
+      usage,
+      finish: 'length',
+    });
+
+    expect(asked.messages).toHaveLength(5);
+    expect(asked.system.at(-1)!.text).not.toContain('Anna wants to');
+    expect(conversation.compactions).toBeUndefined();
+    expect(conversation.unusedSummaries).toMatchObject([
+      { usage, reason: 'cut-short' },
+    ]);
+  });
+
+  it('doesn’t use a summary with only thinking, and sends the messages in full', async () => {
+    const { conversation, asked } = await summarisedWith({
+      text: ['<think>Anna, then Mira.</think>'],
+      usage,
+    });
+
+    expect(asked.messages).toHaveLength(5);
+    expect(conversation.compactions).toBeUndefined();
+    expect(conversation.unusedSummaries).toMatchObject([
+      { usage, reason: 'empty' },
+    ]);
+  });
+
+  it('strips thinking from a summary before it is logged and sent', async () => {
+    const { conversation, asked } = await summarisedWith([
+      '<think>Who is she?</think>Anna wants to leave.',
+    ]);
+
+    expect(conversation.compactions?.map((c) => c.text)).toEqual([
+      'Anna wants to leave.',
+    ]);
+    expect(asked.system.at(-1)!.text).not.toContain('Who is she?');
+    expect(conversation.unusedSummaries).toBeUndefined();
+  });
+
+  it('logs nothing of a failed summary that said nothing of what it used', async () => {
+    const { conversation } = await summarisedWith({
+      text: [],
+      fail: 'offline',
+    });
+
+    expect(conversation.unusedSummaries).toBeUndefined();
   });
 });

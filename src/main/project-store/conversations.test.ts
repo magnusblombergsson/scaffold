@@ -468,7 +468,7 @@ describe('The Model of a Conversation', () => {
     });
   });
 
-  it('keeps the Provider of an empty reply and of a summary', async () => {
+  it('keeps the Provider of an empty reply and of a summary, used or not', async () => {
     const { store } = await newProject();
     const { id } = await store.startConversation('brainstorm', 'Anna');
     await store.appendMessage(id, {
@@ -477,13 +477,24 @@ describe('The Model of a Conversation', () => {
       focus: [],
       at: 2_000,
     });
-    await store.appendEmptyReply(id, { focus: [], at: 3_000 }, QWEN, 'length');
+    await store.appendEmptyReply(
+      id,
+      { focus: [], at: 3_000, reason: 'length' },
+      QWEN,
+    );
     await store.appendSummary(id, {
       text: 'Anna asked why.',
       covers: 1,
       at: 4_000,
       model: 'qwen3-8b',
       provider: 'lmstudio',
+    });
+    await store.appendUnusedSummary(id, {
+      at: 5_000,
+      model: 'qwen3-8b',
+      provider: 'lmstudio',
+      cost: 0,
+      reason: 'cut-short',
     });
 
     const conversation = await store.readConversation(id);
@@ -493,6 +504,7 @@ describe('The Model of a Conversation', () => {
         at: 3_000,
         model: 'qwen3-8b',
         provider: 'lmstudio',
+        reason: 'length',
         before: 1,
       },
     ]);
@@ -500,5 +512,14 @@ describe('The Model of a Conversation', () => {
       model: 'qwen3-8b',
       provider: 'lmstudio',
     });
+    expect(conversation.unusedSummaries).toEqual([
+      {
+        at: 5_000,
+        model: 'qwen3-8b',
+        provider: 'lmstudio',
+        cost: 0,
+        reason: 'cut-short',
+      },
+    ]);
   });
 });

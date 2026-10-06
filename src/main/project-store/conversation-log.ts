@@ -10,6 +10,7 @@ import {
   type InterviewFocus,
   type Mode,
   type Saw,
+  type UnusedSummary,
 } from '../../shared/conversation';
 import {
   isFinding,
@@ -145,6 +146,13 @@ export type FocusChangedEvent = {
  */
 export type SummaryEvent = { type: 'summary' } & Compaction;
 
+/**
+ * A summary that wasn't used, as its call failed, came back empty or was cut
+ * short, logged for what it used and cost, so that counts. It is never
+ * shown. The MVP skips it (ADR 0006).
+ */
+export type UnusedSummaryEvent = { type: 'summary.unused' } & UnusedSummary;
+
 /** The Author gave the Conversation a new title. */
 export type RenamedEvent = { type: 'renamed'; title: string; at: number };
 
@@ -162,6 +170,7 @@ export type ConversationEvent =
   | ModelChosenEvent
   | FocusChangedEvent
   | SummaryEvent
+  | UnusedSummaryEvent
   | RenamedEvent
   | TrashMoveEvent
   | ProposedEvent
@@ -255,6 +264,7 @@ export function parseLog(log: string): LoggedConversation | null {
   const proposals = new Map<string, LoggedProposal>();
   const focusChanges: FocusChange[] = [];
   const compactions: Compaction[] = [];
+  const unusedSummaries: UnusedSummary[] = [];
   let chosen: Model | undefined;
   let { title } = header;
   let trashedAt: number | undefined;
@@ -287,6 +297,10 @@ export function parseLog(log: string): LoggedConversation | null {
     }
     if (isSummary(event, messages.length)) {
       compactions.push(compactionOf(event));
+      continue;
+    }
+    if (isUnusedSummary(event)) {
+      unusedSummaries.push(unusedSummaryOf(event));
       continue;
     }
     if (typeof event?.id !== 'string') continue;
@@ -335,6 +349,7 @@ export function parseLog(log: string): LoggedConversation | null {
     messages,
     ...(emptyReplies.length > 0 && { emptyReplies }),
     ...(compactions.length > 0 && { compactions }),
+    ...(unusedSummaries.length > 0 && { unusedSummaries }),
     proposals: [...proposals.values()],
   };
 }
@@ -549,14 +564,16 @@ function messageOf(event: MessageEvent): ConversationMessage {
   };
 }
 
-/**
- * The event that logs an empty reply, written by `model`, which finished
- * for `reason`.
- */
+/** The event that logs an empty reply, written by `model`. */
 export function emptyReplyEvent(
-  { focus, at, usage, cost }: Omit<EmptyReply, 'model' | 'provider' | 'before'>,
+  {
+    focus,
+    at,
+    usage,
+    cost,
+    reason,
+  }: Omit<EmptyReply, 'model' | 'provider' | 'before'>,
   model: Model,
-  reason: EmptyReplyEvent['reason'],
 ): EmptyReplyEvent {
   return {
     type: 'reply.empty',
@@ -587,8 +604,31 @@ function emptyReplyOf(
     provider,
     ...(isUsage(usage) && { usage }),
     ...(isCost(cost) && { cost }),
-    ...(reason === 'failed' && { failed: true as const }),
+    reason: isEmptyReason(reason) ? reason : 'complete',
     before,
+  };
+}
+
+function isEmptyReason(value: unknown): value is EmptyReply['reason'] {
+  return value === 'complete' || value === 'length' || value === 'failed';
+}
+
+/** The unused summary an event holds; what is known of its cost is kept if readable. */
+function unusedSummaryOf({
+  at,
+  model,
+  provider,
+  usage,
+  cost,
+  reason,
+}: UnusedSummaryEvent): UnusedSummary {
+  return {
+    at,
+    model,
+    provider,
+    ...(isUsage(usage) && { usage }),
+    ...(isCost(cost) && { cost }),
+    reason,
   };
 }
 
@@ -705,6 +745,16 @@ function isModelChosen(value: unknown): value is ModelChosenEvent {
   return (
     event?.type === 'modelChosen' &&
     isModel({ provider: event.provider, id: event.model }) &&
+    typeof event.at === 'number'
+  );
+}
+
+function isUnusedSummary(value: unknown): value is UnusedSummaryEvent {
+  const event = value as Partial<UnusedSummaryEvent> | null;
+  return (
+    event?.type === 'summary.unused' &&
+    isModel({ provider: event.provider, id: event.model }) &&
+    ['failed', 'empty', 'cut-short'].includes(event.reason as string) &&
     typeof event.at === 'number'
   );
 }

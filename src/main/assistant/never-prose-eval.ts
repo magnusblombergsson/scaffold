@@ -30,7 +30,7 @@ import { buildContext, type ContextRequest } from './context-builder';
 import { imagePromptRequest } from './image-prompt';
 import { readProposals } from './proposal-blocks';
 import type { Provider, ProviderRequest } from './provider';
-import { finishReply, streamCall, type ReplyEnding } from './reply-finishing';
+import { finishedCall, type ReplyEnding } from './reply-finishing';
 
 // The never-Prose eval set (MVP spec §4, v2 spec §15): requests for Prose the
 // Author might make, asked of a Model in each Mode as the app asks it,
@@ -216,7 +216,7 @@ export type ProposalLine = { line: string; forbidden: boolean };
  */
 export type Answer = {
   reply: string;
-  ending: ReplyEnding;
+  ending: ReplyEnding | 'empty';
   thinkingStripped: boolean;
   proposals: ProposalLine[];
   findings: string[];
@@ -277,14 +277,32 @@ export async function runNeverProseEval({
     request: ProviderRequest,
     { proposes }: { proposes: boolean },
   ): Promise<Answer> {
-    let streamed = await streamCall(provider, request);
-    for (let retry = 1; retry <= retries && streamed.failed; retry++) {
-      // A bad key or no credit won't mend by waiting.
-      if (streamed.failure === 'key' || streamed.failure === 'credit') break;
-      await wait((streamed.retryAfter ?? 5 * 2 ** retry) * 1000);
-      streamed = await streamCall(provider, request);
+    /** Asks once, keeping the reply as it came, thinking and all. */
+    async function ask() {
+      let streamed = '';
+      const outcome = await finishedCall(provider, request, (text) => {
+        streamed += text;
+      });
+      return { outcome, streamed };
     }
-    const finished = finishReply(streamed);
+    let { outcome, streamed } = await ask();
+    for (let retry = 1; retry <= retries && outcome.failure; retry++) {
+      const { kind, retryAfter } = outcome.failure;
+      // A bad key or no credit won't mend by waiting.
+      if (kind === 'key' || kind === 'credit') break;
+      await wait((retryAfter ?? 5 * 2 ** retry) * 1000);
+      ({ outcome, streamed } = await ask());
+    }
+    const finished =
+      outcome.kind === 'reply'
+        ? outcome
+        : {
+            text: '',
+            ending: 'empty' as const,
+            proposals: [],
+            findings: [],
+            unreadable: 0,
+          };
     const proposals: ProposalLine[] = [];
     let unreadable = proposes ? finished.unreadable : 0;
     for (const block of proposes ? finished.proposals : []) {
@@ -298,14 +316,14 @@ export async function runNeverProseEval({
     return {
       reply: finished.text,
       ending: finished.ending,
-      thinkingStripped: withoutThinking(streamed.text) !== streamed.text,
+      thinkingStripped: withoutThinking(streamed) !== streamed,
       proposals,
       findings: finished.findings.map(findingLine),
       unreadable,
-      ...(unreadable > 0 && { raw: withoutThinking(streamed.text) }),
-      ...(streamed.error !== undefined && { error: streamed.error }),
-      ...(streamed.errorDetail !== undefined && {
-        errorDetail: streamed.errorDetail,
+      ...(unreadable > 0 && { raw: withoutThinking(streamed) }),
+      ...(outcome.failure && { error: outcome.failure.error }),
+      ...(outcome.failure?.detail !== undefined && {
+        errorDetail: outcome.failure.detail,
       }),
     };
   }

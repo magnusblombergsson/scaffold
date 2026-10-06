@@ -226,7 +226,7 @@ it('an MVP app skips an Append or an Add, and its accept, applying nothing; it s
   ]);
 });
 
-it('an MVP app skips an empty reply, or a failed one, counting the same messages, and reads the message of one cut short as interrupted', async () => {
+it('an MVP app skips an empty reply, or a failed one, and a summary not used, counting the same messages, and reads the message of one cut short as interrupted', async () => {
   const store = await createProject(projectPath, deps());
   const { id } = await store.startConversation('writing', 'Anna');
   const usage = { input: 2_000, cached: 0, written: 0, output: 4_096 };
@@ -238,15 +238,13 @@ it('an MVP app skips an empty reply, or a failed one, counting the same messages
   });
   await store.appendEmptyReply(
     id,
-    { focus: [], at: 2, usage },
+    { focus: [], at: 2, usage, reason: 'length' },
     { provider: 'anthropic', id: 'claude-opus-5-5' },
-    'length',
   );
   await store.appendEmptyReply(
     id,
-    { focus: [], at: 2, usage },
+    { focus: [], at: 2, usage, reason: 'failed' },
     { provider: 'anthropic', id: 'claude-opus-5-5' },
-    'failed',
   );
   await store.appendMessage(id, {
     role: 'assistant',
@@ -257,6 +255,13 @@ it('an MVP app skips an empty reply, or a failed one, counting the same messages
     cutShort: true,
   });
   await store.appendSummary(id, { text: 'Anna asked why.', covers: 2, at: 4 });
+  await store.appendUnusedSummary(id, {
+    at: 5,
+    model: 'claude-opus-5-5',
+    provider: 'anthropic',
+    usage,
+    reason: 'failed',
+  });
   await store.close();
 
   const log = await readFile(
@@ -264,6 +269,7 @@ it('an MVP app skips an empty reply, or a failed one, counting the same messages
     'utf8',
   );
   expect(log).toContain('"type":"reply.empty"');
+  expect(log).toContain('"type":"summary.unused"');
   expect(mvpParseLog(log)?.messages).toEqual([
     { role: 'author', text: 'Why?', focus: [], at: 1 },
     {
@@ -275,8 +281,11 @@ it('an MVP app skips an empty reply, or a failed one, counting the same messages
     },
   ]);
 
-  // A summary covers the same messages in both.
-  expect(mvpParseLog(log)?.compactions?.[0].covers).toBe(2);
+  // A summary covers the same messages in both, and the one not used is
+  // no summary to the MVP.
+  expect(mvpParseLog(log)?.compactions).toEqual([
+    { text: 'Anna asked why.', covers: 2, at: 4 },
+  ]);
 
   const reopened = await openProject(projectPath, deps());
   const conversation = await reopened.readConversation(id);
@@ -298,6 +307,7 @@ it('an MVP app skips an empty reply, or a failed one, counting the same messages
       model: 'claude-opus-5-5',
       provider: 'anthropic',
       usage,
+      reason: 'length',
       before: 1,
     },
     {
@@ -306,7 +316,7 @@ it('an MVP app skips an empty reply, or a failed one, counting the same messages
       model: 'claude-opus-5-5',
       provider: 'anthropic',
       usage,
-      failed: true,
+      reason: 'failed',
       before: 1,
     },
   ]);

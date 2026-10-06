@@ -10,8 +10,8 @@ import {
 /**
  * What the fake replies: what the call used, if given, with what the
  * Provider said it cost, if it did; the pieces of text it streams; and how
- * it finished, complete unless `finish` says; with `fail`, the call fails
- * after the pieces instead.
+ * it finished, complete unless `finish` says, or with `finish: null`, not
+ * at all; with `fail`, the call fails after the pieces instead.
  */
 export type FakeReply =
   | string[]
@@ -19,7 +19,7 @@ export type FakeReply =
       text: string[];
       usage?: Usage;
       cost?: number;
-      finish?: Finish;
+      finish?: Finish | null;
       fail?: AssistantFailure;
     };
 
@@ -49,7 +49,8 @@ export function fakeProvider(
         yield { type: 'text', text: piece };
       }
       if (fail) throw new ProviderError(fail, `The call failed: ${fail}`);
-      yield { type: 'finish', finish: finish ?? 'complete' };
+      if (finish !== null)
+        yield { type: 'finish', finish: finish ?? 'complete' };
     },
   };
 }

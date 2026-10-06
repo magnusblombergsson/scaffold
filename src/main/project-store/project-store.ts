@@ -86,6 +86,7 @@ import type {
   EmptyReply,
   InterviewFocus,
   Mode,
+  UnusedSummary,
 } from '../../shared/conversation';
 import type { Model } from '../../shared/models';
 import type { Clock } from './clock';
@@ -100,7 +101,6 @@ import {
   proposedEvent,
   type ConversationEvent,
   type Decision,
-  type EmptyReplyEvent,
   type LoggedConversation,
   type LoggedProposal,
 } from './conversation-log';
@@ -3052,19 +3052,28 @@ ${text}`);
   }
 
   /**
-   * Appends a reply that came back empty, written by `model`, which finished
-   * for `reason`: logged as such, so its cost counts but it is never sent
-   * back as context.
+   * Appends a reply that came back empty, written by `model`: logged as
+   * such, so its cost counts but it is never sent back as context.
    */
   appendEmptyReply(
     id: string,
     reply: Omit<EmptyReply, 'model' | 'provider' | 'before'>,
     model: Model,
-    reason: EmptyReplyEvent['reason'],
   ): Promise<void> {
     return this.inLog(id, async () => {
       await this.passFormatGate();
-      await this.appendEvent(id, emptyReplyEvent(reply, model, reason));
+      await this.appendEvent(id, emptyReplyEvent(reply, model));
+    });
+  }
+
+  /**
+   * Appends a summary that wasn't used, so what it used and cost counts; it
+   * is never shown.
+   */
+  appendUnusedSummary(id: string, unused: UnusedSummary): Promise<void> {
+    return this.inLog(id, async () => {
+      await this.passFormatGate();
+      await this.appendEvent(id, { type: 'summary.unused', ...unused });
     });
   }
 
