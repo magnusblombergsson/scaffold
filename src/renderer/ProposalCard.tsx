@@ -12,15 +12,12 @@ import {
   appendedOnto,
   canAppend,
   FIELD_LABELS,
-  fieldDiff,
   fieldText,
   isAppending,
   isChoiceField,
   orphanedText,
   proposalTarget,
-  textDiff,
   textValue,
-  type DiffPart,
   type FieldValue,
   type NewEntry,
   type ProposalField,
@@ -28,6 +25,7 @@ import {
   type ProposalView,
   type ProposedValue,
 } from '../shared/proposal';
+import { fieldDiff, textDiff, type DiffPart } from '../shared/diff';
 import { flushPendingEdits } from './pending-edits';
 import { ReadOnlyContext } from './read-only';
 

@@ -38,7 +38,7 @@ import {
   type AtMention,
 } from './at-mention';
 import type { MenuItem } from './Binder';
-import { streamingText } from '../shared/proposal';
+import { streamingText } from '../shared/reply';
 import {
   describeTotal,
   describeUsage,

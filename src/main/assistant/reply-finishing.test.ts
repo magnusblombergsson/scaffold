@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { Model } from '../../shared/models';
-import { streamingText } from '../../shared/proposal';
+import { streamingText } from '../../shared/reply';
 import { fakeProvider, type FakeReply } from './fake-provider';
 import { ProviderError } from './provider';
 import { finishedCall } from './reply-finishing';

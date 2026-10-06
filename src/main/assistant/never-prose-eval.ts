@@ -14,11 +14,8 @@ import {
   PROJECT_OUTLINE,
   type EntryValue,
 } from '../../shared/project-types';
-import {
-  FIELD_LABELS,
-  isProposalField,
-  withoutThinking,
-} from '../../shared/proposal';
+import { FIELD_LABELS, isProposalField } from '../../shared/proposal';
+import { withoutThinking } from '../../shared/reply';
 import { instantClock } from '../project-store/clock';
 import { nodeFileSystem } from '../project-store/file-system';
 import {

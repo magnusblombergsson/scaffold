@@ -1,5 +1,5 @@
 import type { AssistantFailure } from '../../shared/conversation';
-import { replyText, splitReply, withoutThinking } from '../../shared/proposal';
+import { replyText, splitReply, withoutThinking } from '../../shared/reply';
 import type { Usage } from '../../shared/usage';
 import {
   ProviderError,
