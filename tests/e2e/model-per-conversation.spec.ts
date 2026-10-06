@@ -82,7 +82,7 @@ test('the Author switches Model mid-Conversation: each reply names its Model, an
   const projectPath = path.join(tempDir(), 'My Novel');
   lmStudioAdded(tempDir());
   anthropic.calls.push(
-    { reply: ['On Opus.'] },
+    { reply: ['On Sonnet.'] },
     { reply: ['On Haiku.'] },
     { reply: ['Haiku again.'] },
   );
@@ -96,28 +96,28 @@ test('the Author switches Model mid-Conversation: each reply names its Model, an
   const assistant = page.getByRole('complementary', { name: 'Assistant' });
   const picker = assistant.getByRole('button', { name: /^Model: / });
   const models = assistant.getByRole('menu', { name: 'Models' });
-  // A new Conversation starts on the Model used last: none yet, so Opus.
-  await expect(picker).toHaveText('Anthropic · Opus 5.5 ▾');
+  // A new Conversation starts on the Model used last: none yet, so the default, Sonnet 5.5.
+  await expect(picker).toHaveText('Anthropic · Sonnet 5.5 ▾');
 
   // The dropdown groups the shortlisted Models under their Provider, and
   // marks those not on the tested list.
   await picker.click();
   const claude = models.getByRole('group', { name: 'Anthropic' });
   await expect(claude.getByRole('menuitemradio')).toHaveText([
-    'Opus 5.5 · 1M · $$$$',
-    'Sonnet 5 · 1M · $$$ · Untested',
+    'Opus 5.5 · 1M · $$$$ · Untested',
+    'Sonnet 5.5 · 1M · $$$',
     'Haiku 4.5 · 200k · $$',
   ]);
   await expect(
     claude
-      .getByRole('menuitemradio', { name: /Sonnet 5/ })
+      .getByRole('menuitemradio', { name: /Opus 5\.5/ })
       .getByText('Untested'),
   ).toHaveAttribute('title', /hasn't been checked against the rule/);
   await expect(
-    claude.getByRole('menuitemradio', { name: /Opus 5\.5/ }),
-  ).toHaveAttribute('title', '$4 in · $20 out per M');
+    claude.getByRole('menuitemradio', { name: /Sonnet 5\.5/ }),
+  ).toHaveAttribute('title', '$2 in · $10 out per M');
   await expect(
-    claude.getByRole('menuitemradio', { name: /Opus 5\.5/ }),
+    claude.getByRole('menuitemradio', { name: /Sonnet 5\.5/ }),
   ).toHaveAttribute('aria-checked', 'true');
   await expect(
     models.getByRole('group', { name: 'LM Studio' }).getByRole('menuitemradio'),
@@ -136,8 +136,8 @@ test('the Author switches Model mid-Conversation: each reply names its Model, an
     replies.nth(index).getByLabel('Model', { exact: true });
 
   await send('Why does Anna leave?');
-  await expect(replies.first()).toContainText('On Opus.');
-  await expect(modelOf(0)).toHaveText('Opus 5.5');
+  await expect(replies.first()).toContainText('On Sonnet.');
+  await expect(modelOf(0)).toHaveText('Sonnet 5.5');
 
   // Switched in the header, from the next message on.
   await picker.click();
@@ -147,9 +147,9 @@ test('the Author switches Model mid-Conversation: each reply names its Model, an
   await expect(replies).toHaveCount(2);
   await expect(replies.last()).toContainText('On Haiku.');
   await expect(modelOf(1)).toHaveText('Haiku 4.5');
-  await expect(modelOf(0)).toHaveText('Opus 5.5');
+  await expect(modelOf(0)).toHaveText('Sonnet 5.5');
   expect(anthropic.sent.map((body) => body.model)).toEqual([
-    'claude-opus-5-5',
+    'claude-sonnet-5-5',
     'claude-haiku-4-5',
   ]);
 
@@ -183,8 +183,8 @@ test('the Author switches Model mid-Conversation: each reply names its Model, an
           : [],
     ),
   ).toEqual([
-    'anthropic:claude-opus-5-5',
-    'reply anthropic:claude-opus-5-5',
+    'anthropic:claude-sonnet-5-5',
+    'reply anthropic:claude-sonnet-5-5',
     'anthropic:claude-haiku-4-5',
     'reply anthropic:claude-haiku-4-5',
     'lmstudio:qwen3-8b',
@@ -210,7 +210,7 @@ test('the Author switches Model mid-Conversation: each reply names its Model, an
   await choose.getByRole('checkbox', { name: /Haiku 4\.5/ }).uncheck();
   await choose.getByRole('button', { name: 'Save' }).click();
   await again.getByRole('button', { name: 'Done' }).click();
-  await expect(picker).toHaveText('Anthropic · Opus 5.5 ▾');
+  await expect(picker).toHaveText('Anthropic · Opus 5.5 · Untested ▾');
 
   await conversation.selectOption('Why does Anna leave?');
   await expect(picker).toHaveText('Anthropic · Haiku 4.5 ▾');
@@ -221,8 +221,8 @@ test('the Author switches Model mid-Conversation: each reply names its Model, an
   await expect(
     models.getByRole('group', { name: 'Anthropic' }).getByRole('menuitemradio'),
   ).toHaveText([
-    'Opus 5.5 · 1M · $$$$',
-    'Sonnet 5 · 1M · $$$ · Untested',
+    'Opus 5.5 · 1M · $$$$ · Untested',
+    'Sonnet 5.5 · 1M · $$$',
     'Haiku 4.5',
   ]);
   await app.close();
@@ -230,7 +230,7 @@ test('the Author switches Model mid-Conversation: each reply names its Model, an
 
 test('an Untested Model warns in the header but is asked like any other', async () => {
   const projectPath = path.join(tempDir(), 'My Novel');
-  anthropic.calls.push({ reply: ['On Sonnet.'] });
+  anthropic.calls.push({ reply: ['On Opus.'] });
   const app = await launch(tempDir(), { anthropicUrl: anthropic.url });
   await answerDialogs(app, projectPath);
   const page = await app.firstWindow();
@@ -243,11 +243,11 @@ test('an Untested Model warns in the header but is asked like any other', async 
   await picker.click();
   await assistant
     .getByRole('menu', { name: 'Models' })
-    .getByRole('menuitemradio', { name: /Sonnet 5/ })
+    .getByRole('menuitemradio', { name: /Opus 5\.5/ })
     .click();
-  await expect(picker).toHaveText('Anthropic · Sonnet 5 · Untested ▾');
+  await expect(picker).toHaveText('Anthropic · Opus 5.5 · Untested ▾');
   await expect(picker).toHaveAccessibleName(
-    'Model: Anthropic · Sonnet 5, Untested',
+    'Model: Anthropic · Opus 5.5, Untested',
   );
 
   await assistant
@@ -257,7 +257,7 @@ test('an Untested Model warns in the header but is asked like any other', async 
   const reply = assistant
     .getByRole('log', { name: 'Messages' })
     .getByRole('article', { name: 'Assistant' });
-  await expect(reply).toContainText('On Sonnet.');
-  expect(anthropic.sent.map((body) => body.model)).toEqual(['claude-sonnet-5']);
+  await expect(reply).toContainText('On Opus.');
+  expect(anthropic.sent.map((body) => body.model)).toEqual(['claude-opus-5-5']);
   await app.close();
 });

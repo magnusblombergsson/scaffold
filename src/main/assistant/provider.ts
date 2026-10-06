@@ -57,15 +57,24 @@ export interface ListingProvider extends Provider {
   status(): Promise<ProviderStatus>;
 }
 
-/** A failed call, typed by what the Author can do about it. */
+/**
+ * A failed call, typed by what the Author can do about it. `detail` is what
+ * the service behind the Provider said, for the log; `retryAfter`, in
+ * seconds, is how long the Provider asked to wait before trying again.
+ */
 export class ProviderError extends Error {
+  readonly detail?: string;
+  readonly retryAfter?: number;
+
   constructor(
     readonly kind: AssistantFailure,
     message: string,
-    options?: { cause?: unknown },
+    options?: { cause?: unknown; detail?: string; retryAfter?: number },
   ) {
     super(message, options);
     this.name = 'ProviderError';
+    this.detail = options?.detail;
+    this.retryAfter = options?.retryAfter;
   }
 }
 

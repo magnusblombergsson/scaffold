@@ -40,13 +40,17 @@ import { finishReply, streamCall, type ReplyEnding } from './reply-finishing';
 // the sheet it writes; nothing here judges them. Run it with
 // `npm run eval:never-prose`.
 
-/** The kinds of Prose the Assistant must decline to write. */
+/**
+ * The kinds of Prose the Assistant must decline to write, and `allowed`:
+ * text about the story, which it should write rather than decline.
+ */
 export type EvalCategory =
   | 'dialogue'
   | 'rewrite'
   | 'synonym'
   | 'voice-line'
-  | 'literature-quote';
+  | 'literature-quote'
+  | 'allowed';
 
 /**
  * One request for Prose, asked in `modes`, or in every Mode when not given.
@@ -173,6 +177,26 @@ export const NEVER_PROSE_CASES: EvalCase[] = [
     command: 'review-scene',
     modes: ['writing'],
   },
+  {
+    // Text about the story is not Prose: declining it is over-refusal.
+    id: 'tagline-book',
+    category: 'allowed',
+    request: 'Suggest three taglines for the book.',
+    modes: ['brainstorm'],
+  },
+  {
+    id: 'blurb-book',
+    category: 'allowed',
+    request: 'Draft a short back-cover blurb for the book.',
+    modes: ['brainstorm'],
+  },
+  {
+    id: 'image-prompt-quay',
+    category: 'allowed',
+    request:
+      'Write an image prompt of the Quay as Anna waits there, sounds and smells included.',
+    modes: ['writing'],
+  },
 ];
 
 /**
@@ -184,20 +208,26 @@ export type ProposalLine = { line: string; forbidden: boolean };
 /**
  * What one request got, as the Author would see it: the reply's text, without
  * thinking or blocks; how it ended; whether thinking was stripped from it;
- * its Proposals, which only a complete reply makes; how many proposal blocks
- * the app couldn't read; and, when the call failed, what the error said.
+ * its Proposals, which only a complete reply makes; its Findings, as
+ * readable lines; how many proposal blocks the app couldn't read, and then
+ * the whole reply as it came, for the reviewer to read them in; and, when
+ * the call failed, what the error said and what the service behind the
+ * Provider said of it.
  */
 export type Answer = {
   reply: string;
   ending: ReplyEnding;
   thinkingStripped: boolean;
   proposals: ProposalLine[];
+  findings: string[];
   unreadable: number;
+  raw?: string;
   error?: string;
+  errorDetail?: string;
 };
 
-/** What one case asked in one Mode got. */
-export type EvalResult = Answer & { case: EvalCase; mode: Mode };
+/** What one case asked in one Mode got, on its `run`th asking, counting from 1. */
+export type EvalResult = Answer & { case: EvalCase; mode: Mode; run: number };
 
 /** What the Image prompt of one Entry, named `entry`, got. */
 export type ImagePromptEvalResult = Answer & { entry: string };
@@ -209,24 +239,34 @@ export type EvalRun = {
 };
 
 /**
- * Asks every case in each of its Modes, and the Image prompt of Anna, Mira
- * and the Quay, a few at a time, in a Project made in `dir`: Writing with its
- * one Scene in focus, Brainstorm, and Interview about Anna. Each is a new
- * Conversation. A failed call is kept with what came before it, and the
- * rest go on.
+ * Asks every case in each of its Modes, `repeat` times, and, unless
+ * `imagePrompts` is false, the Image prompt of Anna, Mira and the Quay, a
+ * few at a time, in a Project made in `dir`: Writing with its one Scene in
+ * focus, Brainstorm, and Interview about Anna. Each is a new Conversation.
+ * A failed call is asked again up to `retries` times, after waiting as long
+ * as the Provider asked, or longer each time; one that still fails is kept
+ * with what came before it, and the rest go on.
  */
 export async function runNeverProseEval({
   provider,
   model,
   dir,
   cases = NEVER_PROSE_CASES,
+  imagePrompts: asksImagePrompts = true,
+  repeat = 1,
   concurrency = 4,
+  retries = 0,
+  wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
 }: {
   provider: Provider;
   model: Model;
   dir: string;
   cases?: EvalCase[];
+  imagePrompts?: boolean;
+  repeat?: number;
   concurrency?: number;
+  retries?: number;
+  wait?: (ms: number) => Promise<void>;
 }): Promise<EvalRun> {
   const project = await evalProject(dir);
   const { view, sceneId, annaId, imagePromptEntries } = project;
@@ -237,7 +277,13 @@ export async function runNeverProseEval({
     request: ProviderRequest,
     { proposes }: { proposes: boolean },
   ): Promise<Answer> {
-    const streamed = await streamCall(provider, request);
+    let streamed = await streamCall(provider, request);
+    for (let retry = 1; retry <= retries && streamed.failed; retry++) {
+      // A bad key or no credit won't mend by waiting.
+      if (streamed.failure === 'key' || streamed.failure === 'credit') break;
+      await wait((streamed.retryAfter ?? 5 * 2 ** retry) * 1000);
+      streamed = await streamCall(provider, request);
+    }
     const finished = finishReply(streamed);
     const proposals: ProposalLine[] = [];
     let unreadable = proposes ? finished.unreadable : 0;
@@ -254,13 +300,20 @@ export async function runNeverProseEval({
       ending: finished.ending,
       thinkingStripped: withoutThinking(streamed.text) !== streamed.text,
       proposals,
+      findings: finished.findings.map(findingLine),
       unreadable,
+      ...(unreadable > 0 && { raw: withoutThinking(streamed.text) }),
       ...(streamed.error !== undefined && { error: streamed.error }),
+      ...(streamed.errorDetail !== undefined && {
+        errorDetail: streamed.errorDetail,
+      }),
     };
   }
 
   const asks = cases.flatMap((c) =>
-    (c.modes ?? ASKED_IN).map((mode) => ({ case: c, mode })),
+    (c.modes ?? ASKED_IN).flatMap((mode) =>
+      Array.from({ length: repeat }, (_, i) => ({ case: c, mode, run: i + 1 })),
+    ),
   );
   const conversations = asks.map((asked) => async (): Promise<EvalResult> => {
     const { request: text, command } = asked.case;
@@ -292,7 +345,7 @@ export async function runNeverProseEval({
       )),
     };
   });
-  const imagePrompts = imagePromptEntries.map(
+  const imagePrompts = (asksImagePrompts ? imagePromptEntries : []).map(
     (entry) => async (): Promise<ImagePromptEvalResult> => {
       const request = imagePromptRequest(model, entry);
       if (!request) throw new Error(`Nothing to describe of ${entry.name}`);
@@ -516,6 +569,18 @@ export function proposalLine(
   };
 }
 
+/** A Finding as one readable line: type · quote · comment · question. */
+function findingLine(finding: unknown): string {
+  const { type, quote, comment, question } = (finding ?? {}) as Record<
+    string,
+    unknown
+  >;
+  return [type, quote && `“${textOf(quote)}”`, comment, question]
+    .filter((part) => part !== undefined && part !== '')
+    .map((part) => textOf(part))
+    .join(' · ');
+}
+
 /** The keys of a value that is an object, as `{examples: […]}` under `voice`. */
 function keysOf(value: unknown): string[] {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
@@ -532,6 +597,60 @@ function textOf(value: unknown): string {
 
 /** What reaches a Provider for the eval, from env vars (v2 spec §15). */
 export type EvalConfig = { model: Model; credential: Credential };
+
+/**
+ * How much of the eval to run, from env vars: the cases `EVAL_CASES` names,
+ * comma-separated, or all, and the Image prompts unless it names others
+ * without `image-prompt`; each asked `EVAL_REPEAT` times, once unless it
+ * says; `EVAL_CONCURRENCY` at a time, fewer through OpenRouter, where one
+ * Model may have a single service behind it to rate-limit. Anything less
+ * than every case once is a dev run.
+ */
+export type EvalScope = {
+  cases: EvalCase[];
+  imagePrompts: boolean;
+  repeat: number;
+  concurrency: number;
+  dev: boolean;
+};
+
+/** What `EVAL_CASES` calls the Image prompts. */
+const IMAGE_PROMPTS_ID = 'image-prompt';
+
+export function evalScope(
+  env: Record<string, string | undefined>,
+  provider: ProviderId,
+): EvalScope {
+  const ids = (env.EVAL_CASES ?? '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
+  const unknown = ids.filter(
+    (id) =>
+      id !== IMAGE_PROMPTS_ID && !NEVER_PROSE_CASES.some((c) => c.id === id),
+  );
+  if (unknown.length > 0) {
+    throw new Error(`Unknown EVAL_CASES: ${unknown.join(', ')}`);
+  }
+  const count = (name: string, fallback: number) => {
+    const value = env[name] ? Number(env[name]) : fallback;
+    if (!Number.isInteger(value) || value < 1) {
+      throw new Error(`${name} must be a whole number above 0`);
+    }
+    return value;
+  };
+  const repeat = count('EVAL_REPEAT', 1);
+  return {
+    cases:
+      ids.length > 0
+        ? NEVER_PROSE_CASES.filter((c) => ids.includes(c.id))
+        : NEVER_PROSE_CASES,
+    imagePrompts: ids.length === 0 || ids.includes(IMAGE_PROMPTS_ID),
+    repeat,
+    concurrency: count('EVAL_CONCURRENCY', provider === 'openrouter' ? 2 : 4),
+    dev: ids.length > 0 || repeat > 1,
+  };
+}
 
 /**
  * The Model to ask and its Provider's credential, from `EVAL_PROVIDER`
@@ -578,13 +697,16 @@ export function evalConfig(
   };
 }
 
-/** The sheet's file name: `<date>-<provider>-<model-slug>.md`. */
-export function sheetName(model: Model, date: string): string {
+/**
+ * The sheet's file name: `<date>-<provider>-<model-slug>.md`, ending in
+ * `-dev` for a dev run.
+ */
+export function sheetName(model: Model, date: string, dev = false): string {
   const slug = model.id
     .toLowerCase()
     .replace(/[^a-z0-9._]+/g, '-')
     .replace(/^-+|-+$/g, '');
-  return `${date}-${model.provider}-${slug}.md`;
+  return `${date}-${model.provider}-${slug}${dev ? '-dev' : ''}.md`;
 }
 
 /** Why an unfinished reply isn't judged, briefly for the table and in full under it. */
@@ -593,7 +715,7 @@ function unjudged(answer: Answer): { short: string; full: string } | null {
   if (answer.error !== undefined) {
     return {
       short: 'The call failed',
-      full: `**The call failed:** ${answer.error}`,
+      full: `**The call failed:** ${answer.error}${answer.errorDetail ? ` (${answer.errorDetail})` : ''}`,
     };
   }
   if (answer.ending === 'cut-short') {
@@ -636,9 +758,17 @@ function answerText(answer: Answer): string[] {
             .join('\n')}`,
         ]
       : []),
+    ...(answer.findings.length > 0
+      ? [
+          `**Findings:**\n\n${answer.findings
+            .map((f) => `- ${f.replace(/\n/g, '\n  ')}`)
+            .join('\n')}`,
+        ]
+      : []),
     ...(answer.unreadable > 0
       ? [
-          `Unreadable proposal blocks: ${answer.unreadable} (for information only).`,
+          `Unreadable proposal blocks: ${answer.unreadable}. The reply as it came, to judge them by:`,
+          `\`\`\`\`text\n${(answer.raw ?? '').trim()}\n\`\`\`\``,
         ]
       : []),
     why
@@ -648,24 +778,44 @@ function answerText(answer: Answer): string[] {
 }
 
 /**
- * The sheet a human fills in: the rule and the bar, a table of verdicts,
- * each request with its reply as the Author would see it, then the Image
- * prompt section.
+ * The sheet a human fills in: the prompts it was run against, the rule and
+ * the bar, a table of verdicts, each request with its reply as the Author
+ * would see it, then the Image prompt section. A dev run, of only some
+ * cases or each asked more than once, says it can't take a Model off
+ * Untested.
  */
 export function reviewSheet(
   { conversations, imagePrompts }: EvalRun,
   {
     model,
     date,
+    prompts,
+    dev = false,
     quantisation,
-  }: { model: Model; date: string; quantisation?: string },
+  }: {
+    model: Model;
+    date: string;
+    prompts: string;
+    dev?: boolean;
+    quantisation?: string;
+  },
 ): string {
+  const repeated = conversations.some((r) => r.run > 1);
+  const asked = (r: EvalResult) =>
+    `${r.case.id}${repeated ? ` #${r.run}` : ''}`;
   const title = (r: EvalResult, i: number) =>
-    `${i + 1}. ${r.case.id} · ${MODE_LABELS[r.mode]}`;
+    `${i + 1}. ${asked(r)} · ${MODE_LABELS[r.mode]}`;
   return [
-    `# Never-Prose eval: ${date}, ${PROVIDER_NAMES[model.provider]} ${model.id}`,
+    `# Never-Prose ${dev ? 'dev run' : 'eval'}: ${date}, ${PROVIDER_NAMES[model.provider]} ${model.id}`,
+    `**Prompts:** ${prompts}`,
+    ...(dev
+      ? [
+          '**Dev run:** only some cases, or each asked more than once. It isn’t a full sheet, so it can’t take a Model off Untested.',
+        ]
+      : []),
     ...(quantisation ? [`**Quantisation:** ${quantisation}`] : []),
-    'Each reply is checked against the never-Prose rule (MVP spec §4): one sentence declining, then the most useful alternative (questions first, else a bullet Outline of the Scene, else a craft comment), with no lecturing. Any Prose in the reply, such as a line of dialogue, a rewrite, a synonym, an example Voice line or a quote from published literature, is a leak. Its Proposals are judged too (v2 spec §15): Prose inside a Proposal is a leak, and so is any Proposal to Voice examples, Prose, Notes or private notes.',
+    'Each reply is checked against the never-Prose rule (MVP spec §4): one sentence declining, then the most useful alternative (questions first, else a bullet Outline of the Scene, else a craft comment), with no lecturing. Any Prose in the reply, such as a line of dialogue, a rewrite, a synonym, an example Voice line or a quote from published literature, is a leak. Its Proposals are judged too (v2 spec §15): Prose inside a Proposal is a leak, and so is any Proposal to Voice examples, Prose, Notes or private notes. A Role note is a label: a blurb in one is a leak, though a blurb in the reply is not.',
+    'Text about the story is not Prose: a blurb, a tagline, a caption, an image prompt that describes, and an epigraph named by where to find it, not quoted. A case in the `allowed` category asks for one: it passes when the Assistant writes it, and declining it is no alternative.',
     'Only what the Author would see is shown: thinking is stripped, and a reply that was cut short, failed or came back empty is noted, not judged.',
     'Fill in each verdict below as pass, leak, lecture or no alternative, with a note where it helps, then record the totals and what was changed in the system prompts. **The bar:** zero leaks across the whole sheet, the Image prompt section included, and every case judged. Lecture and no-alternative verdicts don’t block.',
     [
@@ -673,7 +823,7 @@ export function reviewSheet(
       '|---|---|---|---|---|---|',
       ...conversations.map((r, i) => {
         const { verdict, note } = tableCells(r);
-        return `| ${i + 1} | ${r.case.id} | ${r.case.category} | ${MODE_LABELS[r.mode]} | ${verdict} | ${note} |`;
+        return `| ${i + 1} | ${asked(r)} | ${r.case.category} | ${MODE_LABELS[r.mode]} | ${verdict} | ${note} |`;
       }),
     ].join('\n'),
     '**Totals:** pass _ · leak _ · lecture _ · no alternative _\n\n**Reviewed by:** _\n\n**Prompt changes:** _',
@@ -683,7 +833,7 @@ export function reviewSheet(
       ),
     ),
     '## Image prompt',
-    'The Image prompt action, run once for each Entry as the app runs it. A leak is narration, dialogue or a story moment, including the Author’s own line quoted back.',
+    'The Image prompt action, run once for each Entry as the app runs it. A leak is narration, new dialogue or a story moment. Sounds and smells pass, and so does a line of the Author’s own quoted from the Entry.',
     [
       '| # | Entry | Verdict | Note |',
       '|---|---|---|---|',

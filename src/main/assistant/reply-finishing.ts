@@ -43,13 +43,17 @@ export type FinishedReply = {
 
 /**
  * A call as streamed: its outcome, what it used and, when the Provider
- * said, cost, and when it failed, why, with the error's message as `error`.
+ * said, cost, and when it failed, why, with the error's message as `error`,
+ * what the service behind the Provider said as `errorDetail`, and how many
+ * seconds the Provider asked to wait before trying again as `retryAfter`.
  */
 export type StreamedCall = StreamOutcome & {
   usage?: Usage;
   cost?: number;
   failure: AssistantFailure | null;
   error?: string;
+  errorDetail?: string;
+  retryAfter?: number;
 };
 
 /**
@@ -67,6 +71,8 @@ export async function streamCall(
   let finish: Finish | null = null;
   let failure: AssistantFailure | null = null;
   let message: string | undefined;
+  let detail: string | undefined;
+  let retryAfter: number | undefined;
   try {
     for await (const event of provider.stream(request)) {
       if (event.type === 'usage') {
@@ -82,6 +88,9 @@ export async function streamCall(
     message = error instanceof Error ? error.message : String(error);
     if (error instanceof ProviderError) {
       failure = error.kind;
+      ({ detail, retryAfter } = error);
+      if (detail)
+        console.error(`The Assistant call failed: ${message} (${detail})`);
     } else {
       console.error('The Assistant call failed:', error);
       failure = 'other';
@@ -93,6 +102,8 @@ export async function streamCall(
     failed: failure !== null,
     failure,
     ...(message !== undefined && { error: message }),
+    ...(detail !== undefined && { errorDetail: detail }),
+    ...(retryAfter !== undefined && { retryAfter }),
     ...(usage && { usage }),
     ...(cost !== undefined && { cost }),
   };

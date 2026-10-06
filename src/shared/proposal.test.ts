@@ -175,6 +175,30 @@ describe('proposalOf', () => {
     }
   });
 
+  it('takes a Role note only as a label, never a sentence or a blurb', () => {
+    const blurb =
+      'At thirty she boards the ferry for the mainland, hating goodbyes';
+    for (const text of [
+      'She left the island at thirty. She never looked back.',
+      blurb,
+      'the one who leaves!',
+      'her sister\nher rival',
+    ]) {
+      expect(
+        proposalOf({ entry: 'anna', field: 'roleNote', value: text }, anna),
+      ).toBeNull();
+      expect(
+        proposalOf({ entry: 'anna', field: 'roleNote', append: text }, anna),
+      ).toBeNull();
+    }
+    expect(
+      proposalOf(
+        { entry: 'anna', field: 'roleNote', value: 'the one who walks away' },
+        anna,
+      ),
+    ).toMatchObject({ proposed: 'the one who walks away' });
+  });
+
   it('adds one alias or word, as the item alone, unless the list holds it', () => {
     expect(
       proposalOf({ entry: 'anna', field: 'aliases', add: ' Nan ' }, anna),

@@ -389,6 +389,7 @@ export function proposalOf(
   const base = fieldOf(entry, field);
   if (base === undefined) return null;
   const target = { kind: 'field', entryId: entry.id, field } as const;
+  if (field === 'roleNote' && !isLabel(append ?? value)) return null;
   if (append !== undefined || add !== undefined) {
     const change: EntryFieldChange | null = isListField(field)
       ? typeof add === 'string'
@@ -403,6 +404,24 @@ export function proposalOf(
   if (!isFieldValue(field, value)) return null;
   if (sameValue(value, base)) return 'unchanged';
   return { ...target, base, proposed: value };
+}
+
+/** The most words a Role note the Assistant proposes may have. */
+export const ROLE_NOTE_MAX_WORDS = 6;
+
+/**
+ * Whether `text` reads as a Role note: a label of a few words on one line,
+ * never a sentence or a blurb. A Model asked for a blurb may write one into
+ * the field however the prompt describes it, so it is checked here.
+ */
+function isLabel(text: unknown): boolean {
+  if (typeof text !== 'string') return true;
+  const label = text.trim();
+  return (
+    !label.includes('\n') &&
+    !/[.!?…](\s|$)/.test(label) &&
+    label.split(/\s+/).length <= ROLE_NOTE_MAX_WORDS
+  );
 }
 
 /** An Append or an Add, which lands on whatever its target holds. */

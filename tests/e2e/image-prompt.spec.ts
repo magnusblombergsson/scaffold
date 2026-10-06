@@ -54,7 +54,7 @@ test('Image prompt… on an Entry writes one to copy, again on Regenerate, and l
   await expect(prompt).toHaveText(
     'A tall woman in a grey wool coat on a windy quay.',
   );
-  await expect(dialog.getByLabel('Model')).toHaveText('Anthropic · Opus 5.5');
+  await expect(dialog.getByLabel('Model')).toHaveText('Anthropic · Sonnet 5.5');
   await expect(dialog.getByLabel('Usage')).toHaveText(
     '≈ 400 in · 30 out · < $0.01',
   );

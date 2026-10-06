@@ -98,11 +98,11 @@ describe('saving', () => {
     expect((await load()).highlightMentions()).toBe(false);
   });
 
-  it('remembers the Model used last, Opus 5.5 before any', async () => {
+  it('remembers the Model used last, Sonnet 5.5 before any', async () => {
     const settings = await load();
     expect(settings.lastUsedModel()).toEqual({
       provider: 'anthropic',
-      id: 'claude-opus-5-5',
+      id: 'claude-sonnet-5-5',
     });
 
     settings.setLastUsedModel({

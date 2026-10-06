@@ -439,6 +439,59 @@ describe('openRouterProvider', () => {
     },
   );
 
+  it('keeps what the service behind OpenRouter said, and how long to wait, for the log', async () => {
+    routes['/api/v1/chat/completions'] = (response) => {
+      response.writeHead(429, {
+        'content-type': 'application/json',
+        'retry-after': '20',
+      });
+      response.end(
+        JSON.stringify({
+          error: {
+            code: 429,
+            message: 'Provider returned error',
+            metadata: {
+              provider_name: 'Mistral',
+              error_type: 'rate_limit',
+              raw: { message: 'Requests rate limit exceeded' },
+            },
+          },
+        }),
+      );
+    };
+
+    const { error } = await collect(openRouter());
+
+    expect(error).toMatchObject({
+      kind: 'rate-limit',
+      message: 'Provider returned error',
+      retryAfter: 20,
+    });
+    expect(error?.detail).toBe(
+      'HTTP 429 · Mistral · rate_limit · 429 · {"message":"Requests rate limit exceeded"}',
+    );
+  });
+
+  it('keeps what the service said of an error chunk under HTTP 200', async () => {
+    routes['/api/v1/chat/completions'] = sse([
+      {
+        id: 'gen-1',
+        object: 'chat.completion.chunk',
+        error: {
+          code: 502,
+          message: 'Provider returned error',
+          metadata: { provider_name: 'Mistral', raw: 'upstream timeout' },
+        },
+        choices: [],
+      },
+    ]);
+    routes['/api/v1/generation'] = json(404, { error: { message: 'No' } });
+
+    const { error } = await collect(openRouter());
+
+    expect(error?.detail).toBe('Mistral · 502 · upstream timeout');
+  });
+
   it('says the key is missing without calling OpenRouter', async () => {
     const { error } = await collect(openRouter(null));
 

@@ -353,7 +353,7 @@ test('the current three Claude models are shortlisted until the Author chooses o
   await expect(choose.getByText('Fable 5.1')).toBeVisible();
   await expect(choose).toContainText('$10 in · $50 out per M');
   await choose.getByRole('checkbox', { name: /Fable 5\.1/ }).check();
-  await choose.getByRole('checkbox', { name: /Sonnet 5 / }).uncheck();
+  await choose.getByRole('checkbox', { name: /Sonnet 5\.5/ }).uncheck();
   await choose.getByRole('button', { name: 'Save' }).click();
   await expect(choose).toBeHidden();
   await expect(settings).toBeVisible();

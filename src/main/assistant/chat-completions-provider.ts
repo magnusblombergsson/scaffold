@@ -242,6 +242,7 @@ async function* streamChat(
         throw new ProviderError(
           'other',
           chunk.error.message ?? 'The reply failed partway',
+          { detail: upstreamDetail(chunk.error) },
         );
       }
       for (const choice of chunk.choices ?? []) {
@@ -401,16 +402,37 @@ function isOffline(error: unknown): boolean {
 async function httpError(response: Response): Promise<ProviderError> {
   const text = await response.text().catch(() => '');
   let message = `${response.status} ${response.statusText}`.trim();
+  let detail: string | undefined;
   try {
-    const { error } = JSON.parse(text) as {
-      error?: string | { message?: string };
-    };
+    const { error } = JSON.parse(text) as { error?: string | ApiError };
     const said = typeof error === 'string' ? error : error?.message;
     if (said) message = said;
+    if (typeof error === 'object') detail = upstreamDetail(error);
   } catch {
     // Not JSON: the status says enough.
   }
-  return new ProviderError(failureOf(response.status), message);
+  const seconds = Number(response.headers.get('retry-after'));
+  return new ProviderError(failureOf(response.status), message, {
+    detail: [`HTTP ${response.status}`, detail].filter(Boolean).join(' · '),
+    ...(seconds > 0 && { retryAfter: seconds }),
+  });
+}
+
+/**
+ * What the service behind OpenRouter said of a failure, which OpenRouter
+ * passes on in the error's metadata: who it was, what kind of error, and
+ * its own words, cut to a few hundred characters.
+ */
+function upstreamDetail(error: ApiError): string | undefined {
+  const { provider_name, error_type, raw } = error.metadata ?? {};
+  const said = typeof raw === 'string' ? raw : JSON.stringify(raw);
+  const parts = [
+    provider_name,
+    error_type,
+    error.code === undefined ? undefined : String(error.code),
+    said?.slice(0, 400),
+  ].filter((part) => part !== undefined && part !== '');
+  return parts.length > 0 ? parts.join(' · ') : undefined;
 }
 
 /** 403 is moderation on OpenRouter, not a bad key. */
@@ -527,9 +549,16 @@ type ApiUsage = {
   cost?: number;
 };
 
+/** An error as OpenRouter sends it, with what the service behind it said. */
+type ApiError = {
+  message?: string;
+  code?: number | string;
+  metadata?: { provider_name?: string; error_type?: string; raw?: unknown };
+};
+
 type Chunk = {
   id?: string;
-  error?: { message?: string };
+  error?: ApiError;
   choices?: {
     delta?: { content?: string | null };
     finish_reason?: string | null;

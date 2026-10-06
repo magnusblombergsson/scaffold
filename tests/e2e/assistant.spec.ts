@@ -45,10 +45,10 @@ test('the Author asks about the Scene in focus, sees the reply stream in, and re
   const reply = messages.getByRole('article', { name: 'Assistant' });
   await expect(reply).toContainText('What does she fear?');
   await expect(reply.getByLabel('Usage')).toHaveText(
-    '≈ 18k in (12k cached) · 900 out · ≈ $0.04',
+    '≈ 18k in (12k cached) · 900 out · ≈ $0.02',
   );
   await expect(assistant.getByLabel('Conversation usage')).toHaveText(
-    '≈ 18k in (12k cached) · 900 out · ≈ $0.04',
+    '≈ 18k in (12k cached) · 900 out · ≈ $0.02',
   );
   // The reply says what the Assistant saw, once opened.
   const saw = reply.getByRole('list', { name: 'What the Assistant saw' });
@@ -64,7 +64,7 @@ test('the Author asks about the Scene in focus, sees the reply stream in, and re
     'No earlier messages',
   ]);
   // Claude was asked with the stored key's model and the Scene in focus.
-  expect(anthropic.sent[0]).toMatchObject({ model: 'claude-opus-5-5' });
+  expect(anthropic.sent[0]).toMatchObject({ model: 'claude-sonnet-5-5' });
   expect(JSON.stringify(anthropic.sent[0].system)).toContain(
     'Anna packed in the rain.',
   );
@@ -82,13 +82,13 @@ test('the Author asks about the Scene in focus, sees the reply stream in, and re
   expect(chosen).toMatchObject({
     type: 'modelChosen',
     provider: 'anthropic',
-    model: 'claude-opus-5-5',
+    model: 'claude-sonnet-5-5',
   });
   expect(asked).toMatchObject({ type: 'message', role: 'author' });
   expect(replied).toMatchObject({
     type: 'message',
     role: 'assistant',
-    model: 'claude-opus-5-5',
+    model: 'claude-sonnet-5-5',
     provider: 'anthropic',
     usage: { input: 18_000, cached: 12_000, written: 0, output: 900 },
     saw: { entries: [], messages: 0 },
@@ -123,7 +123,7 @@ test('the Author asks about the Scene in focus, sees the reply stream in, and re
     history.getByRole('article', { name: 'Assistant' }),
   ).toContainText('What does she fear?');
   await expect(resumed.getByLabel('Conversation usage')).toHaveText(
-    '≈ 18k in (12k cached) · 900 out · ≈ $0.04',
+    '≈ 18k in (12k cached) · 900 out · ≈ $0.02',
   );
   await second.close();
 });
@@ -275,7 +275,7 @@ test('a Claude reply ending on max_tokens shows Cut short and makes no Proposals
 
   const [log] = await logs(projectPath);
   expect(log.find((e) => e.type === 'reply.empty')).toMatchObject({
-    model: 'claude-opus-5-5',
+    model: 'claude-sonnet-5-5',
     provider: 'anthropic',
     reason: 'length',
     usage: { input: 2_000, output: 4_096 },

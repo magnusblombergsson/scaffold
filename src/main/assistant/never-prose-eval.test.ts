@@ -6,6 +6,7 @@ import type { Model } from '../../shared/models';
 import { fakeProvider } from './fake-provider';
 import {
   evalConfig,
+  evalScope,
   NEVER_PROSE_CASES,
   proposalLine,
   reviewSheet,
@@ -16,7 +17,13 @@ import {
   type EvalResult,
   type ImagePromptEvalResult,
 } from './never-prose-eval';
-import { IMAGE_PROMPT, MODE_PROMPTS, REVIEW_ASKS } from './system-prompts';
+import { TESTED_MODELS } from '../../shared/tested-models';
+import {
+  IMAGE_PROMPT,
+  MODE_PROMPTS,
+  promptsFingerprint,
+  REVIEW_ASKS,
+} from './system-prompts';
 
 let dir: string;
 
@@ -58,6 +65,7 @@ describe('the eval set', () => {
   it('covers each kind of request for Prose, in every Mode', () => {
     const categories = new Set(NEVER_PROSE_CASES.map((c) => c.category));
     expect([...categories].sort()).toEqual([
+      'allowed',
       'dialogue',
       'literature-quote',
       'rewrite',
@@ -66,7 +74,7 @@ describe('the eval set', () => {
     ]);
     for (const mode of ['writing', 'brainstorm', 'interview'] as const) {
       const asked = NEVER_PROSE_CASES.filter(
-        (c) => !c.modes || c.modes.includes(mode),
+        (c) => c.category !== 'allowed' && (!c.modes || c.modes.includes(mode)),
       );
       expect(new Set(asked.map((c) => c.category)).size).toBe(5);
     }
@@ -90,6 +98,14 @@ describe('the eval set', () => {
       'outline-append-prose': ['writing'],
       'image-prompt-caption': 'every',
     });
+  });
+
+  it('asks for text about the story too, which is not Prose, to catch a refusal', () => {
+    expect(
+      NEVER_PROSE_CASES.filter((c) => c.category === 'allowed').map(
+        (c) => c.id,
+      ),
+    ).toEqual(['tagline-book', 'blurb-book', 'image-prompt-quay']);
   });
 });
 
@@ -259,6 +275,58 @@ describe('runNeverProseEval', () => {
     });
     expect(conversations[3].error).toBeUndefined();
   });
+
+  it('asks a failed call again, waiting longer each time, but not with a bad key', async () => {
+    const provider = fakeProvider((request, n) => {
+      const asked = request.messages.at(-1)?.content;
+      if (String(asked).includes('BADKEY')) return { text: [], fail: 'key' };
+      return n < 3 ? { text: [], fail: 'rate-limit' } : ['Fine.'];
+    });
+    const waited: number[] = [];
+
+    const { conversations } = await runNeverProseEval({
+      provider,
+      model: HAIKU,
+      dir,
+      concurrency: 1,
+      retries: 3,
+      wait: async (ms) => {
+        waited.push(ms);
+      },
+      cases: [
+        { ...cases[1], id: 'a', modes: ['brainstorm'] },
+        { ...cases[1], id: 'b', request: 'BADKEY', modes: ['brainstorm'] },
+      ],
+      imagePrompts: false,
+    });
+
+    expect(conversations.map((r) => r.ending)).toEqual(['complete', 'empty']);
+    expect(waited).toEqual([10_000, 20_000, 40_000]);
+    // Asked four times, then once with the bad key.
+    expect(provider.requests).toHaveLength(5);
+  });
+
+  it('asks each case in each Mode as many times as asked, numbering each', async () => {
+    const provider = fakeProvider(() => ['Fine.']);
+
+    const { conversations } = await runNeverProseEval({
+      provider,
+      model: HAIKU,
+      dir,
+      repeat: 3,
+      cases: [{ ...cases[1], modes: ['writing', 'brainstorm'] }],
+      imagePrompts: false,
+    });
+
+    expect(conversations.map((r) => `${r.mode} ${r.run}`)).toEqual([
+      'writing 1',
+      'writing 2',
+      'writing 3',
+      'brainstorm 1',
+      'brainstorm 2',
+      'brainstorm 3',
+    ]);
+  });
 });
 
 describe('a Review case', () => {
@@ -394,6 +462,7 @@ describe('reviewSheet', () => {
     ending: 'complete',
     thinkingStripped: false,
     proposals: [],
+    findings: [],
     unreadable: 0,
   };
 
@@ -402,18 +471,22 @@ describe('reviewSheet', () => {
       ...answered,
       case: cases[0],
       mode: 'writing',
+      run: 1,
       reply: 'I won’t write her lines.\nWhat does she want from Mira?',
       thinkingStripped: true,
       proposals: [
         { line: 'Anna · Appearance · append · Red coat.', forbidden: false },
         { line: 'Anna · voice.examples · add · Go, then.', forbidden: true },
       ],
+      findings: ['too-much · “late again” · Said twice. · What does it add?'],
       unreadable: 1,
+      raw: 'I won’t write her lines.\n```proposal\n{"entry": oops}\n```',
     },
     {
       ...answered,
       case: cases[1],
       mode: 'interview',
+      run: 1,
       reply: '',
       ending: 'interrupted',
       error: 'Offline',
@@ -422,6 +495,7 @@ describe('reviewSheet', () => {
       ...answered,
       case: cases[1],
       mode: 'interview',
+      run: 1,
       reply: 'Fine. Go',
       ending: 'cut-short',
     },
@@ -429,6 +503,7 @@ describe('reviewSheet', () => {
       ...answered,
       case: cases[1],
       mode: 'interview',
+      run: 1,
       reply: '',
       ending: 'empty',
     },
@@ -442,8 +517,58 @@ describe('reviewSheet', () => {
     {
       model: { provider: 'openrouter', id: 'qwen/qwen3-32b' },
       date: '2026-10-05',
+      prompts: 'abc123',
     },
   );
+
+  it('records the prompts it was run against', () => {
+    expect(sheet).toContain('\n\n**Prompts:** abc123\n\n');
+    expect(sheet).not.toContain('Dev run');
+  });
+
+  it('shows the Findings, and the reply as it came when a block was unreadable', () => {
+    expect(sheet).toContain(
+      '**Findings:**\n\n- too-much · “late again” · Said twice. · What does it add?',
+    );
+    expect(sheet).toContain(
+      'Unreadable proposal blocks: 1. The reply as it came, to judge them by:\n\n````text\nI won’t write her lines.\n```proposal\n{"entry": oops}\n```\n````',
+    );
+  });
+
+  it('says what the service behind the Provider said of a failed call', () => {
+    const failed = reviewSheet(
+      {
+        conversations: [
+          {
+            ...conversations[1],
+            errorDetail: 'HTTP 429 · Mistral · rate_limit',
+          },
+        ],
+        imagePrompts: [],
+      },
+      { model: HAIKU, date: '2026-10-05', prompts: 'abc123' },
+    );
+    expect(failed).toContain(
+      '**The call failed:** Offline (HTTP 429 · Mistral · rate_limit)',
+    );
+  });
+
+  it('marks a dev run, numbering a case asked more than once', () => {
+    const dev = reviewSheet(
+      {
+        conversations: [
+          { ...conversations[0], run: 1 },
+          { ...conversations[0], run: 2 },
+        ],
+        imagePrompts: [],
+      },
+      { model: HAIKU, date: '2026-10-05', prompts: 'abc123', dev: true },
+    );
+    expect(dev).toMatch(/^# Never-Prose dev run: 2026-10-05, Anthropic/);
+    expect(dev).toContain('can’t take a Model off Untested');
+    expect(dev).toContain('## 2. dialogue-goodbye #2 · Writing');
+    expect(dev).toContain('| 2 | dialogue-goodbye #2 | dialogue | Writing |');
+  });
 
   it('names the Provider and Model in its title, and states the bar', () => {
     expect(sheet).toMatch(
@@ -471,9 +596,6 @@ describe('reviewSheet', () => {
       '**Proposals:**\n\n- Anna · Appearance · append · Red coat.\n- **Forbidden target:** Anna · voice.examples · add · Go, then.',
     );
     expect(sheet).toContain('_Thinking stripped._');
-    expect(sheet).toContain(
-      'Unreadable proposal blocks: 1 (for information only).',
-    );
   });
 
   it('notes a cut-short, failed or empty reply, not to be judged', () => {
@@ -508,6 +630,7 @@ describe('reviewSheet', () => {
       {
         model: { provider: 'lmstudio', id: 'qwen3-8b' },
         date: '2026-10-05',
+        prompts: 'abc123',
         quantisation: 'Q4_K_M',
       },
     );
@@ -522,7 +645,7 @@ describe('reviewSheet', () => {
 describe('evalConfig', () => {
   it('asks Anthropic by default, the default Model unless EVAL_MODEL says', () => {
     expect(evalConfig({ ANTHROPIC_API_KEY: 'sk-ant' })).toEqual({
-      model: { provider: 'anthropic', id: 'claude-opus-5-5' },
+      model: { provider: 'anthropic', id: 'claude-sonnet-5-5' },
       credential: { secret: 'sk-ant' },
     });
     expect(
@@ -583,7 +706,61 @@ describe('evalConfig', () => {
   });
 });
 
+describe('evalScope', () => {
+  it('runs every case once, and the Image prompts, as a full sheet', () => {
+    expect(evalScope({}, 'anthropic')).toEqual({
+      cases: NEVER_PROSE_CASES,
+      imagePrompts: true,
+      repeat: 1,
+      concurrency: 4,
+      dev: false,
+    });
+  });
+
+  it('runs fewer at a time through OpenRouter, unless EVAL_CONCURRENCY says', () => {
+    expect(evalScope({}, 'openrouter').concurrency).toBe(2);
+    expect(evalScope({ EVAL_CONCURRENCY: '1' }, 'openrouter').concurrency).toBe(
+      1,
+    );
+  });
+
+  it('makes a dev run of the cases EVAL_CASES names, as often as EVAL_REPEAT says', () => {
+    const scope = evalScope(
+      { EVAL_CASES: 'synonym-list, role-note-blurb', EVAL_REPEAT: '3' },
+      'anthropic',
+    );
+    expect(scope.cases.map((c) => c.id)).toEqual([
+      'role-note-blurb',
+      'synonym-list',
+    ]);
+    expect(scope).toMatchObject({ imagePrompts: false, repeat: 3, dev: true });
+    expect(
+      evalScope({ EVAL_CASES: 'image-prompt' }, 'anthropic'),
+    ).toMatchObject({ cases: [], imagePrompts: true, dev: true });
+    expect(evalScope({ EVAL_REPEAT: '2' }, 'anthropic').dev).toBe(true);
+  });
+
+  it('refuses a case it doesn’t know, or a count that isn’t one', () => {
+    expect(() => evalScope({ EVAL_CASES: 'nope' }, 'anthropic')).toThrow(
+      'Unknown EVAL_CASES: nope',
+    );
+    expect(() => evalScope({ EVAL_REPEAT: '0' }, 'anthropic')).toThrow(
+      'EVAL_REPEAT must be a whole number above 0',
+    );
+  });
+});
+
 describe('sheetName', () => {
+  it('ends in -dev for a dev run', () => {
+    expect(
+      sheetName(
+        { provider: 'anthropic', id: 'claude-opus-5-5' },
+        '2026-10-05',
+        true,
+      ),
+    ).toBe('2026-10-05-anthropic-claude-opus-5-5-dev.md');
+  });
+
   it('is the date, the Provider and the Model as a slug', () => {
     expect(
       sheetName({ provider: 'anthropic', id: 'claude-opus-5-5' }, '2026-10-05'),
@@ -600,5 +777,15 @@ describe('sheetName', () => {
         '2026-10-05',
       ),
     ).toBe('2026-10-05-lmstudio-google-gemma-3.5-12b-q4_k_m.md');
+  });
+});
+
+describe('the tested list', () => {
+  it('holds only Models tested against the prompts as they are now', () => {
+    const stale = TESTED_MODELS.filter(
+      ({ prompts }) => prompts !== promptsFingerprint(),
+    ).map(({ provider, id }) => `${provider} ${id}`);
+    // Run the eval again for each, or take it off the list (README).
+    expect(stale).toEqual([]);
   });
 });

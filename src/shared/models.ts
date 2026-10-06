@@ -77,7 +77,7 @@ export const CLAUDE_MODELS = [
     contextWindow: 1_000_000,
     outputLimit: 128_000,
     price: { input: 2, cached: 0.2, written: 2.5, output: 10 },
-    current: false,
+    current: true,
   },
   {
     id: 'claude-sonnet-5',
@@ -85,7 +85,7 @@ export const CLAUDE_MODELS = [
     contextWindow: 1_000_000,
     outputLimit: 128_000,
     price: { input: 2, cached: 0.2, written: 2.5, output: 10 },
-    current: true,
+    current: false,
   },
   {
     id: 'claude-haiku-4-5',
@@ -106,9 +106,10 @@ export const CLAUDE_MODELS = [
 
 export type ClaudeModelId = (typeof CLAUDE_MODELS)[number]['id'];
 
+/** The Model a Conversation starts on until the Author chooses: a tested one. */
 export const DEFAULT_MODEL: Model = {
   provider: 'anthropic',
-  id: 'claude-opus-5-5',
+  id: 'claude-sonnet-5-5',
 };
 
 export function isClaudeModelId(value: unknown): value is ClaudeModelId {
