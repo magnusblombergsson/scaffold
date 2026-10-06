@@ -4,6 +4,7 @@ import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   claudeListing,
+  DEFAULT_MODEL,
   type ListedModel,
   type ProviderId,
   type ProviderStatus,
@@ -386,17 +387,39 @@ describe('ProviderSettings', () => {
       expect(providers.defaultModel(opus)).toEqual(opus);
     });
 
-    it('is the first shortlisted when the one used last is gone from the shortlist', async () => {
+    it('is the first shortlisted when the one used last is gone and none is the default or tested', async () => {
       const providers = await load();
       await providers.add('anthropic', entry(ANTHROPIC_KEY));
       providers.setShortlist('anthropic', [
-        { ...QWEN, id: 'claude-haiku-4-5' },
         { ...QWEN, id: 'claude-sonnet-5' },
+        { ...QWEN, id: 'claude-fable-5-1' },
       ]);
 
+      // In the order the Claude models are offered.
       expect(providers.defaultModel(opus)).toEqual({
         provider: 'anthropic',
-        id: 'claude-sonnet-5',
+        id: 'claude-fable-5-1',
+      });
+    });
+
+    it('is the default Model, or else a tested one, before an Untested one when the one used last is gone', async () => {
+      const providers = await load();
+      await providers.add('anthropic', entry(ANTHROPIC_KEY));
+      await providers.add('lmstudio', entry(''));
+      providers.setShortlist('lmstudio', [QWEN]);
+      const haiku = { ...QWEN, id: 'claude-haiku-4-5' };
+      const sonnet55 = { ...QWEN, id: DEFAULT_MODEL.id };
+
+      providers.setShortlist('anthropic', [haiku, sonnet55]);
+      expect(providers.defaultModel(opus)).toEqual(DEFAULT_MODEL);
+
+      providers.setShortlist('anthropic', [
+        { ...QWEN, id: 'claude-sonnet-5' },
+        haiku,
+      ]);
+      expect(providers.defaultModel(opus)).toEqual({
+        provider: 'anthropic',
+        id: 'claude-haiku-4-5',
       });
     });
 

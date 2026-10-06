@@ -452,7 +452,8 @@ export interface SettingsApi {
   setShortlist(provider: ProviderId, models: ListedModel[]): Promise<void>;
   /**
    * The Model a new Conversation starts on: the one chosen last, while it is
-   * shortlisted, else the first shortlisted.
+   * shortlisted, else the default Model, a tested one, or the first
+   * shortlisted.
    */
   defaultModel(): Promise<Model>;
 }

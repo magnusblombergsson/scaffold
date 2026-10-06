@@ -9,6 +9,7 @@ import type {
 import {
   claudeListing,
   currentClaudeModels,
+  DEFAULT_MODEL,
   LMSTUDIO_ADDRESS,
   PROVIDER_IDS,
   sameModel,
@@ -17,6 +18,7 @@ import {
   type ProviderId,
   type ProviderStatus,
 } from '../../shared/models';
+import { isTested } from '../../shared/tested-models';
 import type { AppSettings } from '../app-settings/app-settings';
 import type { Credential } from '../assistant/connect-provider';
 import {
@@ -204,8 +206,10 @@ export class ProviderSettings {
 
   /**
    * The Model a new Conversation starts on when `lastUsed` was the one used
-   * last: that one while it is shortlisted and its Provider added, else the
-   * first shortlisted of a Provider that is, so any one Provider is enough.
+   * last: that one while it is shortlisted and its Provider added; else, of
+   * those shortlisted by a Provider that is, the default Model, a tested
+   * one, or the first, so any one Provider is enough and an Untested Model
+   * is a last resort.
    */
   defaultModel(lastUsed: Model): Model {
     const lists = this.shortlists();
@@ -214,8 +218,14 @@ export class ProviderSettings {
         ? lists[id].map((model): Model => ({ provider: id, id: model.id }))
         : [],
     );
-    const shortlisted = offered.some((model) => sameModel(model, lastUsed));
-    return shortlisted ? lastUsed : (offered[0] ?? lastUsed);
+    const find = (wanted: (model: Model) => boolean) => offered.find(wanted);
+    return (
+      find((model) => sameModel(model, lastUsed)) ??
+      find((model) => sameModel(model, DEFAULT_MODEL)) ??
+      find((model) => isTested(model)) ??
+      offered[0] ??
+      lastUsed
+    );
   }
 
   setShortlist(id: ProviderId, models: ListedModel[]): void {

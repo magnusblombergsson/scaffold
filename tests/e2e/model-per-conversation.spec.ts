@@ -199,8 +199,8 @@ test('the Author switches Model mid-Conversation: each reply names its Model, an
   await conversation.selectOption('New Conversation');
   await expect(picker).toHaveText('Anthropic · Haiku 4.5 ▾');
 
-  // Haiku taken off the shortlist: a new Conversation starts on the first
-  // shortlisted, and the one on Haiku still shows it, greyed.
+  // Haiku taken off the shortlist: a new Conversation starts on the default,
+  // Sonnet 5.5, and the one on Haiku still shows it, greyed.
   const again = await openSettings(app, page);
   await again
     .getByRole('region', { name: 'Anthropic' })
@@ -210,7 +210,7 @@ test('the Author switches Model mid-Conversation: each reply names its Model, an
   await choose.getByRole('checkbox', { name: /Haiku 4\.5/ }).uncheck();
   await choose.getByRole('button', { name: 'Save' }).click();
   await again.getByRole('button', { name: 'Done' }).click();
-  await expect(picker).toHaveText('Anthropic · Opus 5.5 · Untested ▾');
+  await expect(picker).toHaveText('Anthropic · Sonnet 5.5 ▾');
 
   await conversation.selectOption('Why does Anna leave?');
   await expect(picker).toHaveText('Anthropic · Haiku 4.5 ▾');
