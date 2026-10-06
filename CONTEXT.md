@@ -95,6 +95,14 @@ _Avoid_: Beat sheet, synopsis, summary
 The Author's working notes on a Chapter or Scene. Visible to the Assistant, unlike an Entry's private notes.
 _Avoid_: Comments (when meaning the Author's own), annotations
 
+**Status**:
+How far along a Scene or Chapter is, chosen by the Author from the Project's ordered list of Statuses (such as Idea, Outlined, Drafted, Revised, Done); a unit has one Status or none. A Chapter's Status is its own, not derived from its Scenes.
+_Avoid_: Label, stage, state
+
+**Tag**:
+A free word or phrase the Author attaches to Scenes, Chapters and Entries to say what they concern, such as "Mara" or "flashback"; a unit may have any number, and the Project's Tags are simply those in use.
+_Avoid_: Keyword, label, category
+
 **Trash**:
 Where deleted Scenes, Chapters, Entries and Conversations go within a Project; they stay recoverable until the Author empties it. A Chapter goes with its Scenes and comes back with them; an Entry with its image; a Conversation goes with its pending Proposals.
 _Avoid_: Bin, archive
