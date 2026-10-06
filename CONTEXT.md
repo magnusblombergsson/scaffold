@@ -111,6 +111,10 @@ _Avoid_: Goal, quota, target (that is what a Proposal changes)
 A narrowing of one list or view to the units matching chosen Statuses, Tags or Entry types; it changes only what the Author sees, never what the Assistant sees.
 _Avoid_: Search
 
+**Todo**:
+One line on the Project's list of things the Author still means to do, ticked off when done, optionally linked to one Scene, Chapter or Entry. The Author's own bookkeeping: the Assistant never sees or proposes Todos, though the Author may turn a Finding into one. Never exported.
+_Avoid_: Task, checklist item, reminder
+
 **Trash**:
 Where deleted Scenes, Chapters, Entries and Conversations go within a Project; they stay recoverable until the Author empties it. A Chapter goes with its Scenes and comes back with them; an Entry, Scene or Chapter with its image; a Conversation goes with its pending Proposals.
 _Avoid_: Bin, archive
