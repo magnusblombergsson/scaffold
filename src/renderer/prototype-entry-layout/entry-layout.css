@@ -1,0 +1,474 @@
+/* PROTOTYPE (throwaway, #124): the Entry layout variants. Never merge. */
+
+/* Shared bits. */
+.el .el-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.el .el-meta-label {
+  font-size: 0.8rem;
+}
+
+.el .el-dot {
+  opacity: 0.6;
+}
+
+.el .el-select select {
+  font-size: 0.85rem;
+}
+
+.el .el-group h3 {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin: 0 0 0.5rem;
+}
+
+.el .el-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.75rem 1.5rem;
+}
+
+.el .el-span {
+  grid-column: 1 / -1;
+}
+
+.el .el-grid h4,
+.el h4 {
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin: 0;
+}
+
+/* Tags (stub). */
+.el-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.el-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  font-size: 0.78rem;
+  padding: 0.05rem 0.25rem 0.05rem 0.55rem;
+  border-radius: 999px;
+  background: var(--accent-tint);
+  border: 1px solid color-mix(in srgb, var(--accent) 35%, transparent);
+  color: var(--accent);
+}
+
+.el-tag-remove {
+  border: none;
+  background: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0 0.2rem;
+  font-size: 0.85rem;
+  line-height: 1;
+  opacity: 0.6;
+}
+
+.el-tag-remove:hover {
+  opacity: 1;
+}
+
+.el-tag-input {
+  font: inherit;
+  font-size: 0.78rem;
+  width: 6rem;
+  border: 1px dashed var(--pill-line);
+  border-radius: 999px;
+  padding: 0.05rem 0.55rem;
+  background: transparent;
+  color: inherit;
+}
+
+/* A: Profile sheet. */
+.el-A {
+  padding: 1.5rem 2rem 3rem;
+}
+
+.el-a {
+  max-width: 46rem;
+  width: 100%;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+}
+
+.el-a-header {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 1.5rem;
+  padding-bottom: 1.25rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.el-a-title {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.el-a-title .plain-text.entry-name {
+  font-size: 1.9rem;
+  font-family: Georgia, 'Times New Roman', serif;
+  font-weight: 600;
+}
+
+/* Aliases as a quiet line under the name. */
+.el-a-aliases .plain-text-field {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: baseline;
+  column-gap: 0.5rem;
+}
+
+.el-a-aliases h3 {
+  margin: 0;
+  text-transform: none;
+  letter-spacing: 0;
+  font-size: 0.85rem;
+  font-weight: 400;
+}
+
+.el-a-aliases h3::after {
+  content: ':';
+}
+
+.el-a-aliases .plain-text {
+  font-size: 0.9rem;
+  color: var(--muted);
+  min-height: 1.4em;
+  padding: 0;
+}
+
+.el-a-aliases .field-hint {
+  grid-column: 2;
+  font-size: 0.72rem;
+}
+
+.el-a-portrait .entry-image {
+  width: 10rem;
+  align-items: stretch;
+}
+
+.el-a-portrait .entry-image img {
+  width: 10rem;
+  height: 12.5rem;
+  max-width: none;
+  object-fit: cover;
+  border-radius: 8px;
+}
+
+.el-a-portrait .entry-image-actions {
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.el-a-portrait .entry-image-actions button {
+  font-size: 0.75rem;
+  padding: 0.1rem 0.5rem;
+}
+
+.el-a-role {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 1.5rem;
+  align-items: start;
+}
+
+.el-a .el-group {
+  border-top: 1px solid var(--line);
+  padding-top: 1rem;
+}
+
+/* B: Fields + side panel. */
+.el-B {
+  padding: 0;
+}
+
+.el-b {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 17rem;
+  min-height: 100%;
+}
+
+.el-b-main {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  padding: 1.5rem 2rem 3rem;
+  min-width: 0;
+}
+
+.el-b-main .plain-text.entry-name {
+  font-size: 1.7rem;
+}
+
+.el-b-side {
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  padding: 1rem;
+  border-left: 1px solid var(--line);
+  background: color-mix(in srgb, var(--desk) 45%, var(--sheet));
+  font-size: 0.9rem;
+}
+
+.el-b-side .entry-image {
+  align-items: stretch;
+}
+
+.el-b-side .entry-image img {
+  max-width: 100%;
+  width: 100%;
+  max-height: 18rem;
+  object-fit: cover;
+}
+
+.el-b-side .entry-image-actions {
+  flex-wrap: wrap;
+  gap: 0.25rem;
+}
+
+.el-b-side .entry-image-actions button {
+  font-size: 0.75rem;
+  padding: 0.1rem 0.5rem;
+}
+
+.el-b-label,
+.el-b-side legend,
+.el-b-side .plain-text-field h3,
+.el-b-side h4 {
+  display: block;
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin: 0 0 0.3rem;
+}
+
+.el-b-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.el-b-row .el-b-label {
+  margin: 0;
+}
+
+.el-b-side .entry-choice {
+  flex-direction: column;
+  gap: 0.2rem;
+}
+
+.el-b-side .plain-text {
+  font-size: 0.88rem;
+}
+
+/* C: Header + tabs. */
+.el-C {
+  padding: 0;
+  gap: 0;
+}
+
+.el-c {
+  display: flex;
+  flex-direction: column;
+  min-height: 100%;
+}
+
+.el-c-header {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  gap: 1rem;
+  align-items: start;
+  padding: 1.25rem 1.5rem 1rem;
+}
+
+.el-c-avatar .entry-image {
+  position: relative;
+  width: 5.5rem;
+  gap: 0.25rem;
+}
+
+.el-c-avatar .entry-image img {
+  width: 5.5rem;
+  height: 5.5rem;
+  object-fit: cover;
+  border-radius: 50%;
+  max-width: none;
+}
+
+.el-c-avatar .entry-image-actions {
+  flex-direction: column;
+  gap: 0.15rem;
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.el-c-avatar .entry-image:hover .entry-image-actions,
+.el-c-avatar .entry-image:focus-within .entry-image-actions,
+.el-c-avatar .entry-image:not(:has(img)) .entry-image-actions {
+  opacity: 1;
+}
+
+.el-c-avatar .entry-image-actions button {
+  font-size: 0.7rem;
+  padding: 0.05rem 0.4rem;
+}
+
+.el-c-title {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  min-width: 0;
+}
+
+.el-c-title .plain-text.entry-name {
+  font-size: 1.6rem;
+}
+
+.el-c-inline .entry-choice {
+  gap: 0.6rem;
+  font-size: 0.85rem;
+}
+
+.el-c-inline legend {
+  display: none;
+}
+
+.el-c-rolenote h4,
+.el-c-rolenote .field-hint {
+  display: none;
+}
+
+.el-c-rolenote .plain-text {
+  font-style: italic;
+  color: var(--muted);
+  padding: 0;
+}
+
+.el-c-rolenote .plain-text p.is-empty::before {
+  content: 'Role note, such as “love interest”';
+  opacity: 0.6;
+}
+
+.el-c-visibility {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 0.2rem;
+  color: var(--muted);
+}
+
+.el-c > .entry-collisions {
+  margin: 0 1.5rem 0.75rem;
+}
+
+.el-c-tabs {
+  display: flex;
+  gap: 0.25rem;
+  padding: 0 1.25rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.el-c-tab {
+  font: inherit;
+  font-size: 0.88rem;
+  background: none;
+  border: none;
+  border-bottom: 2px solid transparent;
+  padding: 0.5rem 0.75rem;
+  color: var(--muted);
+  cursor: pointer;
+  margin-bottom: -1px;
+}
+
+.el-c-tab:hover {
+  color: var(--fg);
+}
+
+.el-c-tab[aria-selected='true'] {
+  color: var(--fg);
+  border-bottom-color: var(--accent);
+  font-weight: 600;
+}
+
+.el-c-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 1.25rem;
+  padding: 1.25rem 1.5rem 3rem;
+}
+
+.el-c-panel[hidden] {
+  display: none;
+}
+
+.el-c-panel > .plain-text-field[data-field='description'] .plain-text {
+  min-height: 12em;
+}
+
+/* The floating bar: plainly not part of the design. */
+.el-bar {
+  position: fixed;
+  bottom: 1rem;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 999px;
+  background: #111;
+  color: #fff;
+  box-shadow: 0 6px 24px rgb(0 0 0 / 35%);
+  font-size: 0.8rem;
+  font-family: system-ui, sans-serif;
+}
+
+.el-bar button {
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid #555;
+  border-radius: 999px;
+  padding: 0.1rem 0.6rem;
+  cursor: pointer;
+}
+
+.el-bar button[aria-pressed='true'] {
+  background: #fff;
+  color: #111;
+}
+
+.el-bar-label {
+  min-width: 11rem;
+  text-align: center;
+  font-weight: 600;
+}
+
+.el-bar-sep {
+  width: 1px;
+  height: 1.1rem;
+  background: #555;
+  margin: 0 0.25rem;
+}

@@ -1,5 +1,5 @@
 import type { Node } from '@tiptap/pm/model';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactElement } from 'react';
 import { entryCollisions } from '../shared/entry';
 import {
   FIELD_LABELS,
@@ -39,6 +39,11 @@ import {
 import { entryTitle } from './StoryBible';
 import { UnitEditor } from './UnitEditor';
 import { tellEntryWritten } from './entry-written';
+import {
+  ArrangedEntry,
+  TagsStub,
+  useEntryLayout,
+} from './prototype-entry-layout/EntryLayoutPrototype';
 
 export const VISIBILITY_LABELS: Record<Visibility, string> = {
   always: 'Always',
@@ -157,6 +162,7 @@ export function EntryView({
   onShowProposal(conversationId: string, proposalId: string): void;
 }) {
   const { id: entryId, visibility } = summary;
+  const layout = useEntryLayout();
   const [loaded, setLoaded] = useState<Loaded | null>(null);
   /** The Entry as last written or reloaded; each field's save changes its own part. */
   const value = useRef<EntryValue | null>(null);
@@ -259,7 +265,7 @@ export function EntryView({
   const collisions = entryCollisions(summary, entries);
 
   if (!loaded) return <main className="centre loading" aria-busy="true" />;
-  const { entry, privateNotes } = loaded;
+  const { entry } = loaded;
   const attributes = (label: string, className = 'plain-text') => ({
     class: className,
     'aria-label': label,
@@ -267,243 +273,325 @@ export function EntryView({
     lang: language,
   });
 
+  // PROTOTYPE (#124): each part of the Entry view on its own, so the
+  // variants on the floating bar can arrange them; 0 is today's order.
+  const typeSelect = (
+    <select
+      aria-label="Type"
+      value={summary.type}
+      onChange={(event) => onType(event.target.value as EntryType)}
+    >
+      {ENTRY_TYPES.map((type) => (
+        <option key={type} value={type}>
+          {ENTRY_TYPE_LABELS[type]}
+        </option>
+      ))}
+    </select>
+  );
+  const image = <EntryImageSection entry={summary} />;
+  const name = (
+    <UnitEditor
+      unitKey={`${entryKey}:name`}
+      field={{ unitKey: entryKey, text: nameOf }}
+      text={entry.name}
+      extensions={singleLineExtensions()}
+      toDoc={textToDoc}
+      toText={docToText}
+      save={(name) => save({ name })}
+      attributes={attributes('Name', 'plain-text entry-name')}
+      autofocus={!!focusName}
+      select={selectName}
+    />
+  );
+  const aliases = (
+    <section className="plain-text-field" data-field="aliases">
+      <h3>Aliases</h3>
+      <UnitEditor
+        unitKey={`${entryKey}:aliases`}
+        field={{ unitKey: entryKey, text: aliasesOf }}
+        text={entry.aliases.join('\n')}
+        extensions={plainTextExtensions({ bullets: false })}
+        toDoc={textToDoc}
+        toText={docToText}
+        save={(text) => save({ aliases: textToLines(text) })}
+        attributes={attributes('Aliases', 'plain-text short')}
+      />
+      <p className="field-hint">One per line</p>
+      {ghosts('aliases')}
+    </section>
+  );
+  const collisionList =
+    collisions.length > 0 ? (
+      <ul className="entry-collisions" role="status">
+        {collisions.map(({ name, entry: other }) => (
+          <li key={`${name}:${other.id}`}>
+            <span aria-hidden="true">⚠</span> “{name}” is also a name of the{' '}
+            {ENTRY_TYPE_LABELS[other.type]} “{entryTitle(other)}”
+          </li>
+        ))}
+      </ul>
+    ) : null;
+  const visibilityRadios = (
+    <fieldset className="entry-choice">
+      <legend>Assistant sees this Entry</legend>
+      {VISIBILITIES.map((option) => (
+        <label key={option}>
+          <input
+            type="radio"
+            name={`visibility-${entryId}`}
+            checked={visibility === option}
+            onChange={() => onVisibility(option)}
+          />
+          {VISIBILITY_LABELS[option]}
+        </label>
+      ))}
+    </fieldset>
+  );
+  const visibilitySelect = (
+    <select
+      aria-label="Assistant sees this Entry"
+      value={visibility}
+      onChange={(event) => onVisibility(event.target.value as Visibility)}
+    >
+      {VISIBILITIES.map((option) => (
+        <option key={option} value={option}>
+          {VISIBILITY_LABELS[option]}
+        </option>
+      ))}
+    </select>
+  );
+  const description = (
+    <section className="plain-text-field" data-field="description">
+      <h3>Description</h3>
+      <UnitEditor
+        unitKey={entryKey}
+        field={{ unitKey: entryKey, text: descriptionOf }}
+        text={entry.description}
+        extensions={plainTextExtensions({ bullets: false })}
+        toDoc={textToDoc}
+        toText={docToText}
+        save={(description) => save({ description })}
+        attributes={attributes('Description')}
+      />
+      {ghosts('description')}
+    </section>
+  );
+  const roleChoice = (
+    <fieldset className="entry-choice" data-field="role">
+      <legend>Role</legend>
+      {ROLES.map((role) => (
+        <label key={role}>
+          <input
+            type="radio"
+            name={`role-${entryId}`}
+            checked={choices.role === role}
+            onChange={() => choose({ role })}
+          />
+          {ROLE_LABELS[role]}
+        </label>
+      ))}
+      {ghosts('role')}
+    </fieldset>
+  );
+  const roleNote = (
+    <section className="plain-text-field" data-field="roleNote">
+      <h4>Role note</h4>
+      <UnitEditor
+        unitKey={`${entryKey}:roleNote`}
+        field={{ unitKey: entryKey, text: roleNoteOf }}
+        text={roleNoteOf(entry)}
+        extensions={singleLineExtensions()}
+        toDoc={textToDoc}
+        toText={docToText}
+        save={(roleNote) => saveFields((fields) => ({ ...fields, roleNote }))}
+        attributes={attributes('Role note', 'plain-text short')}
+      />
+      <p className="field-hint">
+        A few words beside the Role, such as “love interest”
+      </p>
+      {ghosts('roleNote')}
+    </section>
+  );
+  const appearance = (
+    <section className="plain-text-field" data-field="appearance">
+      <h3>Appearance</h3>
+      <UnitEditor
+        unitKey={`${entryKey}:appearance`}
+        field={{ unitKey: entryKey, text: appearanceOf }}
+        text={appearanceOf(entry)}
+        extensions={plainTextExtensions({ bullets: false })}
+        toDoc={textToDoc}
+        toText={docToText}
+        save={(appearance) =>
+          saveFields((fields) => ({ ...fields, appearance }))
+        }
+        attributes={attributes('Appearance')}
+      />
+      {ghosts('appearance')}
+    </section>
+  );
+  const voice = Object.fromEntries(
+    VOICE_FIELDS.map(({ key, label, hint, text }) => [
+      key,
+      <section
+        className="plain-text-field"
+        key={key}
+        data-field={`voice.${key}`}
+      >
+        <h4>{label}</h4>
+        <UnitEditor
+          unitKey={`${entryKey}:voice.${key}`}
+          field={{ unitKey: entryKey, text }}
+          text={text(entry)}
+          extensions={plainTextExtensions({ bullets: false })}
+          toDoc={textToDoc}
+          toText={docToText}
+          save={(typed) =>
+            saveFields((fields) => ({
+              ...fields,
+              voice: {
+                ...fields.voice!,
+                [key]: key === 'traits' ? typed : textToLines(typed),
+              },
+            }))
+          }
+          attributes={attributes(label, 'plain-text short')}
+        />
+        {hint && <p className="field-hint">{hint}</p>}
+        {key !== 'examples' && ghosts(`voice.${key}`)}
+      </section>,
+    ]),
+  ) as Record<keyof Voice, ReactElement>;
+  const senses = Object.fromEntries(
+    SENSE_FIELDS.map(({ key, label, text }) => [
+      key,
+      <section
+        className="plain-text-field"
+        key={key}
+        data-field={`senses.${key}`}
+      >
+        <h4>{label}</h4>
+        <UnitEditor
+          unitKey={`${entryKey}:senses.${key}`}
+          field={{ unitKey: entryKey, text }}
+          text={text(entry)}
+          extensions={plainTextExtensions({ bullets: false })}
+          toDoc={textToDoc}
+          toText={docToText}
+          save={(typed) =>
+            saveFields((fields) => ({
+              ...fields,
+              senses: { ...fields.senses!, [key]: typed },
+            }))
+          }
+          attributes={attributes(label, 'plain-text short')}
+        />
+        {ghosts(`senses.${key}`)}
+      </section>,
+    ]),
+  ) as Record<keyof Senses, ReactElement>;
+  const threadStatus = (
+    <fieldset className="entry-choice" data-field="status">
+      <legend>Status</legend>
+      {THREAD_STATUSES.map((status) => (
+        <label key={status}>
+          <input
+            type="radio"
+            name={`status-${entryId}`}
+            checked={choices.status === status}
+            onChange={() => choose({ status })}
+          />
+          {STATUS_LABELS[status]}
+        </label>
+      ))}
+      {ghosts('status')}
+    </fieldset>
+  );
+  const privateNotes = (
+    <section className="plain-text-field private-notes">
+      <h3>Private notes</h3>
+      <p className="private-notes-warning">
+        <span aria-hidden="true">🔒</span> Never shown to the Assistant
+      </p>
+      <UnitEditor
+        unitKey={`private:${entryId}`}
+        text={loaded.privateNotes.body}
+        extensions={plainTextExtensions({ bullets: false })}
+        toDoc={textToDoc}
+        toText={docToText}
+        save={(body) =>
+          window.project.write(
+            { kind: 'private', id: entryId },
+            { id: entryId, body },
+          )
+        }
+        attributes={attributes('Private notes')}
+      />
+    </section>
+  );
+
+  if (layout !== '0')
+    return (
+      <main className={`centre entry-view el el-${layout}`} ref={view}>
+        <ArrangedEntry
+          variant={layout}
+          p={{
+            entry,
+            summary,
+            typeSelect,
+            image,
+            name,
+            aliases,
+            collisions: collisionList,
+            visibilityRadios,
+            visibilitySelect,
+            description,
+            roleChoice,
+            roleNote,
+            appearance,
+            voice,
+            senses,
+            threadStatus,
+            privateNotes,
+            tags: <TagsStub entryId={entryId} />,
+          }}
+        />
+      </main>
+    );
+
   return (
     <main className="centre entry-view" ref={view}>
       <label className="entry-type">
         Type
-        <select
-          aria-label="Type"
-          value={summary.type}
-          onChange={(event) => onType(event.target.value as EntryType)}
-        >
-          {ENTRY_TYPES.map((type) => (
-            <option key={type} value={type}>
-              {ENTRY_TYPE_LABELS[type]}
-            </option>
-          ))}
-        </select>
+        {typeSelect}
       </label>
-      <EntryImageSection entry={summary} />
-      <UnitEditor
-        unitKey={`${entryKey}:name`}
-        field={{ unitKey: entryKey, text: nameOf }}
-        text={entry.name}
-        extensions={singleLineExtensions()}
-        toDoc={textToDoc}
-        toText={docToText}
-        save={(name) => save({ name })}
-        attributes={attributes('Name', 'plain-text entry-name')}
-        autofocus={!!focusName}
-        select={selectName}
-      />
-      <section className="plain-text-field" data-field="aliases">
-        <h3>Aliases</h3>
-        <UnitEditor
-          unitKey={`${entryKey}:aliases`}
-          field={{ unitKey: entryKey, text: aliasesOf }}
-          text={entry.aliases.join('\n')}
-          extensions={plainTextExtensions({ bullets: false })}
-          toDoc={textToDoc}
-          toText={docToText}
-          save={(text) => save({ aliases: textToLines(text) })}
-          attributes={attributes('Aliases')}
-        />
-        <p className="field-hint">One per line</p>
-        {ghosts('aliases')}
-      </section>
-      {collisions.length > 0 && (
-        <ul className="entry-collisions" role="status">
-          {collisions.map(({ name, entry: other }) => (
-            <li key={`${name}:${other.id}`}>
-              <span aria-hidden="true">⚠</span> “{name}” is also a name of the{' '}
-              {ENTRY_TYPE_LABELS[other.type]} “{entryTitle(other)}”
-            </li>
-          ))}
-        </ul>
-      )}
-      <fieldset className="entry-choice">
-        <legend>Assistant sees this Entry</legend>
-        {VISIBILITIES.map((option) => (
-          <label key={option}>
-            <input
-              type="radio"
-              name={`visibility-${entryId}`}
-              checked={visibility === option}
-              onChange={() => onVisibility(option)}
-            />
-            {VISIBILITY_LABELS[option]}
-          </label>
-        ))}
-      </fieldset>
-      <section className="plain-text-field" data-field="description">
-        <h3>Description</h3>
-        <UnitEditor
-          unitKey={entryKey}
-          field={{ unitKey: entryKey, text: descriptionOf }}
-          text={entry.description}
-          extensions={plainTextExtensions({ bullets: false })}
-          toDoc={textToDoc}
-          toText={docToText}
-          save={(description) => save({ description })}
-          attributes={attributes('Description')}
-        />
-        {ghosts('description')}
-      </section>
+      {image}
+      {name}
+      {aliases}
+      {collisionList}
+      {visibilityRadios}
+      {description}
       {entry.type === 'character' && (
         <>
           <div className="entry-role">
-            <fieldset className="entry-choice" data-field="role">
-              <legend>Role</legend>
-              {ROLES.map((role) => (
-                <label key={role}>
-                  <input
-                    type="radio"
-                    name={`role-${entryId}`}
-                    checked={choices.role === role}
-                    onChange={() => choose({ role })}
-                  />
-                  {ROLE_LABELS[role]}
-                </label>
-              ))}
-              {ghosts('role')}
-            </fieldset>
-            <section className="plain-text-field" data-field="roleNote">
-              <h4>Role note</h4>
-              <UnitEditor
-                unitKey={`${entryKey}:roleNote`}
-                field={{ unitKey: entryKey, text: roleNoteOf }}
-                text={roleNoteOf(entry)}
-                extensions={singleLineExtensions()}
-                toDoc={textToDoc}
-                toText={docToText}
-                save={(roleNote) =>
-                  saveFields((fields) => ({ ...fields, roleNote }))
-                }
-                attributes={attributes('Role note', 'plain-text short')}
-              />
-              <p className="field-hint">
-                A few words beside the Role, such as “love interest”
-              </p>
-              {ghosts('roleNote')}
-            </section>
+            {roleChoice}
+            {roleNote}
           </div>
-          <section className="plain-text-field" data-field="appearance">
-            <h3>Appearance</h3>
-            <UnitEditor
-              unitKey={`${entryKey}:appearance`}
-              field={{ unitKey: entryKey, text: appearanceOf }}
-              text={appearanceOf(entry)}
-              extensions={plainTextExtensions({ bullets: false })}
-              toDoc={textToDoc}
-              toText={docToText}
-              save={(appearance) =>
-                saveFields((fields) => ({ ...fields, appearance }))
-              }
-              attributes={attributes('Appearance')}
-            />
-            {ghosts('appearance')}
-          </section>
+          {appearance}
           <section className="entry-field-group" aria-label="Voice">
             <h3>Voice</h3>
-            {VOICE_FIELDS.map(({ key, label, hint, text }) => (
-              <section
-                className="plain-text-field"
-                key={key}
-                data-field={`voice.${key}`}
-              >
-                <h4>{label}</h4>
-                <UnitEditor
-                  unitKey={`${entryKey}:voice.${key}`}
-                  field={{ unitKey: entryKey, text }}
-                  text={text(entry)}
-                  extensions={plainTextExtensions({ bullets: false })}
-                  toDoc={textToDoc}
-                  toText={docToText}
-                  save={(typed) =>
-                    saveFields((fields) => ({
-                      ...fields,
-                      voice: {
-                        ...fields.voice!,
-                        [key]: key === 'traits' ? typed : textToLines(typed),
-                      },
-                    }))
-                  }
-                  attributes={attributes(label, 'plain-text short')}
-                />
-                {hint && <p className="field-hint">{hint}</p>}
-                {key !== 'examples' && ghosts(`voice.${key}`)}
-              </section>
-            ))}
+            {VOICE_FIELDS.map(({ key }) => voice[key])}
           </section>
         </>
       )}
       {entry.type === 'place' && (
         <section className="entry-field-group" aria-label="Senses">
           <h3>Senses</h3>
-          {SENSE_FIELDS.map(({ key, label, text }) => (
-            <section
-              className="plain-text-field"
-              key={key}
-              data-field={`senses.${key}`}
-            >
-              <h4>{label}</h4>
-              <UnitEditor
-                unitKey={`${entryKey}:senses.${key}`}
-                field={{ unitKey: entryKey, text }}
-                text={text(entry)}
-                extensions={plainTextExtensions({ bullets: false })}
-                toDoc={textToDoc}
-                toText={docToText}
-                save={(typed) =>
-                  saveFields((fields) => ({
-                    ...fields,
-                    senses: { ...fields.senses!, [key]: typed },
-                  }))
-                }
-                attributes={attributes(label, 'plain-text short')}
-              />
-              {ghosts(`senses.${key}`)}
-            </section>
-          ))}
+          {SENSE_FIELDS.map(({ key }) => senses[key])}
         </section>
       )}
-      {entry.type === 'plot-thread' && (
-        <fieldset className="entry-choice" data-field="status">
-          <legend>Status</legend>
-          {THREAD_STATUSES.map((status) => (
-            <label key={status}>
-              <input
-                type="radio"
-                name={`status-${entryId}`}
-                checked={choices.status === status}
-                onChange={() => choose({ status })}
-              />
-              {STATUS_LABELS[status]}
-            </label>
-          ))}
-          {ghosts('status')}
-        </fieldset>
-      )}
-      <section className="plain-text-field private-notes">
-        <h3>Private notes</h3>
-        <p className="private-notes-warning">
-          <span aria-hidden="true">🔒</span> Never shown to the Assistant
-        </p>
-        <UnitEditor
-          unitKey={`private:${entryId}`}
-          text={privateNotes.body}
-          extensions={plainTextExtensions({ bullets: false })}
-          toDoc={textToDoc}
-          toText={docToText}
-          save={(body) =>
-            window.project.write(
-              { kind: 'private', id: entryId },
-              { id: entryId, body },
-            )
-          }
-          attributes={attributes('Private notes')}
-        />
-      </section>
+      {entry.type === 'plot-thread' && threadStatus}
+      {privateNotes}
     </main>
   );
 }
