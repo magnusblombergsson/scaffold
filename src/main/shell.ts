@@ -13,21 +13,21 @@ import path from 'node:path';
 import type {
   ImportChoice,
   ImportFile,
-  ProviderEntry,
   ProvidersView,
   OpenedProject,
   OpenResult,
   ProjectView,
   RecentProject,
+  SettingsApi,
   Tip,
-  WelcomeReason,
 } from '../shared/api';
-import { channel } from '../shared/api';
+import { channel, settingsMethods } from '../shared/api';
+import type { Handlers } from '../shared/bridge';
 import {
   splitManuscript,
   type ImportConvention,
 } from '../shared/manuscript-import';
-import { isProviderId, type ListedModel, type Model } from '../shared/models';
+import { isProviderId, type Model } from '../shared/models';
 import type { ProseLanguage } from '../shared/project-types';
 import { unitName } from '../shared/unit-name';
 import {
@@ -67,7 +67,12 @@ import {
 } from './project-store/project-store';
 import { writeFailureReason } from './project-store/safe-write';
 import { menuTemplate, type MenuState } from './menu';
-import { emit } from './electron-transport';
+import {
+  emit,
+  register,
+  windowContext,
+  type WindowContext,
+} from './electron-transport';
 
 // The app shell: its windows, the Project each one shows, and the settings
 // that remember them on this computer.
@@ -536,72 +541,64 @@ export function registerShellIpc(): void {
   });
 }
 
-/** Settings for every Project on this computer: the welcome, the Providers and the Model. */
-export function registerSettingsIpc(): void {
-  ipcMain.handle(channel.showWelcome, (): WelcomeReason | null => {
+const settingsHandlers: Handlers<
+  SettingsApi,
+  typeof settingsMethods,
+  WindowContext
+> = {
+  showWelcome: () => {
     if (providers.anyAdded()) return null;
     if (providers.unreadable()) return 'keyUnreadable';
     return settings.welcomed() ? null : 'firstLaunch';
-  });
-
-  ipcMain.on(channel.dismissWelcome, () => {
+  },
+  dismissWelcome: () => {
     settings.setWelcomed();
     providers
       .setAsideUnreadable()
       .catch((error) => console.error("Can't set the API key aside:", error));
-  });
-
-  ipcMain.handle(channel.providers, () => providers.view());
-
-  ipcMain.handle(channel.providerStatus, (_event, id: unknown) =>
+  },
+  providers: () => providers.view(),
+  providerStatus: (_ctx, id) =>
     isProviderId(id) ? providers.status(id) : null,
-  );
-
-  ipcMain.handle(
-    channel.addProvider,
-    async (_event, id: unknown, entry: ProviderEntry) => {
-      if (!isProviderId(id)) throw new Error(`No Provider ${String(id)}`);
-      const result = await providers.add(id, entry);
-      if (result.status !== 'key-rejected') {
-        settings.setWelcomed();
-        announceProviders(result.view);
-      }
-      return result;
-    },
-  );
-
-  ipcMain.handle(channel.removeProvider, async (_event, id: unknown) => {
+  addProvider: async (_ctx, id, entry) => {
+    if (!isProviderId(id)) throw new Error(`No Provider ${String(id)}`);
+    const result = await providers.add(id, entry);
+    if (result.status !== 'key-rejected') {
+      settings.setWelcomed();
+      announceProviders(result.view);
+    }
+    return result;
+  },
+  removeProvider: async (_ctx, id) => {
     if (!isProviderId(id)) throw new Error(`No Provider ${String(id)}`);
     const view = await providers.remove(id);
     announceProviders(view);
     return view;
-  });
-
-  ipcMain.handle(channel.listModels, (_event, id: unknown) => {
+  },
+  listModels: (_ctx, id) => {
     if (!isProviderId(id)) throw new Error(`No Provider ${String(id)}`);
     return providers.models(id);
-  });
+  },
+  shortlists: () => providers.shortlists(),
+  setShortlist: (_ctx, id, models) => {
+    if (isProviderId(id) && Array.isArray(models)) {
+      providers.setShortlist(id, models);
+      // The Conversations' dropdowns offer it.
+      announceProviders(providers.view());
+    }
+  },
+  defaultModel: () => defaultModel(),
+};
 
-  ipcMain.handle(channel.shortlists, () => providers.shortlists());
-
-  ipcMain.handle(
-    channel.setShortlist,
-    (_event, id: unknown, models: ListedModel[]) => {
-      if (isProviderId(id) && Array.isArray(models)) {
-        providers.setShortlist(id, models);
-        // The Conversations' dropdowns offer it.
-        announceProviders(providers.view());
-      }
-    },
-  );
-
-  ipcMain.handle(channel.defaultModel, () => defaultModel());
+/** Settings for every Project on this computer: the welcome, the Providers and the Model. */
+export function registerSettingsIpc(): void {
+  register('settings', settingsHandlers, windowContext);
 }
 
 /** Tells every window the Providers changed, so the Assistant shows or asks for one. */
 function announceProviders(view: ProvidersView): void {
   for (const window of BrowserWindow.getAllWindows()) {
-    window.webContents.send(channel.providersChanged, view);
+    emit(window.webContents, 'settings', 'onProviders', view);
   }
 }
 

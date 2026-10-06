@@ -1,4 +1,4 @@
-import { ipcMain, type WebContents } from 'electron';
+import { BrowserWindow, ipcMain, type WebContents } from 'electron';
 import { appBridge } from '../shared/api';
 import type { MainTransport } from '../shared/bridge';
 
@@ -20,3 +20,14 @@ const electronMain: MainTransport<WebContents> = {
 };
 
 export const { register, emit } = appBridge.main(electronMain);
+
+/** What a `shell` or `settings` handler works with: the window that called. */
+export type WindowContext = {
+  sender: WebContents;
+  /** Null once the window has closed. */
+  window: BrowserWindow | null;
+};
+
+export function windowContext(sender: WebContents): WindowContext {
+  return { sender, window: BrowserWindow.fromWebContents(sender) };
+}

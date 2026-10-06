@@ -5,7 +5,6 @@ import {
   replyTextChannel,
   type AssistantApi,
   type ProjectApi,
-  type ProvidersView,
   type SettingsApi,
   type ShellApi,
 } from '../shared/api';
@@ -80,29 +79,7 @@ const shell: ShellApi = {
   },
 };
 
-const settings: SettingsApi = {
-  showWelcome: () => ipcRenderer.invoke(channel.showWelcome),
-  dismissWelcome: () => ipcRenderer.send(channel.dismissWelcome),
-  providers: () => ipcRenderer.invoke(channel.providers),
-  providerStatus: (provider) =>
-    ipcRenderer.invoke(channel.providerStatus, provider),
-  addProvider: (provider, entry) =>
-    ipcRenderer.invoke(channel.addProvider, provider, entry),
-  removeProvider: (provider) =>
-    ipcRenderer.invoke(channel.removeProvider, provider),
-  onProviders(listener) {
-    const forward = (_event: unknown, view: ProvidersView) => listener(view);
-    ipcRenderer.on(channel.providersChanged, forward);
-    return () => {
-      ipcRenderer.off(channel.providersChanged, forward);
-    };
-  },
-  listModels: (provider) => ipcRenderer.invoke(channel.listModels, provider),
-  shortlists: () => ipcRenderer.invoke(channel.shortlists),
-  setShortlist: (provider, models) =>
-    ipcRenderer.invoke(channel.setShortlist, provider, models),
-  defaultModel: () => ipcRenderer.invoke(channel.defaultModel),
-};
+const settings: SettingsApi = build('settings');
 
 /** Tells the replies streaming at once apart. */
 let asked = 0;

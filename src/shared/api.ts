@@ -698,6 +698,20 @@ export const assistantMethods = {
   imagePrompt: 'invoke',
 } as const satisfies MethodTable<AssistantApi>;
 
+export const settingsMethods = {
+  showWelcome: 'invoke',
+  dismissWelcome: 'send',
+  providers: 'invoke',
+  providerStatus: 'invoke',
+  addProvider: 'invoke',
+  removeProvider: 'invoke',
+  onProviders: 'event',
+  listModels: 'invoke',
+  shortlists: 'invoke',
+  setShortlist: 'invoke',
+  defaultModel: 'invoke',
+} as const satisfies MethodTable<SettingsApi>;
+
 /**
  * Where main streams the pieces of a reply, each with the `askId` its call
  * was given.
@@ -708,13 +722,22 @@ export const replyTextChannel = 'assistant:replyText';
 export type Apis = {
   project: ProjectApi;
   assistant: AssistantApi;
+  settings: SettingsApi;
 };
 
 /** Main and the preload both cross between them on this. */
 export const appBridge = bridge<
   Apis,
-  { project: typeof projectMethods; assistant: typeof assistantMethods }
->({ project: projectMethods, assistant: assistantMethods });
+  {
+    project: typeof projectMethods;
+    assistant: typeof assistantMethods;
+    settings: typeof settingsMethods;
+  }
+>({
+  project: projectMethods,
+  assistant: assistantMethods,
+  settings: settingsMethods,
+});
 
 export const channel = {
   currentProject: 'shell:currentProject',
@@ -734,17 +757,6 @@ export const channel = {
   setHighlightMentions: 'shell:setHighlightMentions',
   highlightMentionsChanged: 'shell:highlightMentionsChanged',
   flushRequest: 'shell:flushRequest',
-  showWelcome: 'settings:showWelcome',
-  dismissWelcome: 'settings:dismissWelcome',
-  providers: 'settings:providers',
-  providerStatus: 'settings:providerStatus',
-  addProvider: 'settings:addProvider',
-  removeProvider: 'settings:removeProvider',
-  providersChanged: 'settings:providersChanged',
-  listModels: 'settings:listModels',
-  shortlists: 'settings:shortlists',
-  setShortlist: 'settings:setShortlist',
-  defaultModel: 'settings:defaultModel',
   flushed: 'shell:flushed',
 } as const;
 
