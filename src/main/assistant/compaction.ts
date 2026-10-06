@@ -2,7 +2,7 @@ import type {
   Compaction,
   ConversationMessage,
 } from '../../shared/conversation';
-import type { ModelId } from '../../shared/models';
+import type { Model } from '../../shared/models';
 import { messageContent } from './context-builder';
 import type { ProviderRequest } from './provider';
 import { SUMMARY_PROMPT } from './system-prompts';
@@ -71,7 +71,7 @@ export function compactionPoint(
  * left out, so that a Review still starts fresh.
  */
 export function summaryRequest(
-  model: ModelId,
+  model: Model,
   messages: ConversationMessage[],
   covers: number,
   latest: Compaction | undefined,

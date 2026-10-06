@@ -52,7 +52,7 @@ Said of a Scene that the Manuscript lists but whose Prose isn't on this computer
 _Avoid_: Deleted, broken, lost
 
 **Prose**:
-The story text itself — narration and dialogue — as written by the Author. The Assistant never writes, rewrites, or exemplifies Prose; it may comment on it.
+The story text itself — narration and dialogue — as written by the Author. The Assistant never writes, rewrites, or exemplifies Prose; it may comment on it. Text about the story, such as a blurb, tagline or caption, is not Prose, so the Assistant may suggest it; an epigraph it suggests by naming where to find one, never by quoting it.
 _Avoid_: Text, draft (when meaning the words themselves)
 
 **Story Bible**:
@@ -64,7 +64,7 @@ One typed item in the Story Bible — a Character, Place, Item, World Rule, Plot
 _Avoid_: Card, note, record
 
 **Image prompt**:
-A description of an Entry, written by the Assistant on request from what the Entry says it looks and feels like, for the Author to paste into an image generator elsewhere. It describes only: no narration, dialogue or story moment, so it is not Prose. It isn't kept.
+A description of an Entry, written by the Assistant on request from what the Entry says it looks, sounds, smells and feels like, for the Author to paste into an image generator elsewhere. It describes only: no narration, new dialogue or story moment, so it is not Prose, though it may quote the Author's own lines. It isn't kept.
 _Avoid_: Image description, caption
 
 **Peek**:
@@ -78,6 +78,10 @@ _Avoid_: Sticky, pin (as a noun), floating window
 **Voice**:
 A character's way of speaking, described in its Entry as traits (register, rhythm, tics), words the character uses and never uses, and short example lines written by the Author. The Assistant compares dialogue in the Prose against it and may propose trait descriptions, but never example lines.
 _Avoid_: Tone, style (when meaning a character's speech)
+
+**Role note**:
+A few words beside a Character's Role saying what they are to the story, such as "love interest" or "her mentor". A label, never a sentence or a blurb.
+_Avoid_: Tagline, role description
 
 **Proposal**:
 A change to the Story Bible or an Outline suggested by the Assistant during a Conversation; it takes effect only when the Author accepts it, optionally after editing it. A Proposal to a field or Outline either replaces its text, appends text to it, or adds an item to a list; an append or add lands on whatever the target holds when accepted. The Author may also append a replacing Proposal's text instead of replacing. A replacing Proposal is stale when its target has changed since it was made. An accepted Proposal can be undone while its target still holds the accepted values; it then becomes pending again. A reply the Assistant didn't finish (cut short, failed partway, or empty) makes no Proposals. Proposals never touch Prose, Notes, or private notes.

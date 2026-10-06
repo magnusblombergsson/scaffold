@@ -3,7 +3,7 @@ import {
   channel,
   type AssistantApi,
   type ProjectApi,
-  type KeyStatus,
+  type ProvidersView,
   type ProjectEvent,
   type SettingsApi,
   type ShellApi,
@@ -132,18 +132,25 @@ const shell: ShellApi = {
 const settings: SettingsApi = {
   showWelcome: () => ipcRenderer.invoke(channel.showWelcome),
   dismissWelcome: () => ipcRenderer.send(channel.dismissWelcome),
-  keyStatus: () => ipcRenderer.invoke(channel.keyStatus),
-  setKey: (key, options) => ipcRenderer.invoke(channel.setKey, key, options),
-  removeKey: () => ipcRenderer.invoke(channel.removeKey),
-  onKeyStatus(listener) {
-    const forward = (_event: unknown, status: KeyStatus) => listener(status);
-    ipcRenderer.on(channel.keyStatusChanged, forward);
+  providers: () => ipcRenderer.invoke(channel.providers),
+  providerStatus: (provider) =>
+    ipcRenderer.invoke(channel.providerStatus, provider),
+  addProvider: (provider, entry) =>
+    ipcRenderer.invoke(channel.addProvider, provider, entry),
+  removeProvider: (provider) =>
+    ipcRenderer.invoke(channel.removeProvider, provider),
+  onProviders(listener) {
+    const forward = (_event: unknown, view: ProvidersView) => listener(view);
+    ipcRenderer.on(channel.providersChanged, forward);
     return () => {
-      ipcRenderer.off(channel.keyStatusChanged, forward);
+      ipcRenderer.off(channel.providersChanged, forward);
     };
   },
-  model: () => ipcRenderer.invoke(channel.model),
-  setModel: (model) => ipcRenderer.send(channel.setModel, model),
+  listModels: (provider) => ipcRenderer.invoke(channel.listModels, provider),
+  shortlists: () => ipcRenderer.invoke(channel.shortlists),
+  setShortlist: (provider, models) =>
+    ipcRenderer.invoke(channel.setShortlist, provider, models),
+  defaultModel: () => ipcRenderer.invoke(channel.defaultModel),
 };
 
 /** Tells the replies streaming at once apart. */
@@ -152,8 +159,10 @@ let asked = 0;
 const assistant: AssistantApi = {
   listConversations: () => ipcRenderer.invoke(channel.listConversations),
   readConversation: (id) => ipcRenderer.invoke(channel.readConversation, id),
-  startConversation: (mode, title) =>
-    ipcRenderer.invoke(channel.startConversation, mode, title),
+  startConversation: (mode, title, model) =>
+    ipcRenderer.invoke(channel.startConversation, mode, title, model),
+  chooseModel: (conversationId, model) =>
+    ipcRenderer.invoke(channel.chooseModel, conversationId, model),
   renameConversation: (conversationId, title) =>
     ipcRenderer.invoke(channel.renameConversation, conversationId, title),
   trashConversation: (conversationId) =>
@@ -191,6 +200,7 @@ const assistant: AssistantApi = {
     ipcRenderer.invoke(channel.undoProposal, conversationId, proposalId),
   pendingProposals: (entryId) =>
     ipcRenderer.invoke(channel.pendingProposals, entryId),
+  imagePrompt: (entryId) => ipcRenderer.invoke(channel.imagePrompt, entryId),
 };
 
 /** Makes the call `invoke` with an id, passing on the pieces of its reply. */

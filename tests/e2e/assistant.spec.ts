@@ -1,25 +1,11 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { answerDialogs, launch, useTempDir } from './app';
+import { addAnthropicKey, answerDialogs, launch, useTempDir } from './app';
 import { useFakeAnthropic } from './fake-anthropic';
 
 const tempDir = useTempDir();
 const anthropic = useFakeAnthropic();
-
-/** Adds a key, which the stand-in for Anthropic takes. */
-async function addKey(page: Page) {
-  const assistant = page.getByRole('complementary', { name: 'Assistant' });
-  await assistant.getByRole('button', { name: 'Add API key' }).click();
-  await page
-    .getByRole('textbox', { name: 'API key' })
-    .fill('sk-ant-api03-good-abcd');
-  await page.getByRole('button', { name: 'Check and save' }).click();
-  const settings = page.getByRole('dialog', { name: 'Settings' });
-  await expect(settings.getByLabel('Key in use')).toBeVisible();
-  await settings.getByRole('button', { name: 'Done' }).click();
-  return assistant;
-}
 
 async function logs(projectPath: string) {
   const dir = path.join(projectPath, 'conversations');
@@ -45,7 +31,7 @@ test('the Author asks about the Scene in focus, sees the reply stream in, and re
   const page = await first.firstWindow();
   await page.getByRole('button', { name: 'New Project…' }).click();
   await page.getByLabel('Prose').pressSequentially('Anna packed in the rain.');
-  const assistant = await addKey(page);
+  const assistant = await addAnthropicKey(page);
 
   await assistant
     .getByRole('textbox', { name: 'Message' })
@@ -59,10 +45,10 @@ test('the Author asks about the Scene in focus, sees the reply stream in, and re
   const reply = messages.getByRole('article', { name: 'Assistant' });
   await expect(reply).toContainText('What does she fear?');
   await expect(reply.getByLabel('Usage')).toHaveText(
-    '≈ 18k in (12k cached) · 900 out · ≈ $0.04',
+    '≈ 18k in (12k cached) · 900 out · ≈ $0.02',
   );
   await expect(assistant.getByLabel('Conversation usage')).toHaveText(
-    '≈ 18k in (12k cached) · 900 out · ≈ $0.04',
+    '≈ 18k in (12k cached) · 900 out · ≈ $0.02',
   );
   // The reply says what the Assistant saw, once opened.
   const saw = reply.getByRole('list', { name: 'What the Assistant saw' });
@@ -78,7 +64,7 @@ test('the Author asks about the Scene in focus, sees the reply stream in, and re
     'No earlier messages',
   ]);
   // Claude was asked with the stored key's model and the Scene in focus.
-  expect(anthropic.sent[0]).toMatchObject({ model: 'claude-opus-5-5' });
+  expect(anthropic.sent[0]).toMatchObject({ model: 'claude-sonnet-5-5' });
   expect(JSON.stringify(anthropic.sent[0].system)).toContain(
     'Anna packed in the rain.',
   );
@@ -86,18 +72,24 @@ test('the Author asks about the Scene in focus, sees the reply stream in, and re
   await expect(messages.getByRole('button')).toHaveCount(0);
 
   // The reply is logged once it has streamed in.
-  await expect.poll(async () => (await logs(projectPath))[0].length).toBe(3);
-  const [[header, asked, replied]] = await logs(projectPath);
+  await expect.poll(async () => (await logs(projectPath))[0].length).toBe(4);
+  const [[header, chosen, asked, replied]] = await logs(projectPath);
   expect(header).toMatchObject({
     mode: 'writing',
     title: 'Why does Anna leave?',
     format: 1,
   });
+  expect(chosen).toMatchObject({
+    type: 'modelChosen',
+    provider: 'anthropic',
+    model: 'claude-sonnet-5-5',
+  });
   expect(asked).toMatchObject({ type: 'message', role: 'author' });
   expect(replied).toMatchObject({
     type: 'message',
     role: 'assistant',
-    model: 'claude-opus-5-5',
+    model: 'claude-sonnet-5-5',
+    provider: 'anthropic',
     usage: { input: 18_000, cached: 12_000, written: 0, output: 900 },
     saw: { entries: [], messages: 0 },
   });
@@ -131,7 +123,7 @@ test('the Author asks about the Scene in focus, sees the reply stream in, and re
     history.getByRole('article', { name: 'Assistant' }),
   ).toContainText('What does she fear?');
   await expect(resumed.getByLabel('Conversation usage')).toHaveText(
-    '≈ 18k in (12k cached) · 900 out · ≈ $0.04',
+    '≈ 18k in (12k cached) · 900 out · ≈ $0.02',
   );
   await second.close();
 });
@@ -146,7 +138,7 @@ test('a refused key shows inline with Retry and Open Settings, and logs no turn'
   await answerDialogs(app, projectPath);
   const page = await app.firstWindow();
   await page.getByRole('button', { name: 'New Project…' }).click();
-  const assistant = await addKey(page);
+  const assistant = await addAnthropicKey(page);
   await assistant.getByRole('textbox', { name: 'Message' }).fill('Why?');
   await assistant.getByRole('button', { name: 'Send' }).click();
 
@@ -156,7 +148,7 @@ test('a refused key shows inline with Retry and Open Settings, and logs no turn'
   await expect(
     messages.getByRole('article', { name: 'Assistant' }),
   ).toHaveCount(0);
-  expect((await logs(projectPath))[0]).toHaveLength(2);
+  expect((await logs(projectPath))[0]).toHaveLength(3);
 
   await failed.getByRole('button', { name: 'Open Settings' }).click();
   const settings = page.getByRole('dialog', { name: 'Settings' });
@@ -170,6 +162,7 @@ test('a refused key shows inline with Retry and Open Settings, and logs no turn'
   await expect(failed).toHaveCount(0);
   const [log] = await logs(projectPath);
   expect(log.map((event) => event.role)).toEqual([
+    undefined,
     undefined,
     'author',
     'assistant',
@@ -187,7 +180,7 @@ test('a reply cut short is kept as interrupted, and Retry adds a new turn', asyn
   await answerDialogs(app, projectPath);
   const page = await app.firstWindow();
   await page.getByRole('button', { name: 'New Project…' }).click();
-  const assistant = await addKey(page);
+  const assistant = await addAnthropicKey(page);
   await assistant.getByRole('textbox', { name: 'Message' }).fill('Why?');
   await assistant.getByRole('button', { name: 'Send' }).click();
 
@@ -209,11 +202,85 @@ test('a reply cut short is kept as interrupted, and Retry adds a new turn', asyn
   expect(anthropic.sent[1].messages).toEqual([
     { role: 'user', content: 'Why?' },
   ]);
-  const [[, asked, cut, whole]] = await logs(projectPath);
+  const [[, , asked, cut, whole]] = await logs(projectPath);
   expect(asked).toMatchObject({ role: 'author' });
   expect(cut).toMatchObject({ text: 'What does ', interrupted: true });
   expect(whole).toMatchObject({ text: 'Whole reply.' });
   expect(whole.interrupted).toBeUndefined();
+  await app.close();
+});
+
+test('a Claude reply ending on max_tokens shows Cut short and makes no Proposals; an empty one says so and offers Retry; unreadable Proposals are counted', async () => {
+  const projectPath = path.join(tempDir(), 'My Novel');
+  anthropic.calls.push(
+    {
+      reply: [
+        'Mira, then.\n```proposal\n{"create": "character", "name": "Mira"}\n```\nAnd',
+      ],
+      stopReason: 'max_tokens',
+    },
+    { reply: ['Noted.\n```proposal\n{oops\n```'] },
+    {
+      reply: ['<think>Long ', 'thoughts'],
+      usage: { input: 2_000, output: 4_096 },
+      stopReason: 'max_tokens',
+    },
+    { reply: ['Because.'] },
+  );
+  const app = await launch(tempDir(), { anthropicUrl: anthropic.url });
+  await answerDialogs(app, projectPath);
+  const page = await app.firstWindow();
+  await page.getByRole('button', { name: 'New Project…' }).click();
+  const assistant = await addAnthropicKey(page);
+  const messages = assistant.getByRole('log', { name: 'Messages' });
+  const replies = messages.getByRole('article', { name: 'Assistant' });
+  async function send(text: string, count: number) {
+    await assistant.getByRole('textbox', { name: 'Message' }).fill(text);
+    await assistant.getByRole('button', { name: 'Send' }).click();
+    await expect(replies).toHaveCount(count);
+  }
+
+  await send('Who?', 1);
+  const cut = replies.first();
+  await expect(cut).toContainText('Mira, then.');
+  await expect(cut).toContainText(
+    'Cut short: the reply reached its length limit',
+  );
+  await expect(cut).not.toContainText('Interrupted');
+  await expect(messages.getByRole('region', { name: /^Proposal/ })).toHaveCount(
+    0,
+  );
+
+  await send('And?', 2);
+  await expect(replies.nth(1)).toContainText('Noted.');
+  await expect(replies.nth(1)).toContainText('1 Proposal couldn’t be read');
+  await expect(replies.nth(1)).not.toContainText('oops');
+
+  await send('Then?', 3);
+  const empty = replies.nth(2);
+  await expect(empty).toContainText(
+    'No reply: the Model used its whole length limit thinking. Try again or choose another Model.',
+  );
+  await expect(empty).not.toContainText('thoughts');
+  await expect(empty.getByLabel('Usage')).toContainText('4.1k out');
+
+  await empty.getByRole('button', { name: 'Retry' }).click();
+  await expect(replies).toHaveCount(4);
+  await expect(replies.last()).toContainText('Because.');
+  // Neither the reply cut short nor the empty one is sent back.
+  const sent = JSON.stringify(anthropic.sent[3].messages);
+  expect(sent).toContain('Noted.');
+  expect(sent).not.toContain('Mira');
+  expect(sent).not.toContain('thoughts');
+
+  const [log] = await logs(projectPath);
+  expect(log.find((e) => e.type === 'reply.empty')).toMatchObject({
+    model: 'claude-sonnet-5-5',
+    provider: 'anthropic',
+    reason: 'length',
+    usage: { input: 2_000, output: 4_096 },
+  });
+  expect(log.filter((e) => String(e.type).startsWith('proposal.'))).toEqual([]);
   await app.close();
 });
 
@@ -250,7 +317,7 @@ test('the Author asks for a Review of the Chapter, sees its Findings in order, a
   await page.getByRole('menuitem', { name: 'New Scene', exact: true }).click();
   await expect(page.getByLabel('Prose')).toBeFocused();
   await page.keyboard.type('The letter came on Tuesday.');
-  const assistant = await addKey(page);
+  const assistant = await addAnthropicKey(page);
 
   await assistant.getByRole('button', { name: 'Review Chapter' }).click();
 
@@ -289,8 +356,8 @@ test('the Author asks for a Review of the Chapter, sees its Findings in order, a
   );
 
   // The Findings are logged in the reply, the Review in the ask.
-  await expect.poll(async () => (await logs(projectPath))[0].length).toBe(3);
-  const [[, asked, replied]] = await logs(projectPath);
+  await expect.poll(async () => (await logs(projectPath))[0].length).toBe(4);
+  const [[, , asked, replied]] = await logs(projectPath);
   expect(asked).toMatchObject({ command: 'review-chapter' });
   expect(replied.findings.map((f: { type: string }) => f.type)).toEqual([
     'contradiction',
@@ -315,7 +382,7 @@ test('the Author picks another Scene for a question by typing @, and its Prose i
   await page.getByRole('menuitem', { name: 'New Scene', exact: true }).click();
   await expect(page.getByLabel('Prose')).toBeFocused();
   await page.keyboard.type('Anna burned it unread.');
-  const assistant = await addKey(page);
+  const assistant = await addAnthropicKey(page);
 
   const message = assistant.getByRole('textbox', { name: 'Message' });
   await message.pressSequentially('Does this follow from @sc');

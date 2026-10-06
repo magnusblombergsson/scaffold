@@ -197,6 +197,7 @@ export const CHEAT_SHEET: {
     shortcuts: [
       { keys: [SHORTCUTS.newProject], action: 'New Project' },
       { keys: [SHORTCUTS.openProject], action: 'Open Project' },
+      { keys: ['CmdOrCtrl+S'], action: 'Save now' },
       { keys: [SHORTCUTS.settings], action: 'Settings' },
       { keys: [SHORTCUTS.projectSettings], action: 'Project Settings' },
       { keys: [SHORTCUTS.shortcuts], action: 'Keyboard Shortcuts' },

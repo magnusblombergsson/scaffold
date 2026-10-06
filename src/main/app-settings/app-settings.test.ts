@@ -13,6 +13,7 @@ import { instantClock, type Clock } from '../project-store/clock';
 import { nodeFileSystem, type FileSystem } from '../project-store/file-system';
 import { projectLookup } from '../project-store/project-store';
 import { loadAppSettings, type AppSettings } from './app-settings';
+import { DEFAULT_MODEL } from '../../shared/models';
 
 let dir: string;
 let file: string;
@@ -97,17 +98,135 @@ describe('saving', () => {
     expect((await load()).highlightMentions()).toBe(false);
   });
 
-  it('uses Opus 5.5 until the Author chooses another model, and remembers it', async () => {
+  it('remembers the Model used last, Sonnet 5.5 before any', async () => {
     const settings = await load();
-    expect(settings.model()).toBe('claude-opus-5-5');
+    expect(settings.lastUsedModel()).toEqual({
+      provider: 'anthropic',
+      id: 'claude-sonnet-5-5',
+    });
 
-    settings.setModel('claude-haiku-4-5');
+    settings.setLastUsedModel({
+      provider: 'anthropic',
+      id: 'claude-haiku-4-5',
+    });
     await settings.flush();
 
-    expect((await load()).model()).toBe('claude-haiku-4-5');
-    expect(JSON.parse(await readFile(file, 'utf8')).global).toMatchObject({
-      model: 'claude-haiku-4-5',
+    expect((await load()).lastUsedModel()).toEqual({
+      provider: 'anthropic',
+      id: 'claude-haiku-4-5',
     });
+    expect(JSON.parse(await readFile(file, 'utf8')).global).toMatchObject({
+      model: { provider: 'anthropic', id: 'claude-haiku-4-5' },
+    });
+  });
+
+  it('reads a model saved by its Claude id alone as that Claude model', async () => {
+    await writeFile(
+      file,
+      JSON.stringify({
+        version: 1,
+        global: { model: 'claude-sonnet-5' },
+        projects: {},
+        recent: [],
+      }),
+    );
+
+    expect((await load()).lastUsedModel()).toEqual({
+      provider: 'anthropic',
+      id: 'claude-sonnet-5',
+    });
+  });
+
+  it('reads a Claude model this app doesn’t offer as the default', async () => {
+    const settings = await load();
+
+    settings.setLastUsedModel({ provider: 'anthropic', id: 'claude-gone-1' });
+    await settings.flush();
+
+    expect((await load()).lastUsedModel()).toEqual(DEFAULT_MODEL);
+  });
+
+  it('remembers a Model of another Provider', async () => {
+    const settings = await load();
+
+    settings.setLastUsedModel({ provider: 'lmstudio', id: 'qwen3-8b' });
+    await settings.flush();
+
+    expect((await load()).lastUsedModel()).toEqual({
+      provider: 'lmstudio',
+      id: 'qwen3-8b',
+    });
+  });
+
+  it('has no LM Studio address until the Author adds one, and forgets it when removed', async () => {
+    const settings = await load();
+    expect(settings.lmStudioAddress()).toBeNull();
+
+    settings.setLmStudioAddress('http://localhost:1234');
+    await settings.flush();
+    const reloaded = await load();
+    expect(reloaded.lmStudioAddress()).toBe('http://localhost:1234');
+
+    reloaded.setLmStudioAddress(null);
+    await reloaded.flush();
+    expect((await load()).lmStudioAddress()).toBeNull();
+  });
+
+  it('has no shortlist until the Author chooses one, then remembers it per Provider', async () => {
+    const settings = await load();
+    expect(settings.shortlist('openrouter')).toBeNull();
+
+    const qwen = {
+      id: 'qwen/qwen3-235b',
+      name: 'Qwen3 235B',
+      contextWindow: 131_072,
+      outputLimit: null,
+      price: { input: 0.2, cached: 0.2, written: 0.2, output: 0.6 },
+    };
+    settings.setShortlist('openrouter', [qwen]);
+    settings.setShortlist('anthropic', []);
+    await settings.flush();
+
+    const reloaded = await load();
+    expect(reloaded.shortlist('openrouter')).toEqual([qwen]);
+    expect(reloaded.shortlist('anthropic')).toEqual([]);
+    expect(reloaded.shortlist('lmstudio')).toBeNull();
+  });
+
+  it('reads a bad shortlist as none chosen, and keeps only the Models in it that it can read', async () => {
+    await writeFile(
+      file,
+      JSON.stringify({
+        version: 1,
+        global: {
+          providers: {
+            lmstudio: { address: 7 },
+            shortlists: {
+              openrouter: 'all',
+              lmstudio: [
+                { id: 'qwen3-8b', name: 'Qwen3 8B', contextWindow: 32768 },
+                { name: 'No id' },
+              ],
+            },
+          },
+        },
+        projects: {},
+        recent: [],
+      }),
+    );
+
+    const settings = await load();
+    expect(settings.lmStudioAddress()).toBeNull();
+    expect(settings.shortlist('openrouter')).toBeNull();
+    expect(settings.shortlist('lmstudio')).toEqual([
+      {
+        id: 'qwen3-8b',
+        name: 'Qwen3 8B',
+        contextWindow: 32768,
+        outputLimit: null,
+        price: null,
+      },
+    ]);
   });
 
   it('welcomes the Author until they have been welcomed once', async () => {
@@ -284,7 +403,7 @@ describe('a bad or newer settings file', () => {
     expect(settings.recent()).toEqual([valid]);
     expect(settings.openAtQuit()).toEqual([]);
     expect(settings.highlightMentions()).toBe(true);
-    expect(settings.model()).toBe('claude-opus-5-5');
+    expect(settings.lastUsedModel()).toEqual(DEFAULT_MODEL);
     expect(settings.welcomed()).toBe(false);
     expect(settings.project('a')).toEqual({ panelWidths: { binder: 300 } });
     expect(settings.project('b')).toEqual({});

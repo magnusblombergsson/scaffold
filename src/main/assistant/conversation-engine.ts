@@ -1,12 +1,11 @@
-import { randomUUID } from 'node:crypto';
 import {
   focusIds,
   OPEN_FOCUS,
   type AskResult,
-  type AssistantFailure,
   type Compaction,
   type Conversation,
   type ConversationMessage,
+  type EmptyReply,
   type Saw,
 } from '../../shared/conversation';
 import {
@@ -17,17 +16,8 @@ import {
   type Finding,
   type ReviewCommand,
 } from '../../shared/finding';
-import type { ModelId } from '../../shared/models';
-import { PROJECT_OUTLINE, unitText } from '../../shared/project-types';
-import {
-  newEntryOf,
-  outlineChangeOf,
-  proposalOf,
-  replyText,
-  splitReply,
-  type Proposal,
-  type ProposalChange,
-} from '../../shared/proposal';
+import type { Model } from '../../shared/models';
+import { unitText } from '../../shared/project-types';
 import type { Usage } from '../../shared/usage';
 import type { Clock } from '../project-store/clock';
 import type { ProjectStore } from '../project-store/project-store';
@@ -38,7 +28,9 @@ import {
   type CompactionPolicy,
 } from './compaction';
 import { buildContext, defaultRequest, readableScene } from './context-builder';
-import { ProviderError, type Provider, type ProviderRequest } from './provider';
+import type { ProviderFor, ProviderRequest } from './provider';
+import { readProposals } from './proposal-blocks';
+import { finishReply, streamCall } from './reply-finishing';
 
 /** What a message is about: the Scene open in the editor when it was sent, if any. */
 export type Focus = { sceneId: string | null };
@@ -50,12 +42,14 @@ export type EngineDeps = {
     | 'assistantView'
     | 'readConversation'
     | 'appendMessage'
+    | 'appendEmptyReply'
     | 'appendProposal'
     | 'appendSummary'
   >;
-  provider: Provider;
-  /** The model the next call uses, as chosen in Settings. */
-  model: () => ModelId;
+  /** The Provider each Model is reached through. */
+  providerFor: ProviderFor;
+  /** The Model asked in a Conversation that isn't on one yet. */
+  defaultModel: () => Model;
   clock: Clock;
   /** When a long Conversation is compacted; tests make it short. */
   compaction?: CompactionPolicy;
@@ -68,8 +62,8 @@ export type EngineDeps = {
  */
 export function createConversationEngine({
   store,
-  provider,
-  model,
+  providerFor,
+  defaultModel,
   clock,
   compaction = DEFAULT_COMPACTION,
 }: EngineDeps) {
@@ -137,12 +131,16 @@ export function createConversationEngine({
   }
 
   /**
-   * Asks the model to answer the Conversation as logged, which ends with the
-   * Author's message, with the context the Conversation's Mode gives the
+   * Asks the Conversation's Model to answer it as logged, which ends with
+   * the Author's message, with the context the Conversation's Mode gives the
    * Scene in `focus`, or in an Interview, the focus it was last set to.
    * Past the threshold, the older messages are compacted first.
-   * The reply is logged once it has come, or as interrupted if the call fails partway; a call that fails before any
-   * reply logs nothing. A Review's reply holds Findings, never Proposals.
+   * The reply is logged once it has come, without its thinking: as
+   * interrupted if the call fails partway, or cut short at the length limit,
+   * or as empty if nothing is left of it; a call that fails before any reply
+   * logs nothing, unless it said what it used, which still counts. Only a
+   * complete reply makes Proposals, and a Review's reply holds Findings,
+   * never Proposals.
    */
   async function answer(
     conversationId: string,
@@ -150,12 +148,13 @@ export function createConversationEngine({
       mode,
       focus: interviewFocus,
       compactions,
-    }: Pick<Conversation, 'mode' | 'focus' | 'compactions'>,
+      model,
+    }: Pick<Conversation, 'mode' | 'focus' | 'compactions' | 'model'>,
     messages: ConversationMessage[],
     focus: string[],
     onText: (text: string) => void,
   ): Promise<AskResult> {
-    const chosen = model();
+    const chosen = model ?? defaultModel();
     const summary = await summaryToSend(
       conversationId,
       messages,
@@ -173,46 +172,59 @@ export function createConversationEngine({
       system: context.system,
       messages: context.messages,
     };
-    let text = '';
-    let usage: Usage | undefined;
-    let failure: AssistantFailure | null = null;
-    try {
-      for await (const event of provider.stream(request)) {
-        if (event.type === 'usage') {
-          usage = event.usage;
-        } else {
-          text += event.text;
-          onText(event.text);
-        }
+    const streamed = await streamCall(providerFor(chosen), request, onText);
+    const { usage, cost, finish, failure } = streamed;
+    const finished = finishReply(streamed);
+    if (finished.ending === 'empty') {
+      // A failed call that said nothing of what it used has nothing to count.
+      if (failure && !usage && cost === undefined) {
+        return { reply: null, failure };
       }
-    } catch (error) {
-      if (error instanceof ProviderError) {
-        failure = error.kind;
-      } else {
-        console.error('The Assistant call failed:', error);
-        failure = 'other';
-      }
-      if (text === '') return { reply: null, failure };
+      const empty: EmptyReply = {
+        focus,
+        at: clock.now(),
+        model: chosen.id,
+        provider: chosen.provider,
+        ...(usage && { usage }),
+        ...(cost !== undefined && { cost }),
+        ...(failure && { failed: true as const }),
+        before: messages.length,
+      };
+      await store.appendEmptyReply(
+        conversationId,
+        empty,
+        chosen,
+        failure ? 'failed' : (finish ?? 'complete'),
+      );
+      return { reply: null, empty, failure };
     }
-
     const findings =
-      mode === 'writing' ? await findingsIn(text, context.saw) : [];
+      mode === 'writing'
+        ? await findingsIn(finished.findings, context.saw)
+        : [];
+    // A Review asks before it proposes.
+    const made = reviewing
+      ? null
+      : await readProposals(store.assistantView(), finished.proposals);
+    const proposals = made?.proposals ?? [];
+    const unreadable = made ? finished.unreadable + made.unreadable : 0;
     const reply: ConversationMessage = {
       role: 'assistant',
-      text: replyText(text),
+      text: finished.text,
       focus,
       at: clock.now(),
-      model: chosen,
+      model: chosen.id,
+      provider: chosen.provider,
       ...(usage && { usage }),
-      ...(failure && { interrupted: true as const }),
+      ...(cost !== undefined && { cost }),
+      ...(finished.ending !== 'complete' && { interrupted: true as const }),
+      ...(finished.ending === 'cut-short' && { cutShort: true as const }),
+      ...(unreadable > 0 && { unreadable }),
       saw: context.saw,
       ...(findings.length > 0 && { findings }),
     };
     await store.appendMessage(conversationId, reply);
-    // A reply cut short isn't sent back to the model, so neither are its
-    // Proposals; a Review asks before it proposes.
-    const proposing = !failure && !reviewing;
-    for (const proposal of proposing ? await proposalsIn(text) : []) {
+    for (const proposal of proposals) {
       await store.appendProposal(conversationId, proposal);
     }
     return { reply, failure };
@@ -228,17 +240,18 @@ export function createConversationEngine({
     conversationId: string,
     messages: ConversationMessage[],
     latest: Compaction | undefined,
-    chosen: ModelId,
+    chosen: Model,
   ): Promise<Compaction | undefined> {
     const covers = compactionPoint(messages, latest, compaction);
     if (covers === null) return latest;
     let text = '';
     let usage: Usage | undefined;
+    let cost: number | undefined;
     try {
       const request = summaryRequest(chosen, messages, covers, latest);
-      for await (const event of provider.stream(request)) {
-        if (event.type === 'usage') usage = event.usage;
-        else text += event.text;
+      for await (const event of providerFor(chosen).stream(request)) {
+        if (event.type === 'usage') ({ usage, cost } = event);
+        else if (event.type === 'text') text += event.text;
       }
     } catch (error) {
       console.error('Compacting the Conversation failed:', error);
@@ -249,23 +262,23 @@ export function createConversationEngine({
       text: text.trim(),
       covers,
       at: clock.now(),
-      model: chosen,
+      model: chosen.id,
+      provider: chosen.provider,
       ...(usage && { usage }),
+      ...(cost !== undefined && { cost }),
     };
     await store.appendSummary(conversationId, summary);
     return summary;
   }
 
   /**
-   * The Findings a reply makes, in the order a Review lists them, each with
-   * the Scene it quotes among those the Assistant saw: the one it names if
-   * the quote is there, else the one the quote is in, else the one it
-   * names, else the only one.
+   * The Findings a reply's finding blocks make, in the order a Review lists
+   * them, each with the Scene it quotes among those the Assistant saw: the
+   * one it names if the quote is there, else the one the quote is in, else
+   * the one it names, else the only one.
    */
-  async function findingsIn(reply: string, saw: Saw): Promise<Finding[]> {
-    const findings = splitReply(reply).findings.flatMap(
-      (block) => findingOf(block) ?? [],
-    );
+  async function findingsIn(blocks: unknown[], saw: Saw): Promise<Finding[]> {
+    const findings = blocks.flatMap((block) => findingOf(block) ?? []);
     if (findings.length === 0) return [];
     const view = store.assistantView();
     const prose = new Map<string, string>();
@@ -289,49 +302,6 @@ export function createConversationEngine({
         return { ...finding, ...(sceneId && { sceneId }) };
       }),
     );
-  }
-
-  /**
-   * The Proposals a reply makes, each against its target as it is now. A
-   * block that proposes nothing this app takes, such as a change to Prose,
-   * Notes or a Voice's example lines, is left out.
-   */
-  async function proposalsIn(reply: string): Promise<Proposal[]> {
-    const proposals: Proposal[] = [];
-    for (const block of splitReply(reply).proposals) {
-      const change = await changeOf(block);
-      if (change) proposals.push({ id: randomUUID(), ...change });
-    }
-    return proposals;
-  }
-
-  /**
-   * What a block proposes: a new Entry, under the id it will get; a whole
-   * Outline of a Chapter or Scene in the Project, or of the story; or a change
-   * to a field of an Entry in the Story Bible.
-   */
-  async function changeOf(block: unknown): Promise<ProposalChange | null> {
-    const view = store.assistantView();
-    const { entry: entryId, outline: outlineId } = (block ?? {}) as Record<
-      string,
-      unknown
-    >;
-    const proposed = newEntryOf(block);
-    if (proposed) return { kind: 'new-entry', entryId: randomUUID(), proposed };
-    if (typeof outlineId === 'string') {
-      const { chapters, unplaced } = view.manuscript();
-      const known =
-        outlineId === PROJECT_OUTLINE ||
-        [...chapters, ...chapters.flatMap((c) => c.scenes), ...unplaced].some(
-          (unit) => unit.id === outlineId,
-        );
-      if (!known) return null;
-      const outline = await view.read({ kind: 'outline', id: outlineId });
-      return outlineChangeOf(block, outline);
-    }
-    if (!view.listEntries().some((e) => e.id === entryId)) return null;
-    const entry = await view.read({ kind: 'entry', id: entryId as string });
-    return proposalOf(block, entry);
   }
 
   return {

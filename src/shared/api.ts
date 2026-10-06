@@ -11,9 +11,10 @@ import type {
 } from './project-types';
 import type { ReviewCommand } from './finding';
 import type { ImportBlock, ImportConvention } from './manuscript-import';
-import type { ModelId } from './models';
+import type { ListedModel, Model, ProviderId, ProviderStatus } from './models';
 import type { Command } from './shortcuts';
 import type { PendingProposal, ProposedValue } from './proposal';
+import type { MeteredTurn } from './usage';
 
 /**
  * How the Author accepts a Proposal: with the value they `edited` it to,
@@ -27,6 +28,7 @@ export type AcceptOptions = {
 };
 import type {
   AskResult,
+  AssistantFailure,
   Conversation,
   ConversationSummary,
   InterviewFocus,
@@ -365,36 +367,53 @@ export type RecentProject = {
 };
 
 /**
- * What Anthropic said of a key when it was checked: `unreachable` when it
- * couldn't be asked, as when offline.
- */
-export type KeyCheck = 'ok' | 'invalid' | 'no-credit' | 'unreachable';
-
-/**
- * How the API key is kept: `encrypted` on disk, `unencrypted` on disk because
- * the Author said so, or in memory `untilQuit`.
+ * How a key or token is kept: `encrypted` on disk, `unencrypted` on disk
+ * because the Author said so, or in memory `untilQuit`.
  */
 export type KeyKeeping = 'encrypted' | 'unencrypted' | 'untilQuit';
 
 /**
- * The Author's Anthropic API key as a window may know it, which is never the
- * key itself: `masked` shows only its start and end, as `sk-ant-…abcd`.
+ * A Provider as a window may know it, which never holds its key or token:
+ * `masked` shows only the start and end, as `sk-ant-…abcd`.
  */
-export type KeyStatus = {
+export type ProviderView = {
+  /** Whether the Author has added it: its key, or for LM Studio its address. */
+  added: boolean;
+  /** The key, or LM Studio's token, masked; null when there is none. */
   masked: string | null;
   kept: KeyKeeping | null;
+  /** Where LM Studio's server is; null for the other Providers or before it is added. */
+  address: string | null;
+};
+
+/** Every Provider as a window may know it. */
+export type ProvidersView = {
+  providers: Record<ProviderId, ProviderView>;
   /** Whether this computer can encrypt a key it keeps, which Linux can't without a keyring. */
   canEncrypt: boolean;
 };
 
 /**
- * Whether to save a key unencrypted where it can't be encrypted; ignored where
- * it can.
+ * What the Author entered to add a Provider: its key, or for LM Studio its
+ * address and an optional token. `unencrypted` says to save the secret
+ * unencrypted where it can't be encrypted; ignored where it can.
  */
-export type KeyOptions = { unencrypted: boolean };
+export type ProviderEntry = {
+  secret: string;
+  address?: string;
+  unencrypted: boolean;
+};
 
-/** A key the Author entered: what checking it said, and the key kept now. */
-export type KeyResult = { check: KeyCheck; status: KeyStatus };
+/**
+ * A Provider the Author entered: what checking it said, and every Provider
+ * as kept now. One whose key was rejected isn't kept.
+ */
+export type ProviderResult = { status: ProviderStatus; view: ProvidersView };
+
+/** A Provider's Models for the Author to shortlist, or why it can't list them. */
+export type ModelListing =
+  | { ok: true; models: ListedModel[] }
+  | { ok: false; status: ProviderStatus };
 
 /** Why the Author is welcomed: the first launch, or a saved key that couldn't be read. */
 export type WelcomeReason = 'firstLaunch' | 'keyUnreadable';
@@ -402,27 +421,41 @@ export type WelcomeReason = 'firstLaunch' | 'keyUnreadable';
 /** Settings that hold on this computer for every Project. */
 export interface SettingsApi {
   /**
-   * Why to welcome the Author, if at all; none once they have added a key or
-   * skipped.
+   * Why to welcome the Author, if at all; none once they have added a
+   * Provider or skipped.
    */
   showWelcome(): Promise<WelcomeReason | null>;
   dismissWelcome(): void;
-  keyStatus(): Promise<KeyStatus>;
+  providers(): Promise<ProvidersView>;
+  /** Asks the Provider whether it answers; null when it hasn't been added. */
+  providerStatus(provider: ProviderId): Promise<ProviderStatus | null>;
   /**
-   * Checks the key with Anthropic and keeps it unless it is invalid; the
-   * next call to Claude uses it. Without encryption it is kept until the app
-   * quits, unless `unencrypted` says to save it anyway.
+   * Checks what the Author entered with the Provider and keeps it unless the
+   * key is rejected; the next call uses it. Without encryption a secret is
+   * kept until the app quits, unless `unencrypted` says to save it anyway.
    */
-  setKey(key: string, options: KeyOptions): Promise<KeyResult>;
-  removeKey(): Promise<KeyStatus>;
+  addProvider(
+    provider: ProviderId,
+    entry: ProviderEntry,
+  ): Promise<ProviderResult>;
+  /** Forgets the Provider's key, or LM Studio's address and token. */
+  removeProvider(provider: ProviderId): Promise<ProvidersView>;
   /**
-   * Calls `listener` when the key is added, replaced or removed, from any
-   * window. Returns an unsubscribe function.
+   * Calls `listener` when a Provider is added, replaced or removed, or a
+   * shortlist changes, from any window. Returns an unsubscribe function.
    */
-  onKeyStatus(listener: (status: KeyStatus) => void): () => void;
-  /** The Claude model the next call uses. */
-  model(): Promise<ModelId>;
-  setModel(model: ModelId): void;
+  onProviders(listener: (view: ProvidersView) => void): () => void;
+  /** The Models the Provider offers to shortlist. */
+  listModels(provider: ProviderId): Promise<ModelListing>;
+  /** The Author's Model shortlist of each Provider. */
+  shortlists(): Promise<Record<ProviderId, ListedModel[]>>;
+  setShortlist(provider: ProviderId, models: ListedModel[]): Promise<void>;
+  /**
+   * The Model a new Conversation starts on: the one chosen last, while it is
+   * shortlisted, else the default Model, a tested one, or the first
+   * shortlisted.
+   */
+  defaultModel(): Promise<Model>;
 }
 
 /** A Word or Markdown file read for an Import: its name without extension, and its blocks. */
@@ -502,7 +535,17 @@ export interface AssistantApi {
   /** The Conversations in the Project, latest first. */
   listConversations(): Promise<ConversationSummary[]>;
   readConversation(id: string): Promise<Conversation>;
-  startConversation(mode: Mode, title: string): Promise<ConversationSummary>;
+  /** Starts a Conversation on `model`, which becomes the Model chosen last. */
+  startConversation(
+    mode: Mode,
+    title: string,
+    model: Model,
+  ): Promise<ConversationSummary>;
+  /**
+   * Puts a Conversation on `model` from its next message on, which becomes
+   * the Model chosen last.
+   */
+  chooseModel(conversationId: string, model: Model): Promise<void>;
   /** Gives a Conversation a new title; refused for an empty one. */
   renameConversation(conversationId: string, title: string): Promise<void>;
   /**
@@ -569,7 +612,34 @@ export interface AssistantApi {
   undoProposal(conversationId: string, proposalId: string): Promise<void>;
   /** The Proposals pending on an Entry, in any Conversation. */
   pendingProposals(entryId: string): Promise<PendingProposal[]>;
+  /**
+   * Has the Model chosen last write an Image prompt for an Entry, from its
+   * description, Appearance and Senses, in a one-off request outside any
+   * Conversation; a new one each time, and nothing of it is logged.
+   */
+  imagePrompt(entryId: string): Promise<ImagePromptResult>;
 }
+
+/**
+ * Why an Image prompt couldn't be had: the call failed, as an Assistant
+ * call fails; the reply came back `empty`; the Entry has `nothing` to
+ * describe; or it is `hidden`, an Entry the Assistant never sees.
+ */
+export type ImagePromptFailure =
+  | AssistantFailure
+  | 'empty'
+  | 'nothing'
+  | 'hidden';
+
+/**
+ * An Image prompt, or why there is none, with the Model asked and what the
+ * call used and cost, when known. It isn't kept, nor its cost logged.
+ */
+export type ImagePromptResult = MeteredTurn &
+  (
+    | { ok: true; text: string; cutShort: boolean }
+    | { ok: false; failure: ImagePromptFailure }
+  );
 
 export const channel = {
   project: (method: keyof ProjectApi) => `project:${method}`,
@@ -592,17 +662,21 @@ export const channel = {
   flushRequest: 'shell:flushRequest',
   showWelcome: 'settings:showWelcome',
   dismissWelcome: 'settings:dismissWelcome',
-  keyStatus: 'settings:keyStatus',
-  setKey: 'settings:setKey',
-  removeKey: 'settings:removeKey',
-  keyStatusChanged: 'settings:keyStatusChanged',
-  model: 'settings:model',
-  setModel: 'settings:setModel',
+  providers: 'settings:providers',
+  providerStatus: 'settings:providerStatus',
+  addProvider: 'settings:addProvider',
+  removeProvider: 'settings:removeProvider',
+  providersChanged: 'settings:providersChanged',
+  listModels: 'settings:listModels',
+  shortlists: 'settings:shortlists',
+  setShortlist: 'settings:setShortlist',
+  defaultModel: 'settings:defaultModel',
   flushed: 'shell:flushed',
   projectEvent: 'project:event',
   listConversations: 'assistant:listConversations',
   readConversation: 'assistant:readConversation',
   startConversation: 'assistant:startConversation',
+  chooseModel: 'assistant:chooseModel',
   renameConversation: 'assistant:renameConversation',
   trashConversation: 'assistant:trashConversation',
   setInterviewFocus: 'assistant:setInterviewFocus',
@@ -614,6 +688,7 @@ export const channel = {
   undoProposal: 'assistant:undoProposal',
   pendingProposals: 'assistant:pendingProposals',
   replyText: 'assistant:replyText',
+  imagePrompt: 'assistant:imagePrompt',
 } as const;
 
 declare global {

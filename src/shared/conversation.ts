@@ -1,4 +1,5 @@
 import type { Finding, ReviewCommand } from './finding';
+import type { Model, ProviderId } from './models';
 import { ENTRY_TYPES, type EntryType } from './project-types';
 import type { ProposalView } from './proposal';
 import type { Usage } from './usage';
@@ -86,10 +87,14 @@ export type Saw = {
  * One message in a Conversation: `focus` holds the ids of the Scenes in focus
  * when it was sent, which the Conversation isn't bound to. The Author's
  * message says which Review it asked for, if any, as its `command`; the
- * reply to it holds the Review's `findings`. An Assistant turn
- * also says which `model` answered and what it used, when that is known, and
- * is `interrupted` when the call failed partway and the reply is cut short,
- * and says what the Assistant `saw`, and the `proposals` it made in it.
+ * reply to it holds the Review's `findings`. An Assistant turn says which
+ * `model` answered and through which `provider`; a turn logged before
+ * Providers names no Provider, as it was Anthropic's. It says what it used,
+ * when that is known, and what it `cost` in USD when the Provider said. It
+ * is `interrupted` when the Assistant didn't finish it, so it is never sent
+ * back: the call failed partway, or the reply was
+ * `cutShort` at the length limit. It says what the Assistant `saw`, the `proposals` it made in it,
+ * and how many more it made that couldn't be read, as `unreadable`.
  */
 export type ConversationMessage = {
   role: 'author' | 'assistant';
@@ -99,8 +104,12 @@ export type ConversationMessage = {
   /** When it was sent, in ms since the epoch. */
   at: number;
   model?: string;
+  provider?: ProviderId;
   usage?: Usage;
+  cost?: number;
   interrupted?: true;
+  cutShort?: true;
+  unreadable?: number;
   saw?: Saw;
   findings?: Finding[];
   proposals?: ProposalView[];
@@ -119,20 +128,44 @@ export type AssistantFailure =
   | 'other';
 
 /**
- * How asking the Assistant went: the reply as logged, if any, and why the call
- * failed, if it did. A call that fails partway logs what came as an
- * interrupted reply; one that fails before any reply logs nothing.
+ * A reply that came back with no text, or none once its thinking was
+ * stripped. It isn't a message: it is never sent back, and stands before
+ * the message `before`, which is the number of messages before it. It says
+ * which `model` wrote it, through which `provider`, and what it used and,
+ * when the Provider said, cost, so its cost counts. A call that `failed`
+ * before any text but thinking is logged as one too, when it said what it
+ * used.
+ */
+export type EmptyReply = {
+  focus: string[];
+  /** When it came, in ms since the epoch. */
+  at: number;
+  model: string;
+  provider: ProviderId;
+  usage?: Usage;
+  cost?: number;
+  failed?: true;
+  before: number;
+};
+
+/**
+ * How asking the Assistant went: the reply as logged, if any, or the `empty`
+ * one, and why the call failed, if it did. A call that fails partway logs
+ * what came as an interrupted reply; one that fails before any reply logs
+ * nothing, unless the Provider said what it used: then it logs an `empty`
+ * one, so its cost counts.
  */
 export type AskResult = {
   reply: ConversationMessage | null;
+  empty?: EmptyReply;
   failure: AssistantFailure | null;
 };
 
 /**
  * A summary of the older part of a long Conversation: it stands in for the
  * first `covers` messages when the Assistant is asked, though they stay in
- * the log and on screen. It says which `model` wrote it and what that used,
- * when known.
+ * the log and on screen. It says which `model` wrote it, through which
+ * `provider` as a message does, and what that used and cost, when known.
  */
 export type Compaction = {
   text: string;
@@ -140,15 +173,22 @@ export type Compaction = {
   /** When it was made, in ms since the epoch. */
   at: number;
   model?: string;
+  provider?: ProviderId;
   usage?: Usage;
+  cost?: number;
 };
 
 /**
- * A Conversation's messages, and in an Interview, each time its focus was
- * set; once it is long, the summaries made of it, the latest last.
+ * A Conversation's messages, the replies that came back empty between them,
+ * and in an Interview, each time its focus was set; once it is long, the
+ * summaries made of it, the latest last. Its `model` is the Model chosen for
+ * it last, or for one that never had one chosen, the Model of its latest
+ * reply; none before then.
  */
 export type Conversation = ConversationSummary & {
+  model?: Model;
   messages: ConversationMessage[];
+  emptyReplies?: EmptyReply[];
   focusChanges?: FocusChange[];
   compactions?: Compaction[];
 };

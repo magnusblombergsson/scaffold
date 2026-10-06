@@ -1,13 +1,25 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { AssistantFailure } from '../../shared/conversation';
+import { claudeListing } from '../../shared/models';
 import { NO_USAGE, type Usage } from '../../shared/usage';
-import { ProviderError, type Provider, type ProviderEvent } from './provider';
+import { anthropicKeyCheck } from './claude-key-check';
+import {
+  ProviderError,
+  type ListingProvider,
+  type ProviderEvent,
+} from './provider';
 
 /** Room for thinking and a long answer; every model offered allows it. */
 const MAX_TOKENS = 32_000;
 
 /** A cache breakpoint: the next call within five minutes reads back all up to it. */
 const CACHE = { type: 'ephemeral', ttl: '5m' } as const;
+
+/** Why Claude stops when a reply reached its length limit, not its end. */
+const LENGTH_STOPS = new Set<string>([
+  'max_tokens',
+  'model_context_window_exceeded',
+]);
 
 export type ClaudeProviderDeps = {
   /** The Author's key as it is now, so a replaced key applies from the next call. */
@@ -18,13 +30,20 @@ export type ClaudeProviderDeps = {
 
 /**
  * The provider that asks Claude, over @anthropic-ai/sdk. It retries only as
- * the SDK does on its own, before any of the reply has come.
+ * the SDK does on its own, before any of the reply has come. Its Models are
+ * the built-in ones, which carry their prices.
  */
 export function claudeProvider({
   apiKey,
   baseURL,
-}: ClaudeProviderDeps): Provider {
+}: ClaudeProviderDeps): ListingProvider {
+  const check = anthropicKeyCheck({ baseURL });
   return {
+    models: async () => claudeListing(),
+    async status() {
+      const key = apiKey();
+      return key ? check(key) : 'key-rejected';
+    },
     async *stream(request): AsyncGenerator<ProviderEvent> {
       const key = apiKey();
       if (!key) throw new ProviderError('key', 'No API key has been added');
@@ -35,7 +54,7 @@ export function claudeProvider({
       const usage: Usage = { ...NO_USAGE };
       try {
         const stream = client.messages.stream({
-          model: request.model,
+          model: request.model.id,
           max_tokens: MAX_TOKENS,
           system: request.system.map(({ text, cache }) => ({
             type: 'text',
@@ -61,6 +80,13 @@ export function claudeProvider({
           } else if (event.type === 'message_delta') {
             Object.assign(usage, usageOf(event.usage, usage));
             yield { type: 'usage', usage: { ...usage } };
+            const { stop_reason } = event.delta;
+            if (stop_reason) {
+              yield {
+                type: 'finish',
+                finish: LENGTH_STOPS.has(stop_reason) ? 'length' : 'complete',
+              };
+            }
           }
         }
       } catch (error) {

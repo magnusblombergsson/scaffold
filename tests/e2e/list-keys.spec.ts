@@ -374,6 +374,10 @@ test('the Story Bible list takes the same keys', async () => {
     await page.keyboard.press('Shift+F10');
     const menu = page.getByRole('menu', { name: 'Entry actions: Harbour' });
     await expect(
+      menu.getByRole('menuitem', { name: 'Image prompt…' }),
+    ).toBeFocused();
+    await page.keyboard.press('ArrowDown');
+    await expect(
       menu.getByRole('menuitem', { name: 'Move to Trash' }),
     ).toBeFocused();
     await page.keyboard.press('Enter');

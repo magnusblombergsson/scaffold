@@ -11,7 +11,7 @@ it.skipIf(!key)('streams a reply from Claude with what it used', async () => {
   const events: ProviderEvent[] = [];
 
   for await (const event of provider.stream({
-    model: 'claude-haiku-4-5',
+    model: { provider: 'anthropic', id: 'claude-haiku-4-5' },
     system: [{ text: 'Answer in one short sentence.' }],
     messages: [
       { role: 'user', content: 'What colour is the sky on a clear day?' },
@@ -30,4 +30,5 @@ it.skipIf(!key)('streams a reply from Claude with what it used', async () => {
     expect(usage.usage.input).toBeGreaterThan(0);
     expect(usage.usage.output).toBeGreaterThan(0);
   }
+  expect(events.at(-1)).toEqual({ type: 'finish', finish: 'complete' });
 });

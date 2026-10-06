@@ -5,6 +5,7 @@ import {
   type Conversation,
   type ConversationMessage,
   type ConversationSummary,
+  type EmptyReply,
   type FocusChange,
   type InterviewFocus,
   type Mode,
@@ -27,6 +28,13 @@ import {
   type Proposal,
   type ProposedValue,
 } from '../../shared/proposal';
+import {
+  isModel,
+  isProviderId,
+  loggedModel,
+  type Model,
+} from '../../shared/models';
+import type { Finish } from '../assistant/provider';
 import type { Usage } from '../../shared/usage';
 
 // The format of a Conversation log, `conversations/<id>.jsonl` (ADR 0003): a
@@ -95,6 +103,35 @@ export type UndoneEvent = {
   at: number;
 };
 
+/**
+ * A reply that came back with no text, or none once its thinking was
+ * stripped: which Model wrote it, what it used and, when the Provider said,
+ * what it cost, so its cost counts, and how the Provider said it finished as
+ * its `reason`, or `failed` if the call failed after only thinking. It is
+ * never sent back as context. The MVP skips it (ADR 0006).
+ */
+export type EmptyReplyEvent = {
+  type: 'reply.empty';
+  model: string;
+  provider: Model['provider'];
+  usage?: Usage;
+  cost?: number;
+  reason: Finish | 'failed';
+  focus: string[];
+  at: number;
+};
+
+/**
+ * The Model a Conversation starts on, or is switched to, from its next
+ * message on. The MVP skips it and asks its one Model (ADR 0006).
+ */
+export type ModelChosenEvent = {
+  type: 'modelChosen';
+  provider: Model['provider'];
+  model: string;
+  at: number;
+};
+
 /** The Author set an Interview's focus. */
 export type FocusChangedEvent = {
   type: 'focusChanged';
@@ -121,6 +158,8 @@ export type TrashMoveEvent = { type: 'trashed' | 'restored'; at: number };
 /** An event this app writes. */
 export type ConversationEvent =
   | MessageEvent
+  | EmptyReplyEvent
+  | ModelChosenEvent
   | FocusChangedEvent
   | SummaryEvent
   | RenamedEvent
@@ -212,9 +251,11 @@ export function parseLog(log: string): LoggedConversation | null {
   const header = parseLine(first);
   if (!isHeader(header)) return null;
   const messages: ConversationMessage[] = [];
+  const emptyReplies: EmptyReply[] = [];
   const proposals = new Map<string, LoggedProposal>();
   const focusChanges: FocusChange[] = [];
   const compactions: Compaction[] = [];
+  let chosen: Model | undefined;
   let { title } = header;
   let trashedAt: number | undefined;
   for (const line of rest) {
@@ -229,6 +270,14 @@ export function parseLog(log: string): LoggedConversation | null {
     }
     if (isMessage(event)) {
       messages.push(messageOf(event));
+      continue;
+    }
+    if (isModelChosen(event)) {
+      chosen = { provider: event.provider, id: event.model };
+      continue;
+    }
+    if (isEmptyReply(event)) {
+      emptyReplies.push(emptyReplyOf(event, messages.length));
       continue;
     }
     if (isFocusChanged(event)) {
@@ -269,17 +318,22 @@ export function parseLog(log: string): LoggedConversation | null {
     }
   }
   const { id, mode, created } = header;
+  const replied = messages.findLast((m) => m.role === 'assistant' && m.model);
+  const model =
+    chosen ?? (replied && loggedModel(replied.model!, replied.provider));
   return {
     id,
     mode,
     title,
     created,
+    ...(model && { model }),
     ...(trashedAt !== undefined && { trashedAt }),
     ...(focusChanges.length > 0 && {
       focus: focusChanges.at(-1)!.focus,
       focusChanges,
     }),
     messages,
+    ...(emptyReplies.length > 0 && { emptyReplies }),
     ...(compactions.length > 0 && { compactions }),
     proposals: [...proposals.values()],
   };
@@ -476,7 +530,7 @@ function acceptedOf(
 function messageOf(event: MessageEvent): ConversationMessage {
   const { role, text, command, focus, at, model, usage, interrupted, saw } =
     event;
-  const { findings } = event;
+  const { provider, cost, cutShort, unreadable, findings } = event;
   return {
     role,
     text,
@@ -484,22 +538,75 @@ function messageOf(event: MessageEvent): ConversationMessage {
     focus,
     at,
     ...(typeof model === 'string' && { model }),
+    ...(typeof model === 'string' && isProviderId(provider) && { provider }),
     ...(isUsage(usage) && { usage }),
+    ...(isCost(cost) && { cost }),
     ...(interrupted === true && { interrupted }),
+    ...(interrupted === true && cutShort === true && { cutShort }),
+    ...(isCount(unreadable) && { unreadable }),
     ...(isSaw(saw) && { saw }),
     ...(Array.isArray(findings) && findings.every(isFinding) && { findings }),
   };
 }
 
+/**
+ * The event that logs an empty reply, written by `model`, which finished
+ * for `reason`.
+ */
+export function emptyReplyEvent(
+  { focus, at, usage, cost }: Omit<EmptyReply, 'model' | 'provider' | 'before'>,
+  model: Model,
+  reason: EmptyReplyEvent['reason'],
+): EmptyReplyEvent {
+  return {
+    type: 'reply.empty',
+    model: model.id,
+    provider: model.provider,
+    ...(usage && { usage }),
+    ...(cost !== undefined && { cost }),
+    reason,
+    focus,
+    at,
+  };
+}
+
+/** The event that logs the Model a Conversation is on from now. */
+export function modelChosenEvent(model: Model, at: number): ModelChosenEvent {
+  return { type: 'modelChosen', provider: model.provider, model: model.id, at };
+}
+
+/** The empty reply an event holds, before the message `before`. */
+function emptyReplyOf(
+  { model, provider, usage, cost, reason, focus, at }: EmptyReplyEvent,
+  before: number,
+): EmptyReply {
+  return {
+    focus,
+    at,
+    model,
+    provider,
+    ...(isUsage(usage) && { usage }),
+    ...(isCost(cost) && { cost }),
+    ...(reason === 'failed' && { failed: true as const }),
+    before,
+  };
+}
+
+function isCount(value: unknown): value is number {
+  return Number.isInteger(value) && (value as number) > 0;
+}
+
 /** The summary an event holds; what is known of its cost is kept if readable. */
 function compactionOf(event: SummaryEvent): Compaction {
-  const { text, covers, at, model, usage } = event;
+  const { text, covers, at, model, provider, usage, cost } = event;
   return {
     text,
     covers,
     at,
     ...(typeof model === 'string' && { model }),
+    ...(typeof model === 'string' && isProviderId(provider) && { provider }),
     ...(isUsage(usage) && { usage }),
+    ...(isCost(cost) && { cost }),
   };
 }
 
@@ -527,6 +634,11 @@ function isUsage(value: unknown): value is Usage {
     typeof usage.written === 'number' &&
     typeof usage.output === 'number'
   );
+}
+
+/** What a Provider said a call cost, in USD. */
+function isCost(value: unknown): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0;
 }
 
 function parseLine(line: string | undefined): unknown {
@@ -584,6 +696,25 @@ function isFocusChanged(value: unknown): value is FocusChangedEvent {
   return (
     event?.type === 'focusChanged' &&
     isInterviewFocus(event.focus) &&
+    typeof event.at === 'number'
+  );
+}
+
+function isModelChosen(value: unknown): value is ModelChosenEvent {
+  const event = value as Partial<ModelChosenEvent> | null;
+  return (
+    event?.type === 'modelChosen' &&
+    isModel({ provider: event.provider, id: event.model }) &&
+    typeof event.at === 'number'
+  );
+}
+
+function isEmptyReply(value: unknown): value is EmptyReplyEvent {
+  const event = value as Partial<EmptyReplyEvent> | null;
+  return (
+    event?.type === 'reply.empty' &&
+    isModel({ provider: event.provider, id: event.model }) &&
+    Array.isArray(event.focus) &&
     typeof event.at === 'number'
   );
 }

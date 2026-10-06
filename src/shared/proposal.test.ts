@@ -73,6 +73,7 @@ describe('splitReply', () => {
         { entry: 'anna', field: 'aliases', add: 'Nan' },
       ],
       findings: [],
+      unreadable: 0,
     });
   });
 
@@ -98,16 +99,18 @@ describe('splitReply', () => {
         { type: 'missing', comment: 'No ferry.' },
         { type: 'voice', comment: 'Not Mira.' },
       ],
+      unreadable: 0,
     });
   });
 
-  it('skips a block that is not JSON, and leaves other code blocks alone', () => {
+  it('skips a block that is not JSON, counting it, and leaves other code blocks alone', () => {
     const reply = '```proposal\n{oops\n```\n```\nnot a proposal\n```';
 
     expect(splitReply(reply)).toEqual({
       text: '```\nnot a proposal\n```',
       proposals: [],
       findings: [],
+      unreadable: 1,
     });
   });
 });
@@ -172,6 +175,30 @@ describe('proposalOf', () => {
     }
   });
 
+  it('takes a Role note only as a label, never a sentence or a blurb', () => {
+    const blurb =
+      'At thirty she boards the ferry for the mainland, hating goodbyes';
+    for (const text of [
+      'She left the island at thirty. She never looked back.',
+      blurb,
+      'the one who leaves!',
+      'her sister\nher rival',
+    ]) {
+      expect(
+        proposalOf({ entry: 'anna', field: 'roleNote', value: text }, anna),
+      ).toBeNull();
+      expect(
+        proposalOf({ entry: 'anna', field: 'roleNote', append: text }, anna),
+      ).toBeNull();
+    }
+    expect(
+      proposalOf(
+        { entry: 'anna', field: 'roleNote', value: 'the one who walks away' },
+        anna,
+      ),
+    ).toMatchObject({ proposed: 'the one who walks away' });
+  });
+
   it('adds one alias or word, as the item alone, unless the list holds it', () => {
     expect(
       proposalOf({ entry: 'anna', field: 'aliases', add: ' Nan ' }, anna),
@@ -183,12 +210,14 @@ describe('proposalOf', () => {
       proposed: ['Nan'],
     });
     expect(
-      proposalOf({ entry: 'anna', field: 'voice.neverSays', add: 'okay' }, anna)
-        ?.proposed,
-    ).toEqual(['okay']);
+      proposalOf(
+        { entry: 'anna', field: 'voice.neverSays', add: 'okay' },
+        anna,
+      ),
+    ).toMatchObject({ proposed: ['okay'] });
     expect(
       proposalOf({ entry: 'anna', field: 'aliases', add: 'annie' }, anna),
-    ).toBeNull();
+    ).toBe('unchanged');
   });
 
   it('takes no append to a list or a choice, no add to text, and nothing that adds nothing', () => {
@@ -196,20 +225,22 @@ describe('proposalOf', () => {
       { entry: 'anna', field: 'aliases', append: 'Nan' },
       { entry: 'anna', field: 'role', append: 'supporting' },
       { entry: 'anna', field: 'description', add: 'Older.' },
-      { entry: 'anna', field: 'description', append: '  ' },
-      { entry: 'anna', field: 'description', append: 'sister.' },
       { entry: 'anna', field: 'description', append: 3 },
       { entry: 'anna', field: 'aliases', add: ['Nan'] },
     ]) {
       expect(proposalOf(block, anna)).toBeNull();
     }
+    for (const append of ['  ', 'sister.']) {
+      expect(
+        proposalOf({ entry: 'anna', field: 'description', append }, anna),
+      ).toBe('unchanged');
+    }
   });
 
   it('sets a Role, Status or Sense', () => {
     expect(
-      proposalOf({ entry: 'anna', field: 'role', value: 'supporting' }, anna)
-        ?.proposed,
-    ).toBe('supporting');
+      proposalOf({ entry: 'anna', field: 'role', value: 'supporting' }, anna),
+    ).toMatchObject({ proposed: 'supporting' });
     expect(
       proposalOf({ entry: 'anna', field: 'role', value: 'villain' }, anna),
     ).toBeNull();
@@ -217,8 +248,8 @@ describe('proposalOf', () => {
       proposalOf(
         { entry: 'harbour', field: 'senses.smells', value: 'tar, diesel' },
         harbour,
-      )?.proposed,
-    ).toBe('tar, diesel');
+      ),
+    ).toMatchObject({ proposed: 'tar, diesel' });
   });
 
   it('replaces a Character’s Role note or Appearance, which no other type has', () => {
@@ -263,11 +294,19 @@ describe('proposalOf', () => {
       { entry: 'anna', field: 'senses.smells', value: 'Tar' },
       { entry: 'harbour', field: 'description', value: 'Big.' },
       { entry: 'anna', field: 'description' },
-      { entry: 'anna', field: 'description', value: 'Her sister.' },
       'not an object',
     ]) {
       expect(proposalOf(block, anna)).toBeNull();
     }
+  });
+
+  it('changes nothing with the value the field holds already', () => {
+    expect(
+      proposalOf(
+        { entry: 'anna', field: 'description', value: 'Her sister.' },
+        anna,
+      ),
+    ).toBe('unchanged');
   });
 });
 
@@ -322,7 +361,7 @@ describe('outlineChangeOf', () => {
         { outline: 'harbour', value: '- She waits.' },
         { id: 'harbour', body: '- She waits.', meta: {} },
       ),
-    ).toBeNull();
+    ).toBe('unchanged');
   });
 
   it('appends to the Outline body, as the text alone, unless it adds nothing', () => {
@@ -338,11 +377,14 @@ describe('outlineChangeOf', () => {
       operation: 'append',
       proposed: '- The ferry comes.',
     });
-    for (const append of [' ', '- She waits.', 3]) {
-      expect(
-        outlineChangeOf({ outline: 'harbour', append }, outline),
-      ).toBeNull();
+    for (const append of [' ', '- She waits.']) {
+      expect(outlineChangeOf({ outline: 'harbour', append }, outline)).toBe(
+        'unchanged',
+      );
     }
+    expect(
+      outlineChangeOf({ outline: 'harbour', append: 3 }, outline),
+    ).toBeNull();
   });
 
   it('takes nothing for another Outline, or without text', () => {

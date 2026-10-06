@@ -13,8 +13,8 @@ import path from 'node:path';
 import type {
   ImportChoice,
   ImportFile,
-  KeyOptions,
-  KeyStatus,
+  ProviderEntry,
+  ProvidersView,
   OpenedProject,
   OpenResult,
   ProjectView,
@@ -27,7 +27,7 @@ import {
   splitManuscript,
   type ImportConvention,
 } from '../shared/manuscript-import';
-import { isModelId, type ModelId } from '../shared/models';
+import { isProviderId, type ListedModel, type Model } from '../shared/models';
 import type { ProseLanguage } from '../shared/project-types';
 import { unitName } from '../shared/unit-name';
 import {
@@ -49,9 +49,13 @@ import {
   newChapters,
   readImportFile,
 } from './import/manuscript-import';
-import { anthropicKeyCheck } from './key-store/check-key';
-import { loadKeyStore, type KeyStore } from './key-store/key-store';
+import { connectProvider } from './assistant/connect-provider';
+import type { Provider } from './assistant/provider';
 import { safeStorageEncryption } from './key-store/safe-storage';
+import {
+  loadProviderSettings,
+  type ProviderSettings,
+} from './provider-settings/provider-settings';
 import { systemClock } from './project-store/clock';
 import { nodeFileSystem } from './project-store/file-system';
 import {
@@ -70,7 +74,7 @@ import { menuTemplate, type MenuState } from './menu';
 const deps = { fs: nodeFileSystem, clock: systemClock };
 
 let settings: AppSettings;
-let apiKey: KeyStore;
+let providers: ProviderSettings;
 
 /** The open Project of each window, keyed by its webContents id. */
 const stores = new Map<number, ProjectStore>();
@@ -83,14 +87,19 @@ export function storeOf(contents: WebContents): ProjectStore | undefined {
   return stores.get(contents.id);
 }
 
-/** The Claude model the next call to the Assistant uses, as chosen in Settings. */
-export function assistantModel(): ModelId {
-  return settings.model();
+/** The Model a new Conversation starts on: the one chosen last, or one shortlisted of a Provider that is added. */
+export function defaultModel(): Model {
+  return providers.defaultModel(settings.lastUsedModel());
 }
 
-/** The API key the next call to the Assistant uses, if one was added. */
-export function assistantKey(): string | null {
-  return apiKey.key();
+/** The Author chose `model` for a Conversation: a new one starts on it. */
+export function rememberModel(model: Model): void {
+  settings.setLastUsedModel(model);
+}
+
+/** The Provider the next call to `model` goes through, with its credential as kept then. */
+export function assistantProvider(model: Model): Provider {
+  return providers.provider(model.provider);
 }
 
 /** Loads the settings, then reopens the Projects open at quit, each in its window. */
@@ -99,17 +108,17 @@ export async function startShell(): Promise<void> {
     path.join(app.getPath('userData'), 'settings.json'),
     { ...deps, projects: projectLookup(deps.fs) },
   );
-  apiKey = await loadKeyStore(
-    path.join(app.getPath('userData'), 'api-key.json'),
-    {
-      ...deps,
-      encryption: safeStorageEncryption,
-      // End-to-end tests stand in for Anthropic.
-      check: anthropicKeyCheck({
-        baseURL: process.env.SCAFFOLD_ANTHROPIC_URL,
+  providers = await loadProviderSettings(app.getPath('userData'), {
+    ...deps,
+    encryption: safeStorageEncryption,
+    settings,
+    connect: (id, credential) =>
+      connectProvider(id, credential, {
+        // End-to-end tests stand in for Anthropic and OpenRouter.
+        anthropic: process.env.SCAFFOLD_ANTHROPIC_URL,
+        openrouter: process.env.SCAFFOLD_OPENROUTER_URL,
       }),
-    },
-  );
+  });
 
   // A quit waits until every window's Project is closed, its edits on disk,
   // then asks again. Those Projects stay listed to reopen at startup.
@@ -526,52 +535,72 @@ export function registerShellIpc(): void {
   });
 }
 
-/** Settings for every Project on this computer: the welcome, the API key and the model. */
+/** Settings for every Project on this computer: the welcome, the Providers and the Model. */
 export function registerSettingsIpc(): void {
   ipcMain.handle(channel.showWelcome, (): WelcomeReason | null => {
-    if (apiKey.key() !== null) return null;
-    if (apiKey.unreadable()) return 'keyUnreadable';
+    if (providers.anyAdded()) return null;
+    if (providers.unreadable()) return 'keyUnreadable';
     return settings.welcomed() ? null : 'firstLaunch';
   });
 
   ipcMain.on(channel.dismissWelcome, () => {
     settings.setWelcomed();
-    apiKey
+    providers
       .setAsideUnreadable()
       .catch((error) => console.error("Can't set the API key aside:", error));
   });
 
-  ipcMain.handle(channel.keyStatus, () => apiKey.status());
+  ipcMain.handle(channel.providers, () => providers.view());
+
+  ipcMain.handle(channel.providerStatus, (_event, id: unknown) =>
+    isProviderId(id) ? providers.status(id) : null,
+  );
 
   ipcMain.handle(
-    channel.setKey,
-    async (_event, key: string, options: KeyOptions) => {
-      const result = await apiKey.setKey(key, options);
-      if (result.check !== 'invalid') {
+    channel.addProvider,
+    async (_event, id: unknown, entry: ProviderEntry) => {
+      if (!isProviderId(id)) throw new Error(`No Provider ${String(id)}`);
+      const result = await providers.add(id, entry);
+      if (result.status !== 'key-rejected') {
         settings.setWelcomed();
-        announceKeyStatus(result.status);
+        announceProviders(result.view);
       }
       return result;
     },
   );
 
-  ipcMain.handle(channel.removeKey, async () => {
-    const status = await apiKey.removeKey();
-    announceKeyStatus(status);
-    return status;
+  ipcMain.handle(channel.removeProvider, async (_event, id: unknown) => {
+    if (!isProviderId(id)) throw new Error(`No Provider ${String(id)}`);
+    const view = await providers.remove(id);
+    announceProviders(view);
+    return view;
   });
 
-  ipcMain.handle(channel.model, () => settings.model());
-
-  ipcMain.on(channel.setModel, (_event, model: unknown) => {
-    if (isModelId(model)) settings.setModel(model);
+  ipcMain.handle(channel.listModels, (_event, id: unknown) => {
+    if (!isProviderId(id)) throw new Error(`No Provider ${String(id)}`);
+    return providers.models(id);
   });
+
+  ipcMain.handle(channel.shortlists, () => providers.shortlists());
+
+  ipcMain.handle(
+    channel.setShortlist,
+    (_event, id: unknown, models: ListedModel[]) => {
+      if (isProviderId(id) && Array.isArray(models)) {
+        providers.setShortlist(id, models);
+        // The Conversations' dropdowns offer it.
+        announceProviders(providers.view());
+      }
+    },
+  );
+
+  ipcMain.handle(channel.defaultModel, () => defaultModel());
 }
 
-/** Tells every window the key changed, so the Assistant shows or asks for one. */
-function announceKeyStatus(status: KeyStatus): void {
+/** Tells every window the Providers changed, so the Assistant shows or asks for one. */
+function announceProviders(view: ProvidersView): void {
   for (const window of BrowserWindow.getAllWindows()) {
-    window.webContents.send(channel.keyStatusChanged, status);
+    window.webContents.send(channel.providersChanged, view);
   }
 }
 

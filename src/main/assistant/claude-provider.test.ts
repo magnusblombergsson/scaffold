@@ -34,7 +34,7 @@ afterEach(async () => {
 });
 
 const request: ProviderRequest = {
-  model: 'claude-opus-5-5',
+  model: { provider: 'anthropic', id: 'claude-opus-5-5' },
   system: [
     { text: 'You never write Prose.', cache: true },
     { text: 'The Scene in focus.' },
@@ -143,6 +143,42 @@ describe('claudeProvider', () => {
     });
   });
 
+  it('says the reply finished complete when Claude ends its turn', async () => {
+    answer = (response) =>
+      sse(response, [messageStart, textStart, delta('Hm.'), ...replyEnd]);
+
+    const { events } = await collect();
+
+    expect(events.filter((e) => e.type === 'finish')).toEqual([
+      { type: 'finish', finish: 'complete' },
+    ]);
+  });
+
+  it.each(['max_tokens', 'model_context_window_exceeded'])(
+    'says the reply stopped at the length limit when Claude stops with %s',
+    async (stopReason) => {
+      answer = (response) =>
+        sse(response, [
+          messageStart,
+          textStart,
+          delta('What does she'),
+          { type: 'content_block_stop', index: 0 },
+          {
+            type: 'message_delta',
+            delta: { stop_reason: stopReason, stop_sequence: null },
+            usage: { output_tokens: 32_000 },
+          },
+          { type: 'message_stop' },
+        ]);
+
+      const { events, error } = await collect();
+
+      expect(error).toBeNull();
+      expect(events.at(-1)).toEqual({ type: 'finish', finish: 'length' });
+      expect(events.filter((e) => e.type === 'finish')).toHaveLength(1);
+    },
+  );
+
   it('sends the chosen model, the system prompt and the Conversation with the stored key, with a breakpoint after each block marked for caching', async () => {
     answer = (response) =>
       sse(response, [messageStart, textStart, delta('Hm.'), ...replyEnd]);
@@ -231,6 +267,28 @@ describe('claudeProvider', () => {
     const { error } = await collect(null);
 
     expect(error?.kind).toBe('key');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('lists the built-in Claude models with their prices, without calling Anthropic', async () => {
+    const provider = claudeProvider({ apiKey: () => null, baseURL });
+
+    const models = await provider.models();
+
+    expect(models.map((model) => model.id)).toContain('claude-opus-5-5');
+    expect(models.find((model) => model.id === 'claude-haiku-4-5')).toEqual({
+      id: 'claude-haiku-4-5',
+      name: 'Haiku 4.5',
+      contextWindow: 200_000,
+      outputLimit: 64_000,
+      price: { input: 1, cached: 0.1, written: 1.25, output: 5 },
+    });
+    expect(calls).toHaveLength(0);
+  });
+
+  it('says the key is rejected when there is none, without calling Anthropic', async () => {
+    const provider = claudeProvider({ apiKey: () => null, baseURL });
+    expect(await provider.status()).toBe('key-rejected');
     expect(calls).toHaveLength(0);
   });
 

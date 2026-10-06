@@ -4,7 +4,16 @@ import type { FileSystem } from '../project-store/file-system';
 import type { ProjectLookup } from '../project-store/project-store';
 import { safeWrite, setAside } from '../project-store/safe-write';
 import type { PanelWidths, PinnedNote, Tip } from '../../shared/api';
-import { DEFAULT_MODEL, isModelId, type ModelId } from '../../shared/models';
+import {
+  DEFAULT_MODEL,
+  isClaudeModelId,
+  isModel,
+  isProviderId,
+  type ListedModel,
+  type Model,
+  type Price,
+  type ProviderId,
+} from '../../shared/models';
 
 export const SETTINGS_VERSION = 1;
 const RECENT_LIMIT = 20;
@@ -40,15 +49,29 @@ export type ProjectSettings = {
   dismissedTips?: Tip[];
 };
 
+/**
+ * What this computer keeps of the Providers besides their keys, which are
+ * kept apart: LM Studio's address once added, and each Model shortlist the
+ * Author has chosen.
+ */
+type ProvidersSettings = {
+  lmstudio?: { address: string };
+  shortlists?: Partial<Record<ProviderId, ListedModel[]>>;
+} & Record<string, unknown>;
+
 type SettingsFile = {
   version: number;
   global: {
     openAtQuit?: string[];
     highlightMentions?: boolean;
-    /** Any string: one this app doesn't offer reads as the default. */
-    model?: string;
-    /** Set once the Author has added a key or skipped the welcome. */
+    /**
+     * Any value: one that names no Model reads as the default. Older
+     * settings name a Claude model by its id alone.
+     */
+    model?: unknown;
+    /** Set once the Author has added a Provider or skipped the welcome. */
     welcomed?: boolean;
+    providers?: ProvidersSettings;
   } & Record<string, unknown>;
   projects: Record<string, ProjectSettings & Record<string, unknown>>;
   recent: RecentRecord[];
@@ -108,6 +131,11 @@ function parseSettings(text: string): SettingsFile | null {
     delete global.highlightMentions;
   }
   if (typeof global.welcomed !== 'boolean') delete global.welcomed;
+  if (isJsonObject(global.providers)) {
+    global.providers = parseProvidersSettings(global.providers);
+  } else {
+    delete global.providers;
+  }
   const projects: SettingsFile['projects'] = {};
   if (isJsonObject(raw.projects)) {
     for (const [id, value] of Object.entries(raw.projects)) {
@@ -127,6 +155,48 @@ function parseSettings(text: string): SettingsFile | null {
       ? raw.recent.flatMap((item) => parseRecentRecord(item) ?? [])
       : [],
   };
+}
+
+function parseProvidersSettings(raw: JsonObject): ProvidersSettings {
+  const settings: ProvidersSettings = { ...raw };
+  const lmstudio = settings.lmstudio;
+  if (!isJsonObject(lmstudio) || typeof lmstudio.address !== 'string') {
+    delete settings.lmstudio;
+  }
+  const shortlists: Partial<Record<ProviderId, ListedModel[]>> = {};
+  if (isJsonObject(raw.shortlists)) {
+    for (const [id, list] of Object.entries(raw.shortlists)) {
+      if (isProviderId(id) && Array.isArray(list)) {
+        shortlists[id] = list.flatMap((model) => listedModel(model) ?? []);
+      }
+    }
+  }
+  settings.shortlists = shortlists;
+  return settings;
+}
+
+/** A shortlisted Model as kept, or null without an id; other bad fields read as unknown. */
+function listedModel(raw: unknown): ListedModel | null {
+  if (!isJsonObject(raw) || typeof raw.id !== 'string' || raw.id === '') {
+    return null;
+  }
+  const count = (value: unknown) => (isFiniteNumber(value) ? value : null);
+  return {
+    id: raw.id,
+    name: typeof raw.name === 'string' ? raw.name : raw.id,
+    contextWindow: count(raw.contextWindow),
+    outputLimit: count(raw.outputLimit),
+    price: isPrice(raw.price) ? raw.price : null,
+  };
+}
+
+function isPrice(value: unknown): value is Price {
+  return (
+    isJsonObject(value) &&
+    ['input', 'cached', 'written', 'output'].every((key) =>
+      isFiniteNumber(value[key]),
+    )
+  );
 }
 
 function parseProjectSettings(raw: JsonObject): ProjectSettings & JsonObject {
@@ -326,14 +396,58 @@ export class AppSettings {
     this.changed();
   }
 
-  /** The Claude model for the next call, in every Project. */
-  model(): ModelId {
+  /**
+   * The Model the Author chose last for a Conversation, in any Project; a
+   * Claude model this app doesn't offer reads as the default.
+   */
+  lastUsedModel(): Model {
     const model = this.data.global.model;
-    return isModelId(model) ? model : DEFAULT_MODEL;
+    if (isModel(model) && model.provider !== 'anthropic') {
+      return { provider: model.provider, id: model.id };
+    }
+    // Older settings name the Claude model by its id alone.
+    const id = isModel(model) ? model.id : model;
+    return isClaudeModelId(id) ? { provider: 'anthropic', id } : DEFAULT_MODEL;
   }
 
-  setModel(model: ModelId): void {
-    this.data.global.model = model;
+  setLastUsedModel(model: Model): void {
+    this.data.global.model = { provider: model.provider, id: model.id };
+    this.changed();
+  }
+
+  /** Where LM Studio's server is, once the Author has added it. */
+  lmStudioAddress(): string | null {
+    return this.data.global.providers?.lmstudio?.address ?? null;
+  }
+
+  /** Adds LM Studio at `address`, or with null, removes it. */
+  setLmStudioAddress(address: string | null): void {
+    const providers = (this.data.global.providers ??= {});
+    if (address === null) {
+      delete providers.lmstudio;
+    } else {
+      providers.lmstudio = { address };
+    }
+    this.changed();
+  }
+
+  /** The Models the Author shortlisted of `provider`; null if they never chose. */
+  shortlist(provider: ProviderId): ListedModel[] | null {
+    const list = this.data.global.providers?.shortlists?.[provider];
+    return list ? structuredClone(list) : null;
+  }
+
+  setShortlist(provider: ProviderId, models: ListedModel[]): void {
+    const providers = (this.data.global.providers ??= {});
+    (providers.shortlists ??= {})[provider] = models.map(
+      ({ id, name, contextWindow, outputLimit, price }) => ({
+        id,
+        name,
+        contextWindow,
+        outputLimit,
+        price,
+      }),
+    );
     this.changed();
   }
 

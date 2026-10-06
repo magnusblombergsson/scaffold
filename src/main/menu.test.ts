@@ -147,6 +147,10 @@ describe('menuTemplate', () => {
 
   it('opens Settings from Tools, or on macOS from the app menu', () => {
     const { template, sent } = build(writable);
+    expect(labels(menu(template, 'Tools'))).toEqual([
+      'Project Settings…',
+      'Settings…',
+    ]);
     const settings = item(menu(template, 'Tools'), 'Settings…');
     expect(settings.accelerator).toBe('CmdOrCtrl+,');
     click(settings);

@@ -9,6 +9,7 @@ import {
 import { SHORTCUTS, withShortcut } from '../shared/shortcuts';
 import { ConflictMarker, Menu } from './Binder';
 import { EntryThumbnail } from './EntryImage';
+import { ImagePromptDialog } from './ImagePromptDialog';
 import type { Row } from './binder-keys';
 import { useListKeys } from './list-keys';
 import { MAC } from './platform';
@@ -69,6 +70,9 @@ export function StoryBible({
   );
   /** The Entry whose ⋯ menu is open, as by Shift+F10. */
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  /** The Entry whose Image prompt dialog is open. */
+  const [imagePromptFor, setImagePromptFor] = useState<string | null>(null);
+  const imagePromptEntry = entries.find((e) => e.id === imagePromptFor);
   const keys = useListKeys(rows, {
     rename: (row) => onRename(row.id),
     menu: (row) => setMenuFor(row.id),
@@ -143,6 +147,10 @@ export function StoryBible({
                     returnFocus={() => keys.focusRow(entry.id)}
                     items={[
                       {
+                        label: 'Image prompt…',
+                        run: () => setImagePromptFor(entry.id),
+                      },
+                      {
                         label: 'Move to Trash',
                         run: () =>
                           onChange(
@@ -158,6 +166,12 @@ export function StoryBible({
           </section>
         );
       })}
+      {imagePromptEntry && (
+        <ImagePromptDialog
+          entry={imagePromptEntry}
+          onClose={() => setImagePromptFor(null)}
+        />
+      )}
     </nav>
   );
 }

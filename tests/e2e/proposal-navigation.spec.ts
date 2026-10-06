@@ -1,24 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { answerDialogs, launch, useTempDir } from './app';
+import { addAnthropicKey, answerDialogs, launch, useTempDir } from './app';
 import { useFakeAnthropic } from './fake-anthropic';
 
 const tempDir = useTempDir();
 const anthropic = useFakeAnthropic();
-
-async function addKey(page: Page) {
-  const assistant = page.getByRole('complementary', { name: 'Assistant' });
-  await assistant.getByRole('button', { name: 'Add API key' }).click();
-  await page
-    .getByRole('textbox', { name: 'API key' })
-    .fill('sk-ant-api03-good-abcd');
-  await page.getByRole('button', { name: 'Check and save' }).click();
-  const settings = page.getByRole('dialog', { name: 'Settings' });
-  await expect(settings.getByLabel('Key in use')).toBeVisible();
-  await settings.getByRole('button', { name: 'Done' }).click();
-  return assistant;
-}
 
 /** Replaces the text of an editor field. */
 async function fill(page: Page, label: string, text: string) {
@@ -52,7 +39,7 @@ async function start() {
   const page = await app.firstWindow();
   await page.getByRole('button', { name: 'New Project…' }).click();
   await expect(page.getByLabel('Prose')).toBeFocused();
-  const assistant = await addKey(page);
+  const assistant = await addAnthropicKey(page);
   await page.getByRole('tab', { name: 'Story Bible' }).click();
   await page.getByRole('button', { name: 'New Entry' }).click();
   await page.getByRole('menuitem', { name: 'Character', exact: true }).click();

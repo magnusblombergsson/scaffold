@@ -5,15 +5,17 @@ import {
   type EntryValue,
   type Manuscript,
 } from '../shared/project-types';
-import { NoKeyState, useKeyStatus } from './ApiKey';
+import { anyAdded, NoProviderState, useProviders } from './Providers';
 import {
   Composer,
+  ConversationUsage,
   MessageLog,
   useConversation,
   type Names,
   type OnChange,
 } from './Conversation';
 import { EntryCard } from './EntryCard';
+import { ModelPicker } from './ModelPicker';
 import { PanelResizer, type PaneSize } from './PanelResizer';
 import { RoomList } from './RoomList';
 
@@ -27,7 +29,7 @@ export function BrainstormRoom({
   active,
   names,
   pane,
-  onAddKey,
+  onAddProvider,
   onOpenEntry,
   onChange,
 }: {
@@ -36,12 +38,12 @@ export function BrainstormRoom({
   names: Names;
   /** The width of a side pane, and how to resize it. */
   pane(key: keyof PanelWidths): PaneSize;
-  onAddKey(): void;
+  onAddProvider(): void;
   /** Opens an Entry in the Writing Mode. */
   onOpenEntry(entryId: string): void;
   onChange: OnChange;
 }) {
-  const status = useKeyStatus();
+  const providers = useProviders();
   const conversation = useConversation({
     mode: 'brainstorm',
     sceneId: null,
@@ -70,22 +72,16 @@ export function BrainstormRoom({
       />
       <main className="centre room-centre" aria-label="Brainstorm">
         <h2 className="centre-title">{current?.title ?? 'New Conversation'}</h2>
-        {status &&
-          (status.masked ? (
+        {providers &&
+          (anyAdded(providers) ? (
             <div className="conversations">
-              {total && (
-                <p
-                  className="conversation-usage"
-                  aria-label="Conversation usage"
-                >
-                  {total}
-                </p>
-              )}
+              <ModelPicker conversation={conversation} />
+              <ConversationUsage total={total} />
               <MessageLog
                 conversation={conversation}
                 names={names}
                 empty="Brainstorm with the Assistant: characters, places, turns of plot, structure."
-                onOpenSettings={onAddKey}
+                onOpenSettings={onAddProvider}
               />
               {error && (
                 <p className="assistant-error" role="alert">
@@ -98,7 +94,7 @@ export function BrainstormRoom({
               />
             </div>
           ) : (
-            <NoKeyState onAddKey={onAddKey} />
+            <NoProviderState onAddProvider={onAddProvider} />
           ))}
       </main>
       <PanelResizer

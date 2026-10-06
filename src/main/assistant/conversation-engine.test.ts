@@ -2,6 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { Model } from '../../shared/models';
 import { instantClock } from '../project-store/clock';
 import { nodeFileSystem, type FileSystem } from '../project-store/file-system';
 import { createProject, openProject } from '../project-store/project-store';
@@ -11,6 +12,9 @@ import {
 } from './conversation-engine';
 import { fakeProvider, type FakeReply } from './fake-provider';
 import type { ProviderRequest } from './provider';
+
+const OPUS: Model = { provider: 'anthropic', id: 'claude-opus-5-5' };
+const ROUTED: Model = { provider: 'openrouter', id: 'qwen/qwen3-235b' };
 
 let dir: string;
 
@@ -36,8 +40,8 @@ async function setUp(
   const provider = fakeProvider((request, n) => reply(n, request));
   const engine = createConversationEngine({
     store,
-    provider,
-    model: () => 'claude-opus-5-5',
+    providerFor: () => provider,
+    defaultModel: () => OPUS,
     clock,
     compaction,
   });
@@ -65,6 +69,7 @@ describe('askAssistant', () => {
         focus: [sceneId],
         at: clock.now(),
         model: 'claude-opus-5-5',
+        provider: 'anthropic',
         saw: {
           entries: [],
           units: [
@@ -104,8 +109,103 @@ describe('askAssistant', () => {
       role: 'assistant',
       text: 'Hm.',
       model: 'claude-opus-5-5',
+      provider: 'anthropic',
       usage,
     });
+  });
+
+  it('logs what the Provider said a reply cost, with what it used', async () => {
+    const usage = { input: 18_000, cached: 0, written: 0, output: 900 };
+    const { store, sceneId, engine } = await setUp(() => ({
+      text: ['Hm.'],
+      usage,
+      cost: 0.031,
+    }));
+    const { id } = await store.startConversation('writing', 'Anna', ROUTED);
+
+    await engine.askAssistant(id, 'Why?', { sceneId }, () => {});
+
+    const [, replied] = (await store.readConversation(id)).messages;
+    expect(replied).toMatchObject({
+      model: 'qwen/qwen3-235b',
+      provider: 'openrouter',
+      usage,
+      cost: 0.031,
+    });
+  });
+
+  it('logs no cost for a reply whose Provider didn’t say one', async () => {
+    const { store, sceneId, engine } = await setUp(() => ({
+      text: ['Hm.'],
+      usage: { input: 18_000, cached: 0, written: 0, output: 900 },
+    }));
+    const { id } = await store.startConversation('writing', 'Anna');
+
+    await engine.askAssistant(id, 'Why?', { sceneId }, () => {});
+
+    const [, replied] = (await store.readConversation(id)).messages;
+    expect(replied).not.toHaveProperty('cost');
+  });
+
+  it('asks the Model the Conversation is on, switched from the next message, and logs which wrote each reply', async () => {
+    const { store, sceneId, clock } = await setUp();
+    const local: Model = { provider: 'lmstudio', id: 'qwen3-8b' };
+    const asked: Model[] = [];
+    const engine = createConversationEngine({
+      store,
+      providerFor: (model) => {
+        asked.push(model);
+        return fakeProvider(() => [`From ${model.id}.`]);
+      },
+      defaultModel: () => {
+        throw new Error('The Conversation has a Model');
+      },
+      clock,
+    });
+    const { id } = await store.startConversation('writing', 'Anna', OPUS);
+
+    await engine.askAssistant(id, 'Why?', { sceneId }, () => {});
+    await store.chooseModel(id, local);
+    await engine.askAssistant(id, 'And?', { sceneId }, () => {});
+
+    expect(asked).toEqual([OPUS, local]);
+    const replies = (await store.readConversation(id)).messages.filter(
+      (m) => m.role === 'assistant',
+    );
+    expect(replies.map((m) => [m.text, m.provider, m.model])).toEqual([
+      ['From claude-opus-5-5.', 'anthropic', 'claude-opus-5-5'],
+      ['From qwen3-8b.', 'lmstudio', 'qwen3-8b'],
+    ]);
+  });
+
+  it('asks the Model of the latest reply in a Conversation with none chosen, and the default Model before any reply', async () => {
+    const { store, sceneId, clock } = await setUp();
+    const haiku: Model = { provider: 'anthropic', id: 'claude-haiku-4-5' };
+    const asked: Model[] = [];
+    const engine = createConversationEngine({
+      store,
+      providerFor: (model) => {
+        asked.push(model);
+        return fakeProvider(() => ['Hm.']);
+      },
+      defaultModel: () => haiku,
+      clock,
+    });
+    const { id } = await store.startConversation('writing', 'Anna');
+    await engine.askAssistant(id, 'Why?', { sceneId }, () => {});
+    const { id: older } = await store.startConversation('writing', 'Mira');
+    // As the MVP logged a reply: the model's id alone.
+    await store.appendMessage(older, {
+      role: 'assistant',
+      text: 'Hm.',
+      focus: [],
+      at: 1,
+      model: 'claude-opus-5-5',
+    });
+
+    await engine.askAssistant(older, 'And?', { sceneId }, () => {});
+
+    expect(asked).toEqual([haiku, OPUS]);
   });
 
   it('sends the Writing context for the Scene in focus and this Conversation only', async () => {
@@ -134,7 +234,7 @@ describe('askAssistant', () => {
     await engine.askAssistant(id, 'And the rain?', { sceneId }, () => {});
 
     const request = provider.requests.at(-1)!;
-    expect(request.model).toBe('claude-opus-5-5');
+    expect(request.model).toEqual(OPUS);
     expect(request.system).toHaveLength(4);
     expect(request.system[0].text).toMatch(/advise the Author, who is writing/);
     expect(request.system[0].text).toMatch(/You never write Prose/);
@@ -215,7 +315,7 @@ describe('askAssistant', () => {
     const onDisk: string[] = [];
     const engine = createConversationEngine({
       store,
-      provider: {
+      providerFor: () => ({
         async *stream() {
           onDisk.push(
             await readFile(
@@ -225,8 +325,8 @@ describe('askAssistant', () => {
           );
           yield { type: 'text', text: 'Hm.' };
         },
-      },
-      model: () => 'claude-opus-5-5',
+      }),
+      defaultModel: () => OPUS,
       clock,
     });
     const { id } = await store.startConversation('writing', 'Anna');
@@ -280,6 +380,27 @@ describe('askAssistant', () => {
     expect(
       (await store.readConversation(id)).messages.map((m) => m.role),
     ).toEqual(['author']);
+  });
+
+  it('keeps what a reply stopped partway used and cost, as looked up after', async () => {
+    const usage = { input: 2_000, cached: 0, written: 0, output: 3 };
+    const { store, sceneId, engine } = await setUp(() => ({
+      text: ['What does '],
+      usage,
+      cost: 0.002,
+      fail: 'offline',
+    }));
+    const { id } = await store.startConversation('writing', 'Anna', ROUTED);
+
+    const result = await engine.askAssistant(id, 'Why?', { sceneId }, () => {});
+
+    expect(result.reply).toMatchObject({
+      interrupted: true,
+      usage,
+      cost: 0.002,
+    });
+    const [, replied] = (await store.readConversation(id)).messages;
+    expect(replied).toEqual(result.reply);
   });
 
   it('keeps a reply cut short as an interrupted turn, with what it used', async () => {
@@ -657,6 +778,211 @@ describe('Proposals in a reply', () => {
     expect(skeleton.text).toContain(`Id: ${sceneId}`);
     expect(skeleton.text).toContain('Id: project');
   });
+
+  it('makes no Proposals in a reply cut short at the length limit, which keeps its text and is marked so', async () => {
+    const { store, engine } = await withAnna((annaId) => ({
+      text: [
+        'Older, then.\n',
+        block({ entry: annaId, field: 'description', value: 'Older.' }),
+        '\nAnd',
+      ],
+      finish: 'length',
+    }));
+    const { id } = await store.startConversation('writing', 'Anna');
+
+    const result = await engine.askAssistant(
+      id,
+      'Hm',
+      { sceneId: null },
+      () => {},
+    );
+
+    expect(result.failure).toBeNull();
+    const [, replied] = (await store.readConversation(id)).messages;
+    expect(replied).toMatchObject({
+      text: 'Older, then.\n\nAnd',
+      interrupted: true,
+      cutShort: true,
+    });
+    expect(replied.proposals).toBeUndefined();
+    expect(result.reply).toEqual({ ...replied, proposals: undefined });
+  });
+
+  it('strips thinking from the reply, and makes no Proposals from blocks inside it', async () => {
+    const { store, engine } = await withAnna((annaId) => [
+      '<think>Perhaps:\n',
+      block({ entry: annaId, field: 'description', value: 'Thought.' }),
+      '\n</think>\n\nOlder?\n',
+      block({ entry: annaId, field: 'role', value: 'supporting' }),
+    ]);
+    const { id } = await store.startConversation('writing', 'Anna');
+
+    await engine.askAssistant(id, 'Hm', { sceneId: null }, () => {});
+
+    const [, replied] = (await store.readConversation(id)).messages;
+    expect(replied.text).toBe('Older?');
+    expect(replied.unreadable).toBeUndefined();
+    expect(
+      replied.proposals?.map((p) => p.kind === 'field' && p.field),
+    ).toEqual(['role']);
+  });
+
+  it('counts the Proposal blocks it couldn’t read: bad JSON, an unknown Entry or field, a value the field can’t hold', async () => {
+    const { store, engine } = await withAnna((annaId) => [
+      'Noted.\n',
+      '```proposal\n{"entry": oops}\n```\n',
+      block({ entry: 'nobody', field: 'description', value: 'Who?' }),
+      block({ entry: annaId, field: 'mood', value: 'Sad.' }),
+      block({ entry: annaId, field: 'role', value: 'sidekick' }),
+      // Proposes what Anna holds already: readable, but nothing to propose.
+      block({ entry: annaId, field: 'description', value: 'Her sister.' }),
+      block({ entry: annaId, field: 'aliases', add: 'Nan' }),
+    ]);
+    const { id } = await store.startConversation('writing', 'Anna');
+
+    const result = await engine.askAssistant(
+      id,
+      'Hm',
+      { sceneId: null },
+      () => {},
+    );
+
+    expect(result.reply?.unreadable).toBe(4);
+    const [, replied] = (await store.readConversation(id)).messages;
+    expect(replied.unreadable).toBe(4);
+    expect(replied.proposals).toHaveLength(1);
+  });
+});
+
+describe('Empty replies', () => {
+  it('logs a reply with nothing left after thinking as reply.empty, with what it used, and makes no Proposals', async () => {
+    const usage = { input: 2_000, cached: 0, written: 0, output: 4_096 };
+    const { projectPath, store, sceneId, engine, clock } = await setUp(() => ({
+      text: ['<think>Hm. ', 'Long thoughts'],
+      usage,
+      finish: 'length',
+    }));
+    const { id } = await store.startConversation('writing', 'Anna');
+
+    const result = await engine.askAssistant(id, 'Why?', { sceneId }, () => {});
+
+    const empty = {
+      focus: [sceneId],
+      at: clock.now(),
+      model: 'claude-opus-5-5',
+      provider: 'anthropic',
+      usage,
+      before: 1,
+    };
+    expect(result).toEqual({ reply: null, empty, failure: null });
+    const conversation = await store.readConversation(id);
+    expect(conversation.messages.map((m) => m.role)).toEqual(['author']);
+    expect(conversation.emptyReplies).toEqual([empty]);
+    const log = await readFile(
+      path.join(projectPath, 'conversations', `${id}.jsonl`),
+      'utf8',
+    );
+    const events = log
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as { type?: string });
+    expect(events.at(-1)).toEqual({
+      type: 'reply.empty',
+      model: 'claude-opus-5-5',
+      provider: 'anthropic',
+      usage,
+      reason: 'length',
+      focus: [sceneId],
+      at: clock.now(),
+    });
+    expect(events.filter((e) => e.type?.startsWith('proposal.'))).toEqual([]);
+  });
+
+  it('logs what the Provider said an empty reply cost, so it counts', async () => {
+    const usage = { input: 2_000, cached: 0, written: 0, output: 4_096 };
+    const { store, sceneId, engine } = await setUp(() => ({
+      text: ['<think>Long thoughts'],
+      usage,
+      cost: 0.05,
+      finish: 'length',
+    }));
+    const { id } = await store.startConversation('writing', 'Anna', ROUTED);
+
+    const result = await engine.askAssistant(id, 'Why?', { sceneId }, () => {});
+
+    expect(result.empty).toMatchObject({ usage, cost: 0.05 });
+    const conversation = await store.readConversation(id);
+    expect(conversation.emptyReplies).toEqual([result.empty]);
+  });
+
+  it('logs a call that failed after only thinking as a failed reply.empty, so what it used still counts', async () => {
+    const usage = { input: 2_000, cached: 0, written: 0, output: 900 };
+    const { projectPath, store, sceneId, engine, clock } = await setUp(() => ({
+      text: ['<think>Hm, the quay'],
+      usage,
+      cost: 0.01,
+      fail: 'offline',
+    }));
+    const { id } = await store.startConversation('writing', 'Anna', ROUTED);
+
+    const result = await engine.askAssistant(id, 'Why?', { sceneId }, () => {});
+
+    const empty = {
+      focus: [sceneId],
+      at: clock.now(),
+      model: ROUTED.id,
+      provider: ROUTED.provider,
+      usage,
+      cost: 0.01,
+      failed: true,
+      before: 1,
+    };
+    expect(result).toEqual({ reply: null, empty, failure: 'offline' });
+    const conversation = await store.readConversation(id);
+    expect(conversation.messages.map((m) => m.role)).toEqual(['author']);
+    expect(conversation.emptyReplies).toEqual([empty]);
+    const log = await readFile(
+      path.join(projectPath, 'conversations', `${id}.jsonl`),
+      'utf8',
+    );
+    expect(JSON.parse(log.trim().split('\n').at(-1)!)).toMatchObject({
+      type: 'reply.empty',
+      reason: 'failed',
+    });
+  });
+
+  it('logs nothing for a call that failed after only thinking and used nothing it said', async () => {
+    const { store, sceneId, engine } = await setUp(() => ({
+      text: ['<think>Hm'],
+      fail: 'offline',
+    }));
+    const { id } = await store.startConversation('writing', 'Anna');
+
+    const result = await engine.askAssistant(id, 'Why?', { sceneId }, () => {});
+
+    expect(result).toEqual({ reply: null, failure: 'offline' });
+    expect((await store.readConversation(id)).emptyReplies ?? []).toEqual([]);
+  });
+
+  it('never sends an empty reply back, and a retry answers the Author’s message afresh', async () => {
+    const { store, sceneId, engine, provider } = await setUp((n) =>
+      n === 0 ? [] : ['Because.'],
+    );
+    const { id } = await store.startConversation('writing', 'Anna');
+    await engine.askAssistant(id, 'Why?', { sceneId }, () => {});
+
+    await engine.retry(id, () => {});
+    await engine.askAssistant(id, 'And?', { sceneId }, () => {});
+
+    expect(provider.requests[1].messages).toEqual([
+      { role: 'user', content: 'Why?' },
+    ]);
+    expect(provider.requests[2].messages.map((m) => m.content)).toEqual([
+      'Why?',
+      'Because.',
+      'And?',
+    ]);
+  });
 });
 
 describe('Reviews', () => {
@@ -834,8 +1160,8 @@ describe('Reviews', () => {
     const provider = fakeProvider(() => ['Hm.']);
     const engine = createConversationEngine({
       store,
-      provider,
-      model: () => 'claude-opus-5-5',
+      providerFor: () => provider,
+      defaultModel: () => OPUS,
       clock,
     });
     const { id } = await store.startConversation('writing', 'Review');
@@ -911,8 +1237,31 @@ describe('Compaction of a long Conversation', () => {
         covers: 2,
         at: clock.now(),
         model: 'claude-opus-5-5',
+        provider: 'anthropic',
       },
     ]);
+  });
+
+  it('logs what summarising used and cost, so it counts', async () => {
+    const usage = { input: 900, cached: 0, written: 0, output: 50 };
+    const { store, engine } = await setUp(
+      (n) =>
+        n === 2
+          ? { text: ['Anna wants to leave.'], usage, cost: 0.001 }
+          : [`Reply ${n}`],
+      { compaction },
+    );
+    const { id } = await store.startConversation('brainstorm', 'Anna', ROUTED);
+    await engine.askAssistant(id, long('Anna'), { sceneId: null }, () => {});
+    await engine.askAssistant(id, long('Mira'), { sceneId: null }, () => {});
+    await engine.askAssistant(id, 'And then?', { sceneId: null }, () => {});
+
+    const conversation = await store.readConversation(id);
+    expect(conversation.compactions?.[0]).toMatchObject({
+      provider: 'openrouter',
+      usage,
+      cost: 0.001,
+    });
   });
 
   it('always sends the undecided Proposals of the summarised part in full, and no decided ones', async () => {

@@ -83,19 +83,24 @@ import type {
   Conversation,
   ConversationMessage,
   ConversationSummary,
+  EmptyReply,
   InterviewFocus,
   Mode,
 } from '../../shared/conversation';
+import type { Model } from '../../shared/models';
 import type { Clock } from './clock';
 import {
   acceptedEvent,
+  emptyReplyEvent,
   eventLine,
   forkedLog,
   headerLine,
+  modelChosenEvent,
   parseLog,
   proposedEvent,
   type ConversationEvent,
   type Decision,
+  type EmptyReplyEvent,
   type LoggedConversation,
   type LoggedProposal,
 } from './conversation-log';
@@ -2779,10 +2784,14 @@ export class ProjectStore {
     if (reload) reload.kept = true;
   }
 
-  /** Starts a Conversation in `mode`, written as its log's header line. */
+  /**
+   * Starts a Conversation in `mode`, written as its log's header line, on
+   * `model` if given, logged as chosen.
+   */
   async startConversation(
     mode: Mode,
     title: string,
+    model?: Model,
   ): Promise<ConversationSummary> {
     await this.passFormatGate();
     const summary = {
@@ -2798,7 +2807,19 @@ export class ProjectStore {
       conversationPath(this.path, summary.id),
       headerLine({ ...summary, format: FORMAT }),
     );
+    if (model) await this.chooseModel(summary.id, model);
     return summary;
+  }
+
+  /** Puts a Conversation on `model` from its next message on, logged as chosen. */
+  chooseModel(id: string, model: Model): Promise<void> {
+    return this.inLog(id, async () => {
+      await this.passFormatGate();
+      await this.appendEvent(
+        id,
+        modelChosenEvent(model, this.deps.clock.now()),
+      );
+    });
   }
 
   /**
@@ -3027,6 +3048,23 @@ ${text}`);
     return this.inLog(id, async () => {
       await this.passFormatGate();
       await this.appendEvent(id, { type: 'message', ...logged });
+    });
+  }
+
+  /**
+   * Appends a reply that came back empty, written by `model`, which finished
+   * for `reason`: logged as such, so its cost counts but it is never sent
+   * back as context.
+   */
+  appendEmptyReply(
+    id: string,
+    reply: Omit<EmptyReply, 'model' | 'provider' | 'before'>,
+    model: Model,
+    reason: EmptyReplyEvent['reason'],
+  ): Promise<void> {
+    return this.inLog(id, async () => {
+      await this.passFormatGate();
+      await this.appendEvent(id, emptyReplyEvent(reply, model, reason));
     });
   }
 

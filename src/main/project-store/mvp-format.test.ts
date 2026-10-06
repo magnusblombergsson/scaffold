@@ -226,6 +226,181 @@ it('an MVP app skips an Append or an Add, and its accept, applying nothing; it s
   ]);
 });
 
+it('an MVP app skips an empty reply, or a failed one, counting the same messages, and reads the message of one cut short as interrupted', async () => {
+  const store = await createProject(projectPath, deps());
+  const { id } = await store.startConversation('writing', 'Anna');
+  const usage = { input: 2_000, cached: 0, written: 0, output: 4_096 };
+  await store.appendMessage(id, {
+    role: 'author',
+    text: 'Why?',
+    focus: [],
+    at: 1,
+  });
+  await store.appendEmptyReply(
+    id,
+    { focus: [], at: 2, usage },
+    { provider: 'anthropic', id: 'claude-opus-5-5' },
+    'length',
+  );
+  await store.appendEmptyReply(
+    id,
+    { focus: [], at: 2, usage },
+    { provider: 'anthropic', id: 'claude-opus-5-5' },
+    'failed',
+  );
+  await store.appendMessage(id, {
+    role: 'assistant',
+    text: 'Because',
+    focus: [],
+    at: 3,
+    interrupted: true,
+    cutShort: true,
+  });
+  await store.appendSummary(id, { text: 'Anna asked why.', covers: 2, at: 4 });
+  await store.close();
+
+  const log = await readFile(
+    path.join(projectPath, 'conversations', `${id}.jsonl`),
+    'utf8',
+  );
+  expect(log).toContain('"type":"reply.empty"');
+  expect(mvpParseLog(log)?.messages).toEqual([
+    { role: 'author', text: 'Why?', focus: [], at: 1 },
+    {
+      role: 'assistant',
+      text: 'Because',
+      focus: [],
+      at: 3,
+      interrupted: true,
+    },
+  ]);
+
+  // A summary covers the same messages in both.
+  expect(mvpParseLog(log)?.compactions?.[0].covers).toBe(2);
+
+  const reopened = await openProject(projectPath, deps());
+  const conversation = await reopened.readConversation(id);
+  expect(conversation.messages).toEqual([
+    { role: 'author', text: 'Why?', focus: [], at: 1 },
+    {
+      role: 'assistant',
+      text: 'Because',
+      focus: [],
+      at: 3,
+      interrupted: true,
+      cutShort: true,
+    },
+  ]);
+  expect(conversation.emptyReplies).toEqual([
+    {
+      focus: [],
+      at: 2,
+      model: 'claude-opus-5-5',
+      provider: 'anthropic',
+      usage,
+      before: 1,
+    },
+    {
+      focus: [],
+      at: 2,
+      model: 'claude-opus-5-5',
+      provider: 'anthropic',
+      usage,
+      failed: true,
+      before: 1,
+    },
+  ]);
+  expect(conversation.compactions?.[0].covers).toBe(2);
+  await reopened.close();
+});
+
+it('an MVP app skips the Model a Conversation is on and ignores which Provider wrote a reply, so it asks its own one Model', async () => {
+  const store = await createProject(projectPath, deps());
+  const local = { provider: 'lmstudio', id: 'qwen3-8b' } as const;
+  const { id } = await store.startConversation('writing', 'Anna', local);
+  await store.appendMessage(id, {
+    role: 'author',
+    text: 'Why?',
+    focus: [],
+    at: 1,
+  });
+  await store.appendMessage(id, {
+    role: 'assistant',
+    text: 'Because.',
+    focus: [],
+    at: 2,
+    model: 'qwen3-8b',
+    provider: 'lmstudio',
+  });
+  await store.chooseModel(id, {
+    provider: 'anthropic',
+    id: 'claude-haiku-4-5',
+  });
+  await store.close();
+
+  const log = await readFile(
+    path.join(projectPath, 'conversations', `${id}.jsonl`),
+    'utf8',
+  );
+  expect(log.match(/"type":"modelChosen"/g)).toHaveLength(2);
+  const mvp = mvpParseLog(log);
+  // Nothing in what it reads names a Model to ask: it asks its global one.
+  expect(mvp).not.toHaveProperty('model');
+  expect(mvp?.messages).toEqual([
+    { role: 'author', text: 'Why?', focus: [], at: 1 },
+    {
+      role: 'assistant',
+      text: 'Because.',
+      focus: [],
+      at: 2,
+      model: 'qwen3-8b',
+    },
+  ]);
+
+  const reopened = await openProject(projectPath, deps());
+  const conversation = await reopened.readConversation(id);
+  expect(conversation.model).toEqual({
+    provider: 'anthropic',
+    id: 'claude-haiku-4-5',
+  });
+  expect(conversation.messages[1]).toMatchObject({ provider: 'lmstudio' });
+  await reopened.close();
+});
+
+it('an MVP app ignores what OpenRouter said a reply cost', async () => {
+  const store = await createProject(projectPath, deps());
+  const routed = { provider: 'openrouter', id: 'qwen/qwen3-235b' } as const;
+  const { id } = await store.startConversation('writing', 'Anna', routed);
+  const usage = { input: 2_000, cached: 0, written: 0, output: 40 };
+  await store.appendMessage(id, {
+    role: 'assistant',
+    text: 'Because.',
+    focus: [],
+    at: 1,
+    model: 'qwen/qwen3-235b',
+    provider: 'openrouter',
+    usage,
+    cost: 0.003,
+  });
+  await store.close();
+
+  const log = await readFile(
+    path.join(projectPath, 'conversations', `${id}.jsonl`),
+    'utf8',
+  );
+  expect(log).toContain('"cost":0.003');
+  expect(mvpParseLog(log)?.messages).toEqual([
+    {
+      role: 'assistant',
+      text: 'Because.',
+      focus: [],
+      at: 1,
+      model: 'qwen/qwen3-235b',
+      usage,
+    },
+  ]);
+});
+
 it('reads a Proposal the MVP logged as a Replace', async () => {
   const store = await createProject(projectPath, deps());
   const { id: annaId } = await store.createEntry('character', 'Anna');

@@ -1,9 +1,10 @@
 import { useContext, useState } from 'react';
 import { MODE_LABELS, type Mode } from '../shared/conversation';
 import { reviewText, type ReviewCommand } from '../shared/finding';
-import { NoKeyState, useKeyStatus } from './ApiKey';
+import { anyAdded, NoProviderState, useProviders } from './Providers';
 import {
   Composer,
+  ConversationUsage,
   conversationActions,
   MessageLog,
   useConversation,
@@ -13,6 +14,7 @@ import {
   type ShowProposal,
 } from './Conversation';
 import { Menu, TitleInput } from './Binder';
+import { ModelPicker } from './ModelPicker';
 import { ReadOnlyContext } from './read-only';
 
 /**
@@ -22,7 +24,7 @@ import { ReadOnlyContext } from './read-only';
 export function AssistantPanel({
   active,
   width,
-  onAddKey,
+  onAddProvider,
   sceneId,
   names,
   show,
@@ -33,7 +35,7 @@ export function AssistantPanel({
   active: boolean;
   /** In CSS pixels. */
   width: number;
-  onAddKey(): void;
+  onAddProvider(): void;
   /** The Scene open in the editor, which a message sent now is about. */
   sceneId: string | null;
   names: Names;
@@ -42,23 +44,23 @@ export function AssistantPanel({
   onQuote(sceneId: string, quote: string): void;
   onChange: OnChange;
 }) {
-  const status = useKeyStatus();
+  const providers = useProviders();
   return (
     <aside className="assistant-panel" aria-label="Assistant" style={{ width }}>
       <h2 className="assistant-heading">Assistant</h2>
-      {status &&
-        (status.masked ? (
+      {providers &&
+        (anyAdded(providers) ? (
           <Conversations
             active={active}
             sceneId={sceneId}
             names={names}
             show={show}
-            onOpenSettings={onAddKey}
+            onOpenSettings={onAddProvider}
             onQuote={onQuote}
             onChange={onChange}
           />
         ) : (
-          <NoKeyState onAddKey={onAddKey} />
+          <NoProviderState onAddProvider={onAddProvider} />
         ))}
     </aside>
   );
@@ -174,11 +176,8 @@ function Conversations({
             />
           )}
         </div>
-        {total && (
-          <p className="conversation-usage" aria-label="Conversation usage">
-            {total}
-          </p>
-        )}
+        <ModelPicker conversation={conversation} />
+        <ConversationUsage total={total} />
       </div>
       <MessageLog
         conversation={conversation}

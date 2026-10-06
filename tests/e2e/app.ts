@@ -1,5 +1,6 @@
 import {
   _electron as electron,
+  expect,
   test,
   type ElectronApplication,
   type Page,
@@ -28,6 +29,8 @@ export type LaunchOptions = {
   firstRun?: boolean;
   /** Where Anthropic is, such as a fake one the test runs. */
   anthropicUrl?: string;
+  /** Where OpenRouter is, such as a fake one the test runs. */
+  openRouterUrl?: string;
 };
 
 /**
@@ -45,7 +48,7 @@ export function launch(dir: string, options: LaunchOptions = {}) {
 /** The environment the app runs in, with its settings in `dir`. */
 export function appEnv(
   dir: string,
-  { firstRun = false, anthropicUrl }: LaunchOptions = {},
+  { firstRun = false, anthropicUrl, openRouterUrl }: LaunchOptions = {},
 ): Record<string, string> {
   const userData = path.join(dir, 'user-data');
   const settings = path.join(userData, 'settings.json');
@@ -67,9 +70,10 @@ export function appEnv(
   return {
     ...(env as Record<string, string>),
     SCAFFOLD_USER_DATA: userData,
-    // Never the real Anthropic: a port nothing listens on, unless a test
-    // runs a fake one.
+    // Never the real Anthropic or OpenRouter: a port nothing listens on,
+    // unless a test runs a fake one.
     SCAFFOLD_ANTHROPIC_URL: anthropicUrl ?? 'http://127.0.0.1:9',
+    SCAFFOLD_OPENROUTER_URL: openRouterUrl ?? 'http://127.0.0.1:9',
   };
 }
 
@@ -144,4 +148,24 @@ export async function chooseMenu(
     },
     [labels, window] as const,
   );
+}
+
+/**
+ * Adds an Anthropic key from the Assistant's empty state, as the Author
+ * would, and closes Settings; the fake Anthropic takes any key. Returns the
+ * Assistant panel.
+ */
+export async function addAnthropicKey(page: Page) {
+  const assistant = page.getByRole('complementary', { name: 'Assistant' });
+  await assistant.getByRole('button', { name: 'Add a Provider' }).click();
+  const settings = page.getByRole('dialog', { name: 'Settings' });
+  const anthropic = settings.getByRole('region', { name: 'Anthropic' });
+  await anthropic.getByRole('button', { name: 'Add key' }).click();
+  await anthropic
+    .getByRole('textbox', { name: 'Anthropic API key' })
+    .fill('sk-ant-api03-good-abcd');
+  await anthropic.getByRole('button', { name: 'Check and save' }).click();
+  await expect(anthropic.getByLabel('Anthropic key in use')).toBeVisible();
+  await settings.getByRole('button', { name: 'Done' }).click();
+  return assistant;
 }

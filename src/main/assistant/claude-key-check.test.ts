@@ -1,7 +1,7 @@
 import { createServer, type Server } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { anthropicKeyCheck } from './check-key';
+import { anthropicKeyCheck } from './claude-key-check';
 
 /** What the fake Anthropic answers the model list with. */
 let reply: { status: number; body: unknown };
@@ -31,10 +31,12 @@ function error(status: number, type: string) {
 }
 
 describe('anthropicKeyCheck', () => {
-  it('lists the models with the key, which is ok when that works', async () => {
+  it('lists the models with the key, which is connected when that works', async () => {
     reply = { status: 200, body: { data: [], has_more: false } };
 
-    expect(await anthropicKeyCheck({ baseURL })('sk-ant-good')).toBe('ok');
+    expect(await anthropicKeyCheck({ baseURL })('sk-ant-good')).toBe(
+      'connected',
+    );
     expect(seen).toEqual({
       url: expect.stringMatching(/^\/v1\/models/),
       key: 'sk-ant-good',
@@ -42,10 +44,10 @@ describe('anthropicKeyCheck', () => {
   });
 
   it.each([
-    [401, 'authentication_error', 'invalid'],
-    [403, 'permission_error', 'invalid'],
+    [401, 'authentication_error', 'key-rejected'],
+    [403, 'permission_error', 'key-rejected'],
     [402, 'billing_error', 'no-credit'],
-    [429, 'rate_limit_error', 'ok'],
+    [429, 'rate_limit_error', 'connected'],
     [500, 'api_error', 'unreachable'],
     [529, 'overloaded_error', 'unreachable'],
   ])('reads a %i %s as %s', async (status, type, check) => {

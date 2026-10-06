@@ -24,6 +24,7 @@ import {
   type Finding,
   type ReviewCommand,
 } from '../shared/finding';
+import { loggedModel, type Model } from '../shared/models';
 import type {
   EntrySummary,
   Manuscript,
@@ -37,11 +38,19 @@ import {
   type AtMention,
 } from './at-mention';
 import type { MenuItem } from './Binder';
-import { replyText } from '../shared/proposal';
-import { describeTotal, describeUsage } from '../shared/usage';
+import { streamingText } from '../shared/proposal';
+import {
+  describeTotal,
+  describeUsage,
+  type MeteredTurn,
+  type Total,
+} from '../shared/usage';
 import { focusLabel } from './interview-focus';
 import { proposalCardId, ProposalCard } from './ProposalCard';
 import { flushPendingEdits } from './pending-edits';
+import { modelName } from './model-listing';
+import { failureMessage } from './provider-messages';
+import { NO_SHORTLISTS, useProviders, useShortlists } from './Providers';
 import { ReadOnlyContext } from './read-only';
 import { sawList } from './saw-list';
 
@@ -74,6 +83,9 @@ export type ShowProposal = {
   count: number;
 };
 
+/** Names the Model a turn was logged with, as the Author knows it. */
+type Named = (model: string, provider?: Model['provider']) => string;
+
 /** The longest title a Conversation gets from its first message. */
 const TITLE_LENGTH = 60;
 
@@ -84,17 +96,6 @@ function titleOf(message: string): string {
     ? `${line.slice(0, TITLE_LENGTH - 1).trimEnd()}…`
     : line;
 }
-
-/** What the Author is told when the Assistant couldn't answer. */
-const FAILURES: Record<AssistantFailure, string> = {
-  key: "Anthropic didn't accept the API key. Check it in Settings, then retry.",
-  credit:
-    'Your Anthropic account is out of credit. Add credit in Anthropic Console, then retry.',
-  'rate-limit':
-    'Anthropic is getting too many calls from this key. Wait a moment, then retry.',
-  offline: "Can't reach Anthropic. Check the connection, then retry.",
-  other: "The Assistant couldn't answer. Retry, or try again later.",
-};
 
 function sceneOf(
   sceneId: string,
@@ -113,7 +114,9 @@ function sceneOf(
  * about `focus`. `show` opens one at a Proposal the Author asked to see. A
  * decision made anywhere shows at once, and so does a Conversation renamed,
  * moved to Trash or restored, or forked on another computer. A failed call
- * is kept as `failure`, for Retry; it isn't in the log.
+ * is kept as `failure`, with the Model it asked, for Retry; it isn't in the
+ * log. A Conversation is on its `model`, which a new one starts on: the one
+ * chosen last, unless the Author chooses another before sending.
  */
 export function useConversation({
   mode,
@@ -141,8 +144,22 @@ export function useConversation({
   /** The reply streaming in, while the Assistant answers. */
   const [streaming, setStreaming] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  /** Why the last call failed, until the Author asks again. */
-  const [failure, setFailure] = useState<AssistantFailure | null>(null);
+  /** Why the last call failed, and on which Model, until the Author asks again. */
+  const [failure, setFailure] = useState<{
+    kind: AssistantFailure;
+    model: Model;
+  } | null>(null);
+  /** The Model a new Conversation starts on unless the Author chooses. */
+  const [defaultModel, setDefaultModel] = useState<Model>();
+  /** The Model the Author chose for a new Conversation, before it starts. */
+  const [newModel, setNewModel] = useState<Model>();
+  /** Whether the Model dropdown is open. */
+  const [picking, setPicking] = useState(false);
+  const providers = useProviders();
+  /** One that never had a Model chosen nor a reply is asked as a new one is. */
+  const model = current
+    ? (current.model ?? defaultModel)
+    : (newModel ?? defaultModel);
   /** The Proposal last shown from an Entry, until another Conversation is opened. */
   const [shown, setShown] = useState<string | null>(null);
   const currentId = useRef<string | null>(null);
@@ -154,6 +171,20 @@ export function useConversation({
     // Others may have started meanwhile, as in another Mode's room.
     if (active) void window.assistant.listConversations().then(setList);
   }, [active]);
+
+  // Asked anew whenever another Conversation may have been put on a Model,
+  // or the shortlists changed.
+  const opened = current?.id ?? null;
+  useEffect(() => {
+    if (!active) return;
+    let live = true;
+    void window.settings.defaultModel().then((model) => {
+      if (live) setDefaultModel(model);
+    });
+    return () => {
+      live = false;
+    };
+  }, [active, opened, providers]);
 
   useEffect(
     () =>
@@ -202,6 +233,8 @@ export function useConversation({
     setError(null);
     setFailure(null);
     setShown(null);
+    setNewModel(undefined);
+    setPicking(false);
     if (id === '') {
       setCurrent(null);
       return;
@@ -267,11 +300,14 @@ export function useConversation({
   ): Promise<string> {
     let conversation = current;
     if (!conversation) {
+      if (!model) throw new Error('There is no Model to ask');
       const started = await window.assistant.startConversation(
         mode,
         titleOf(message.text),
+        model,
       );
-      conversation = { ...started, messages: [] };
+      setNewModel(undefined);
+      conversation = { ...started, model, messages: [] };
       if (mode === 'interview') {
         await window.assistant.setInterviewFocus(started.id, focus);
         conversation = {
@@ -303,6 +339,27 @@ export function useConversation({
         window.assistant.retry(conversation.id, onText),
       ),
     );
+  }
+
+  /**
+   * Puts the open Conversation on `next` from its next message on, or a new
+   * one, once it starts.
+   */
+  async function chooseModel(next: Model) {
+    const conversation = current;
+    if (streaming !== null) return;
+    setError(null);
+    if (!conversation) {
+      setNewModel(next);
+      return;
+    }
+    try {
+      await window.assistant.chooseModel(conversation.id, next);
+      const changed = await window.assistant.readConversation(conversation.id);
+      if (currentId.current === changed.id) setCurrent(changed);
+    } catch (error) {
+      setError(`Can't change the Model: ${(error as Error).message}`);
+    }
   }
 
   /** Gives a Conversation a new title; the list shows it once main says so. */
@@ -350,17 +407,25 @@ export function useConversation({
 
   /** Shows the Conversation as logged once the call is over, and how it went. */
   async function showResult(id: string, result: Promise<AskResult>) {
+    const asked = model;
     const { failure } = await result;
     // The log, not this window, says what was sent and when.
-    setCurrent(await window.assistant.readConversation(id));
-    setFailure(failure);
+    const logged = await window.assistant.readConversation(id);
+    setCurrent(logged);
+    const on = logged.model ?? asked;
+    setFailure(failure && on ? { kind: failure, model: on } : null);
   }
 
-  // Summarising a long Conversation is a call too, and counts.
+  // Summarising a long Conversation is a call too, and counts. A turn with
+  // no usage counts too, as one whose price isn't known.
   const total = current
     ? describeTotal(
-        [...current.messages, ...(current.compactions ?? [])].flatMap((m) =>
-          m.model && m.usage ? [{ model: m.model, usage: m.usage }] : [],
+        [
+          ...current.messages,
+          ...(current.emptyReplies ?? []),
+          ...(current.compactions ?? []),
+        ].flatMap((m) =>
+          m.model ? [meteredTurn({ ...m, model: m.model })] : [],
         ),
       )
     : null;
@@ -375,6 +440,10 @@ export function useConversation({
     failure,
     shown,
     total,
+    model,
+    chooseModel,
+    picking,
+    setPicking,
     resume,
     send,
     review,
@@ -407,13 +476,15 @@ export function conversationActions(
 
 /**
  * The messages of the Conversation open, each change of an Interview's focus
- * between them, the reply streaming in, and a failed call with Retry. The
+ * between them, the reply streaming in, and a failed call with why, naming
+ * its Provider, with Retry and a switch to another Model. Each reply names
+ * the Model that wrote it. The
  * Assistant's replies are plain text: nothing here puts
  * them in the Manuscript, though the Author can copy them as any text. A
  * reply's Proposals show as cards in it, where the Author decides them.
  */
 export function MessageLog({
-  conversation: { current, streaming, failure, shown, retry },
+  conversation: { current, streaming, failure, shown, retry, setPicking },
   names,
   empty,
   onOpenSettings,
@@ -427,6 +498,11 @@ export function MessageLog({
   onQuote?(sceneId: string, quote: string): void;
 }) {
   const readOnly = useContext(ReadOnlyContext);
+  const providers = useProviders();
+  const shortlists = useShortlists();
+  /** What names a Model in this log: its shortlist, as it is now. */
+  const named = (model: string, provider?: Model['provider']) =>
+    modelName(loggedModel(model, provider), shortlists ?? NO_SHORTLISTS);
   const messagesEnd = useRef<HTMLDivElement>(null);
   useEffect(() => {
     messagesEnd.current?.scrollIntoView?.({ block: 'end' });
@@ -444,10 +520,12 @@ export function MessageLog({
       {empty && !current && <p className="assistant-empty">{empty}</p>}
       {current?.messages.map((m, i) => (
         <Fragment key={i}>
+          <EmptyReplies conversation={current} before={i} named={named} />
           <FocusChanges conversation={current} before={i} names={names} />
           <Message
             message={m}
             names={names}
+            named={named}
             conversationId={current.id}
             shown={shown}
             onQuote={onQuote}
@@ -455,26 +533,44 @@ export function MessageLog({
         </Fragment>
       ))}
       {current && (
-        <FocusChanges
-          conversation={current}
-          before={current.messages.length}
-          names={names}
-        />
+        <>
+          <EmptyReplies
+            conversation={current}
+            before={current.messages.length}
+            named={named}
+            onRetry={
+              streaming === null && !failure ? () => void retry() : undefined
+            }
+          />
+          <FocusChanges
+            conversation={current}
+            before={current.messages.length}
+            names={names}
+          />
+        </>
       )}
-      {streaming !== null && replyText(streaming) !== '' && (
+      {streaming !== null && streamingText(streaming) !== '' && (
         <Message
-          message={{ role: 'assistant', text: replyText(streaming) }}
+          message={{ role: 'assistant', text: streamingText(streaming) }}
           names={names}
+          named={named}
         />
       )}
       {failure && streaming === null && (
         <article className="message message-system" aria-label="System">
-          <p>{FAILURES[failure]}</p>
+          <p>
+            {providers &&
+              failureMessage(failure.kind, failure.model, providers)}
+          </p>
           <div className="message-actions">
             <button onClick={() => void retry()} disabled={readOnly}>
               Retry
             </button>
-            {failure === 'key' && (
+            <button onClick={() => setPicking(true)} disabled={readOnly}>
+              Choose another Model
+            </button>
+            {(failure.kind === 'key' ||
+              !providers?.providers[failure.model.provider].added) && (
               <button onClick={onOpenSettings}>Open Settings</button>
             )}
           </div>
@@ -483,6 +579,52 @@ export function MessageLog({
       <div ref={messagesEnd} />
     </div>
   );
+}
+
+/**
+ * The replies that came back empty, or failed before any text, before
+ * the message `before`, each with what it used; the last offers `onRetry`,
+ * if given.
+ */
+function EmptyReplies({
+  conversation: { emptyReplies = [] },
+  before,
+  named,
+  onRetry,
+}: {
+  conversation: Conversation;
+  before: number;
+  named: Named;
+  onRetry?(): void;
+}) {
+  const readOnly = useContext(ReadOnlyContext);
+  const here = emptyReplies.filter((reply) => reply.before === before);
+  return here.map((reply, i) => (
+    <article
+      key={i}
+      className="message message-assistant"
+      aria-label="Assistant"
+    >
+      <p className="message-note">
+        {reply.failed
+          ? 'No reply: the call failed before the Model wrote anything.'
+          : 'No reply: the Model used its whole length limit thinking. Try again or choose another Model.'}
+      </p>
+      {onRetry && i === here.length - 1 && (
+        <div className="message-actions">
+          <button onClick={onRetry} disabled={readOnly}>
+            Retry
+          </button>
+        </div>
+      )}
+      <p className="message-used">
+        <span className="message-model" aria-label="Model">
+          {named(reply.model, reply.provider)}
+        </span>
+        <UsageLine turn={reply} />
+      </p>
+    </article>
+  ));
 }
 
 /** Where an Interview's focus was set, before the message `before`. */
@@ -657,13 +799,63 @@ export function Composer({
 }
 
 /**
+ * What a Conversation's turns used and cost so far; on hover, how many have
+ * no price when some haven't.
+ */
+export function ConversationUsage({ total }: { total: Total | null }) {
+  return (
+    total && (
+      <p
+        className="conversation-usage"
+        aria-label="Conversation usage"
+        title={total.hover}
+      >
+        {total.text}
+      </p>
+    )
+  );
+}
+
+/** What the log holds of a turn's cost: a message, empty reply or summary. */
+type LoggedTurn = Pick<ConversationMessage, 'provider' | 'usage' | 'cost'> & {
+  model: string;
+};
+
+/** A turn as far as its cost goes, from what the log holds of it. */
+function meteredTurn({
+  model,
+  provider,
+  usage,
+  cost,
+}: LoggedTurn): MeteredTurn {
+  return {
+    model: loggedModel(model, provider),
+    ...(usage && { usage }),
+    ...(cost !== undefined && { cost }),
+  };
+}
+
+/** What a turn used and cost, when anything of it is known. */
+function UsageLine({ turn }: { turn: LoggedTurn }) {
+  const described = describeUsage(meteredTurn(turn));
+  return (
+    described && (
+      <span className="message-usage" aria-label="Usage">
+        {described}
+      </span>
+    )
+  );
+}
+
+/**
  * A message; a reply shows the Findings it made as a list, and the Proposals
  * as cards, and ends with a collapsible line saying what it used and cost,
  * which opens to list what the Assistant saw.
  */
 function Message({
-  message: { role, text, model, usage, interrupted, saw, findings, proposals },
+  message,
   names,
+  named,
   conversationId,
   shown,
   onQuote,
@@ -671,15 +863,21 @@ function Message({
   message: Pick<ConversationMessage, 'role' | 'text'> &
     Partial<ConversationMessage>;
   names: Names;
+  named: Named;
   conversationId?: string;
   /** The Proposal the Author came to see, if any. */
   shown?: string | null;
   onQuote?(sceneId: string, quote: string): void;
 }) {
-  const used = model && usage && (
-    <span className="message-usage" aria-label="Usage">
-      {describeUsage(model, usage)}
-    </span>
+  const { role, text, model, provider, interrupted, unreadable } = message;
+  const { cutShort, saw, findings, proposals } = message;
+  const used = model && (
+    <>
+      <span className="message-model" aria-label="Model">
+        {named(model, provider)}
+      </span>
+      <UsageLine turn={{ ...message, model }} />
+    </>
   );
   return (
     <article
@@ -708,7 +906,20 @@ function Message({
             highlighted={proposal.id === shown}
           />
         ))}
-      {interrupted && <p className="message-note">Interrupted</p>}
+      {interrupted && (
+        <p className="message-note">
+          {cutShort
+            ? 'Cut short: the reply reached its length limit'
+            : 'Interrupted'}
+        </p>
+      )}
+      {unreadable && (
+        <p className="message-note">
+          {unreadable === 1
+            ? '1 Proposal couldn’t be read'
+            : `${unreadable} Proposals couldn’t be read`}
+        </p>
+      )}
       {saw ? (
         <details className="message-saw">
           <summary>What the Assistant saw{used}</summary>
