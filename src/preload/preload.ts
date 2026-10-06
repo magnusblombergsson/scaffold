@@ -1,82 +1,32 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import {
+  appBridge,
   channel,
   type AssistantApi,
   type ProjectApi,
   type ProvidersView,
-  type ProjectEvent,
   type SettingsApi,
   type ShellApi,
 } from '../shared/api';
+import type { RendererTransport } from '../shared/bridge';
 import type { Command } from '../shared/shortcuts';
 
-const project: ProjectApi = {
-  manuscript: () => ipcRenderer.invoke(channel.project('manuscript')),
-  read: (ref) => ipcRenderer.invoke(channel.project('read'), ref),
-  write: (ref, value) =>
-    ipcRenderer.invoke(channel.project('write'), ref, value),
-  reloadTaken: (ref) => ipcRenderer.invoke(channel.project('reloadTaken'), ref),
-  keepEditsOverReload: (ref) =>
-    ipcRenderer.invoke(channel.project('keepEditsOverReload'), ref),
-  flush: () => ipcRenderer.invoke(channel.project('flush')),
-  hasUnsaved: () => ipcRenderer.invoke(channel.project('hasUnsaved')),
-  saveStatuses: () => ipcRenderer.invoke(channel.project('saveStatuses')),
-  createChapter: (index, title) =>
-    ipcRenderer.invoke(channel.project('createChapter'), index, title),
-  createScene: (chapterId, index, title) =>
-    ipcRenderer.invoke(channel.project('createScene'), chapterId, index, title),
-  renameChapter: (chapterId, title) =>
-    ipcRenderer.invoke(channel.project('renameChapter'), chapterId, title),
-  renameScene: (sceneId, title) =>
-    ipcRenderer.invoke(channel.project('renameScene'), sceneId, title),
-  moveChapter: (chapterId, index) =>
-    ipcRenderer.invoke(channel.project('moveChapter'), chapterId, index),
-  moveScene: (sceneId, chapterId, index) =>
-    ipcRenderer.invoke(channel.project('moveScene'), sceneId, chapterId, index),
-  trashScene: (sceneId) =>
-    ipcRenderer.invoke(channel.project('trashScene'), sceneId),
-  trashChapter: (chapterId) =>
-    ipcRenderer.invoke(channel.project('trashChapter'), chapterId),
-  listEntries: () => ipcRenderer.invoke(channel.project('listEntries')),
-  createEntry: (type, name) =>
-    ipcRenderer.invoke(channel.project('createEntry'), type, name),
-  trashEntry: (entryId) =>
-    ipcRenderer.invoke(channel.project('trashEntry'), entryId),
-  setEntryVisibility: (entryId, visibility) =>
-    ipcRenderer.invoke(
-      channel.project('setEntryVisibility'),
-      entryId,
-      visibility,
-    ),
-  setEntryType: (entryId, type) =>
-    ipcRenderer.invoke(channel.project('setEntryType'), entryId, type),
-  chooseEntryImage: (entryId) =>
-    ipcRenderer.invoke(channel.project('chooseEntryImage'), entryId),
-  removeEntryImage: (entryId) =>
-    ipcRenderer.invoke(channel.project('removeEntryImage'), entryId),
-  entryImage: (entryId) =>
-    ipcRenderer.invoke(channel.project('entryImage'), entryId),
-  restore: (id) => ipcRenderer.invoke(channel.project('restore'), id),
-  undo: (step) => ipcRenderer.invoke(channel.project('undo'), step),
-  listTrash: () => ipcRenderer.invoke(channel.project('listTrash')),
-  emptyTrash: () => ipcRenderer.invoke(channel.project('emptyTrash')),
-  setLanguage: (language) =>
-    ipcRenderer.invoke(channel.project('setLanguage'), language),
-  setFoldedNoteImage: (on) =>
-    ipcRenderer.invoke(channel.project('setFoldedNoteImage'), on),
-  listConflicts: () => ipcRenderer.invoke(channel.project('listConflicts')),
-  readConflictVersion: (ref, versionId) =>
-    ipcRenderer.invoke(channel.project('readConflictVersion'), ref, versionId),
-  resolveConflict: (ref, kept) =>
-    ipcRenderer.invoke(channel.project('resolveConflict'), ref, kept),
-  subscribe(listener) {
-    const forward = (_event: unknown, event: ProjectEvent) => listener(event);
-    ipcRenderer.on(channel.projectEvent, forward);
+/** A window's end of the bridge over Electron IPC. */
+const transport: RendererTransport = {
+  invoke: (channel, args) => ipcRenderer.invoke(channel, ...args),
+  send: (channel, args) => ipcRenderer.send(channel, ...args),
+  on(channel, listener) {
+    const forward = (_event: unknown, ...args: unknown[]) => listener(args);
+    ipcRenderer.on(channel, forward);
     return () => {
-      ipcRenderer.off(channel.projectEvent, forward);
+      ipcRenderer.off(channel, forward);
     };
   },
 };
+
+const { build } = appBridge.renderer(transport);
+
+const project: ProjectApi = build('project');
 
 const flushListeners = new Set<() => void>();
 

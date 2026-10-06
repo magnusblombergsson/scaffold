@@ -3,20 +3,22 @@ import {
   dialog,
   ipcMain,
   nativeImage,
-  type IpcMainInvokeEvent,
   type WebContents,
 } from 'electron';
 import {
   channel,
+  projectMethods,
   type AcceptOptions,
   type Changed,
   type ProjectApi,
 } from '../shared/api';
+import type { Handlers } from '../shared/bridge';
 import type { InterviewFocus, Mode } from '../shared/conversation';
 import type { ReviewCommand } from '../shared/finding';
 import { PROSE_LANGUAGES, type ProseLanguage } from '../shared/project-types';
 import { createConversationEngine } from './assistant/conversation-engine';
 import { createImagePrompts } from './assistant/image-prompt';
+import { register } from './electron-transport';
 import { entryImageOf, imageDataUrl } from './entry-image';
 import { systemClock } from './project-store/clock';
 import type { ProjectStore } from './project-store/project-store';
@@ -29,107 +31,72 @@ import {
 } from './shell';
 import { trashConversationQuestion } from './trash-question';
 
-/**
- * Every method but `emptyTrash`, which asks the Author first, the Project
- * settings, which may warn them, `chooseEntryImage`, which asks for a file,
- * and `subscribe`, whose events the shell sends to the window.
- */
-type StoreMethod = Exclude<
-  keyof ProjectApi,
-  | 'emptyTrash'
-  | 'setLanguage'
-  | 'setFoldedNoteImage'
-  | 'chooseEntryImage'
-  | 'subscribe'
->;
+/** What a `project` handler works with: the window's Project, and the window. */
+type ProjectContext = { store: ProjectStore; sender: WebContents };
 
-type Handlers = {
-  [K in StoreMethod]: (
-    store: ProjectStore,
-    ...args: Parameters<ProjectApi[K]>
-  ) => ReturnType<ProjectApi[K]>;
-};
-
-const projectHandlers: Handlers = {
-  manuscript: async (store) => store.manuscript(),
-  read: (store, ref) => store.read(ref),
-  write: (store, ref, value) => store.write(ref, value),
-  reloadTaken: async (store, ref) => store.reloadTaken(ref),
-  keepEditsOverReload: async (store, ref) => store.keepEditsOverReload(ref),
-  flush: (store) => store.flush(),
-  hasUnsaved: async (store) => store.hasUnsaved(),
-  saveStatuses: async (store) => store.saveStatuses(),
-  createChapter: (store, index, title) => store.createChapter(index, title),
-  createScene: (store, chapterId, index, title) =>
+const projectHandlers: Handlers<
+  ProjectApi,
+  typeof projectMethods,
+  ProjectContext
+> = {
+  manuscript: async ({ store }) => store.manuscript(),
+  read: ({ store }, ref) => store.read(ref),
+  write: ({ store }, ref, value) => store.write(ref, value),
+  reloadTaken: async ({ store }, ref) => store.reloadTaken(ref),
+  keepEditsOverReload: async ({ store }, ref) => store.keepEditsOverReload(ref),
+  flush: ({ store }) => store.flush(),
+  hasUnsaved: async ({ store }) => store.hasUnsaved(),
+  saveStatuses: async ({ store }) => store.saveStatuses(),
+  createChapter: ({ store }, index, title) => store.createChapter(index, title),
+  createScene: ({ store }, chapterId, index, title) =>
     store.createScene(chapterId, index, title),
-  renameChapter: (store, chapterId, title) =>
+  renameChapter: ({ store }, chapterId, title) =>
     store.renameChapter(chapterId, title),
-  renameScene: (store, sceneId, title) => store.renameScene(sceneId, title),
-  moveChapter: (store, chapterId, index) => store.moveChapter(chapterId, index),
-  moveScene: (store, sceneId, chapterId, index) =>
+  renameScene: ({ store }, sceneId, title) => store.renameScene(sceneId, title),
+  moveChapter: ({ store }, chapterId, index) =>
+    store.moveChapter(chapterId, index),
+  moveScene: ({ store }, sceneId, chapterId, index) =>
     store.moveScene(sceneId, chapterId, index),
-  trashScene: (store, sceneId) => store.trashScene(sceneId),
-  trashChapter: (store, chapterId) => store.trashChapter(chapterId),
-  listEntries: async (store) => store.listEntries(),
-  createEntry: (store, type, name) => store.createEntry(type, name),
-  trashEntry: (store, entryId) => store.trashEntry(entryId),
-  setEntryVisibility: (store, entryId, visibility) =>
+  trashScene: ({ store }, sceneId) => store.trashScene(sceneId),
+  trashChapter: ({ store }, chapterId) => store.trashChapter(chapterId),
+  listEntries: async ({ store }) => store.listEntries(),
+  createEntry: ({ store }, type, name) => store.createEntry(type, name),
+  trashEntry: ({ store }, entryId) => store.trashEntry(entryId),
+  setEntryVisibility: ({ store }, entryId, visibility) =>
     store.setEntryVisibility(entryId, visibility),
-  setEntryType: (store, entryId, type) => store.setEntryType(entryId, type),
-  removeEntryImage: (store, entryId) => store.removeEntryImage(entryId),
-  entryImage: async (store, entryId) => {
+  setEntryType: ({ store }, entryId, type) => store.setEntryType(entryId, type),
+  chooseEntryImage: ({ store, sender }, entryId) =>
+    chooseEntryImage(sender, store, entryId),
+  removeEntryImage: ({ store }, entryId) => store.removeEntryImage(entryId),
+  entryImage: async ({ store }, entryId) => {
     const image = await store.readEntryImage(entryId);
     return image && imageDataUrl(image);
   },
-  restore: (store, id) => store.restore(id),
-  undo: (store, step) => store.undo(step),
-  listTrash: async (store) => store.listTrash(),
-  listConflicts: async (store) => store.listConflicts(),
-  readConflictVersion: (store, ref, versionId) =>
+  restore: ({ store }, id) => store.restore(id),
+  undo: ({ store }, step) => store.undo(step),
+  listTrash: async ({ store }) => store.listTrash(),
+  listConflicts: async ({ store }) => store.listConflicts(),
+  readConflictVersion: ({ store }, ref, versionId) =>
     store.readConflictVersion(ref, versionId),
-  resolveConflict: (store, ref, kept) => store.resolveConflict(ref, kept),
+  resolveConflict: ({ store }, ref, kept) => store.resolveConflict(ref, kept),
+  emptyTrash: ({ store, sender }) => emptyTrash(sender, store),
+  setLanguage: ({ store, sender }, language) =>
+    setLanguage(sender, store, language),
+  setFoldedNoteImage: ({ store, sender }, on) =>
+    saveProjectSetting(
+      sender,
+      store,
+      `The Pinned notes setting of ${store.displayName}`,
+      () => store.setFoldedNoteImage(on === true),
+    ),
 };
 
 /** Connects each window's `project` calls to the store of its Project. */
 export function registerProjectIpc(): void {
-  for (const method of Object.keys(projectHandlers) as StoreMethod[]) {
-    ipcMain.handle(
-      channel.project(method),
-      (event: IpcMainInvokeEvent, ...args: unknown[]) => {
-        const store = storeOfWindow(event.sender);
-        const handler = projectHandlers[method] as (
-          store: ProjectStore,
-          ...args: unknown[]
-        ) => unknown;
-        return handler(store, ...args);
-      },
-    );
-  }
-  ipcMain.handle(channel.project('emptyTrash'), (event) =>
-    emptyTrash(event.sender, storeOfWindow(event.sender)),
-  );
-  ipcMain.handle(
-    channel.project('chooseEntryImage'),
-    (event, entryId: string) =>
-      chooseEntryImage(event.sender, storeOfWindow(event.sender), entryId),
-  );
-  ipcMain.handle(
-    channel.project('setLanguage'),
-    (event, language: ProseLanguage) =>
-      setLanguage(event.sender, storeOfWindow(event.sender), language),
-  );
-  ipcMain.handle(
-    channel.project('setFoldedNoteImage'),
-    (event, on: boolean) => {
-      const store = storeOfWindow(event.sender);
-      return saveProjectSetting(
-        event.sender,
-        store,
-        `The Pinned notes setting of ${store.displayName}`,
-        () => store.setFoldedNoteImage(on === true),
-      );
-    },
-  );
+  register('project', projectHandlers, (sender) => ({
+    store: storeOfWindow(sender),
+    sender,
+  }));
 }
 
 /** The engine for the Project of the window `sender` belongs to. */

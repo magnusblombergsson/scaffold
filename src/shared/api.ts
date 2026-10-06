@@ -15,6 +15,7 @@ import type { ListedModel, Model, ProviderId, ProviderStatus } from './models';
 import type { Command } from './shortcuts';
 import type { PendingProposal, ProposedValue } from './proposal';
 import type { MeteredTurn } from './usage';
+import { bridge, type MethodTable } from './bridge';
 
 /**
  * How the Author accepts a Proposal: with the value they `edited` it to,
@@ -35,8 +36,9 @@ import type {
   Mode,
 } from './conversation';
 
-// The preload exposes these four objects on `window`. Main registers a handler
-// per method, and both sides are checked against these interfaces.
+// The preload exposes these four objects on `window`, built from the method
+// table of each. Main registers a handler per method, and both sides are
+// checked against these interfaces.
 
 /**
  * What a structure operation resolves with once it is on disk: the Manuscript,
@@ -641,8 +643,54 @@ export type ImagePromptResult = MeteredTurn &
     | { ok: false; failure: ImagePromptFailure }
   );
 
+export const projectMethods = {
+  manuscript: 'invoke',
+  read: 'invoke',
+  write: 'invoke',
+  reloadTaken: 'invoke',
+  keepEditsOverReload: 'invoke',
+  flush: 'invoke',
+  hasUnsaved: 'invoke',
+  saveStatuses: 'invoke',
+  subscribe: 'event',
+  createChapter: 'invoke',
+  createScene: 'invoke',
+  renameChapter: 'invoke',
+  renameScene: 'invoke',
+  moveChapter: 'invoke',
+  moveScene: 'invoke',
+  trashScene: 'invoke',
+  trashChapter: 'invoke',
+  listEntries: 'invoke',
+  createEntry: 'invoke',
+  trashEntry: 'invoke',
+  setEntryVisibility: 'invoke',
+  setEntryType: 'invoke',
+  chooseEntryImage: 'invoke',
+  removeEntryImage: 'invoke',
+  entryImage: 'invoke',
+  restore: 'invoke',
+  undo: 'invoke',
+  listTrash: 'invoke',
+  listConflicts: 'invoke',
+  readConflictVersion: 'invoke',
+  resolveConflict: 'invoke',
+  emptyTrash: 'invoke',
+  setLanguage: 'invoke',
+  setFoldedNoteImage: 'invoke',
+} as const satisfies MethodTable<ProjectApi>;
+
+/** The APIs a window sees, by the name it sees each under. */
+export type Apis = {
+  project: ProjectApi;
+};
+
+/** Main and the preload both cross between them on this. */
+export const appBridge = bridge<Apis, { project: typeof projectMethods }>({
+  project: projectMethods,
+});
+
 export const channel = {
-  project: (method: keyof ProjectApi) => `project:${method}`,
   currentProject: 'shell:currentProject',
   createProject: 'shell:createProject',
   openProject: 'shell:openProject',
@@ -672,7 +720,6 @@ export const channel = {
   setShortlist: 'settings:setShortlist',
   defaultModel: 'settings:defaultModel',
   flushed: 'shell:flushed',
-  projectEvent: 'project:event',
   listConversations: 'assistant:listConversations',
   readConversation: 'assistant:readConversation',
   startConversation: 'assistant:startConversation',

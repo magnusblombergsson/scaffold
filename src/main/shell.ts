@@ -67,6 +67,7 @@ import {
 } from './project-store/project-store';
 import { writeFailureReason } from './project-store/safe-write';
 import { menuTemplate, type MenuState } from './menu';
+import { emit } from './electron-transport';
 
 // The app shell: its windows, the Project each one shows, and the settings
 // that remember them on this computer.
@@ -252,7 +253,7 @@ function attach(contents: WebContents, store: ProjectStore): void {
     contents.id,
     store.subscribe((event) => {
       if (contents.isDestroyed()) return;
-      contents.send(channel.projectEvent, event);
+      emit(contents, 'project', 'subscribe', event);
       // Which also spellchecks in the new language.
       if (event.type === 'languageChanged' || event.type === 'readOnly') {
         updateMenu();
