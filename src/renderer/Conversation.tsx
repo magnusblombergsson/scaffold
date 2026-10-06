@@ -30,7 +30,7 @@ import type {
   Manuscript,
   ManuscriptScene,
 } from '../shared/project-types';
-import type { Changed } from '../shared/api';
+import type { CallFailure, Changed } from '../shared/api';
 import {
   atMentionAt,
   atMentionOptions,
@@ -242,7 +242,9 @@ export function useConversation({
     try {
       setCurrent(await window.assistant.readConversation(id));
     } catch (error) {
-      setError(`Can't open the Conversation: ${(error as Error).message}`);
+      setError(
+        `Can't open the Conversation: ${(error as CallFailure).message}`,
+      );
     }
   }
 
@@ -286,7 +288,7 @@ export function useConversation({
       if (currentId.current === changed.id) setCurrent(changed);
       setList(await window.assistant.listConversations());
     } catch (error) {
-      setError(`Can't change the focus: ${(error as Error).message}`);
+      setError(`Can't change the focus: ${(error as CallFailure).message}`);
     }
   }
 
@@ -358,7 +360,7 @@ export function useConversation({
       const changed = await window.assistant.readConversation(conversation.id);
       if (currentId.current === changed.id) setCurrent(changed);
     } catch (error) {
-      setError(`Can't change the Model: ${(error as Error).message}`);
+      setError(`Can't change the Model: ${(error as CallFailure).message}`);
     }
   }
 
@@ -368,7 +370,9 @@ export function useConversation({
     try {
       await window.assistant.renameConversation(id, title);
     } catch (error) {
-      setError(`Can't rename the Conversation: ${(error as Error).message}`);
+      setError(
+        `Can't rename the Conversation: ${(error as CallFailure).message}`,
+      );
     }
   }
 
@@ -395,7 +399,9 @@ export function useConversation({
     try {
       await ask();
     } catch (error) {
-      setError(`The Assistant couldn't answer: ${(error as Error).message}`);
+      setError(
+        `The Assistant couldn't answer: ${(error as CallFailure).message}`,
+      );
     } finally {
       setStreaming(null);
     }

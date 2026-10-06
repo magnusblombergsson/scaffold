@@ -83,26 +83,27 @@ describe('bridge', () => {
     );
   });
 
-  it('rejects with the clean message and reason of an error that says why', async () => {
+  // A plain object, since Electron's contextBridge passes on only the
+  // message of an Error that crosses into the page.
+  it('rejects with a plain object holding the message and reason of an error that says why', async () => {
     const { notes } = setUp({}).open();
 
-    const error = await notes.read('trashed').catch((error: unknown) => error);
+    const failure = await notes
+      .read('trashed')
+      .catch((error: unknown) => error);
 
-    expect(error).toBeInstanceOf(Error);
-    expect(error).toMatchObject({
+    expect(failure).toStrictEqual({
       message: 'It is in Trash',
       reason: 'trashed',
     });
   });
 
-  it('rejects with the clean message of a plain Error', async () => {
+  it('rejects with a plain object holding the message of a plain Error', async () => {
     const { notes } = setUp({}).open();
 
-    const error = await notes.read('b').catch((error: unknown) => error);
+    const failure = await notes.read('b').catch((error: unknown) => error);
 
-    expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toBe('No note b');
-    expect(error).not.toHaveProperty('reason');
+    expect(failure).toStrictEqual({ message: 'No note b' });
   });
 
   it('passes a send on to its handler', async () => {

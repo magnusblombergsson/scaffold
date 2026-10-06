@@ -17,6 +17,8 @@ import type { PendingProposal, ProposedValue } from './proposal';
 import type { MeteredTurn } from './usage';
 import { bridge, type MethodTable } from './bridge';
 
+export type { CallFailure } from './bridge';
+
 /**
  * How the Author accepts a Proposal: with the value they `edited` it to,
  * `anyway` when they saw it was stale, and `append` to add it to what its
@@ -38,7 +40,8 @@ import type {
 
 // The preload exposes these four objects on `window`, built from the method
 // table of each. Main registers a handler per method, and both sides are
-// checked against these interfaces.
+// checked against these interfaces. A call that fails rejects with a
+// `CallFailure`, not an Error.
 
 /**
  * What a structure operation resolves with once it is on disk: the Manuscript,

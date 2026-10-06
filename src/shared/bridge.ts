@@ -109,13 +109,18 @@ export interface RendererTransport {
 }
 
 /**
+ * Why a call to main failed, as a window's call rejects with it: `reason`
+ * is a ProjectError's. A plain object, not an Error, since Electron passes
+ * on only the message of an Error that crosses into the page.
+ */
+export type CallFailure = { message: string; reason?: string };
+
+/**
  * What an invoke resolves with as it crosses: its value, or why it failed.
  * Electron would rewrite the message of an error thrown across and drop its
  * `reason`, so main sends them as values.
  */
-type Outcome =
-  | { ok: true; value: unknown }
-  | { ok: false; message: string; reason?: string };
+type Outcome = { ok: true; value: unknown } | ({ ok: false } & CallFailure);
 
 function failure(error: unknown): Outcome {
   if (!(error instanceof Error)) return { ok: false, message: String(error) };
@@ -203,10 +208,9 @@ export function bridge<Apis, T extends Tables<Apis>>(tables: T) {
         const outcome = (await transport.invoke(channel, args)) as Outcome;
         if (outcome.ok) return outcome.value;
         const { message, reason } = outcome;
-        throw Object.assign(
-          new Error(message),
-          reason === undefined ? {} : { reason },
-        );
+        const failure: CallFailure =
+          reason === undefined ? { message } : { message, reason };
+        throw failure;
       }
 
       return {
