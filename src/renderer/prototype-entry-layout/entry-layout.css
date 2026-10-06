@@ -137,7 +137,7 @@
   column-gap: 0.5rem;
 }
 
-.el-a-aliases h3 {
+.el-a-aliases .plain-text-field h3 {
   margin: 0;
   text-transform: none;
   letter-spacing: 0;
@@ -471,4 +471,21 @@
   height: 1.1rem;
   background: #555;
   margin: 0 0.25rem;
+}
+
+/* An empty image slot keeps its shape. */
+.el-a-portrait .entry-image:not(:has(img))::before,
+.el-c-avatar .entry-image:not(:has(img))::before {
+  content: '';
+  display: block;
+  border: 1px dashed var(--pill-line);
+  border-radius: 8px;
+  width: 10rem;
+  height: 12.5rem;
+}
+
+.el-c-avatar .entry-image:not(:has(img))::before {
+  width: 5.5rem;
+  height: 5.5rem;
+  border-radius: 50%;
 }
