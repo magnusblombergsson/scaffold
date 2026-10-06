@@ -1,7 +1,16 @@
 import { describe, expect, it, vi } from 'vitest';
-import { ProjectError } from '../main/project-store/project-store';
 import { bridge, type Handlers, type MethodTable } from './bridge';
 import { memoryTransport } from './memory-transport';
+
+/** An error that says why, as main's ProjectError does. */
+class NoteError extends Error {
+  constructor(
+    readonly reason: string,
+    message: string,
+  ) {
+    super(message);
+  }
+}
 
 /** A small API, as a window sees it, for the bridge to carry. */
 interface NotesApi {
@@ -31,14 +40,12 @@ function setUp(texts: Record<string, string>) {
     'notes',
     {
       read: async ({ owner }, id) => {
-        if (id === 'trashed')
-          throw new ProjectError('trashed', 'It is in Trash');
+        if (id === 'trashed') throw new NoteError('trashed', 'It is in Trash');
         if (!(id in texts)) throw new Error(`No note ${id}`);
         return `${owner}: ${texts[id]}`;
       },
       write: (_ctx, id, text) => {
-        if (id === 'trashed')
-          throw new ProjectError('trashed', 'It is in Trash');
+        if (id === 'trashed') throw new NoteError('trashed', 'It is in Trash');
         texts[id] = text;
       },
       summarize: async ({ owner }, askId, id) =>
@@ -76,7 +83,7 @@ describe('bridge', () => {
     );
   });
 
-  it('rejects with the clean message and reason of a ProjectError', async () => {
+  it('rejects with the clean message and reason of an error that says why', async () => {
     const { notes } = setUp({}).open();
 
     const error = await notes.read('trashed').catch((error: unknown) => error);
