@@ -25,10 +25,10 @@ A Project's Prose, organised as Chapters containing Scenes.
 _Avoid_: Draft, document
 
 **Chapter**:
-An ordered group of Scenes within the Manuscript.
+An ordered group of Scenes within the Manuscript. It may have one image, reference for the Author only: never in the Prose, never exported, never sent to the Assistant.
 
 **Scene**:
-The smallest movable unit of the Manuscript; the level at which the Assistant compares Prose against its Outline.
+The smallest movable unit of the Manuscript; the level at which the Assistant compares Prose against its Outline. It may have one image, like a Chapter's.
 _Avoid_: Section, passage
 
 **Binder**:
@@ -72,7 +72,7 @@ A short, read-only look at the Entries a highlighted name refers to, opened by c
 _Avoid_: Popup, tooltip, preview
 
 **Pinned note**:
-A Peek the Author has pinned in Writing so it stays while they write: it floats over the page, can be dragged aside, folded to its title and unpinned, and stays where it was left for the Project until unpinned.
+A Peek the Author has pinned in Writing so it stays while they write: it floats over the page, can be dragged aside, folded to its title, switched to show the Entry's image instead of its text, and unpinned, and stays where it was left for the Project until unpinned.
 _Avoid_: Sticky, pin (as a noun), floating window
 
 **Voice**:
@@ -108,7 +108,7 @@ A narrowing of one list or view to the units matching chosen Statuses, Tags or E
 _Avoid_: Search
 
 **Trash**:
-Where deleted Scenes, Chapters, Entries and Conversations go within a Project; they stay recoverable until the Author empties it. A Chapter goes with its Scenes and comes back with them; an Entry with its image; a Conversation goes with its pending Proposals.
+Where deleted Scenes, Chapters, Entries and Conversations go within a Project; they stay recoverable until the Author empties it. A Chapter goes with its Scenes and comes back with them; an Entry, Scene or Chapter with its image; a Conversation goes with its pending Proposals.
 _Avoid_: Bin, archive
 
 **Export**:
