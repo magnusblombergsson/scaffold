@@ -132,6 +132,10 @@ describe('CHEAT_SHEET', () => {
     }
   });
 
+  it('lists Ctrl+S, which saves at once', () => {
+    expect(listed).toContain('CmdOrCtrl+S');
+  });
+
   it('lists the keys of the Binder and Story Bible list, the item menus and the panes', () => {
     for (const keys of [
       'Up',

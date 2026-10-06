@@ -180,7 +180,7 @@ export function menuTemplate(
     // On macOS Settings… is in the app menu.
     {
       label: 'Tools',
-      submenu: mac ? [projectSettings] : [settings, projectSettings],
+      submenu: mac ? [projectSettings] : [projectSettings, settings],
     },
     { role: 'windowMenu' },
     {
