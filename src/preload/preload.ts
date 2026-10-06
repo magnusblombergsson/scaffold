@@ -1,7 +1,8 @@
 import { contextBridge, ipcRenderer } from 'electron';
 import {
   appBridge,
-  channel,
+  flushedChannel,
+  flushRequestChannel,
   replyTextChannel,
   type AssistantApi,
   type ProjectApi,
@@ -9,7 +10,6 @@ import {
   type ShellApi,
 } from '../shared/api';
 import type { RendererTransport } from '../shared/bridge';
-import type { Command } from '../shared/shortcuts';
 
 /** A window's end of the bridge over Electron IPC. */
 const transport: RendererTransport = {
@@ -32,45 +32,16 @@ const flushListeners = new Set<() => void>();
 
 // IPC keeps message order, so writes sent by the listeners reach main before
 // the `flushed` reply.
-ipcRenderer.on(channel.flushRequest, () => {
+ipcRenderer.on(flushRequestChannel, () => {
   try {
     for (const listener of flushListeners) listener();
   } finally {
-    ipcRenderer.send(channel.flushed);
+    ipcRenderer.send(flushedChannel);
   }
 });
 
 const shell: ShellApi = {
-  currentProject: () => ipcRenderer.invoke(channel.currentProject),
-  createProject: () => ipcRenderer.invoke(channel.createProject),
-  openProject: () => ipcRenderer.invoke(channel.openProject),
-  chooseImport: () => ipcRenderer.invoke(channel.chooseImport),
-  importProject: (file, convention) =>
-    ipcRenderer.invoke(channel.importProject, file, convention),
-  onCommand(listener) {
-    const forward = (_event: unknown, command: Command) => listener(command);
-    ipcRenderer.on(channel.command, forward);
-    return () => {
-      ipcRenderer.off(channel.command, forward);
-    };
-  },
-  openRecent: (path) => ipcRenderer.invoke(channel.openRecent, path),
-  locateProject: (path) => ipcRenderer.invoke(channel.locateProject, path),
-  recentProjects: () => ipcRenderer.invoke(channel.recentProjects),
-  removeRecent: (path) => ipcRenderer.invoke(channel.removeRecent, path),
-  saveView: (view) => ipcRenderer.send(channel.saveView, view),
-  tips: () => ipcRenderer.invoke(channel.tips),
-  dismissTip: (tip) => ipcRenderer.send(channel.dismissTip, tip),
-  highlightMentions: () => ipcRenderer.invoke(channel.highlightMentions),
-  setHighlightMentions: (on) =>
-    ipcRenderer.send(channel.setHighlightMentions, on),
-  onHighlightMentions(listener) {
-    const forward = (_event: unknown, on: boolean) => listener(on);
-    ipcRenderer.on(channel.highlightMentionsChanged, forward);
-    return () => {
-      ipcRenderer.off(channel.highlightMentionsChanged, forward);
-    };
-  },
+  ...build('shell'),
   onFlushRequest(listener) {
     flushListeners.add(listener);
     return () => {
@@ -100,10 +71,10 @@ const assistant: AssistantApi = {
     ),
 };
 
-/** Makes the call `invoke` with an id, passing on the pieces of its reply. */
+/** Makes the call `ask` with an id, passing on the pieces of its reply. */
 function streamReply<T>(
   onText: (text: string) => void,
-  invoke: (askId: number) => Promise<T>,
+  ask: (askId: number) => Promise<T>,
 ): Promise<T> {
   const askId = ++asked;
   const forward = (_event: unknown, id: number, text: string) => {
@@ -111,7 +82,7 @@ function streamReply<T>(
   };
   // IPC keeps message order, so every piece arrives before the reply.
   ipcRenderer.on(replyTextChannel, forward);
-  return invoke(askId).finally(() => {
+  return ask(askId).finally(() => {
     ipcRenderer.off(replyTextChannel, forward);
   });
 }

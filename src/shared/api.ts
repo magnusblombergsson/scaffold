@@ -712,17 +712,45 @@ export const settingsMethods = {
   defaultModel: 'invoke',
 } as const satisfies MethodTable<SettingsApi>;
 
+export const shellMethods = {
+  currentProject: 'invoke',
+  createProject: 'invoke',
+  openProject: 'invoke',
+  chooseImport: 'invoke',
+  importProject: 'invoke',
+  onCommand: 'event',
+  openRecent: 'invoke',
+  locateProject: 'invoke',
+  recentProjects: 'invoke',
+  removeRecent: 'invoke',
+  saveView: 'send',
+  tips: 'invoke',
+  dismissTip: 'send',
+  highlightMentions: 'invoke',
+  setHighlightMentions: 'send',
+  onHighlightMentions: 'event',
+  onFlushRequest: 'flush',
+} as const satisfies MethodTable<ShellApi>;
+
 /**
  * Where main streams the pieces of a reply, each with the `askId` its call
  * was given.
  */
 export const replyTextChannel = 'assistant:replyText';
 
+/**
+ * Where main asks a window for its pending edits before it closes, and the
+ * window answers once it has sent them.
+ */
+export const flushRequestChannel = 'shell:flushRequest';
+export const flushedChannel = 'shell:flushed';
+
 /** The APIs a window sees, by the name it sees each under. */
 export type Apis = {
   project: ProjectApi;
   assistant: AssistantApi;
   settings: SettingsApi;
+  shell: ShellApi;
 };
 
 /** Main and the preload both cross between them on this. */
@@ -732,33 +760,14 @@ export const appBridge = bridge<
     project: typeof projectMethods;
     assistant: typeof assistantMethods;
     settings: typeof settingsMethods;
+    shell: typeof shellMethods;
   }
 >({
   project: projectMethods,
   assistant: assistantMethods,
   settings: settingsMethods,
+  shell: shellMethods,
 });
-
-export const channel = {
-  currentProject: 'shell:currentProject',
-  createProject: 'shell:createProject',
-  openProject: 'shell:openProject',
-  chooseImport: 'shell:chooseImport',
-  importProject: 'shell:importProject',
-  command: 'shell:command',
-  openRecent: 'shell:openRecent',
-  locateProject: 'shell:locateProject',
-  recentProjects: 'shell:recentProjects',
-  removeRecent: 'shell:removeRecent',
-  saveView: 'shell:saveView',
-  tips: 'shell:tips',
-  dismissTip: 'shell:dismissTip',
-  highlightMentions: 'shell:highlightMentions',
-  setHighlightMentions: 'shell:setHighlightMentions',
-  highlightMentionsChanged: 'shell:highlightMentionsChanged',
-  flushRequest: 'shell:flushRequest',
-  flushed: 'shell:flushed',
-} as const;
 
 declare global {
   interface Window {
