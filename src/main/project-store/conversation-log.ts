@@ -19,11 +19,14 @@ import {
 } from '../../shared/finding';
 import {
   asNewEntry,
+  decided,
   isAppending,
   isChoiceField,
   isFieldValue,
   isListField,
   isProposalField,
+  type Decision,
+  type DecisionEvent,
   type FieldValue,
   type NewEntry,
   type Proposal,
@@ -179,16 +182,6 @@ export type ConversationEvent =
   | RejectedEvent
   | UndoneEvent;
 
-/**
- * What the log says of a Proposal: undecided, accepted with the value it
- * replaced, if any, and the one it wrote, or rejected. An accept that was
- * undone leaves it undecided again, with what that accept wrote as `undid`.
- */
-export type Decision =
-  | { kind: 'pending'; undid?: ProposedValue }
-  | { kind: 'accepted'; replaced?: FieldValue; wrote: ProposedValue }
-  | { kind: 'rejected' };
-
 /** A Proposal in a log: the message it came with, by index, and the latest decision on it. */
 export type LoggedProposal = Proposal & { message: number; decision: Decision };
 
@@ -320,15 +313,9 @@ export function parseLog(log: string): LoggedConversation | null {
           decision: { kind: 'pending' },
         });
       }
-    } else if (known && event.type === 'proposal.accepted') {
-      const accepted = acceptedOf(known, event as Partial<AcceptedEvent>);
-      if (accepted) known.decision = accepted;
-    } else if (known && event.type === 'proposal.rejected') {
-      known.decision = { kind: 'rejected' };
-    } else if (known && event.type === 'proposal.undone') {
-      if (known.decision.kind === 'accepted') {
-        known.decision = { kind: 'pending', undid: known.decision.wrote };
-      }
+    } else if (known) {
+      const decision = decisionEventOf(known, event);
+      if (decision) known.decision = decided(known.decision, decision);
     }
   }
   const { id, mode, created } = header;
@@ -512,11 +499,22 @@ function loggedOffer(event: Partial<OfferedEvent>): Proposal | null {
     : null;
 }
 
+/** The accept, reject or undo an event logs of `proposal`, if it can be read. */
+function decisionEventOf(
+  proposal: Proposal,
+  event: { type?: unknown },
+): DecisionEvent | null {
+  if (event.type === 'proposal.rejected') return { kind: 'rejected' };
+  if (event.type === 'proposal.undone') return { kind: 'undone' };
+  if (event.type !== 'proposal.accepted') return null;
+  return acceptedOf(proposal, event as Partial<AcceptedEvent>);
+}
+
 /** The accept an event logs of `proposal`, if it can be read. */
 function acceptedOf(
   proposal: Proposal,
   event: Partial<AcceptedEvent>,
-): Decision | null {
+): Extract<Decision, { kind: 'accepted' }> | null {
   const { fields } = event;
   if (!fields) return null;
   if (proposal.kind === 'new-entry') {
