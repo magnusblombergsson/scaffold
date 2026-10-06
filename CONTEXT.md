@@ -103,6 +103,10 @@ _Avoid_: Label, stage, state
 A free word or phrase the Author attaches to Scenes, Chapters and Entries to say what they concern, such as "Mara" or "flashback"; a unit may have any number, and the Project's Tags are simply those in use.
 _Avoid_: Keyword, label, category
 
+**Filter**:
+A narrowing of one list or view to the units matching chosen Statuses, Tags or Entry types; it changes only what the Author sees, never what the Assistant sees.
+_Avoid_: Search
+
 **Trash**:
 Where deleted Scenes, Chapters, Entries and Conversations go within a Project; they stay recoverable until the Author empties it. A Chapter goes with its Scenes and comes back with them; an Entry with its image; a Conversation goes with its pending Proposals.
 _Avoid_: Bin, archive
@@ -159,7 +163,7 @@ _Avoid_: Chat, session, history
 Mode for free idea generation with the Assistant.
 
 **Interview**:
-Mode where the Assistant asks the Author questions to capture facts about the story's world, characters, and plot into the Story Bible and Outlines. The Author chooses a focus (one Entry, one Entry type, a Chapter or Scene, or open) and may change it at any time; within it the Assistant asks about what is missing, one question at a time, and turns each answer into Proposals.
+Mode where the Assistant asks the Author questions to capture facts about the story's world, characters, and plot into the Story Bible and Outlines. The Author chooses a focus (one Entry, one Entry type, a Tag, a Chapter or Scene, or open) and may change it at any time; within it the Assistant asks about what is missing, one question at a time, and turns each answer into Proposals.
 _Avoid_: Q&A, questionnaire
 
 **Writing**:
