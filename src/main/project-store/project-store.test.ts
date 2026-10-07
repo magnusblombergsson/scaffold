@@ -1089,7 +1089,7 @@ describe('Outlines and Notes', () => {
     }
   });
 
-  it('stores Outlines as outlines/<id>.md, with per-unit metadata in frontmatter', async () => {
+  it('stores Outlines as outlines/<id>.md, with per-unit metadata in frontmatter, and when each key was saved', async () => {
     const { projectPath, store, one, a } = await newProject();
 
     await store.write(outline(a), {
@@ -1103,7 +1103,8 @@ describe('Outlines and Notes', () => {
     expect(
       await readFile(path.join(projectPath, 'outlines', `${a}.md`), 'utf8'),
     ).toBe(
-      `---\nid: ${a}\nformat: 1\npov: Anna\nstatus: draft\n---\n` +
+      `---\nid: ${a}\nformat: 1\npov: Anna\nstatus: draft\n` +
+        'keysSavedAt:\n  pov: 0\n  status: 0\n---\n' +
         '- Anna finds the letter\n- She hides it',
     );
     const reopened = await openProject(projectPath, deps());

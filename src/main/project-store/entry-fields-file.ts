@@ -29,6 +29,11 @@ const FIELD_KEYS: Record<EntryType, readonly (keyof EntryFields)[]> = {
   other: [],
 };
 
+/** The frontmatter keys an Entry's fields may be stored under, of any type. */
+export const ENTRY_FIELD_KEYS: readonly string[] = [
+  ...new Set(Object.values(FIELD_KEYS).flat()),
+];
+
 /** The free-text fields. */
 const TEXT_KEYS = ['roleNote', 'appearance'] as const;
 const VOICE_KEYS = ['traits', 'says', 'neverSays', 'examples'] as const;
