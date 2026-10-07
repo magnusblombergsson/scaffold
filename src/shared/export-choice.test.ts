@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import type { Manuscript } from './project-types';
+import type { Status } from './status';
 import {
   chapterTick,
   pickedManuscript,
   sceneTicked,
   TICK_ALL,
+  tickMatching,
   toggleChapter,
   toggleScene,
 } from './export-choice';
@@ -102,5 +104,51 @@ describe('What a Manuscript Export picks', () => {
     expect(pickedManuscript(novel, unticked).chapters.map((c) => c.id)).toEqual(
       ['c3'],
     );
+  });
+});
+
+describe('Tick matching…', () => {
+  const statuses: Status[] = [{ id: 'done', name: 'Done', colour: 'green' }];
+  const tagged: Manuscript = {
+    chapters: [
+      {
+        ...one,
+        scenes: [{ id: 's1', title: 'A', status: 'done' }, one.scenes[1]],
+      },
+      empty,
+      { ...three, tags: ['war'] },
+    ],
+    unplaced: [],
+  };
+  const [taggedOne, taggedEmpty, taggedThree] = tagged.chapters;
+
+  it('ticks only the matching Scenes, the rest unticked', () => {
+    const unticked = tickMatching(tagged, { statuses: ['done'] }, statuses);
+    expect(sceneTicked('s1', unticked)).toBe(true);
+    expect(sceneTicked('s2', unticked)).toBe(false);
+    expect(chapterTick(taggedOne, unticked)).toBe('half');
+    expect(chapterTick(taggedEmpty, unticked)).toBe('unticked');
+    expect(chapterTick(taggedThree, unticked)).toBe('unticked');
+  });
+
+  it('ticks a matching Chapter with all its Scenes', () => {
+    const unticked = tickMatching(tagged, { tags: ['War'] }, statuses);
+    expect(chapterTick(taggedThree, unticked)).toBe('ticked');
+    expect(chapterTick(taggedOne, unticked)).toBe('unticked');
+  });
+
+  it('ticks a matching empty Chapter', () => {
+    const unticked = tickMatching(tagged, { tags: [null] }, statuses);
+    expect(chapterTick(taggedEmpty, unticked)).toBe('ticked');
+    expect(chapterTick(taggedOne, unticked)).toBe('ticked');
+    // Its one Scene untagged, a tagged Chapter is ticked through it.
+    expect(chapterTick(taggedThree, unticked)).toBe('ticked');
+  });
+
+  it('lets the Author tick by hand afterwards', () => {
+    const matched = tickMatching(tagged, { statuses: ['done'] }, statuses);
+    const unticked = toggleScene(taggedOne, 's2', matched);
+    expect(chapterTick(taggedOne, unticked)).toBe('ticked');
+    expect(pickedManuscript(tagged, unticked).chapters).toHaveLength(1);
   });
 });

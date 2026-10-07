@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  filterManuscript,
   filterOn,
   filterSummary,
   keepKnown,
@@ -9,6 +10,7 @@ import {
   withValue,
   type Filter,
 } from './filter';
+import type { Manuscript } from './project-types';
 import type { Status } from './status';
 
 const statuses: Status[] = [
@@ -105,6 +107,97 @@ describe('filterSummary', () => {
         statuses,
       ),
     ).toBe('Character · Place · Done · No Status · subplot-B · No tags');
+  });
+});
+
+describe('A Status renamed', () => {
+  it('is followed, as a Filter names a Status by id', () => {
+    const renamed = [{ ...statuses[0], name: 'First draft' }, statuses[1]];
+    expect(filterSummary({ statuses: ['drafted'] }, renamed)).toBe(
+      'First draft',
+    );
+  });
+});
+
+describe('filterManuscript', () => {
+  const novel: Manuscript = {
+    chapters: [
+      {
+        id: 'c1',
+        title: 'One',
+        status: 'drafted',
+        scenes: [
+          { id: 's1', title: 'A', status: 'done' },
+          { id: 's2', title: 'B' },
+        ],
+      },
+      {
+        id: 'c2',
+        title: 'Two',
+        tags: ['war'],
+        scenes: [
+          { id: 's3', title: 'C', status: 'drafted', tags: ['Mara'] },
+          { id: 's4', title: 'D', status: 'gone' },
+        ],
+      },
+      { id: 'c3', title: 'Empty', scenes: [] },
+    ],
+    unplaced: [{ id: 's9', title: 'Unplaced', status: 'drafted' }],
+  };
+  const shape = (filter: Filter) =>
+    filterManuscript(filter, novel, statuses).chapters.map((c) => [
+      c.chapter.id,
+      c.dimmed,
+      c.scenes.map((s) => s.id),
+    ]);
+
+  it('shows every Chapter whole with no Filter', () => {
+    expect(shape({})).toEqual([
+      ['c1', false, ['s1', 's2']],
+      ['c2', false, ['s3', 's4']],
+      ['c3', false, []],
+    ]);
+  });
+
+  it('shows a matching Chapter whole', () => {
+    expect(shape({ statuses: ['drafted'] })[0]).toEqual([
+      'c1',
+      false,
+      ['s1', 's2'],
+    ]);
+  });
+
+  it('dims a Chapter holding only matching Scenes, over just them', () => {
+    expect(shape({ statuses: ['drafted'] })[1]).toEqual(['c2', true, ['s3']]);
+  });
+
+  it('hides a Chapter with nothing matching', () => {
+    expect(shape({ statuses: ['done'] })).toEqual([['c1', true, ['s1']]]);
+  });
+
+  it('matches "No Status", an unknown Status id among them', () => {
+    expect(shape({ statuses: [null] })).toEqual([
+      ['c1', true, ['s2']],
+      ['c2', false, ['s3', 's4']],
+      ['c3', false, []],
+    ]);
+  });
+
+  it('matches "No tags"', () => {
+    expect(shape({ tags: [null] })).toEqual([
+      ['c1', false, ['s1', 's2']],
+      ['c2', true, ['s4']],
+      ['c3', false, []],
+    ]);
+  });
+
+  it('counts the matching units of all those placed', () => {
+    const { matching, total } = filterManuscript(
+      { statuses: ['drafted'] },
+      novel,
+      statuses,
+    );
+    expect([matching, total]).toEqual([2, 7]);
   });
 });
 

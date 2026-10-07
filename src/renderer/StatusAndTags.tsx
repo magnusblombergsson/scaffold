@@ -50,6 +50,11 @@ function useStatusAndTags(): StatusAndTags {
   return context;
 }
 
+/** The Project's Status list, in order. */
+export function useStatuses(): Status[] {
+  return useStatusAndTags().statuses;
+}
+
 type Unit = ManuscriptChapter | ManuscriptScene;
 
 /** A unit's Status dot, named; nothing without a Status. */

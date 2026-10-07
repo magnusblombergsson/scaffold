@@ -16,7 +16,10 @@ import {
   type FilterPlace,
 } from '../shared/filter';
 import { ENTRY_TYPE_LABELS, ENTRY_TYPES } from '../shared/project-types';
+import type { Status } from '../shared/status';
 import { tagKey } from '../shared/tags';
+import { StatusDot } from './Binder';
+import { useStatuses } from './StatusAndTags';
 
 /** The events after which the Tags in use may have changed. */
 const TAG_EVENTS = new Set([
@@ -27,8 +30,9 @@ const TAG_EVENTS = new Set([
 
 /**
  * The Filter at `place`, as this computer remembers it for the Project, and
- * the Tags in use to pick from. A Tag no longer in use drops out; one gone
- * as the place opens is forgotten, so a Filter emptied that way is off.
+ * the Tags in use to pick from. A Tag no longer in use, or a Status no longer
+ * in the list, drops out; one gone as the place opens is forgotten, so a
+ * Filter emptied that way is off.
  */
 export function useFilter(place: FilterPlace): {
   filter: Filter;
@@ -37,6 +41,7 @@ export function useFilter(place: FilterPlace): {
 } {
   const [stored, setStored] = useState<Filter | null>(null);
   const [inUse, setInUse] = useState<string[] | null>(null);
+  const statuses = useStatuses();
 
   useEffect(() => {
     let current = true;
@@ -74,7 +79,7 @@ export function useFilter(place: FilterPlace): {
   // The same object while it chooses the same values, as the Tags in use
   // are read anew.
   const filterKey = JSON.stringify(
-    stored && inUse ? keepKnown(stored, { tags: inUse }) : {},
+    stored && inUse ? keepKnown(stored, { tags: inUse, statuses }) : {},
   );
   const filter = useMemo(() => JSON.parse(filterKey) as Filter, [filterKey]);
 
@@ -98,10 +103,10 @@ export function useFilter(place: FilterPlace): {
 }
 
 /**
- * The Filter button, and the panel it opens: Entry types to tick, and Tags
- * picked from those in use. While a Filter is on, the button sums it up
- * with how many units it shows, and ✕ clears it. It changes only what the
- * Author sees.
+ * The Filter button, and the panel it opens: Entry types or Statuses to
+ * tick, and Tags picked from those in use. While a Filter is on, the button
+ * sums it up with how many units it shows, and ✕ clears it. It changes
+ * nothing the Assistant sees; Tick matching… uses it to tick units.
  */
 export function FilterControl({
   filter,
@@ -109,6 +114,8 @@ export function FilterControl({
   inUse,
   shown,
   total,
+  by = 'types',
+  label = 'Filter',
 }: {
   filter: Filter;
   onChange(filter: Filter): void;
@@ -116,7 +123,12 @@ export function FilterControl({
   /** How many units match, of how many. */
   shown: number;
   total: number;
+  /** What it filters on besides Tags: Entry types, or Statuses. */
+  by?: 'types' | 'statuses';
+  /** The button's name while no Filter is on. */
+  label?: string;
 }) {
+  const statuses = useStatuses();
   const [open, setOpen] = useState(false);
   const root = useRef<HTMLDivElement>(null);
   const button = useRef<HTMLButtonElement>(null);
@@ -132,7 +144,9 @@ export function FilterControl({
   }, [open]);
 
   function onKeyDown(event: KeyboardEvent) {
-    if (event.key === 'Escape') {
+    if (event.key === 'Escape' && open) {
+      // Not the dialog it may be in, too.
+      event.preventDefault();
       event.stopPropagation();
       setOpen(false);
       button.current?.focus();
@@ -150,7 +164,9 @@ export function FilterControl({
           aria-pressed={on}
           onClick={() => setOpen(!open)}
         >
-          {on ? `${filterSummary(filter)} — ${shown} of ${total}` : 'Filter'}
+          {on
+            ? `${filterSummary(filter, statuses)} — ${shown} of ${total}`
+            : label}
         </button>
         {on && (
           <button
@@ -164,7 +180,12 @@ export function FilterControl({
         )}
       </div>
       {open && (
-        <FilterPanel filter={filter} onChange={onChange} inUse={inUse} />
+        <FilterPanel
+          filter={filter}
+          onChange={onChange}
+          inUse={inUse}
+          statuses={by === 'statuses' ? statuses : null}
+        />
       )}
     </div>
   );
@@ -174,14 +195,18 @@ function FilterPanel({
   filter,
   onChange,
   inUse,
+  statuses,
 }: {
   filter: Filter;
   onChange(filter: Filter): void;
   inUse: string[];
+  /** The Statuses to tick, or null for Entry types. */
+  statuses: Status[] | null;
 }) {
   const [typing, setTyping] = useState('');
   const listId = useId();
   const types = filter.types ?? [];
+  const chosenStatuses = filter.statuses ?? [];
   const tags = filter.tags ?? [];
   const chosen = new Set(
     tags.flatMap((tag) => (tag === null ? [] : [tagKey(tag)])),
@@ -198,21 +223,49 @@ function FilterPanel({
 
   return (
     <div className="filter-panel" role="dialog" aria-label="Filter">
-      <fieldset>
-        <legend>Type</legend>
-        {ENTRY_TYPES.map((type) => (
-          <label key={type}>
-            <input
-              type="checkbox"
-              checked={types.includes(type)}
-              onChange={(event) =>
-                onChange(withValue(filter, 'types', type, event.target.checked))
-              }
-            />
-            {ENTRY_TYPE_LABELS[type]}
-          </label>
-        ))}
-      </fieldset>
+      {statuses ? (
+        <fieldset>
+          <legend>Status</legend>
+          {[...statuses, null].map((status) => (
+            <label key={status?.id ?? ''}>
+              <input
+                type="checkbox"
+                checked={chosenStatuses.includes(status?.id ?? null)}
+                onChange={(event) =>
+                  onChange(
+                    withValue(
+                      filter,
+                      'statuses',
+                      status?.id ?? null,
+                      event.target.checked,
+                    ),
+                  )
+                }
+              />
+              {status && <StatusDot status={status} named={false} />}
+              {status?.name ?? 'No Status'}
+            </label>
+          ))}
+        </fieldset>
+      ) : (
+        <fieldset>
+          <legend>Type</legend>
+          {ENTRY_TYPES.map((type) => (
+            <label key={type}>
+              <input
+                type="checkbox"
+                checked={types.includes(type)}
+                onChange={(event) =>
+                  onChange(
+                    withValue(filter, 'types', type, event.target.checked),
+                  )
+                }
+              />
+              {ENTRY_TYPE_LABELS[type]}
+            </label>
+          ))}
+        </fieldset>
+      )}
       <fieldset>
         <legend>Tags</legend>
         <label>

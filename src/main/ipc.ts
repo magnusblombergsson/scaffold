@@ -108,7 +108,12 @@ const projectHandlers: Handlers<
       sender,
       store,
       `The Statuses of ${store.displayName}`,
-      () => store.deleteStatus(statusId, moveTo),
+      async () => {
+        await store.deleteStatus(statusId, moveTo);
+        changeFilters(sender, store.id, (filter) =>
+          withValue(filter, 'statuses', statusId, false),
+        );
+      },
     ),
   tags: async ({ store }) => store.tags(),
   setTags: ({ store }, unitId, tags) => store.setTags(unitId, tags),

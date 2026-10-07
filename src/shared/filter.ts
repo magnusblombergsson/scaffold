@@ -7,6 +7,9 @@ import {
   ENTRY_TYPE_LABELS,
   ENTRY_TYPES,
   type EntryType,
+  type Manuscript,
+  type ManuscriptChapter,
+  type ManuscriptScene,
 } from './project-types';
 import { statusOf, type Status } from './status';
 import { hasTag, tagKey, tagSpelling } from './tags';
@@ -25,7 +28,12 @@ export type Filter = {
 export type FilterPart = keyof Filter;
 
 /** Where a Filter is, each remembering its own on this computer. */
-export const FILTER_PLACES = ['brainstorm-bible', 'writing-bible'] as const;
+export const FILTER_PLACES = [
+  'brainstorm-bible',
+  'writing-bible',
+  'outline-skeleton',
+  'export-manuscript',
+] as const;
 export type FilterPlace = (typeof FILTER_PLACES)[number];
 
 export type Filters = Partial<Record<FilterPlace, Filter>>;
@@ -53,6 +61,42 @@ export function matchesFilter(filter: Filter, unit: Filtered): boolean {
         tag === null ? unitTags.length === 0 : hasTag(unitTags, tag),
       ))
   );
+}
+
+/** A Chapter as a Filter shows it, with the Scenes it shows under it. */
+export type FilteredChapter = {
+  chapter: ManuscriptChapter;
+  /** Shown only as the heading over its matching Scenes. */
+  dimmed: boolean;
+  scenes: ManuscriptScene[];
+};
+
+/**
+ * The placed Chapters and Scenes as `filter` shows them: a matching Chapter
+ * whole, one holding only matching Scenes dimmed over just them, one with
+ * nothing matching not at all. With how many units match, of how many.
+ */
+export function filterManuscript(
+  filter: Filter,
+  manuscript: Manuscript,
+  statuses: readonly Status[],
+): { chapters: FilteredChapter[]; matching: number; total: number } {
+  const matches = (unit: ManuscriptChapter | ManuscriptScene) =>
+    matchesFilter(filter, {
+      status: statusOf(statuses, unit.status)?.id,
+      tags: unit.tags,
+    });
+  let matching = 0;
+  let total = 0;
+  const chapters = manuscript.chapters.flatMap((chapter) => {
+    const scenes = chapter.scenes.filter(matches);
+    const whole = matches(chapter);
+    matching += scenes.length + (whole ? 1 : 0);
+    total += chapter.scenes.length + 1;
+    if (whole) return [{ chapter, dimmed: false, scenes: chapter.scenes }];
+    return scenes.length > 0 ? [{ chapter, dimmed: true, scenes }] : [];
+  });
+  return { chapters, matching, total };
 }
 
 /**
