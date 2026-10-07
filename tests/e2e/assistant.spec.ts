@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator } from '@playwright/test';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { addAnthropicKey, answerDialogs, launch, useTempDir } from './app';
@@ -20,10 +20,23 @@ async function logs(projectPath: string) {
   );
 }
 
+/**
+ * The reply of the first test, with its bold and list shown as formatting
+ * and none of its Markdown showing.
+ */
+async function expectFormatted(reply: Locator) {
+  const text = reply.locator('.message-text');
+  await expect(text.locator('p').first()).toHaveText('What does she fear?');
+  await expect(text.locator('strong')).toHaveText('she fear?');
+  await expect(text.locator('ul > li')).toHaveText(['The sea', 'Her sister']);
+  await expect(text.locator('em')).toHaveText('Her');
+  await expect(text).not.toContainText('*');
+}
+
 test('the Author asks about the Scene in focus, sees the reply stream in, and resumes the Conversation later', async () => {
   const projectPath = path.join(tempDir(), 'My Novel');
   anthropic.calls.push({
-    reply: ['What does ', 'she fear?'],
+    reply: ['What does **she', ' fear?**\n\n- The sea\n- *Her* sister'],
     usage: { input: 18_000, cached: 12_000, output: 900 },
   });
   const first = await launch(tempDir(), { anthropicUrl: anthropic.url });
@@ -33,17 +46,19 @@ test('the Author asks about the Scene in focus, sees the reply stream in, and re
   await page.getByLabel('Prose').pressSequentially('Anna packed in the rain.');
   const assistant = await addAnthropicKey(page);
 
+  // The Author's Markdown shows as typed, unlike the reply's.
   await assistant
     .getByRole('textbox', { name: 'Message' })
-    .fill('Why does Anna leave?');
+    .fill('Why does *Anna* leave?');
   await assistant.getByRole('button', { name: 'Send' }).click();
 
   const messages = assistant.getByRole('log', { name: 'Messages' });
   await expect(messages.getByRole('article', { name: 'You' })).toHaveText(
-    'Why does Anna leave?',
+    'Why does *Anna* leave?',
   );
   const reply = messages.getByRole('article', { name: 'Assistant' });
   await expect(reply).toContainText('What does she fear?');
+  await expectFormatted(reply);
   await expect(reply.getByLabel('Usage')).toHaveText(
     '≈ 18k in (12k cached) · 900 out · ≈ $0.02',
   );
@@ -76,7 +91,7 @@ test('the Author asks about the Scene in focus, sees the reply stream in, and re
   const [[header, chosen, asked, replied]] = await logs(projectPath);
   expect(header).toMatchObject({
     mode: 'writing',
-    title: 'Why does Anna leave?',
+    title: 'Why does *Anna* leave?',
     format: 1,
   });
   expect(chosen).toMatchObject({
@@ -114,14 +129,12 @@ test('the Author asks about the Scene in focus, sees the reply stream in, and re
   const resumed = again.getByRole('complementary', { name: 'Assistant' });
   await resumed
     .getByRole('combobox', { name: 'Conversation' })
-    .selectOption({ label: 'Why does Anna leave?' });
+    .selectOption({ label: 'Why does *Anna* leave?' });
   const history = resumed.getByRole('log', { name: 'Messages' });
   await expect(history.getByRole('article', { name: 'You' })).toHaveText(
-    'Why does Anna leave?',
+    'Why does *Anna* leave?',
   );
-  await expect(
-    history.getByRole('article', { name: 'Assistant' }),
-  ).toContainText('What does she fear?');
+  await expectFormatted(history.getByRole('article', { name: 'Assistant' }));
   await expect(resumed.getByLabel('Conversation usage')).toHaveText(
     '≈ 18k in (12k cached) · 900 out · ≈ $0.02',
   );
@@ -294,7 +307,7 @@ test('the Author asks for a Review of the Chapter, sees its Findings in order, a
       finding({
         type: 'missing',
         quote: 'The letter came',
-        comment: 'Nobody reads the letter.',
+        comment: 'Nobody reads *the letter*.',
       }),
       finding({
         type: 'contradiction',
@@ -334,6 +347,8 @@ test('the Author asks for a Review of the Chapter, sees its Findings in order, a
   );
   await expect(contradiction.locator('strong')).toHaveText('Which holds?');
   await expect(missing).toContainText('Missing');
+  await expect(missing).toContainText('Nobody reads the letter.');
+  await expect(missing.locator('.finding-comment em')).toHaveText('the letter');
   // Each Scene's Prose was sent, with what a Chapter Review is to do.
   const sent = JSON.stringify(anthropic.sent[0]);
   expect(sent).toContain('She waited on the quay.');

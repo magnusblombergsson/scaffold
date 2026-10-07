@@ -55,6 +55,7 @@ import { emptyReplyNote } from './empty-reply-note';
 import { failureMessage } from './provider-messages';
 import { NO_SHORTLISTS, useProviders, useShortlists } from './Providers';
 import { ReadOnlyContext } from './read-only';
+import { ReplyInlineText, ReplyText } from './ReplyText';
 import { sawList } from './saw-list';
 
 // A Conversation with the Assistant, wherever it is shown: in the Assistant
@@ -489,10 +490,11 @@ export function conversationActions(
  * The messages of the Conversation open, each change of an Interview's focus
  * between them, the reply streaming in, and a failed call with why, naming
  * its Provider, with Retry and a switch to another Model. Each reply names
- * the Model that wrote it. The
- * Assistant's replies are plain text: nothing here puts
- * them in the Manuscript, though the Author can copy them as any text. A
- * reply's Proposals show as cards in it, where the Author decides them.
+ * the Model that wrote it. The Assistant's replies show their bold, italic
+ * and lists, and the rest of their Markdown as typed; the Author's messages
+ * show as typed. Nothing here puts a reply in the Manuscript, though the
+ * Author can copy it as any text. A reply's Proposals show as cards in it,
+ * where the Author decides them.
  */
 export function MessageLog({
   conversation: { current, streaming, failure, shown, retry, setPicking },
@@ -905,7 +907,12 @@ function Message({
       className={`message message-${role}`}
       aria-label={role === 'author' ? 'You' : 'Assistant'}
     >
-      {text && <div className="message-text">{text}</div>}
+      {text &&
+        (role === 'assistant' ? (
+          <ReplyText text={text} />
+        ) : (
+          <div className="message-text">{text}</div>
+        ))}
       {findings && findings.length > 0 && (
         <ol className="findings" aria-label="Findings">
           {findings.map((finding, i) => (
@@ -979,7 +986,9 @@ function FindingItem({
   return (
     <li className={`finding finding-${type}`}>
       <span className="finding-type">{FINDING_LABELS[type]}</span>
-      <p className="finding-comment">{comment}</p>
+      <p className="finding-comment">
+        <ReplyInlineText text={comment} />
+      </p>
       {quote &&
         (scene && !scene.missing && onQuote ? (
           <button
@@ -994,7 +1003,9 @@ function FindingItem({
         ))}
       {question && (
         <p className="finding-question">
-          <strong>{question}</strong>
+          <strong>
+            <ReplyInlineText text={question} />
+          </strong>
         </p>
       )}
       {onAddTodo && (

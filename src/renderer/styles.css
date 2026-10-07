@@ -3396,6 +3396,31 @@ header.entry-header {
   align-self: flex-start;
 }
 
+.reply-text p,
+.reply-text ul,
+.reply-text ol {
+  margin: 0;
+}
+
+.reply-text > * + *,
+.reply-text li > * + * {
+  margin-top: 0.5em;
+}
+
+.reply-text ul,
+.reply-text ol {
+  padding-left: 1.4em;
+}
+
+.reply-text li + li {
+  margin-top: 0.2em;
+}
+
+.reply-text strong,
+.finding-comment strong {
+  font-weight: 600;
+}
+
 .message-saw {
   margin: 0.3rem 0 0;
   font-size: 0.8em;
