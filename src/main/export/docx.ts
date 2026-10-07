@@ -1,5 +1,6 @@
 import { crc32, deflateRawSync } from 'node:zlib';
 import type { ProseLanguage } from '../../shared/project-types';
+import { ALIGN_NAME, type Alignment } from '../../shared/prose-markdown';
 
 // A minimal .docx: one document part, and a styles part holding Word's
 // built-in Normal and Heading 1, so the reader's Word restyles it as they
@@ -8,10 +9,10 @@ import type { ProseLanguage } from '../../shared/project-types';
 /** A run of text, and whether it is bold or italic. */
 export type DocxRun = { text: string; bold: boolean; italic: boolean };
 
-/** A paragraph: Normal, Heading 1 or Quote, and whether it is centred. */
+/** A paragraph: Normal, Heading 1 or Quote, and how it is aligned if not left. */
 export type DocxParagraph = {
   style?: 'heading1' | 'quote';
-  centred?: boolean;
+  align?: Alignment;
   runs: DocxRun[];
 };
 
@@ -39,10 +40,10 @@ function documentXml(paragraphs: DocxParagraph[]): string {
     .join('')}</w:body></w:document>`;
 }
 
-function paragraphXml({ style, centred, runs }: DocxParagraph): string {
+function paragraphXml({ style, align, runs }: DocxParagraph): string {
   const properties =
     (style ? `<w:pStyle w:val="${STYLE_IDS[style]}"/>` : '') +
-    (centred ? '<w:jc w:val="center"/>' : '');
+    (align ? `<w:jc w:val="${ALIGN_NAME[align]}"/>` : '');
   return `<w:p>${properties && `<w:pPr>${properties}</w:pPr>`}${runs
     .map(runXml)
     .join('')}</w:p>`;

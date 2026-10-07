@@ -42,6 +42,19 @@ describe('the Format menu', () => {
     expect(docToMarkdown(editor.getJSON())).toBe('> ***One*** two.');
   });
 
+  it('aligns the paragraph, and the current alignment again returns it to left', () => {
+    const editor = open('One.');
+    expect(applyFormat(editor, 'alignCentre')).toBe(true);
+    expect(docToMarkdown(editor.getJSON())).toBe('{.centre} One.');
+    expect(applyFormat(editor, 'alignRight')).toBe(true);
+    expect(docToMarkdown(editor.getJSON())).toBe('{.right} One.');
+    expect(applyFormat(editor, 'alignRight')).toBe(true);
+    expect(docToMarkdown(editor.getJSON())).toBe('One.');
+    applyFormat(editor, 'alignCentre');
+    expect(applyFormat(editor, 'alignLeft')).toBe(true);
+    expect(docToMarkdown(editor.getJSON())).toBe('One.');
+  });
+
   it('formats nothing in a read-only Project', () => {
     const editor = open('One.');
     editor.setEditable(false);

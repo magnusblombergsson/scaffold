@@ -681,7 +681,9 @@ function setApplicationMenu(): void {
   const store = window && stores.get(window.webContents.id);
   const state: MenuState = {
     mac: process.platform === 'darwin',
-    dev: !app.isPackaged,
+    // Run from the dev server, by `electron-forge start`; what `package`
+    // builds, as the e2e tests run, is as it ships.
+    dev: Boolean(MAIN_WINDOW_VITE_DEV_SERVER_URL),
     project: store
       ? {
           readOnly: store.readOnly() !== null,

@@ -301,6 +301,45 @@ describe('Block quotes in a Markdown Export', () => {
   });
 });
 
+describe('Alignment in a Markdown Export', () => {
+  const markdownOfProse = async (s1: string) =>
+    (
+      await markdownOf(
+        { chapters: [chapter('c1', 'One', 's1')], unplaced: [] },
+        { s1 },
+      )
+    ).replace(/^# One\n\n/, '');
+
+  it('writes a centred or right-aligned paragraph as `<p align>`, with `<em>` and `<strong>` inside', async () => {
+    expect(
+      await markdownOfProse(
+        'Before.\n\n{.centre} The *End*\n\n{.right} **Signed** by *me*.',
+      ),
+    ).toBe(
+      'Before.\n\n<p align="center">The <em>End</em></p>\n\n' +
+        '<p align="right"><strong>Signed</strong> by <em>me</em>.</p>\n',
+    );
+  });
+
+  it('nests marks that cross, and escapes HTML', async () => {
+    expect(await markdownOfProse('{.centre} *a **b* c** & <x> \\*')).toBe(
+      '<p align="center"><em>a <strong>b</strong></em><strong> c</strong> &amp; &lt;x&gt; *</p>\n',
+    );
+  });
+
+  it('keeps a line break within the paragraph', async () => {
+    expect(await markdownOfProse('{.right} One\nTwo')).toBe(
+      '<p align="right">One<br>Two</p>\n',
+    );
+  });
+
+  it('quotes an aligned paragraph within its passage', async () => {
+    expect(await markdownOfProse('> One.\n\n> {.centre} Two.')).toBe(
+      '> One.\n>\n> <p align="center">Two.</p>\n',
+    );
+  });
+});
+
 describe('Exporting the Manuscript to .docx', () => {
   it('writes Chapter titles as Heading 1, Prose as Normal, and a centred break between Scenes', async () => {
     const { 'word/document.xml': document } = await docxOf(novel, prose);
@@ -398,6 +437,28 @@ describe('Exporting the Manuscript to .docx', () => {
     expect(quote).toContain('<w:name w:val="Quote"/>');
     expect(quote).toMatch(/<w:ind w:left="(\d+)" w:right="\1"\/>/);
     expect(quote).not.toContain('<w:i/>');
+  });
+
+  it('writes a centred or right-aligned paragraph with `w:jc`, quoted or not', async () => {
+    const files = await docxOf(
+      { chapters: [chapter('c1', 'One', 's1')], unplaced: [] },
+      {
+        s1: '{.centre} The End\n\n{.right} Signed.\n\n> {.centre} Quoted.\n\nLeft.',
+      },
+    );
+    expect(
+      [...files['word/document.xml'].matchAll(/<w:p>(.*?)<\/w:p>/g)]
+        .slice(1)
+        .map(([, p]) => [
+          /<w:pStyle w:val="([^"]+)"\/>/.exec(p)?.[1],
+          /<w:jc w:val="([^"]+)"\/>/.exec(p)?.[1],
+        ]),
+    ).toEqual([
+      [undefined, 'center'],
+      [undefined, 'right'],
+      ['Quote', 'center'],
+      [undefined, undefined],
+    ]);
   });
 
   it('keeps marks that overlap, and escapes XML', async () => {

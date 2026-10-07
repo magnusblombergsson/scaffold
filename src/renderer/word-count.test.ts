@@ -55,6 +55,13 @@ describe('proseCounts', () => {
     });
   });
 
+  it('skips alignment markers, also after a quote marker', () => {
+    expect(proseCounts('{.centre} The End\n\n> {.right} Signed.')).toEqual({
+      words: 3,
+      characters: 14,
+    });
+  });
+
   it('counts nothing in empty Prose', () => {
     expect(proseCounts('')).toEqual({ words: 0, characters: 0 });
   });

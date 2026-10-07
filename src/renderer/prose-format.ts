@@ -20,6 +20,12 @@ export function applyFormat(editor: Editor, format: ProseFormat): boolean {
       return chain.toggleBold().run();
     case 'italic':
       return chain.toggleItalic().run();
+    case 'alignLeft':
+      return chain.alignParagraphs(null).run();
+    case 'alignCentre':
+      return chain.alignParagraphs('centre').run();
+    case 'alignRight':
+      return chain.alignParagraphs('right').run();
     case 'blockQuote':
       return chain.toggleBlockQuote().run();
   }

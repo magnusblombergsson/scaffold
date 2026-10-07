@@ -350,9 +350,10 @@ describe('Prose by Mode and command', () => {
     expect(context.saw.entries).toContain(entries.anna);
   });
 
-  it('sends Prose with its block quote markers as stored', async () => {
+  it('sends Prose with its block quote and alignment markers as stored', async () => {
     const { store, view, scenes } = await fixture();
-    const markdown = 'She read:\n\n> Come *home*.\n\n> Now.\n\n\\>sigh';
+    const markdown =
+      'She read:\n\n> Come *home*.\n\n> {.right} Now.\n\n\\>sigh\n\n{.centre} The End';
     await store.write(
       { kind: 'scene', id: scenes.harbour },
       { id: scenes.harbour, markdown },

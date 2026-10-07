@@ -12,8 +12,9 @@ import type { JSONContent } from '@tiptap/core';
 // differently). Literal `*` and `\` are escaped with a backslash.
 //
 // How a paragraph is formatted is a marker at its start (ADR 0007): `> ` for
-// a block quote. A paragraph whose own text starts with `>` or `{.`, which
-// markers start with, has it escaped.
+// a block quote, `{.centre} ` or `{.right} ` for its alignment, combined as
+// `> {.centre} `; left is unmarked. A paragraph whose own text starts with
+// `>` or `{.`, which markers start with, has it escaped.
 
 export type Mark = 'bold' | 'italic';
 const MARKS: readonly Mark[] = ['bold', 'italic'];
@@ -22,11 +23,39 @@ const DELIMITER: Record<Mark, string> = { bold: '**', italic: '*' };
 /** A stretch of Prose with the same marks, bold before italic. */
 export type Span = { text: string; marks: Mark[] };
 
-/** A paragraph of Prose: its spans, and whether it is a block quote. */
-export type Paragraph = { spans: Span[]; quote?: boolean };
+/** How a paragraph is aligned, when not left. */
+export type Alignment = 'centre' | 'right';
+export const ALIGNMENTS: readonly Alignment[] = ['centre', 'right'];
+
+/**
+ * A paragraph of Prose: its spans, whether it is a block quote, and how it
+ * is aligned.
+ */
+export type Paragraph = { spans: Span[]; quote?: boolean; align?: Alignment };
 
 /** The marker of a quoted paragraph. */
 const QUOTE = '> ';
+
+/** The marker of each alignment, after a quote's. */
+const ALIGN_MARKER: Record<Alignment, string> = {
+  centre: '{.centre} ',
+  right: '{.right} ',
+};
+
+/**
+ * Each alignment by the name the editor's `textAlign`, CSS, HTML's `align`
+ * and Word's `w:jc` all give it.
+ */
+export const ALIGN_NAME: Record<Alignment, string> = {
+  centre: 'center',
+  right: 'right',
+};
+
+/** The alignment `ALIGN_NAME` names, in any case; none for left or others. */
+export function alignmentNamed(name: unknown): Alignment | undefined {
+  if (typeof name !== 'string') return undefined;
+  return ALIGNMENTS.find((align) => ALIGN_NAME[align] === name.toLowerCase());
+}
 
 /**
  * What starts a marker, escaped where a paragraph's own text starts with it,
@@ -39,6 +68,7 @@ export function docToMarkdown(doc: JSONContent): string {
     (doc.content ?? []).map((paragraph) => ({
       spans: spansOf(paragraph),
       quote: paragraph.attrs?.blockQuote === true,
+      align: alignmentNamed(paragraph.attrs?.textAlign),
     })),
   );
 }
@@ -49,9 +79,14 @@ export function markdownToDoc(markdown: string): JSONContent {
     return { type: 'doc', content: [{ type: 'paragraph' }] };
   return {
     type: 'doc',
-    content: paragraphs.map(({ spans, quote }) => ({
+    content: paragraphs.map(({ spans, quote, align }) => ({
       type: 'paragraph',
-      ...(quote && { attrs: { blockQuote: true } }),
+      ...((quote || align) && {
+        attrs: {
+          ...(quote && { blockQuote: true }),
+          ...(align && { textAlign: ALIGN_NAME[align] }),
+        },
+      }),
       content: spans.map(({ text, marks }) =>
         marks.length === 0
           ? { type: 'text', text }
@@ -79,16 +114,24 @@ export function writeProse(paragraphs: Paragraph[]): string {
     .join('\n\n');
 }
 
-/** A paragraph with its marker; empty when it has no text but whitespace. */
-function writeParagraph({ spans, quote }: Paragraph): string {
+/** A paragraph with its markers; empty when it has no text but whitespace. */
+function writeParagraph({ spans, quote, align }: Paragraph): string {
   const text = writeSpans(spans).replace(MARKER_START, '$1\\$2');
   if (text.trim() === '') return '';
-  return (quote ? QUOTE : '') + text;
+  return (quote ? QUOTE : '') + (align ? ALIGN_MARKER[align] : '') + text;
 }
 
 function readParagraph(block: string): Paragraph {
-  if (!block.startsWith(QUOTE)) return { spans: readSpans(block) };
-  return { spans: readSpans(block.slice(QUOTE.length)), quote: true };
+  let text = block;
+  const quote = text.startsWith(QUOTE);
+  if (quote) text = text.slice(QUOTE.length);
+  const align = ALIGNMENTS.find((a) => text.startsWith(ALIGN_MARKER[a]));
+  if (align) text = text.slice(ALIGN_MARKER[align].length);
+  return {
+    spans: readSpans(text),
+    ...(quote && { quote }),
+    ...(align && { align }),
+  };
 }
 
 // --- Writing ---

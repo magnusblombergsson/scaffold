@@ -332,10 +332,21 @@ describe('menuTemplate', () => {
   it('formats the Prose from Format, with keys the editor takes', () => {
     const { template, sent } = build(inProse);
     const format = menu(template, 'Format');
-    expect(labels(format)).toEqual(['Bold', 'Italic', 'Block Quote']);
+    expect(labels(format)).toEqual([
+      'Bold',
+      'Italic',
+      'Align Left',
+      'Align Centre',
+      'Align Right',
+      'Block Quote',
+    ]);
     expect(format.map((entry) => entry.type ?? entry.accelerator)).toEqual([
       'CmdOrCtrl+B',
       'CmdOrCtrl+I',
+      'separator',
+      'CmdOrCtrl+Shift+L',
+      'CmdOrCtrl+Shift+E',
+      'CmdOrCtrl+Shift+R',
       'separator',
       'CmdOrCtrl+Shift+B',
     ]);
@@ -346,10 +357,16 @@ describe('menuTemplate', () => {
     }
     click(item(format, 'Bold'));
     click(item(format, 'Italic'));
+    click(item(format, 'Align Left'));
+    click(item(format, 'Align Centre'));
+    click(item(format, 'Align Right'));
     click(item(format, 'Block Quote'));
     expect(sent).toEqual([
       { type: 'format', format: 'bold' },
       { type: 'format', format: 'italic' },
+      { type: 'format', format: 'alignLeft' },
+      { type: 'format', format: 'alignCentre' },
+      { type: 'format', format: 'alignRight' },
       { type: 'format', format: 'blockQuote' },
     ]);
   });

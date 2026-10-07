@@ -175,6 +175,25 @@ describe('Reading a Markdown manuscript', () => {
       await blocks(markdown('> One *a*.\n>\n> Two.\n>\n> - Three.\n\nAfter.')),
     ).toEqual(['> One *a*.', '> Two.', '> Three.', 'After.']);
   });
+
+  it('reads `<p align>` centre and right as alignment, with italic and bold inside', async () => {
+    expect(
+      await blocks(
+        markdown(
+          'Before.\n\n<p align="center">The <em>End</em> &amp; <b>more</b></p>\n\n' +
+            "<P ALIGN='right'>Signed,\nme.</P>\n\n" +
+            '> <p align="center">Quoted.</p>\n\n' +
+            '<p align="justify">Justified.</p>\n\n<div>Not Prose.</div>',
+        ),
+      ),
+    ).toEqual([
+      'Before.',
+      '{.centre} The *End* & **more**',
+      '{.right} Signed, me.',
+      '> {.centre} Quoted.',
+      'Justified.',
+    ]);
+  });
 });
 
 describe('Reading a Word manuscript', () => {
@@ -217,6 +236,35 @@ describe('Reading a Word manuscript', () => {
       '***',
       '***',
       'One\nTwo & <three>',
+    ]);
+  });
+
+  it('reads `w:jc` centre and right as alignment, and leaves headings and other alignments be', async () => {
+    const aligned = (jc: string, text: string, style = '') =>
+      `<w:p><w:pPr>${style && `<w:pStyle w:val="${style}"/>`}<w:jc w:val="${jc}"/></w:pPr>${run(text)}</w:p>`;
+    expect(
+      await blocks(
+        readImport(
+          docxOf(
+            aligned('center', 'Title', 'Heading1') +
+              aligned('center', 'The End') +
+              aligned('right', 'Signed.') +
+              aligned('center', 'Quoted.', 'Quote') +
+              aligned('both', 'Justified.') +
+              aligned('left', 'Left.') +
+              para(run('Plain.')),
+          ),
+          'docx',
+        ),
+      ),
+    ).toEqual([
+      '# Title',
+      '{.centre} The End',
+      '{.right} Signed.',
+      '> {.centre} Quoted.',
+      'Justified.',
+      'Left.',
+      'Plain.',
     ]);
   });
 
@@ -279,7 +327,7 @@ describe('Importing an Export', () => {
   const scenes: Record<string, string> = {
     s1: 'It was a *dark* night.\n\nThe rain **fell**, ***hard***.\n\n# Not a heading, 1. not a list\n\nA line\nbroken.',
     s2: 'Morning: *came **slowly***.\n\n\\*\\*\\* and \\\\ stay literal; so do _ and [this].',
-    s3: '- Dash first.\n\n—\n\n> Quoted *one*.\n\n> Two.\n\n**All** was *quiet*.',
+    s3: '- Dash first.\n\n—\n\n> Quoted *one*.\n\n> {.right} Two.\n\n**All** was *quiet*.\n\n{.centre} The ***End*** & <more>',
   };
 
   for (const format of ['markdown', 'docx'] as ExportFormat[]) {

@@ -243,3 +243,98 @@ describe('block quotes at the boundary (ADR 0007)', () => {
     });
   });
 });
+
+describe('alignment at the boundary (ADR 0007)', () => {
+  /** A paragraph of `p`, aligned as TipTap's `textAlign`, and quoted if `quoted`. */
+  const aligned = (
+    textAlign: 'center' | 'right',
+    runs: Run[],
+    quoted = false,
+  ): JSONContent => ({
+    ...p(...runs),
+    attrs: { ...(quoted && { blockQuote: true }), textAlign },
+  });
+
+  it('writes a centred or right-aligned paragraph with a `{.centre} ` or `{.right} ` marker', () => {
+    expect(
+      docToMarkdown(
+        doc(
+          aligned('center', ['The ', ['End', 'bold']]),
+          aligned('right', ['Signed.']),
+          p('Left.'),
+        ),
+      ),
+    ).toBe('{.centre} The **End**\n\n{.right} Signed.\n\nLeft.');
+  });
+
+  it('reads `{.centre} ` and `{.right} ` as alignment', () => {
+    expect(markdownToDoc('{.centre} The **End**\n\n{.right} Signed.')).toEqual(
+      doc(
+        aligned('center', ['The ', ['End', 'bold']]),
+        aligned('right', ['Signed.']),
+      ),
+    );
+  });
+
+  it('writes and reads a centred quote as `> {.centre} `', () => {
+    const centredQuote = doc(aligned('center', ['Come home.'], true));
+    expect(docToMarkdown(centredQuote)).toBe('> {.centre} Come home.');
+    expect(markdownToDoc('> {.centre} Come home.')).toEqual(centredQuote);
+  });
+
+  it('writes left, the default, unmarked', () => {
+    expect(
+      docToMarkdown(doc({ ...p('Left.'), attrs: { textAlign: null } })),
+    ).toBe('Left.');
+  });
+
+  it('escapes a literal `{.` after the alignment marker', () => {
+    const literal = doc(aligned('right', ['{.centre} text']));
+    expect(docToMarkdown(literal)).toBe(String.raw`{.right} \{.centre} text`);
+    expect(markdownToDoc(docToMarkdown(literal))).toEqual(literal);
+  });
+
+  it.each([
+    ['`{.centre}` without a space after it', '{.centre}x'],
+    ['an alignment it does not know', '{.left} x'],
+  ])('reads %s as text', (_, markdown) => {
+    expect(readProse(markdown)).toEqual([
+      { spans: [{ text: markdown, marks: [] }] },
+    ]);
+  });
+
+  it.each([
+    ['a centred paragraph', '{.centre} The *End*'],
+    ['a right-aligned one', '{.right} Signed.'],
+    ['a centred quote', '> {.centre} Come home.'],
+    [
+      'a right-aligned quote among quotes',
+      '> One.\n\n> {.right} Two.\n\nAfter.',
+    ],
+  ])('round-trips %s', (_, markdown) => {
+    expect(docToMarkdown(markdownToDoc(markdown))).toBe(markdown);
+  });
+
+  it('reads and writes paragraphs with their alignment', () => {
+    const paragraphs = [
+      { spans: [{ text: 'Plain.', marks: [] }] },
+      { spans: [{ text: 'Centred', marks: [] }], align: 'centre' as const },
+      {
+        spans: [{ text: 'Quoted', marks: [] }],
+        quote: true,
+        align: 'right' as const,
+      },
+    ];
+    const markdown = 'Plain.\n\n{.centre} Centred\n\n> {.right} Quoted';
+    expect(writeProse(paragraphs)).toBe(markdown);
+    expect(readProse(markdown)).toEqual(paragraphs);
+  });
+
+  it('shows the markers as text in the v2 app, and keeps them', () => {
+    const markdown = '{.centre} The End\n\n> {.right} Signed.';
+    expect(v2.markdownToDoc(markdown)).toEqual(
+      doc(p('{.centre} The End'), p('> {.right} Signed.')),
+    );
+    expect(v2.docToMarkdown(v2.markdownToDoc(markdown))).toBe(markdown);
+  });
+});
