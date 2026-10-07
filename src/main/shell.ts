@@ -27,6 +27,7 @@ import {
   shellMethods,
 } from '../shared/api';
 import type { Handlers } from '../shared/bridge';
+import { TICK_ALL, type ExportUnticked } from '../shared/export-choice';
 import { splitManuscript } from '../shared/manuscript-import';
 import { isProviderId, type Model } from '../shared/models';
 import type { ProseLanguage } from '../shared/project-types';
@@ -458,6 +459,16 @@ const shellHandlers: Handlers<ShellApi, typeof shellMethods, WindowContext> = {
       return openFailure(filePath, error);
     }
   },
+  exportChoice: ({ sender }) => {
+    const store = stores.get(sender.id);
+    return (store && settings.project(store.id).exportUnticked) ?? TICK_ALL;
+  },
+  exportManuscript: async (ctx, unticked) => {
+    const store = stores.get(ctx.sender.id);
+    if (!store) return;
+    settings.updateProject(store.id, { exportUnticked: unticked });
+    await exportFrom(windowOf(ctx), store, unticked);
+  },
   openRecent: (ctx, projectPath) => openPath(ctx, projectPath),
   locateProject: async (ctx, oldPath) => {
     const chosen = await chooseFolder(ctx, 'Locate Project');
@@ -608,9 +619,6 @@ function setApplicationMenu(): void {
             );
           }
         },
-        export: (window) => {
-          if (window instanceof BrowserWindow) void exportFrom(window);
-        },
       }),
     ),
   );
@@ -633,14 +641,21 @@ function realOrSame(target: string): Promise<string> {
 }
 
 /**
- * Exports the Manuscript of the window's Project where the Author chooses,
- * once they have agreed to export the main version of Scenes in Conflict.
+ * Exports the ticked part of the Manuscript of the window's Project where the
+ * Author chooses, once they have agreed to export the main version of ticked
+ * Scenes in Conflict.
  */
-async function exportFrom(window: BrowserWindow): Promise<void> {
-  const store = stores.get(window.webContents.id);
-  if (!store) return;
+async function exportFrom(
+  window: BrowserWindow,
+  store: ProjectStore,
+  unticked: ExportUnticked,
+): Promise<void> {
   await requestRendererFlush(window.webContents);
-  const titles = conflictedScenes(store.manuscript(), store.listConflicts());
+  const titles = conflictedScenes(
+    store.manuscript(),
+    store.listConflicts(),
+    unticked,
+  );
   if (titles.length > 0) {
     const { response } = await dialog.showMessageBox(window, {
       type: 'warning',
@@ -652,7 +667,7 @@ async function exportFrom(window: BrowserWindow): Promise<void> {
     if (response !== 0) return;
   }
   const { canceled, filePath } = await dialog.showSaveDialog(window, {
-    title: 'Export',
+    title: 'Export Manuscript',
     buttonLabel: 'Export',
     defaultPath: path.join(
       app.getPath('documents'),
@@ -696,7 +711,10 @@ async function exportFrom(window: BrowserWindow): Promise<void> {
     }
   }
   try {
-    await writeFile(target.path, await exportManuscript(store, target.format));
+    await writeFile(
+      target.path,
+      await exportManuscript(store, target.format, unticked),
+    );
   } catch (error) {
     await dialog.showMessageBox(window, {
       type: 'error',

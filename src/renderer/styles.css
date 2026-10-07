@@ -2118,6 +2118,42 @@ header.entry-header {
   white-space: nowrap;
 }
 
+.export {
+  width: min(32rem, 90vw);
+}
+
+.export-tree {
+  max-height: 50vh;
+  overflow-y: auto;
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  list-style: none;
+}
+
+.export-tree ul {
+  margin: 0.25rem 0 0.5rem;
+  padding-left: 1.5rem;
+  list-style: none;
+}
+
+.export-tree label {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.1rem 0;
+}
+
+.export-chapter {
+  font-weight: 600;
+}
+
+/* Tick All stands apart from the buttons that close the dialog. */
+.export-tick-all {
+  margin-right: auto;
+}
+
 .setting select {
   margin-left: 0.5rem;
 }

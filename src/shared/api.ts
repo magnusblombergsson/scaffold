@@ -9,6 +9,7 @@ import type {
   ValueOf,
   Visibility,
 } from './project-types';
+import type { ExportUnticked } from './export-choice';
 import type { ReviewCommand } from './finding';
 import type { Status } from './status';
 import type { ImportBlock, ImportConvention } from './manuscript-import';
@@ -522,6 +523,17 @@ export interface ShellApi {
    * its shortcut. Returns an unsubscribe function.
    */
   onCommand(listener: (command: Command) => void): () => void;
+  /**
+   * What the Author left unticked at this window's last Manuscript Export, on
+   * this computer; a unit created since starts ticked.
+   */
+  exportChoice(): Promise<ExportUnticked>;
+  /**
+   * Remembers `unticked`, then exports the rest of the Manuscript where the
+   * Author chooses, once they have agreed to export the main version of
+   * ticked Scenes in Conflict. Resolves when done or cancelled.
+   */
+  exportManuscript(unticked: ExportUnticked): Promise<void>;
   /** Opens a Project from the recent list. */
   openRecent(path: string): Promise<OpenResult>;
   /** Asks where a recent Project that wasn't found is now, and opens it. */
@@ -746,6 +758,8 @@ export const shellMethods = {
   chooseImport: 'invoke',
   importProject: 'invoke',
   onCommand: 'event',
+  exportChoice: 'invoke',
+  exportManuscript: 'invoke',
   openRecent: 'invoke',
   locateProject: 'invoke',
   recentProjects: 'invoke',

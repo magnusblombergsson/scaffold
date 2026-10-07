@@ -13,6 +13,12 @@ import {
   exportTarget,
   type ExportSource,
 } from './manuscript-export';
+import {
+  TICK_ALL,
+  toggleChapter,
+  toggleScene,
+  type ExportUnticked,
+} from '../../shared/export-choice';
 
 /** A Project whose Scenes hold `prose`, by id; a Scene not in it is empty. */
 function source(
@@ -58,8 +64,13 @@ const prose = {
 async function markdownOf(
   manuscript: Manuscript,
   scenes: Record<string, string>,
+  unticked: ExportUnticked = TICK_ALL,
 ): Promise<string> {
-  const file = await exportManuscript(source(manuscript, scenes), 'markdown');
+  const file = await exportManuscript(
+    source(manuscript, scenes),
+    'markdown',
+    unticked,
+  );
   return Buffer.from(file).toString('utf8');
 }
 
@@ -90,8 +101,11 @@ function unzip(archive: Uint8Array): Record<string, string> {
 async function docxOf(
   manuscript: Manuscript,
   scenes: Record<string, string>,
+  unticked: ExportUnticked = TICK_ALL,
 ): Promise<Record<string, string>> {
-  return unzip(await exportManuscript(source(manuscript, scenes), 'docx'));
+  return unzip(
+    await exportManuscript(source(manuscript, scenes), 'docx', unticked),
+  );
 }
 
 /** The paragraphs of a document.xml, each as its style, alignment and runs. */
@@ -163,6 +177,73 @@ describe('Exporting the Manuscript to Markdown', () => {
         'A literal \\* star.',
       ].join('\n\n') + '\n',
     );
+  });
+});
+
+describe('Exporting only the ticked Scenes and Chapters', () => {
+  /** The Storm without s1, Empty Chapter without its one Scene, The Calm whole. */
+  const partly = toggleScene(
+    novel.chapters[1],
+    's4',
+    toggleScene(novel.chapters[0], 's1', TICK_ALL),
+  );
+  const empty: Manuscript = {
+    chapters: [
+      chapter('c1', 'Prologue'),
+      chapter('c2', 'Kept Empty'),
+      chapter('c3', 'One', 's1'),
+    ],
+    unplaced: [],
+  };
+
+  it('gives a partly ticked Chapter its heading and only the ticked Scenes, and leaves out one with none ticked', async () => {
+    expect(await markdownOf(novel, prose, partly)).toBe(
+      ['# The Storm', 'Morning came.', '# The Calm', 'All was quiet.'].join(
+        '\n\n',
+      ) + '\n',
+    );
+  });
+
+  it('keeps the break between ticked Scenes, with no marker for a skip', async () => {
+    const manuscript: Manuscript = {
+      chapters: [chapter('c1', 'One', 's1', 's2', 's3')],
+      unplaced: [],
+    };
+    const unticked = toggleScene(manuscript.chapters[0], 's2', TICK_ALL);
+    expect(
+      await markdownOf(manuscript, { s1: 'A.', s2: 'B.', s3: 'C.' }, unticked),
+    ).toBe('# One\n\nA.\n\n***\n\nC.\n');
+  });
+
+  it('puts in an empty Chapter only when its own box is ticked', async () => {
+    const unticked = toggleChapter(empty.chapters[0], TICK_ALL);
+    expect(await markdownOf(empty, { s1: 'Text.' }, unticked)).toBe(
+      '# Kept Empty\n\n# One\n\nText.\n',
+    );
+  });
+
+  it('follows the same rules in .docx', async () => {
+    const texts = async (
+      manuscript: Manuscript,
+      scenes: Record<string, string>,
+      unticked: ExportUnticked,
+    ) =>
+      paragraphs(
+        (await docxOf(manuscript, scenes, unticked))['word/document.xml'],
+      ).map((p) => p.runs.map((r) => r.text).join(''));
+    expect(await texts(novel, prose, partly)).toEqual([
+      'The Storm',
+      'Morning came.',
+      'The Calm',
+      'All was quiet.',
+    ]);
+    expect(
+      await texts(
+        empty,
+        { s1: 'Text.' },
+        toggleChapter(empty.chapters[0], TICK_ALL),
+      ),
+    ).toEqual(['Kept Empty', 'One', 'Text.']);
   });
 });
 
@@ -327,13 +408,28 @@ describe('Exporting while Scenes are in Conflict', () => {
 
   it('names the Scenes in the Manuscript in Conflict, in order', () => {
     expect(
-      conflictedScenes(novel, [
-        conflict('scene', 's5'),
-        conflict('outline', 's1'),
-        conflict('scene', 's1'),
-        conflict('scene', 's9'),
-      ]),
+      conflictedScenes(
+        novel,
+        [
+          conflict('scene', 's5'),
+          conflict('outline', 's1'),
+          conflict('scene', 's1'),
+          conflict('scene', 's9'),
+        ],
+        TICK_ALL,
+      ),
     ).toEqual(['Title s1', 'Title s5']);
+  });
+
+  it('names only the ticked Scenes', () => {
+    const unticked = toggleScene(novel.chapters[0], 's1', TICK_ALL);
+    expect(
+      conflictedScenes(
+        novel,
+        [conflict('scene', 's1'), conflict('scene', 's5')],
+        unticked,
+      ),
+    ).toEqual(['Title s5']);
   });
 
   it('asks whether to export the main version of them', () => {

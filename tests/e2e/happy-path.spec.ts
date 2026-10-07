@@ -123,7 +123,7 @@ test('the MVP hangs together: welcome, key, Project, Prose, Review Scene, a Prop
 
   // Export writes the Manuscript, and nothing the Assistant wrote.
   await answerDialogs(app, exportPath);
-  await chooseExport(app);
+  await chooseExport(app, page);
   await expect
     .poll(() => existsSync(exportPath) && readFile(exportPath, 'utf8'))
     .toBe('# Chapter 1\n\nAnna packed in the rain. Mira watched.\n');
