@@ -19,6 +19,7 @@ import type { ListedModel, Model, ProviderId, ProviderStatus } from './models';
 import type { Command, DockedPanes } from './shortcuts';
 import type { PendingProposal, ProposedValue } from './proposal';
 import type { MeteredTurn } from './usage';
+import type { ViewSettings } from './view-settings';
 import { bridge, type MethodTable } from './bridge';
 
 export type { CallFailure } from './bridge';
@@ -643,6 +644,15 @@ export interface ShellApi {
    * window. Returns an unsubscribe function.
    */
   onHighlightMentions(listener: (on: boolean) => void): () => void;
+  /** The writing width, theme and spell check, on this computer. */
+  viewSettings(): Promise<ViewSettings>;
+  /** Changes them, in every window, as the View menu does. */
+  setViewSettings(change: Partial<ViewSettings>): void;
+  /**
+   * Calls `listener` with all of them when any changes, from any window or
+   * the menu. Returns an unsubscribe function.
+   */
+  onViewSettings(listener: (view: ViewSettings) => void): () => void;
   /**
    * Main asks the window to hand over pending edits before it closes. The
    * listener must push them with `project.write` before returning. Returns an
@@ -870,6 +880,9 @@ export const shellMethods = {
   highlightMentions: 'invoke',
   setHighlightMentions: 'send',
   onHighlightMentions: 'event',
+  viewSettings: 'invoke',
+  setViewSettings: 'send',
+  onViewSettings: 'event',
   onFlushRequest: 'flush',
 } as const satisfies MethodTable<ShellApi>;
 

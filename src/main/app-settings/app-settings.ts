@@ -15,6 +15,11 @@ import {
   type Price,
   type ProviderId,
 } from '../../shared/models';
+import {
+  DEFAULT_VIEW_SETTINGS,
+  parseViewSettings,
+  type ViewSettings,
+} from '../../shared/view-settings';
 
 export const SETTINGS_VERSION = 1;
 const RECENT_LIMIT = 20;
@@ -75,7 +80,8 @@ type SettingsFile = {
     /** Set once the Author has added a Provider or skipped the welcome. */
     welcomed?: boolean;
     providers?: ProvidersSettings;
-  } & Record<string, unknown>;
+  } & Partial<ViewSettings> &
+    Record<string, unknown>;
   projects: Record<string, ProjectSettings & Record<string, unknown>>;
   recent: RecentRecord[];
 };
@@ -134,6 +140,11 @@ function parseSettings(text: string): SettingsFile | null {
     delete global.highlightMentions;
   }
   if (typeof global.welcomed !== 'boolean') delete global.welcomed;
+  const view = parseViewSettings(global);
+  delete global.writingWidth;
+  delete global.theme;
+  delete global.spellCheck;
+  Object.assign(global, view);
   if (isJsonObject(global.providers)) {
     global.providers = parseProvidersSettings(global.providers);
   } else {
@@ -404,6 +415,20 @@ export class AppSettings {
 
   setHighlightMentions(on: boolean): void {
     this.data.global.highlightMentions = on;
+    this.changed();
+  }
+
+  /** The writing width, theme and spell check, for every window. */
+  viewSettings(): ViewSettings {
+    return {
+      ...DEFAULT_VIEW_SETTINGS,
+      ...parseViewSettings(this.data.global),
+    };
+  }
+
+  /** Keeps the valid settings of `change`, as a window may send anything. */
+  setViewSettings(change: Partial<ViewSettings>): void {
+    Object.assign(this.data.global, parseViewSettings(change));
     this.changed();
   }
 

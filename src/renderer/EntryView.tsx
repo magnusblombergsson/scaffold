@@ -312,7 +312,6 @@ export function EntryView({
   const attributes = (label: string, className = 'plain-text') => ({
     class: className,
     'aria-label': label,
-    spellcheck: 'true',
     lang: language,
   });
 

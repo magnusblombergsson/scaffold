@@ -121,6 +121,14 @@ describe('commandForKey', () => {
     expect(commandForKey(key('f', { ctrlKey: true }), false)).toBeNull();
   });
 
+  it('cycles the writing width with Ctrl+Shift+W, but not Ctrl+W', () => {
+    expect(
+      commandForKey(key('W', { ctrlKey: true, shiftKey: true }), false),
+    ).toEqual({ type: 'cycleWritingWidth' });
+    expect(SHORTCUTS.writingWidth).toBe('CmdOrCtrl+Shift+W');
+    expect(commandForKey(key('w', { ctrlKey: true }), false)).toBeNull();
+  });
+
   it('never takes Ctrl+Alt with a letter or digit, which is AltGr on Windows', () => {
     expect(
       commandForKey(key('e', { ctrlKey: true, altKey: true }), false),
@@ -171,13 +179,14 @@ describe('CHEAT_SHEET', () => {
     }
   });
 
-  it('lists zen mode, Escape leaving it, and the pane keys in a View group', () => {
+  it('lists zen mode, Escape leaving it, the pane keys and the width key in a View group', () => {
     const view = CHEAT_SHEET.find((group) => group.title === 'View');
     expect(view?.shortcuts.flatMap((s) => s.keys)).toEqual([
       'CmdOrCtrl+Shift+F',
       'Escape',
       'CmdOrCtrl+Shift+M',
       'CmdOrCtrl+Shift+A',
+      'CmdOrCtrl+Shift+W',
     ]);
   });
 

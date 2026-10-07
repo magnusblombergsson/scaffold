@@ -127,7 +127,6 @@ function PlainTextField({
         attributes={{
           class: 'plain-text',
           'aria-label': label,
-          spellcheck: 'true',
           lang: language,
         }}
       />
