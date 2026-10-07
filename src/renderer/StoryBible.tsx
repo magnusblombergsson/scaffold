@@ -136,8 +136,10 @@ export function StoryBible({
                     aria-current={entry.id === openId ? 'true' : undefined}
                     onClick={() => onOpen(entry.id)}
                   >
+                    <span className="story-bible-name">
+                      {entryTitle(entry)}
+                    </span>
                     <EntryThumbnail entry={entry} />
-                    {entryTitle(entry)}
                     <ConflictMarker shown={conflicted.has(entry.id)} />
                   </button>
                   <Menu
