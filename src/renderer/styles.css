@@ -1,7 +1,7 @@
 /*
  * Paper on a desk. Everything outside the work is the desk; the centre pane
  * is a sheet lifted off it. Popovers and dialogs are sheets too. The app
- * follows the system theme.
+ * follows the system theme, or the Theme Setting, which main sets for it.
  */
 :root {
   --desk: #e9e6df;
@@ -361,6 +361,15 @@ button.recent-open:hover {
   font-size: 1.15rem;
   line-height: 1.6;
   outline: none;
+}
+
+/* The writing width, a Setting: Narrow above, Wide, or Full, capped. */
+:root[data-writing-width='wide'] .editor .prose {
+  max-width: 52rem;
+}
+
+:root[data-writing-width='full'] .editor .prose {
+  max-width: 72rem;
 }
 
 .editor .prose p {

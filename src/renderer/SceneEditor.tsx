@@ -79,7 +79,6 @@ export function SceneEditor({
       attributes={{
         class: 'prose',
         'aria-label': 'Prose',
-        spellcheck: 'true',
         lang: language,
       }}
       autofocus={autofocus}

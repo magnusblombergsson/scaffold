@@ -6,10 +6,19 @@ import type {
 import { MODE_LABELS } from '../shared/conversation';
 import { ENTRY_TYPE_LABELS, ENTRY_TYPES } from '../shared/project-types';
 import { SHORTCUTS, type Command, type DockedPanes } from '../shared/shortcuts';
+import {
+  THEME_LABELS,
+  THEMES,
+  WRITING_WIDTH_LABELS,
+  WRITING_WIDTHS,
+  type ViewSettings,
+} from '../shared/view-settings';
 
 /** What the menus show for the window in front. */
 export type MenuState = {
   mac: boolean;
+  /** A development build, which has Electron's Reload and Developer Tools. */
+  dev: boolean;
   /**
    * The Project the window in front shows, if any, its Writing panes, and
    * whether it is in zen mode.
@@ -17,12 +26,15 @@ export type MenuState = {
   project: { readOnly: boolean; docked: DockedPanes; zen: boolean } | null;
   /** Latest first. */
   recent: { path: string; displayName: string }[];
+  view: ViewSettings;
 };
 
 /** What the menus do, in the window they were chosen in, if any. */
 export type MenuActions = {
   /** Hands a command to the window, which knows what is current in it. */
   send(command: Command, window: BaseWindow | undefined): void;
+  /** Changes how every window looks. */
+  setViewSettings(change: Partial<ViewSettings>): void;
 };
 
 /**
@@ -31,7 +43,7 @@ export type MenuActions = {
  * where they apply; the menus only show them.
  */
 export function menuTemplate(
-  { mac, project, recent }: MenuState,
+  { mac, dev, project, recent, view }: MenuState,
   actions: MenuActions,
 ): MenuItemConstructorOptions[] {
   /** A menu item that hands `command` to the window it was chosen in. */
@@ -56,6 +68,18 @@ export function menuTemplate(
     ...sending({ type: 'settings' }),
   };
   // Open to a read-only Project too, which shows its values.
+  /** Radio items, one per value of the Setting `key`, the current one ticked. */
+  const choices = <K extends 'writingWidth' | 'theme'>(
+    key: K,
+    values: readonly ViewSettings[K][],
+    labels: Record<ViewSettings[K], string>,
+  ): MenuItemConstructorOptions[] =>
+    values.map((value) => ({
+      label: labels[value],
+      type: 'radio',
+      checked: view[key] === value,
+      click: () => actions.setViewSettings({ [key]: value }),
+    }));
   const projectSettings: MenuItemConstructorOptions = {
     label: 'Project Settings…',
     accelerator: SHORTCUTS.projectSettings,
@@ -155,16 +179,39 @@ export function menuTemplate(
           ...sending({ type: 'togglePane', pane: 'assistant' }),
         },
         { type: 'separator' },
-        // Electron's own View menu.
-        { role: 'reload' },
-        { role: 'forceReload' },
-        { role: 'toggleDevTools' },
+        // Ctrl+Shift+W, which the window takes, cycles them in Writing.
+        {
+          label: 'Writing Width',
+          submenu: choices(
+            'writingWidth',
+            WRITING_WIDTHS,
+            WRITING_WIDTH_LABELS,
+          ),
+        },
+        { type: 'separator' },
+        { label: 'Theme', submenu: choices('theme', THEMES, THEME_LABELS) },
+        {
+          label: 'Spell Check',
+          type: 'checkbox',
+          checked: view.spellCheck,
+          click: () =>
+            actions.setViewSettings({ spellCheck: !view.spellCheck }),
+        },
         { type: 'separator' },
         { role: 'resetZoom' },
         { role: 'zoomIn' },
         { role: 'zoomOut' },
         { type: 'separator' },
         { role: 'togglefullscreen' },
+        // Electron's own, for development only.
+        ...(dev
+          ? [
+              { type: 'separator' as const },
+              { role: 'reload' as const },
+              { role: 'forceReload' as const },
+              { role: 'toggleDevTools' as const },
+            ]
+          : []),
       ],
     },
     {

@@ -98,6 +98,25 @@ describe('saving', () => {
     expect((await load()).highlightMentions()).toBe(false);
   });
 
+  it('looks as today until the Author changes the writing width, theme or spell check, and remembers them', async () => {
+    const settings = await load();
+    expect(settings.viewSettings()).toEqual({
+      writingWidth: 'narrow',
+      theme: 'system',
+      spellCheck: true,
+    });
+
+    settings.setViewSettings({ writingWidth: 'full', spellCheck: false });
+    settings.setViewSettings({ theme: 'dark' });
+    await settings.flush();
+
+    expect((await load()).viewSettings()).toEqual({
+      writingWidth: 'full',
+      theme: 'dark',
+      spellCheck: false,
+    });
+  });
+
   it('remembers the Model used last, Sonnet 5.5 before any', async () => {
     const settings = await load();
     expect(settings.lastUsedModel()).toEqual({
@@ -372,6 +391,9 @@ describe('a bad or newer settings file', () => {
           highlightMentions: 'no',
           model: 'claude-gone-1',
           welcomed: 'yes',
+          writingWidth: 'huge',
+          theme: 'sepia',
+          spellCheck: 'off',
         },
         projects: {
           a: {
@@ -405,6 +427,11 @@ describe('a bad or newer settings file', () => {
     expect(settings.highlightMentions()).toBe(true);
     expect(settings.lastUsedModel()).toEqual(DEFAULT_MODEL);
     expect(settings.welcomed()).toBe(false);
+    expect(settings.viewSettings()).toEqual({
+      writingWidth: 'narrow',
+      theme: 'system',
+      spellCheck: true,
+    });
     expect(settings.project('a')).toEqual({ panelWidths: { binder: 300 } });
     expect(settings.project('b')).toEqual({});
     expect(settings.project('c')).toEqual({

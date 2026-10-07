@@ -64,6 +64,7 @@ import { ProposalPeek, type TargetPeek } from './ProposalPeek';
 import { PinnedNotes } from './PinnedNotes';
 import { applyChange, togglePin, withoutTrashed } from './pinned-notes';
 import { revealedEdge, type ChromeEdge } from './zen';
+import { cycleWritingWidth } from './view-settings';
 import {
   onMentionClick,
   setMentionEntries,
@@ -907,6 +908,11 @@ function ProjectView({
       } else {
         enterZen();
       }
+      return true;
+    }
+    if (command.type === 'cycleWritingWidth') {
+      if (mode !== 'writing') return false;
+      cycleWritingWidth();
       return true;
     }
     if (command.type === 'togglePane') {

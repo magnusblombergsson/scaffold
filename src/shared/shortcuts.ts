@@ -39,6 +39,8 @@ export type Command = (
   | { type: 'togglePane'; pane: SidePane }
   /** Enters zen mode in Writing, or leaves it. */
   | { type: 'zen' }
+  /** Narrow, Wide, Full, Narrow: Ctrl+Shift+W in Writing. */
+  | { type: 'cycleWritingWidth' }
 ) & { byKey?: true };
 
 /**
@@ -64,6 +66,7 @@ export const SHORTCUTS = {
   zen: 'CmdOrCtrl+Shift+F',
   leftPane: 'CmdOrCtrl+Shift+M',
   assistant: 'CmdOrCtrl+Shift+A',
+  writingWidth: 'CmdOrCtrl+Shift+W',
   // In the Binder and Story Bible list, while it has focus.
   rename: 'F2',
   moveUp: 'Alt+Up',
@@ -76,6 +79,7 @@ const SHIFT_LETTERS: Record<string, Command> = {
   f: { type: 'zen' },
   m: { type: 'togglePane', pane: 'left' },
   a: { type: 'togglePane', pane: 'assistant' },
+  w: { type: 'cycleWritingWidth' },
 };
 
 /** The digit after Ctrl that switches to each Mode, as in `SHORTCUTS`. */
@@ -95,8 +99,8 @@ type KeyPress = {
 
 /**
  * The command a key press in a window asks for, if any: the create chords,
- * Ctrl+E, Ctrl+T, Ctrl+1/2/3, zen and the pane keys, which apply where a
- * Project is shown, and Ctrl+/.
+ * Ctrl+E, Ctrl+T, Ctrl+1/2/3, zen, the pane keys and the width key, which
+ * apply where a Project is shown, and Ctrl+/.
  * Ctrl is ⌘ on macOS. The menus take the others.
  */
 export function commandForKey(press: KeyPress, mac: boolean): Command | null {
@@ -242,6 +246,10 @@ export const CHEAT_SHEET: {
       {
         keys: [SHORTCUTS.assistant],
         action: 'Collapse the Assistant, or dock it back',
+      },
+      {
+        keys: [SHORTCUTS.writingWidth],
+        action: 'Writing width: Narrow, Wide or Full, in turn',
       },
     ],
   },

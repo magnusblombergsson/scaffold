@@ -1,9 +1,19 @@
 import type { MenuItemConstructorOptions } from 'electron';
 import { describe, expect, it } from 'vitest';
 import type { Command } from '../shared/shortcuts';
+import {
+  DEFAULT_VIEW_SETTINGS,
+  type ViewSettings,
+} from '../shared/view-settings';
 import { menuTemplate, type MenuState } from './menu';
 
-const noProject: MenuState = { mac: false, project: null, recent: [] };
+const noProject: MenuState = {
+  mac: false,
+  dev: false,
+  project: null,
+  recent: [],
+  view: DEFAULT_VIEW_SETTINGS,
+};
 const docked = { left: true, assistant: true };
 const writable: MenuState = {
   ...noProject,
@@ -12,10 +22,12 @@ const writable: MenuState = {
 
 function build(state: MenuState) {
   const sent: Command[] = [];
+  const viewChanges: Partial<ViewSettings>[] = [];
   const template = menuTemplate(state, {
     send: (command) => sent.push(command),
+    setViewSettings: (change) => viewChanges.push(change),
   });
-  return { template, sent };
+  return { template, sent, viewChanges };
 }
 
 function menu(
@@ -161,6 +173,96 @@ describe('menuTemplate', () => {
       checked: false,
       enabled: false,
     });
+  });
+
+  it('has View in its order: Modes, zen and panes, width, theme and spell check, zoom, full screen', () => {
+    const view = menu(build(writable).template, 'View');
+    expect(view.map((i) => i.label ?? i.role ?? i.type)).toEqual([
+      'Writing',
+      'Brainstorm',
+      'Interview',
+      'separator',
+      'Zen Mode',
+      'Left Pane',
+      'Assistant',
+      'separator',
+      'Writing Width',
+      'separator',
+      'Theme',
+      'Spell Check',
+      'separator',
+      'resetZoom',
+      'zoomIn',
+      'zoomOut',
+      'separator',
+      'togglefullscreen',
+    ]);
+  });
+
+  it('has Electron’s Reload and Developer Tools only in a development build', () => {
+    const roles = (state: MenuState) =>
+      menu(build(state).template, 'View').map((i) => i.role);
+    expect(roles(writable)).not.toContain('reload');
+    // After the View menu's own items, which keep their order.
+    expect(roles({ ...writable, dev: true }).slice(-5)).toEqual([
+      'togglefullscreen',
+      undefined,
+      'reload',
+      'forceReload',
+      'toggleDevTools',
+    ]);
+  });
+
+  it('sets the writing width from View, as radio items, with or without a Project', () => {
+    for (const state of [writable, noProject]) {
+      const { template, viewChanges } = build({
+        ...state,
+        view: { ...DEFAULT_VIEW_SETTINGS, writingWidth: 'wide' },
+      });
+      const widths = menu(menu(template, 'View'), 'Writing Width');
+      expect(
+        widths.map(({ label, type, checked }) => ({ label, type, checked })),
+      ).toEqual([
+        { label: 'Narrow', type: 'radio', checked: false },
+        { label: 'Wide', type: 'radio', checked: true },
+        { label: 'Full', type: 'radio', checked: false },
+      ]);
+      expect(widths.every((i) => i.enabled !== false)).toBe(true);
+      click(item(widths, 'Full'));
+      expect(viewChanges).toEqual([{ writingWidth: 'full' }]);
+    }
+  });
+
+  it('sets the theme from View, as radio items', () => {
+    const { template, viewChanges } = build({
+      ...noProject,
+      view: { ...DEFAULT_VIEW_SETTINGS, theme: 'dark' },
+    });
+    const themes = menu(menu(template, 'View'), 'Theme');
+    expect(
+      themes.map(({ label, type, checked }) => ({ label, type, checked })),
+    ).toEqual([
+      { label: 'System', type: 'radio', checked: false },
+      { label: 'Light', type: 'radio', checked: false },
+      { label: 'Dark', type: 'radio', checked: true },
+    ]);
+    click(item(themes, 'System'));
+    expect(viewChanges).toEqual([{ theme: 'system' }]);
+  });
+
+  it('turns spell check off and on from View, a check item', () => {
+    const on = build(noProject);
+    const spellCheck = item(menu(on.template, 'View'), 'Spell Check');
+    expect(spellCheck).toMatchObject({ type: 'checkbox', checked: true });
+    click(spellCheck);
+    expect(on.viewChanges).toEqual([{ spellCheck: false }]);
+
+    const off = build({
+      ...noProject,
+      view: { ...DEFAULT_VIEW_SETTINGS, spellCheck: false },
+    });
+    click(item(menu(off.template, 'View'), 'Spell Check'));
+    expect(off.viewChanges).toEqual([{ spellCheck: true }]);
   });
 
   it('creates from Insert, below or above, and Entries of each type', () => {

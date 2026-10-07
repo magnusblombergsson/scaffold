@@ -4,6 +4,7 @@ import {
   dialog,
   ipcMain,
   Menu,
+  nativeTheme,
   screen,
   shell,
   type WebContents,
@@ -33,6 +34,7 @@ import { isProviderId, type Model } from '../shared/models';
 import type { ProseLanguage } from '../shared/project-types';
 import { ALL_DOCKED, type DockedPanes } from '../shared/shortcuts';
 import { unitName } from '../shared/unit-name';
+import type { ViewSettings } from '../shared/view-settings';
 import {
   loadAppSettings,
   samePath,
@@ -124,6 +126,8 @@ export async function startShell(): Promise<void> {
     path.join(app.getPath('userData'), 'settings.json'),
     { ...deps, projects: projectLookup(deps.fs) },
   );
+  // Before any window, so none starts in the other theme.
+  nativeTheme.themeSource = settings.viewSettings().theme;
   providers = await loadProviderSettings(app.getPath('userData'), {
     ...deps,
     encryption: safeStorageEncryption,
@@ -556,7 +560,23 @@ const shellHandlers: Handlers<ShellApi, typeof shellMethods, WindowContext> = {
       emit(window.webContents, 'shell', 'onHighlightMentions', on);
     }
   },
+  viewSettings: () => settings.viewSettings(),
+  setViewSettings: (_ctx, change) => setViewSettings(change),
 };
+
+/**
+ * Changes how every window looks: the theme through Chromium, which every
+ * window's CSS follows, the rest in each window.
+ */
+function setViewSettings(change: Partial<ViewSettings>): void {
+  settings.setViewSettings(change);
+  const view = settings.viewSettings();
+  nativeTheme.themeSource = view.theme;
+  for (const window of BrowserWindow.getAllWindows()) {
+    emit(window.webContents, 'shell', 'onViewSettings', view);
+  }
+  updateMenu();
+}
 
 export function registerShellIpc(): void {
   register('shell', shellHandlers, windowContext);
@@ -629,6 +649,7 @@ function setApplicationMenu(): void {
   const store = window && stores.get(window.webContents.id);
   const state: MenuState = {
     mac: process.platform === 'darwin',
+    dev: !app.isPackaged,
     project: store
       ? {
           readOnly: store.readOnly() !== null,
@@ -639,6 +660,7 @@ function setApplicationMenu(): void {
     recent: settings
       .recent()
       .map(({ path, displayName }) => ({ path, displayName })),
+    view: settings.viewSettings(),
   };
   Menu.setApplicationMenu(
     Menu.buildFromTemplate(
@@ -654,6 +676,7 @@ function setApplicationMenu(): void {
             );
           }
         },
+        setViewSettings,
       }),
     ),
   );
