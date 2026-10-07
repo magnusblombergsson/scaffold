@@ -76,6 +76,26 @@ const projectHandlers: Handlers<
   setLanguage: ({ store, sender }, language) =>
     setLanguage(sender, store, language),
   setStatus: ({ store }, unitId, statusId) => store.setStatus(unitId, statusId),
+  editStatus: ({ store, sender }, edit) =>
+    saveProjectSetting(
+      sender,
+      store,
+      `The Statuses of ${store.displayName}`,
+      () =>
+        edit.type === 'add'
+          ? store.addStatus(edit.status)
+          : edit.type === 'change'
+            ? store.changeStatus(edit.statusId, edit.change)
+            : store.moveStatus(edit.statusId, edit.index),
+    ),
+  statusUses: async ({ store }, statusId) => store.statusUses(statusId),
+  deleteStatus: ({ store, sender }, statusId, moveTo) =>
+    saveProjectSetting(
+      sender,
+      store,
+      `The Statuses of ${store.displayName}`,
+      () => store.deleteStatus(statusId, moveTo),
+    ),
   setFoldedNoteImage: ({ store, sender }, on) =>
     saveProjectSetting(
       sender,

@@ -153,7 +153,17 @@ export type UnitDetailsChanged = {
   manuscript: Manuscript;
 };
 
-/** The Project's Status list changed on another computer: `statuses` is it now. */
+/** One change to the Status list, made to it as saved. */
+export type StatusEdit =
+  | { type: 'add'; status: Status }
+  | {
+      type: 'change';
+      statusId: string;
+      change: Partial<Pick<Status, 'name' | 'colour'>>;
+    }
+  | { type: 'move'; statusId: string; index: number };
+
+/** The Project's Status list changed, here or on another computer: `statuses` is it now. */
 export type StatusesChanged = { type: 'statusesChanged'; statuses: Status[] };
 
 /** A newer app upgraded the Project; `host` is the computer it did so on, when known. */
@@ -301,6 +311,21 @@ export interface ProjectApi {
    * `unitDetailsChanged`.
    */
   setStatus(unitId: string, statusId: string | null): Promise<void>;
+  /**
+   * Adds, renames, recolours or moves a Status in the list, as now saved;
+   * a Status leaves it only by `deleteStatus`. The list follows as a
+   * `statusesChanged`. False when it can't be saved, which main has told
+   * the Author.
+   */
+  editStatus(edit: StatusEdit): Promise<boolean>;
+  /** How many Chapters and Scenes have the Status of `statusId`, those in Trash too. */
+  statusUses(statusId: string): Promise<number>;
+  /**
+   * Deletes the Status of `statusId`, moving the units that have it to the
+   * Status of `moveTo`, or to none with null. False when it can't be saved,
+   * which main has told the Author.
+   */
+  deleteStatus(statusId: string, moveTo: string | null): Promise<boolean>;
 }
 
 /**
@@ -717,6 +742,9 @@ export const projectMethods = {
   setLanguage: 'invoke',
   setFoldedNoteImage: 'invoke',
   setStatus: 'invoke',
+  editStatus: 'invoke',
+  statusUses: 'invoke',
+  deleteStatus: 'invoke',
 } as const satisfies MethodTable<ProjectApi>;
 
 export const assistantMethods = {
