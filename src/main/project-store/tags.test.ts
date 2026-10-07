@@ -11,7 +11,7 @@ import {
   openProject,
   type ProjectStore,
 } from './project-store';
-import { parseUnitFile } from './unit-file';
+import { formatUnitFile, parseUnitFile } from './unit-file';
 import { v2ReadUnit } from './v2-unit-file';
 
 // Scenes and Chapters carry any number of Tags, from one vocabulary per
@@ -91,6 +91,8 @@ const tagsOf = (store: ProjectStore, id: string) => {
     (node) => node.id === id,
   )?.tags;
 };
+
+const entry = (id: string) => ({ kind: 'entry', id }) as const;
 
 describe('setting Tags', () => {
   it('shows them on the Scene or Chapter in the Manuscript, and they survive reopening', async () => {
@@ -368,7 +370,6 @@ describe('Tags set on two computers', () => {
 describe('Entry Tags', () => {
   const entryPath = (id: string, name = `${id}.md`) =>
     path.join(projectPath, 'bible', name);
-  const entry = (id: string) => ({ kind: 'entry', id }) as const;
   const summaryOf = (store: ProjectStore, id: string) =>
     store.listEntries().find((e) => e.id === id);
 
@@ -519,5 +520,207 @@ describe('Entry Tags', () => {
     await expect(
       store.setTags('5e6dbfac-0000-4000-8000-000000000000', ['Mara']),
     ).rejects.toThrow();
+  });
+});
+
+// Project Settings lists the Tags in use with counts, and renames, merges
+// and deletes a Tag on every unit that has it, those in Trash too (v3 spec
+// §1, §14).
+describe('Tags in Project Settings', () => {
+  it('count the Scenes, Chapters and Entries that have each Tag, those in Trash too', async () => {
+    const { sceneId, otherId, chapterId } = await newProject();
+    const store = await open();
+    const { id } = await store.createEntry('character', 'Anna');
+    await store.setTags(sceneId, ['Mara', 'war']);
+    await store.setTags(otherId, ['mara']);
+    await store.setTags(chapterId, ['flashback']);
+    await store.setTags(id, ['Mara']);
+    await store.trashScene(otherId);
+    await store.trashEntry(id);
+
+    expect(store.tagUses()).toEqual([
+      { tag: 'flashback', uses: 1 },
+      { tag: 'Mara', uses: 3 },
+      { tag: 'war', uses: 1 },
+    ]);
+  });
+
+  it('rename a Tag on every Scene, Chapter and Entry that has it, those in Trash too', async () => {
+    const { sceneId, otherId, chapterId } = await newProject();
+    const store = await open();
+    const { id } = await store.createEntry('character', 'Anna');
+    const trashed = await store.createEntry('place', 'Harbour');
+    await store.setTags(sceneId, ['war', 'Mara']);
+    await store.setTags(otherId, ['Mara']);
+    await store.setTags(chapterId, ['Mara']);
+    await store.setTags(id, ['Mara']);
+    await store.setTags(trashed.id, ['Mara']);
+    await store.trashScene(otherId);
+    await store.trashEntry(trashed.id);
+
+    await store.renameTag('mara', 'Mara Lind');
+
+    expect(tagsOf(store, sceneId)).toEqual(['war', 'Mara Lind']);
+    expect(tagsOf(store, chapterId)).toEqual(['Mara Lind']);
+    expect((await headerOf(otherId)).tags).toEqual(['Mara Lind']);
+    expect((await store.read(entry(id))).tags).toEqual(['Mara Lind']);
+    expect(store.tagUses()).toEqual([
+      { tag: 'Mara Lind', uses: 5 },
+      { tag: 'war', uses: 1 },
+    ]);
+    await store.restore(otherId);
+    await store.restore(trashed.id);
+    expect(tagsOf(store, otherId)).toEqual(['Mara Lind']);
+    expect((await store.read(entry(trashed.id))).tags).toEqual(['Mara Lind']);
+  });
+
+  it('merge a Tag renamed onto another in use, ignoring case, into that one', async () => {
+    const { sceneId, otherId, chapterId } = await newProject();
+    const store = await open();
+    const { id } = await store.createEntry('character', 'Anna');
+    await store.setTags(sceneId, ['Mara', 'war']);
+    await store.setTags(otherId, ['Lind']);
+    await store.setTags(chapterId, ['Lind', 'Mara']);
+    await store.setTags(id, ['Lind']);
+
+    await store.renameTag('Lind', 'mara');
+
+    expect(tagsOf(store, sceneId)).toEqual(['Mara', 'war']);
+    expect(tagsOf(store, otherId)).toEqual(['Mara']);
+    expect(tagsOf(store, chapterId)).toEqual(['Mara']);
+    expect((await store.read(entry(id))).tags).toEqual(['Mara']);
+    expect(store.tagUses()).toEqual([
+      { tag: 'Mara', uses: 4 },
+      { tag: 'war', uses: 1 },
+    ]);
+  });
+
+  it('respell a Tag renamed in another case', async () => {
+    const { sceneId, otherId } = await newProject();
+    const store = await open();
+    await store.setTags(sceneId, ['mara']);
+    await store.setTags(otherId, ['mara', 'war']);
+
+    await store.renameTag('mara', 'Mara');
+
+    expect(tagsOf(store, sceneId)).toEqual(['Mara']);
+    expect(store.tags()).toEqual(['Mara', 'war']);
+  });
+
+  it('refuse to rename a Tag to nothing, or to more than one', async () => {
+    const { sceneId } = await newProject();
+    const store = await open();
+    await store.setTags(sceneId, ['Mara']);
+
+    await expect(store.renameTag('Mara', '  ')).rejects.toThrow();
+    await expect(store.renameTag('Mara', 'Mara, Lind')).rejects.toThrow();
+    expect(tagsOf(store, sceneId)).toEqual(['Mara']);
+  });
+
+  it('delete a Tag from every Scene, Chapter and Entry that has it, those in Trash too', async () => {
+    const { sceneId, otherId, chapterId } = await newProject();
+    const store = await open();
+    const { id } = await store.createEntry('character', 'Anna');
+    const trashed = await store.createEntry('place', 'Harbour');
+    await store.setTags(sceneId, ['Mara', 'war']);
+    await store.setTags(otherId, ['Mara']);
+    await store.setTags(chapterId, ['MARA']);
+    await store.setTags(id, ['Mara']);
+    await store.setTags(trashed.id, ['Mara']);
+    await store.trashScene(otherId);
+    await store.trashEntry(trashed.id);
+
+    await store.deleteTag('mara');
+
+    expect(tagsOf(store, sceneId)).toEqual(['war']);
+    expect(tagsOf(store, chapterId)).toBeUndefined();
+    expect(await headerOf(otherId)).not.toHaveProperty('tags');
+    expect((await store.read(entry(id))).tags).toBeUndefined();
+    expect(store.tagUses()).toEqual([{ tag: 'war', uses: 1 }]);
+    await store.restore(trashed.id);
+    expect((await store.read(entry(trashed.id))).tags).toBeUndefined();
+  });
+
+  it('rename and delete Tags another computer gave units, not yet read here', async () => {
+    const { sceneId } = await newProject();
+    const store = await open('GAMMA', 1000);
+    const other = await open('BETA', 2000);
+    await other.setTags(sceneId, ['Mara']);
+    await other.close();
+
+    await store.renameTag('Mara', 'Lind');
+
+    expect(tagsOf(store, sceneId)).toEqual(['Lind']);
+    await store.deleteTag('Lind');
+    expect(await headerOf(sceneId)).not.toHaveProperty('tags');
+  });
+
+  it('tell the window the Manuscript and Entries as retagged', async () => {
+    const { sceneId } = await newProject();
+    const store = await open();
+    const { id } = await store.createEntry('character', 'Anna');
+    await store.setTags(sceneId, ['Mara']);
+    await store.setTags(id, ['Mara']);
+    const events = eventsOf(store);
+
+    await store.renameTag('Mara', 'Lind');
+
+    expect(events).toContainEqual({
+      type: 'unitDetailsChanged',
+      manuscript: store.manuscript(),
+    });
+    expect(events).toContainEqual({
+      type: 'entriesChanged',
+      entries: store.listEntries(),
+    });
+  });
+
+  it('are refused once a newer app has upgraded the Project', async () => {
+    const { sceneId } = await newProject();
+    const store = await open();
+    await store.setTags(sceneId, ['Mara']);
+    const manifest = JSON.parse(await readFile(manifestPath(), 'utf8'));
+    await writeFile(
+      manifestPath(),
+      JSON.stringify({ ...manifest, format: FORMAT + 1 }),
+    );
+    await store.checkForChanges();
+
+    await expect(store.renameTag('Mara', 'Lind')).rejects.toThrow();
+    await expect(store.deleteTag('Mara')).rejects.toThrow();
+    expect(await headerOf(sceneId)).toMatchObject({ tags: ['Mara'] });
+  });
+
+  it('keep the Tags another computer gave an Entry, not yet read here', async () => {
+    await newProject();
+    const store = await open('GAMMA', 1000);
+    const { id } = await store.createEntry('character', 'Anna');
+    const trashed = await store.createEntry('place', 'Harbour');
+    await store.setTags(id, ['Mara']);
+    await store.setTags(trashed.id, ['Mara']);
+    await store.trashEntry(trashed.id);
+    await store.flush();
+    const other = await open('BETA', 2000);
+    await other.setTags(id, ['Mara', 'war']);
+    await other.close();
+    const trashFile = path.join(projectPath, 'trash', `${trashed.id}.entry.md`);
+    // As another computer's restore, retag and delete would leave it.
+    const { frontmatter, body } = parseUnitFile(
+      await readFile(trashFile, 'utf8'),
+    );
+    await writeFile(
+      trashFile,
+      formatUnitFile({
+        frontmatter: { ...frontmatter, tags: ['Mara', 'flashback'] },
+        body,
+      }),
+    );
+
+    await store.renameTag('Mara', 'Lind');
+
+    expect((await store.read(entry(id))).tags).toEqual(['Lind', 'war']);
+    expect(
+      parseUnitFile(await readFile(trashFile, 'utf8')).frontmatter.tags,
+    ).toEqual(['Lind', 'flashback']);
   });
 });

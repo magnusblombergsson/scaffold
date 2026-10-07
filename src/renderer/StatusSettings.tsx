@@ -7,6 +7,7 @@ import {
 import type { StatusEdit } from '../shared/api';
 import { capitalized } from '../shared/unit-name';
 import { StatusDot } from './Binder';
+import { NameField } from './NameField';
 
 /**
  * Project Settings' Statuses: the ordered Status list, edited in place
@@ -67,8 +68,9 @@ export function StatusSettings({
         {statuses.map((status, index) => (
           <li key={status.id}>
             <StatusDot status={status} named={false} />
-            <StatusName
-              status={status}
+            <NameField
+              name={status.name}
+              label={`Name of ${status.name}`}
               disabled={readOnly}
               focus={added === status.id}
               onRename={(name) =>
@@ -154,63 +156,6 @@ export function StatusSettings({
 
 /** A Status being deleted, and how many Chapters and Scenes have it. */
 type Deleting = { status: Status; uses: number };
-
-/**
- * A Status's name, renamed as the Author leaves the field or presses Enter;
- * Escape, or leaving it empty, puts the name back.
- */
-function StatusName({
-  status,
-  disabled,
-  focus,
-  onRename,
-}: {
-  status: Status;
-  disabled: boolean;
-  focus: boolean;
-  /** Resolves with whether the name was saved. */
-  onRename(name: string): Promise<boolean>;
-}) {
-  const [draft, setDraft] = useState(status.name);
-  const input = useRef<HTMLInputElement>(null);
-  useEffect(() => setDraft(status.name), [status.name]);
-  useEffect(() => {
-    if (focus) input.current?.select();
-  }, [focus]);
-
-  function commit() {
-    const name = draft.trim();
-    if (name === '' || name === status.name) {
-      setDraft(status.name);
-      return;
-    }
-    // Saved, `status.name` follows; if not, the name goes back.
-    void onRename(name).then((saved) => {
-      if (!saved) setDraft(status.name);
-    });
-  }
-
-  return (
-    <input
-      ref={input}
-      aria-label={`Name of ${status.name}`}
-      value={draft}
-      disabled={disabled}
-      onChange={(event) => setDraft(event.target.value)}
-      onBlur={commit}
-      onKeyDown={(event) => {
-        if (event.key === 'Enter') {
-          event.preventDefault();
-          commit();
-        } else if (event.key === 'Escape' && draft !== status.name) {
-          // Puts the name back, rather than closing the dialog.
-          event.preventDefault();
-          setDraft(status.name);
-        }
-      }}
-    />
-  );
-}
 
 /** Asks where the units that have a Status go, before deleting it. */
 function DeleteStatus({

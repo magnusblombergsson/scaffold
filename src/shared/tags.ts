@@ -56,3 +56,21 @@ export function tagVocabulary(lists: Iterable<readonly string[]>): string[] {
     a.localeCompare(b, undefined, { sensitivity: 'base' }),
   );
 }
+
+/** A Tag in use, and how many units have it. */
+export type TagUse = { tag: string; uses: number };
+
+/** The Tags in use on the units with `lists`, as `tagVocabulary`, each with how many have it. */
+export function tagUses(lists: Iterable<readonly string[]>): TagUse[] {
+  const all = [...lists];
+  const uses = new Map<string, number>();
+  for (const tags of all) {
+    for (const key of new Set(tags.map(tagKey))) {
+      uses.set(key, (uses.get(key) ?? 0) + 1);
+    }
+  }
+  return tagVocabulary(all).map((tag) => ({
+    tag,
+    uses: uses.get(tagKey(tag)) ?? 0,
+  }));
+}

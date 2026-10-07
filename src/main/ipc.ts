@@ -98,6 +98,15 @@ const projectHandlers: Handlers<
     ),
   tags: async ({ store }) => store.tags(),
   setTags: ({ store }, unitId, tags) => store.setTags(unitId, tags),
+  tagUses: async ({ store }) => store.tagUses(),
+  renameTag: ({ store, sender }, tag, to) =>
+    saveProjectSetting(sender, store, `The Tag ${tag}`, () =>
+      store.renameTag(tag, to),
+    ),
+  deleteTag: ({ store, sender }, tag) =>
+    saveProjectSetting(sender, store, `The Tag ${tag}`, () =>
+      store.deleteTag(tag),
+    ),
   listTodos: async ({ store }) => store.listTodos(),
   addTodo: ({ store }, text, link) => store.addTodo(text, link),
   changeTodo: ({ store }, id, change) => store.changeTodo(id, change),

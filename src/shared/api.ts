@@ -12,6 +12,7 @@ import type {
 import type { ExportUnticked } from './export-choice';
 import type { ReviewCommand } from './finding';
 import type { Status } from './status';
+import type { TagUse } from './tags';
 import type { Todo, TodoChange, TodoLink } from './todo';
 import type { ImportBlock, ImportConvention } from './manuscript-import';
 import type { ListedModel, Model, ProviderId, ProviderStatus } from './models';
@@ -343,6 +344,22 @@ export interface ProjectApi {
    * as an `entriesChanged`.
    */
   setTags(unitId: string, tags: string[]): Promise<void>;
+  /**
+   * The Tags in use, as `tags`, each with how many Chapters, Scenes and
+   * Entries have it, those in Trash too.
+   */
+  tagUses(): Promise<TagUse[]>;
+  /**
+   * Renames `tag` on every Chapter, Scene and Entry that has it, those in
+   * Trash too; onto another Tag in use, ignoring case, it merges them.
+   * False when it can't be saved, which main has told the Author.
+   */
+  renameTag(tag: string, to: string): Promise<boolean>;
+  /**
+   * Takes `tag` off every Chapter, Scene and Entry that has it, those in
+   * Trash too. False when it can't be saved, which main has told the Author.
+   */
+  deleteTag(tag: string): Promise<boolean>;
   /** The Todos: those not done, then the done, each in list order. */
   listTodos(): Promise<Todo[]>;
   /**
@@ -789,6 +806,9 @@ export const projectMethods = {
   deleteStatus: 'invoke',
   tags: 'invoke',
   setTags: 'invoke',
+  tagUses: 'invoke',
+  renameTag: 'invoke',
+  deleteTag: 'invoke',
   listTodos: 'invoke',
   addTodo: 'invoke',
   changeTodo: 'invoke',
