@@ -6,6 +6,8 @@ import {
   answerQuestions,
   chooseMenu,
   launch,
+  loseFocus,
+  menuEnabled,
   useTempDir,
 } from './app';
 
@@ -67,6 +69,36 @@ test('a Prose language chosen in Project Settings is saved at once, for spellche
   }
   await dialog.getByRole('button', { name: 'Close' }).click();
   await expect(dialog).toBeHidden();
+  await app.close();
+});
+
+test('a Prose language chosen with the app in the background still spellchecks, and keeps the menus on the Project', async () => {
+  const projectPath = path.join(tempDir(), 'The Long Night');
+  const app = await launch(tempDir());
+  await answerDialogs(app, projectPath);
+  const page = await app.firstWindow();
+  await page.getByRole('button', { name: 'New Project…' }).click();
+  await expect(page.getByLabel('Prose')).toBeFocused();
+  await chooseMenu(app, ['Tools', 'Project Settings…']);
+  const dialog = page.getByRole('dialog', {
+    name: 'Project Settings: The Long Night',
+  });
+  await expect(dialog).toBeVisible();
+
+  await loseFocus(app);
+  await dialog.getByLabel('Prose language').selectOption('Swedish');
+  await expect.poll(() => manifestLanguage(projectPath)).toBe('sv-SE');
+  if (process.platform !== 'darwin') {
+    await expect
+      .poll(() =>
+        app.evaluate(({ session }) =>
+          session.defaultSession.getSpellCheckerLanguages(),
+        ),
+      )
+      .toEqual([expect.stringMatching(/^sv\b/)]);
+  }
+  // The menus still offer the Project's items.
+  expect(await menuEnabled(app, ['Tools', 'Project Settings…'])).toBe(true);
   await app.close();
 });
 

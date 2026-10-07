@@ -1,7 +1,13 @@
-import { expect, test, type ElectronApplication } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { answerDialogs, chooseMenu, launch, useTempDir } from './app';
+import {
+  answerDialogs,
+  chooseMenu,
+  launch,
+  menuEnabled,
+  useTempDir,
+} from './app';
 
 const tempDir = useTempDir();
 
@@ -112,19 +118,6 @@ test('a Project made Swedish is spellchecked and typeset in Swedish, after a res
   }
   await second.close();
 });
-
-/** Whether an item of the menu bar, by its labels, can be chosen. */
-function menuEnabled(app: ElectronApplication, labels: string[]) {
-  return app.evaluate(({ Menu }, labels) => {
-    let items = Menu.getApplicationMenu()?.items ?? [];
-    let item: Electron.MenuItem | undefined;
-    for (const label of labels) {
-      item = items.find((i) => i.label === label);
-      items = item?.submenu?.items ?? [];
-    }
-    return item?.enabled ?? false;
-  }, labels);
-}
 
 test('the Author block quotes paragraphs with Ctrl+Shift+B and formats from the Format menu while in the Prose', async () => {
   const projectPath = path.join(tempDir(), 'My Novel');
