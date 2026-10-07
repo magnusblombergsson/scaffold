@@ -75,6 +75,10 @@ _Avoid_: Popup, tooltip, preview
 A Peek the Author has pinned in Writing so it stays while they write: it floats over the page, can be dragged aside, folded to its title, switched to show the Entry's image instead of its text, and unpinned, and stays where it was left for the Project until unpinned.
 _Avoid_: Sticky, pin (as a noun), floating window
 
+**Large view**:
+An Entry's, Scene's or Chapter's image shown alone over the dimmed app, as large as the window allows, with that Entry's or unit's name beneath; opened by clicking the image wherever it shows. It only shows: there is nothing to edit and no going to the next image.
+_Avoid_: Lightbox, zoom, preview, image viewer
+
 **Voice**:
 A character's way of speaking, described in its Entry as traits (register, rhythm, tics), words the character uses and never uses, and short example lines written by the Author. The Assistant compares dialogue in the Prose against it and may propose trait descriptions, but never example lines.
 _Avoid_: Tone, style (when meaning a character's speech)
