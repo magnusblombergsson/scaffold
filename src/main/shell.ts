@@ -84,6 +84,7 @@ import {
 } from './project-store/project-store';
 import { writeFailureReason } from './project-store/safe-write';
 import { menuTemplate, proseMenuTemplate, type MenuState } from './menu';
+import { menuWindow } from './menu-window';
 import {
   emit,
   register,
@@ -115,6 +116,8 @@ const focusedProse = new Map<number, { splittable: boolean }>();
 const zenWindows = new Map<number, boolean>();
 /** Stops sending a window its store's events, by webContents id. */
 const unsubscribes = new Map<number, () => void>();
+/** The window the menus follow, kept while the app is in the background. */
+const followed = menuWindow(() => BrowserWindow.getFocusedWindow());
 
 let quitting = false;
 
@@ -184,7 +187,11 @@ export async function startShell(): Promise<void> {
     if (BrowserWindow.getAllWindows().length === 0) createWindow(null);
   });
   setApplicationMenu();
-  app.on('browser-window-focus', updateMenu);
+  // From the event, as getFocusedWindow() may not say so yet.
+  app.on('browser-window-focus', (_event, window) => {
+    followed.focused(window);
+    updateMenu();
+  });
 
   for (const projectPath of settings.openAtQuit()) {
     if (windowShowing(projectPath)) continue;
@@ -710,9 +717,9 @@ function announceProviders(view: ProvidersView): void {
   }
 }
 
-/** The menu bar, made anew for the window in front whenever what it shows changes. */
+/** The menu bar, made anew for the window it follows whenever what it shows changes. */
 function setApplicationMenu(): void {
-  const window = BrowserWindow.getFocusedWindow();
+  const window = followed.current();
   const store = window && stores.get(window.webContents.id);
   const state: MenuState = {
     mac: process.platform === 'darwin',
@@ -755,12 +762,13 @@ function setApplicationMenu(): void {
 }
 
 /**
- * The menus follow the window in front and its Project. The window in front
- * also sets the spellchecker's language for every window.
+ * The menus follow the window in front and its Project, or while none has
+ * focus, the window last in front. That window also sets the spellchecker's
+ * language for every window.
  */
 function updateMenu(): void {
   setApplicationMenu();
-  const window = BrowserWindow.getFocusedWindow();
+  const window = followed.current();
   const store = window && stores.get(window.webContents.id);
   if (store) spellcheckIn(window.webContents, store.language);
 }

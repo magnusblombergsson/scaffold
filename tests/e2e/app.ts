@@ -171,6 +171,29 @@ export async function chooseMenu(
   );
 }
 
+/** Whether an item of the menu bar, by its labels, can be chosen. */
+export function menuEnabled(app: ElectronApplication, labels: string[]) {
+  return app.evaluate(({ Menu }, labels) => {
+    let items = Menu.getApplicationMenu()?.items ?? [];
+    let item: Electron.MenuItem | undefined;
+    for (const label of labels) {
+      item = items.find((i) => i.label === label);
+      items = item?.submenu?.items ?? [];
+    }
+    return item?.enabled ?? false;
+  }, labels);
+}
+
+/**
+ * Puts the app in the background as far as the main process can tell: from
+ * now on no window has OS focus, whatever the OS says.
+ */
+export async function loseFocus(app: ElectronApplication) {
+  await app.evaluate(({ BrowserWindow }) => {
+    BrowserWindow.getFocusedWindow = () => null;
+  });
+}
+
 /**
  * Adds an Anthropic key from the Assistant's empty state, as the Author
  * would, and closes Settings; the fake Anthropic takes any key. Returns the

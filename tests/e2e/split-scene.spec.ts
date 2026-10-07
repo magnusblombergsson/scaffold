@@ -1,11 +1,12 @@
-import {
-  expect,
-  test,
-  type ElectronApplication,
-  type Page,
-} from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import path from 'node:path';
-import { answerDialogs, chooseMenu, launch, useTempDir } from './app';
+import {
+  answerDialogs,
+  chooseMenu,
+  launch,
+  menuEnabled,
+  useTempDir,
+} from './app';
 
 const tempDir = useTempDir();
 
@@ -17,16 +18,6 @@ function binderTitles(page: Page) {
 }
 
 /** Whether Insert › `label` is enabled in the menu bar now. */
-function menuEnabled(app: ElectronApplication, label: string) {
-  return app.evaluate(
-    ({ Menu }, label) =>
-      Menu.getApplicationMenu()
-        ?.items.find((i) => i.label === 'Insert')
-        ?.submenu?.items.find((i) => i.label === label)?.enabled,
-    label,
-  );
-}
-
 async function newProject() {
   const projectPath = path.join(tempDir(), 'My Novel');
   const app = await launch(tempDir());
@@ -78,7 +69,9 @@ test('Ctrl+K splits the Scene at the cursor, and Ctrl+Z in the Binder joins it b
 test('the Splits say there is nothing to split at the end, and Split to Next Chapter makes one', async () => {
   const { app, page, prose } = await newProject();
   await page.keyboard.type('One two. Three four.');
-  await expect.poll(() => menuEnabled(app, 'Split Scene')).toBe(true);
+  await expect
+    .poll(() => menuEnabled(app, ['Insert', 'Split Scene']))
+    .toBe(true);
 
   await page.keyboard.press('ControlOrMeta+k');
   await expect(page.locator('.status-bar')).toContainText('Nothing to split');
@@ -98,6 +91,8 @@ test('the Splits say there is nothing to split at the end, and Split to Next Cha
 
   // Off the Prose, there is nothing to split.
   await page.getByRole('button', { name: 'Chapter 1', exact: true }).focus();
-  await expect.poll(() => menuEnabled(app, 'Split Scene')).toBe(false);
+  await expect
+    .poll(() => menuEnabled(app, ['Insert', 'Split Scene']))
+    .toBe(false);
   await app.close();
 });

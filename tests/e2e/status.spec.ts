@@ -1,7 +1,13 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { answerDialogs, chooseMenu, launch, useTempDir } from './app';
+import {
+  answerDialogs,
+  chooseMenu,
+  launch,
+  loseFocus,
+  useTempDir,
+} from './app';
 
 const tempDir = useTempDir();
 
@@ -197,7 +203,9 @@ test('the Author edits the Statuses in Project Settings, and deleting one moves 
   await expect(names).toHaveCount(4);
   await dialog.getByRole('button', { name: 'Close' }).click();
 
-  // Upgraded elsewhere, the section shows, disabled.
+  // Upgraded elsewhere, the section shows, disabled, even when that happens
+  // with the app in the background.
+  await loseFocus(app);
   const manifest = path.join(projectPath, 'project.json');
   await writeFile(
     manifest,
