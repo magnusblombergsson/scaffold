@@ -17,6 +17,7 @@ import {
   type EntryType,
   type EntryValue,
   type Manuscript,
+  type ManuscriptScene,
   type NotesRef,
   type NotesValue,
   type OutlineRef,
@@ -75,6 +76,11 @@ import {
   type Target,
 } from '../../shared/proposal';
 import { capitalized, unitName } from '../../shared/unit-name';
+import {
+  DEFAULT_STATUSES,
+  readStatusList,
+  type Status,
+} from '../../shared/status';
 import type {
   Compaction,
   Conversation,
@@ -129,6 +135,8 @@ type Manifest = {
   language: string;
   /** Whether a folded Pinned note shows its Entry's image; on unless false. */
   foldedNoteImage?: unknown;
+  /** The Status list, in order; without one, the Project shows the defaults. */
+  statuses?: unknown;
   tree: ProjectTree;
 };
 
@@ -155,6 +163,8 @@ export type AssistantRef = Exclude<UnitRef, { kind: 'private' }>;
  */
 export interface AssistantView {
   manuscript(): Manuscript;
+  /** The Status list, to name the Status of each Chapter and Scene. */
+  statuses(): Status[];
   listEntries(): EntrySummary[];
   read<R extends AssistantRef>(ref: R): Promise<ValueOf<R>>;
 }
@@ -213,6 +223,7 @@ export async function createProject(
     format: FORMAT,
     id: randomUUID(),
     language: options.language ?? 'en-US',
+    statuses: DEFAULT_STATUSES,
     tree: {
       chapters: chapters.map((chapter) => ({
         id: randomUUID(),
@@ -309,6 +320,7 @@ export async function openProject(
   if (manifest.tree.chapters.length === 0) await store.createChapter(0);
   await store.findConflicts();
   await store.forkConversationCopies();
+  await store.readStatuses();
   return store;
 }
 
@@ -1055,6 +1067,10 @@ export class ProjectStore {
   private readonly mergeLater = new Set<string>();
   /** Files with no id that names a unit or the Project, already logged. */
   private readonly unrecognised: Set<string>;
+  /** Each Chapter's and Scene's Status id, as its Outline file holds it, by unit id. */
+  private readonly unitStatuses = new Map<string, string>();
+  /** The Outline files as their Status was last read or written, by unit id. */
+  private readonly outlineFingerprints = new Map<string, Fingerprint>();
   /** What versions of `project.json` that met as the Project opened lost, until told. */
   private dropped: Dropped[];
   /**
@@ -1236,6 +1252,12 @@ export class ProjectStore {
         await this.checkUnits();
         await this.findConflicts();
         await this.forkConversationCopies();
+        if (await this.readStatuses()) {
+          this.emit({
+            type: 'unitDetailsChanged',
+            manuscript: this.manuscript(),
+          });
+        }
       } catch (error) {
         console.error(`Can't check ${this.path} for changes:`, error);
       }
@@ -1282,18 +1304,27 @@ export class ProjectStore {
     // structure.
     const structure = () =>
       JSON.stringify([
-        { ...this.manifest, language: null, foldedNoteImage: null },
+        {
+          ...this.manifest,
+          language: null,
+          foldedNoteImage: null,
+          statuses: null,
+        },
         this.manuscript(),
         this.listTrash(),
       ]);
     const before = structure();
     const { language, foldedNoteImage } = this;
+    const statuses = this.statuses();
     this.manifest = manifest;
     if (this.language !== language) {
       this.emit({ type: 'languageChanged', language: this.language });
     }
     if (this.foldedNoteImage !== foldedNoteImage) {
       this.emit({ type: 'foldedNoteImageChanged', on: this.foldedNoteImage });
+    }
+    if (!isDeepStrictEqual(this.statuses(), statuses)) {
+      this.emit({ type: 'statusesChanged', statuses: this.statuses() });
     }
     replaceAll(this.files, units.files);
     this.trash.clear();
@@ -1528,13 +1559,20 @@ export class ProjectStore {
     this.mergeLater.delete(key);
     const merging = merge(true);
     if (key === holding) return merging;
-    // Writes to the unit wait for the merge.
+    return this.holdingWrites(key, merging);
+  }
+
+  /** Resolves as `work` does; the unit's writes wait for it, then go on. */
+  private async holdingWrites<T>(key: string, work: Promise<T>): Promise<T> {
     this.writing.set(
       key,
-      merging.then(() => {}),
+      work.then(
+        () => {},
+        () => {},
+      ),
     );
     try {
-      return await merging;
+      return await work;
     } finally {
       this.writing.delete(key);
       if (this.unsaved.has(key)) this.startWriting(key);
@@ -1711,27 +1749,171 @@ export class ProjectStore {
     });
   }
 
+  /**
+   * The Status list, in order: as `project.json` holds it, or the defaults
+   * while it holds none, until a Status is first set.
+   */
+  statuses(): Status[] {
+    return (
+      readStatusList(this.manifest.statuses) ??
+      structuredClone([...DEFAULT_STATUSES])
+    );
+  }
+
+  /**
+   * Gives a Scene or Chapter the Status of `statusId`, or none with null:
+   * its id goes in the unit's Outline file's header, a unit detail (ADR
+   * 0008). A Project without a Status list is first given the one it shows.
+   * There is no undo.
+   */
+  setStatus(unitId: string, statusId: string | null): Promise<void> {
+    return this.enqueueWrite(async () => {
+      if (unitId === PROJECT_OUTLINE) {
+        throw new Error('Only a Scene or Chapter has a Status');
+      }
+      const ref = outlineRef(unitId);
+      this.refuseUnavailable(ref);
+      const statuses = this.statuses();
+      if (statusId !== null && !statuses.some((s) => s.id === statusId)) {
+        throw new Error(`No Status ${statusId}`);
+      }
+      // Already so: nothing to save, nor to sync.
+      if (this.unitStatuses.get(unitId) === (statusId ?? undefined)) return;
+      if (readStatusList(this.manifest.statuses) === undefined) {
+        await this.writeManifest({ ...this.manifest, statuses });
+      }
+      await this.saveStatus(ref, statusId);
+      this.emit({ type: 'unitDetailsChanged', manuscript: this.manuscript() });
+    });
+  }
+
+  /**
+   * Saves a Status id in an Outline's file, or takes it away with null, as
+   * changed now; the rest of the file stays as on disk. The unit's writes
+   * wait meanwhile.
+   */
+  private async saveStatus(
+    ref: OutlineRef,
+    statusId: string | null,
+  ): Promise<void> {
+    const held = unitKey(ref);
+    while (this.writing.has(held)) await this.writing.get(held);
+    const saving = (async () => {
+      const file = unitPath(this.path, ref);
+      await this.deps.fs.mkdir(path.dirname(file));
+      const fingerprint = await this.deps.fs.stat(file);
+      const text = fingerprint && (await this.deps.fs.readFile(file));
+      const onDisk = text ? parseUnitFile(text) : { frontmatter: {}, body: '' };
+      const header = frontmatterOf(ref.id, onDisk.frontmatter);
+      const { [STATUS]: _, ...after } = header;
+      if (statusId !== null) after[STATUS] = statusId;
+      const written = formatWithDetails(
+        ref.kind,
+        { frontmatter: header, body: onDisk.body },
+        changeDetails(ref.kind, header, header, after, this.deps.clock.now()),
+      );
+      await safeWrite(this.deps.fs, this.deps.clock, file, written);
+      const saved = await this.deps.fs.stat(file);
+      // What an editor has is this version still: only a detail changed.
+      const loaded = this.loaded.get(held);
+      if (
+        loaded &&
+        !loaded.reload &&
+        sameFingerprint(loaded.fingerprint, fingerprint) &&
+        loaded.hash === (text && hashOf(text))
+      ) {
+        loaded.fingerprint = saved;
+        loaded.hash = hashOf(written);
+      }
+      this.noteStatus(ref.id, saved, statusId);
+    })();
+    await this.holdingWrites(held, saving);
+  }
+
+  /**
+   * Reads the Status of each Chapter and Scene whose Outline file changed
+   * since it was last read or written here, as on another computer;
+   * resolves with whether any Status did.
+   */
+  async readStatuses(): Promise<boolean> {
+    const dir = path.join(this.path, UNIT_DIRS.outline);
+    const seen = new Set<string>();
+    let changed = false;
+    for (const name of await this.deps.fs.readdir(dir)) {
+      const id = ID_FILE.exec(name)?.[1];
+      if (!id) continue;
+      seen.add(id);
+      const file = path.join(dir, name);
+      try {
+        // Taken first: a change while reading then shows on the next check.
+        const fingerprint = await this.deps.fs.stat(file);
+        const known = this.outlineFingerprints.get(id) ?? null;
+        if (!fingerprint || sameFingerprint(fingerprint, known)) continue;
+        const { frontmatter } = parseUnitFile(
+          await this.deps.fs.readFile(file),
+        );
+        if (this.noteStatus(id, fingerprint, frontmatter[STATUS])) {
+          changed = true;
+        }
+      } catch (error) {
+        // Gone, or still arriving: the next check reads it again.
+        console.error(`Can't read the Status in ${file}:`, error);
+      }
+    }
+    for (const id of this.outlineFingerprints.keys()) {
+      if (!seen.has(id) && this.noteStatus(id, null, undefined)) {
+        changed = true;
+      }
+    }
+    return changed;
+  }
+
+  /** Notes a unit's Status as its Outline file holds it; true if it changed. */
+  private noteStatus(
+    id: string,
+    fingerprint: Fingerprint | null,
+    status: unknown,
+  ): boolean {
+    if (fingerprint) this.outlineFingerprints.set(id, fingerprint);
+    else this.outlineFingerprints.delete(id);
+    const before = this.unitStatuses.get(id);
+    if (typeof status === 'string') this.unitStatuses.set(id, status);
+    else this.unitStatuses.delete(id);
+    return this.unitStatuses.get(id) !== before;
+  }
+
   tree(): ProjectTree {
     return structuredClone(this.manifest.tree);
   }
 
   /**
    * The tree, with Scenes whose file isn't in `scenes/` marked Missing, and
-   * the Scene files it doesn't place as Unplaced, sorted by id.
+   * the Scene files it doesn't place as Unplaced, sorted by id; each
+   * Chapter and Scene with a Status has its id.
    */
   manuscript(): Manuscript {
     const placed = new Set(sceneIds(this.manifest.tree));
+    const withStatus = <T extends { id: string }>(node: T): T => {
+      const status = this.unitStatuses.get(node.id);
+      return status === undefined ? node : { ...node, status };
+    };
     return {
-      chapters: this.manifest.tree.chapters.map((chapter) => ({
-        ...chapter,
-        scenes: chapter.scenes.map((scene) =>
-          this.files.has(scene.id) ? { ...scene } : { ...scene, missing: true },
-        ),
-      })),
+      chapters: this.manifest.tree.chapters.map((chapter) =>
+        withStatus({
+          ...chapter,
+          scenes: chapter.scenes.map((scene) =>
+            withStatus<ManuscriptScene>(
+              this.files.has(scene.id)
+                ? { ...scene }
+                : { ...scene, missing: true },
+            ),
+          ),
+        }),
+      ),
       unplaced: [...this.files]
         .filter((id) => !placed.has(id))
         .sort()
-        .map((id) => ({ id, title: UNPLACED_TITLE })),
+        .map((id) => withStatus({ id, title: UNPLACED_TITLE })),
     };
   }
 
@@ -2810,6 +2992,7 @@ export class ProjectStore {
   assistantView(): AssistantView {
     return {
       manuscript: () => this.manuscript(),
+      statuses: () => this.statuses(),
       // Nor an Entry's image.
       listEntries: () => this.listEntries().map(withoutImage),
       read: async (ref) => {
@@ -4055,6 +4238,13 @@ function sceneFile(value: SceneValue, previous?: UnknownKeys): string {
 }
 
 /**
+ * The header key of a Chapter's or Scene's Status id, in its Outline file.
+ * Only `setStatus` changes it: it isn't in the Outline's metadata, and a
+ * write keeps it as on disk, as it does any detail it didn't change.
+ */
+const STATUS = 'status';
+
+/**
  * An Outline's metadata is the rest of its frontmatter, so it already holds
  * what this app doesn't know; any other unit's is kept from `previous`.
  */
@@ -4132,6 +4322,7 @@ function unitValue(ref: UnitRef, file: UnitFile): UnitValue {
     id: _id,
     format: _format,
     [KEYS_SAVED_AT]: _savedAt,
+    [STATUS]: _status,
     ...meta
   } = frontmatter;
   return { id: ref.id, body, meta };

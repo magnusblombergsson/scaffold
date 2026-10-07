@@ -10,6 +10,7 @@ import {
 import { findingBlock, type ReviewCommand } from '../../shared/finding';
 import { roleText } from '../../shared/entry';
 import { mentionMatcher } from '../../shared/mentions';
+import { statusOf } from '../../shared/status';
 import { proposalBlock, type ProposalView } from '../../shared/proposal';
 import {
   ENTRY_TYPE_LABELS,
@@ -264,30 +265,40 @@ function entryText(entry: EntryValue): string {
 
 /**
  * Every Outline in Manuscript order, the Project's first, under the titles
- * of its Chapters and Scenes; no Prose. `texts` holds the Outlines.
+ * of its Chapters and Scenes, with the Status of each that has one in the
+ * list; no Prose. `texts` holds the Outlines.
  */
 async function outlineSkeleton(
   view: AssistantView,
   manuscript: Manuscript,
 ): Promise<{ text: string; texts: string[] }> {
   const texts: string[] = [];
+  const statuses = view.statuses();
   async function outline(id: string): Promise<string> {
     const { body } = await view.read({ kind: 'outline', id });
     texts.push(body);
     return body.trim() || '(No Outline.)';
   }
+  async function unit(
+    heading: string,
+    node: ManuscriptChapter | ManuscriptScene,
+  ): Promise<string> {
+    const status = statusOf(statuses, node.status);
+    return [
+      heading,
+      `Id: ${node.id}`,
+      ...(status ? [`Status: ${status.name}`] : []),
+      await outline(node.id),
+    ].join('\n');
+  }
   const parts = [
-    'The Outline skeleton: the Outline of the whole story, then each Chapter and Scene in Manuscript order with its Outline, each under its Id. It holds no Prose.',
+    'The Outline skeleton: the Outline of the whole story, then each Chapter and Scene in Manuscript order with its Outline, each under its Id and, if the Author gave it one, its Status. It holds no Prose.',
     `## The story\nId: ${PROJECT_OUTLINE}\n${await outline(PROJECT_OUTLINE)}`,
   ];
   for (const chapter of manuscript.chapters) {
-    parts.push(
-      `## Chapter “${chapter.title}”\nId: ${chapter.id}\n${await outline(chapter.id)}`,
-    );
+    parts.push(await unit(`## Chapter “${chapter.title}”`, chapter));
     for (const scene of chapter.scenes) {
-      parts.push(
-        `### Scene “${scene.title}”\nId: ${scene.id}\n${await outline(scene.id)}`,
-      );
+      parts.push(await unit(`### Scene “${scene.title}”`, scene));
     }
   }
   return { text: parts.join('\n\n'), texts };

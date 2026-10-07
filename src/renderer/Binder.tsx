@@ -1,8 +1,10 @@
 import {
+  useContext,
   useEffect,
   useRef,
   useState,
   type DragEvent,
+  type FocusEvent,
   type KeyboardEvent,
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
@@ -18,6 +20,8 @@ import {
 import { useListKeys } from './list-keys';
 import { SHORTCUTS, shortcutText, withShortcut } from '../shared/shortcuts';
 import { MAC } from './platform';
+import { ReadOnlyContext } from './read-only';
+import { statusOf, type Status } from '../shared/status';
 import {
   PROJECT_OUTLINE,
   type Manuscript,
@@ -50,6 +54,10 @@ type Props = {
   onRename(id: string | null): void;
   /** Undoes the last structure change, as Ctrl+Z in the list does. */
   onUndo(): Promise<void>;
+  /** The Project's Status list, in order. */
+  statuses: Status[];
+  /** Gives a Chapter or Scene a Status, or none with null. */
+  onSetStatus(unitId: string, statusId: string | null): void;
 };
 
 const SCENE = 'application/x-scaffold-scene';
@@ -65,8 +73,11 @@ export function Binder({
   renaming,
   onRename: setRenaming,
   onUndo,
+  statuses,
+  onSetStatus,
 }: Props) {
   const project = window.project;
+  const readOnly = useContext(ReadOnlyContext);
   const { chapters } = manuscript;
   const rows = listRows(manuscript);
   /** The row whose ⋯ menu is open, as by Shift+F10. */
@@ -193,6 +204,28 @@ export function Binder({
     void moveChapter(chapterId, at + (after ? 1 : 0));
   }
 
+  /** The Status ▸ submenu: none, or one of the list. */
+  function statusItem(node: { id: string; status?: string }): MenuItem {
+    const current = statusOf(statuses, node.status);
+    return {
+      label: 'Status',
+      disabled: readOnly,
+      items: [
+        {
+          label: 'No Status',
+          checked: !current,
+          run: () => onSetStatus(node.id, null),
+        },
+        ...statuses.map((status) => ({
+          label: status.name,
+          before: <StatusDot status={status} named={false} />,
+          checked: current?.id === status.id,
+          run: () => onSetStatus(node.id, status.id),
+        })),
+      ],
+    };
+  }
+
   function sceneMenu(
     scene: ManuscriptScene,
     chapter: ManuscriptChapter | null,
@@ -208,7 +241,7 @@ export function Binder({
       disabled: scene.missing,
       run: () => trash(scene, 'scene'),
     };
-    if (!chapter) return [...moves, toTrash];
+    if (!chapter) return [statusItem(scene), ...moves, toTrash];
     const index = chapter.scenes.indexOf(scene);
     return [
       {
@@ -238,6 +271,7 @@ export function Binder({
       },
       ...moveItems({ kind: 'scene', id: scene.id, chapterId: chapter.id }),
       ...moves,
+      statusItem(scene),
       toTrash,
     ];
   }
@@ -280,6 +314,7 @@ export function Binder({
           ),
       },
       ...moveItems({ kind: 'chapter', id: chapter.id }),
+      statusItem(chapter),
       {
         label: 'Move to Trash',
         // The Manuscript keeps at least one Chapter, and a Missing Scene has
@@ -314,6 +349,7 @@ export function Binder({
             dropScene(sceneId, chapter, scene, inLowerHalf(event));
         }}
       >
+        <StatusDot status={statusOf(statuses, scene.status)} />
         {renaming === scene.id ? (
           <TitleInput
             title={scene.title}
@@ -403,6 +439,7 @@ export function Binder({
                 dropChapter(chapterId, chapter, inLowerHalf(event));
               }}
             >
+              <StatusDot status={statusOf(statuses, chapter.status)} />
               {renaming === chapter.id ? (
                 <TitleInput
                   title={chapter.title}
@@ -464,6 +501,31 @@ export function Binder({
   );
 }
 
+/**
+ * A Status's colour, `named` for those who can't see it unless its name is
+ * beside it; nothing without one.
+ */
+export function StatusDot({
+  status,
+  named = true,
+}: {
+  status: Status | undefined;
+  named?: boolean;
+}) {
+  if (!status) return null;
+  return named ? (
+    <span
+      className="status-dot"
+      data-colour={status.colour}
+      role="img"
+      aria-label={`Status: ${status.name}`}
+      title={status.name}
+    />
+  ) : (
+    <span className="status-dot" data-colour={status.colour} aria-hidden />
+  );
+}
+
 /** Marks a unit in Conflict; it stays editable. */
 export function ConflictMarker({ shown }: { shown: boolean }) {
   return shown ? <span className="binder-conflict"> Conflict</span> : null;
@@ -513,11 +575,20 @@ export function TitleInput({
 
 export type MenuItem = {
   label: string;
-  run(): unknown;
   disabled?: boolean;
   /** The keys that do the same for the row with focus, as an accelerator. */
   shortcut?: string;
-};
+  /** Shown before the label, such as a Status's dot. */
+  before?: ReactNode;
+} & (
+  | {
+      run(): unknown;
+      /** Set for one of a set of choices: whether it is the one chosen. */
+      checked?: boolean;
+    }
+  /** A submenu, which →, Enter or a click opens and ← or Escape closes. */
+  | { items: MenuItem[] }
+);
 
 /** Keys as `aria-keyshortcuts` names them, such as Control+Shift+Enter or Alt+ArrowUp. */
 function ariaKeys(text: string): string {
@@ -570,9 +641,7 @@ export function Menu({
 
   useEffect(() => {
     if (!open) return;
-    root.current
-      ?.querySelector<HTMLElement>('[role="menuitem"]:not(:disabled)')
-      ?.focus();
+    root.current?.querySelector<HTMLElement>(`${ITEM}:not(:disabled)`)?.focus();
     const close = (event: MouseEvent) => {
       if (!root.current?.contains(event.target as Node)) {
         latestSetOpen.current(false);
@@ -586,25 +655,6 @@ export function Menu({
     setOpen(false);
     if (returnFocus) returnFocus();
     else button.current?.focus();
-  }
-
-  function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
-    const enabled = [
-      ...event.currentTarget.querySelectorAll<HTMLElement>(
-        '[role="menuitem"]:not(:disabled)',
-      ),
-    ];
-    const at = enabled.indexOf(document.activeElement as HTMLElement);
-    const last = enabled.length - 1;
-    const key = event.key;
-    if (key === 'Escape') closeToRow();
-    else if (key === 'ArrowDown') enabled[at >= last ? 0 : at + 1]?.focus();
-    else if (key === 'ArrowUp') enabled[at <= 0 ? last : at - 1]?.focus();
-    else if (key === 'Home') enabled[0]?.focus();
-    else if (key === 'End') enabled[last]?.focus();
-    else return;
-    event.preventDefault();
-    event.stopPropagation();
   }
 
   return (
@@ -621,41 +671,159 @@ export function Menu({
         {children ?? '⋯'}
       </button>
       {open && (
-        <div
-          role="menu"
-          aria-label={label}
-          className="menu-items"
-          onKeyDown={onKeyDown}
+        <MenuList
+          label={label}
+          items={items}
+          done={closeToRow}
           // Focus leaving it, as by Tab or F6, closes it behind.
           onBlur={(event) => {
             if (!root.current?.contains(event.relatedTarget)) setOpen(false);
           }}
-        >
-          {items.map((item) => (
-            <button
-              key={item.label}
-              role="menuitem"
-              tabIndex={-1}
-              disabled={item.disabled}
-              aria-keyshortcuts={
-                item.shortcut && ariaKeys(shortcutText(item.shortcut, MAC))
-              }
-              onClick={() => {
-                closeToRow();
-                void item.run();
-              }}
-            >
-              {item.label}
-              {item.shortcut && (
-                // Shown, not part of the item's name.
-                <span className="menu-shortcut" aria-hidden="true">
-                  {shortcutText(item.shortcut, MAC)}
-                </span>
-              )}
-            </button>
-          ))}
-        </div>
+        />
       )}
+    </div>
+  );
+}
+
+/** A menu's items, of any role: plain, one of a set of choices, or a submenu. */
+const ITEM = '[role^="menuitem"]';
+
+/**
+ * The items of a menu or submenu. ↑/↓, Home and End choose among its own,
+ * Enter does one, and `done` closes the whole menu once one is done, or on
+ * Escape. A submenu's `back`, on ← or Escape, closes just it.
+ */
+function MenuList({
+  label,
+  items,
+  done,
+  back,
+  onBlur,
+}: {
+  label: string;
+  items: MenuItem[];
+  done(): void;
+  back?(): void;
+  onBlur?(event: FocusEvent<HTMLDivElement>): void;
+}) {
+  const list = useRef<HTMLDivElement>(null);
+  /** The item whose submenu is open, if any. */
+  const [open, setOpen] = useState<string | null>(null);
+  /** Its own items, not those of a submenu. */
+  const own = () => [
+    ...(list.current?.querySelectorAll<HTMLElement>(
+      `:scope > ${ITEM}, :scope > .menu-parent > ${ITEM}`,
+    ) ?? []),
+  ];
+
+  const isSubmenu = back !== undefined;
+  useEffect(() => {
+    if (!isSubmenu) return;
+    // A submenu opens on its choice, if it has one.
+    const enabled = own().filter((item) => !item.matches(':disabled'));
+    (
+      enabled.find((item) => item.getAttribute('aria-checked') === 'true') ??
+      enabled[0]
+    )?.focus();
+  }, [isSubmenu]);
+
+  function closeSubmenu(itemLabel: string) {
+    setOpen(null);
+    own()
+      .find((item) => item.dataset.label === itemLabel)
+      ?.focus();
+  }
+
+  function onKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const enabled = own().filter((item) => !item.matches(':disabled'));
+    const active = document.activeElement as HTMLElement;
+    const at = enabled.indexOf(active);
+    const last = enabled.length - 1;
+    const key = event.key;
+    if (key === 'Escape') (back ?? done)();
+    else if (key === 'ArrowLeft' && back) back();
+    else if (key === 'ArrowRight' && active.getAttribute('aria-haspopup')) {
+      setOpen(active.dataset.label ?? null);
+    } else if (key === 'ArrowDown') enabled[at >= last ? 0 : at + 1]?.focus();
+    else if (key === 'ArrowUp') enabled[at <= 0 ? last : at - 1]?.focus();
+    else if (key === 'Home') enabled[0]?.focus();
+    else if (key === 'End') enabled[last]?.focus();
+    else return;
+    event.preventDefault();
+    event.stopPropagation();
+  }
+
+  return (
+    <div
+      ref={list}
+      role="menu"
+      aria-label={label}
+      className={back ? 'menu-items menu-submenu' : 'menu-items'}
+      onKeyDown={onKeyDown}
+      onBlur={onBlur}
+    >
+      {items.map((item) => {
+        const content = (
+          <>
+            {item.before}
+            {item.label}
+            {item.shortcut && (
+              // Shown, not part of the item's name.
+              <span className="menu-shortcut" aria-hidden="true">
+                {shortcutText(item.shortcut, MAC)}
+              </span>
+            )}
+          </>
+        );
+        if ('items' in item) {
+          return (
+            <div key={item.label} className="menu-parent">
+              <button
+                role="menuitem"
+                tabIndex={-1}
+                disabled={item.disabled}
+                data-label={item.label}
+                aria-haspopup="menu"
+                aria-expanded={open === item.label}
+                onClick={() => setOpen(open === item.label ? null : item.label)}
+              >
+                {content}
+                <span className="menu-arrow" aria-hidden="true">
+                  ▸
+                </span>
+              </button>
+              {open === item.label && (
+                <MenuList
+                  label={item.label}
+                  items={item.items}
+                  done={done}
+                  back={() => closeSubmenu(item.label)}
+                />
+              )}
+            </div>
+          );
+        }
+        const choice = item.checked !== undefined;
+        return (
+          <button
+            key={item.label}
+            role={choice ? 'menuitemradio' : 'menuitem'}
+            aria-checked={choice ? item.checked : undefined}
+            tabIndex={-1}
+            disabled={item.disabled}
+            data-label={item.label}
+            aria-keyshortcuts={
+              item.shortcut && ariaKeys(shortcutText(item.shortcut, MAC))
+            }
+            onClick={() => {
+              done();
+              void item.run();
+            }}
+          >
+            {content}
+          </button>
+        );
+      })}
     </div>
   );
 }

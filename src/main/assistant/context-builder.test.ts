@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -7,7 +7,7 @@ import { findingBlock } from '../../shared/finding';
 import { PROJECT_OUTLINE } from '../../shared/project-types';
 import { instantClock } from '../project-store/clock';
 import { nodeFileSystem } from '../project-store/file-system';
-import { createProject } from '../project-store/project-store';
+import { createProject, openProject } from '../project-store/project-store';
 import {
   buildContext,
   type Command,
@@ -669,6 +669,49 @@ describe('order and caching', () => {
     ].map((part) => skeleton.indexOf(part));
     expect(order.every((at) => at >= 0)).toBe(true);
     expect(order).toEqual([...order].sort((a, b) => a - b));
+  });
+
+  it('gives each Chapter and Scene its Status in the skeleton, by name, but none not in the list', async () => {
+    const { store, chapters, scenes } = await fixture();
+    await store.setStatus(chapters.arrival, 'outlined');
+    await store.setStatus(scenes.harbour, 'drafted');
+    await store.setStatus(scenes.letter, 'done');
+    await store.close();
+    const outline = path.join(
+      dir,
+      'My Novel',
+      'outlines',
+      `${scenes.letter}.md`,
+    );
+    await writeFile(
+      outline,
+      (await readFile(outline, 'utf8')).replace('done', 'polished'),
+    );
+    const reopened = await openProject(path.join(dir, 'My Novel'), {
+      fs: nodeFileSystem,
+      clock: instantClock(),
+    });
+
+    const context = await buildContext(reopened.assistantView(), {
+      mode: 'brainstorm',
+      messages: [message('author', 'Hm.')],
+    });
+    await reopened.close();
+
+    const skeleton = context.system[2].text;
+    expect(skeleton).toContain(
+      `## Chapter “Arrival”\nId: ${chapters.arrival}\nStatus: Outlined\n- She arrives`,
+    );
+    expect(skeleton).toContain(
+      `### Scene “Harbour”\nId: ${scenes.harbour}\nStatus: Drafted\n- She waits`,
+    );
+    expect(skeleton).toContain(
+      `### Scene “Letter”\nId: ${scenes.letter}\n- The letter`,
+    );
+    expect(skeleton).toContain(
+      `## Chapter “Storm”\nId: ${chapters.storm}\n- The storm`,
+    );
+    expect(sent(context)).not.toContain('polished');
   });
 
   it('on a first message, puts the second breakpoint on the last block before it', async () => {

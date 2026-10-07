@@ -305,6 +305,7 @@ function openedProject(store: ProjectStore): OpenedProject {
     displayName: store.displayName,
     language: store.language,
     foldedNoteImage: store.foldedNoteImage,
+    statuses: store.statuses(),
     manuscript: store.manuscript(),
     view: {
       lastSceneId,

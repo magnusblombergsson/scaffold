@@ -10,6 +10,7 @@ import type {
   Visibility,
 } from './project-types';
 import type { ReviewCommand } from './finding';
+import type { Status } from './status';
 import type { ImportBlock, ImportConvention } from './manuscript-import';
 import type { ListedModel, Model, ProviderId, ProviderStatus } from './models';
 import type { Command } from './shortcuts';
@@ -142,6 +143,18 @@ export type EntriesChanged = {
  */
 export type EntryImageChanged = { type: 'entryImageChanged'; id: string };
 
+/**
+ * A Scene's or Chapter's unit details, such as its Status, changed, here or
+ * on another computer: `manuscript` shows them now.
+ */
+export type UnitDetailsChanged = {
+  type: 'unitDetailsChanged';
+  manuscript: Manuscript;
+};
+
+/** The Project's Status list changed on another computer: `statuses` is it now. */
+export type StatusesChanged = { type: 'statusesChanged'; statuses: Status[] };
+
 /** A newer app upgraded the Project; `host` is the computer it did so on, when known. */
 export type Upgrade = { host?: string };
 
@@ -168,6 +181,8 @@ export type ProjectEvent =
   | UnitSaveStatus
   | UnitReloaded
   | StructureChanged
+  | UnitDetailsChanged
+  | StatusesChanged
   | ConflictsChanged
   | EntriesChanged
   | EntryImageChanged
@@ -279,6 +294,12 @@ export interface ProjectApi {
    * False when it can't be saved, which main has told the Author.
    */
   setFoldedNoteImage(on: boolean): Promise<boolean>;
+  /**
+   * Gives a Scene or Chapter the Status of `statusId`, or none with null;
+   * there is no undo. The Manuscript showing it follows as a
+   * `unitDetailsChanged`.
+   */
+  setStatus(unitId: string, statusId: string | null): Promise<void>;
 }
 
 /**
@@ -338,6 +359,8 @@ export type OpenedProject = {
   language: ProseLanguage;
   /** Whether a folded Pinned note shows its Entry's image. */
   foldedNoteImage: boolean;
+  /** The Project's Status list, in order. */
+  statuses: Status[];
   manuscript: Manuscript;
   view: ProjectView;
   sessions: SessionNotice;
@@ -681,6 +704,7 @@ export const projectMethods = {
   emptyTrash: 'invoke',
   setLanguage: 'invoke',
   setFoldedNoteImage: 'invoke',
+  setStatus: 'invoke',
 } as const satisfies MethodTable<ProjectApi>;
 
 export const assistantMethods = {
