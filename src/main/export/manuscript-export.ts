@@ -10,7 +10,12 @@ import type {
   SceneRef,
   SceneValue,
 } from '../../shared/project-types';
-import { readProse, type Mark, type Span } from '../../shared/prose-markdown';
+import {
+  readProse,
+  type Mark,
+  type Paragraph,
+  type Span,
+} from '../../shared/prose-markdown';
 import { docx, type DocxParagraph, type DocxRun } from './docx';
 
 // The Manuscript Export: the Prose of the Scenes the Author ticked, for others
@@ -39,7 +44,7 @@ export type ExportSource = {
 const SCENE_BREAK = '***';
 
 /** A Chapter's title, and the Prose paragraphs of each of its Scenes that has any. */
-type ExportedChapter = { title: string; scenes: Span[][][] };
+type ExportedChapter = { title: string; scenes: Paragraph[][] };
 
 /**
  * The Prose of the ticked part of the Manuscript as a file of `format`.
@@ -74,7 +79,7 @@ async function readChapters(
               kind: 'scene',
               id: scene.id,
             });
-            return readProse(markdown).filter((spans) => spans.length > 0);
+            return readProse(markdown).filter(({ spans }) => spans.length > 0);
           }),
       );
       return {
@@ -92,10 +97,32 @@ function markdownOf(chapters: ExportedChapter[]): string {
     `# ${escapeCommonMark(title).replace(/#/g, '\\#')}`,
     ...scenes.flatMap((paragraphs, i) => [
       ...(i > 0 ? [SCENE_BREAK] : []),
-      ...paragraphs.map(commonMarkParagraph),
+      ...markdownBlocks(paragraphs),
     ]),
   ]);
   return blocks.join('\n\n') + '\n';
+}
+
+/**
+ * A Scene's paragraphs as blocks of CommonMark. Quoted paragraphs in a row
+ * are one block quote, as they read as one passage.
+ */
+function markdownBlocks(paragraphs: Paragraph[]): string[] {
+  const blocks: string[] = [];
+  paragraphs.forEach(({ spans, quote }, i) => {
+    const text = commonMarkParagraph(spans);
+    if (!quote) {
+      blocks.push(text);
+      return;
+    }
+    const quoted = text
+      .split('\n')
+      .map((line) => `> ${line}`)
+      .join('\n');
+    if (paragraphs[i - 1]?.quote) blocks[blocks.length - 1] += `\n>\n${quoted}`;
+    else blocks.push(quoted);
+  });
+  return blocks;
 }
 
 const DELIMITER: Record<Mark, string> = { bold: '**', italic: '*' };
@@ -169,7 +196,8 @@ function docxParagraphs(chapters: ExportedChapter[]): DocxParagraph[] {
     { style: 'heading1' as const, runs: [plain(title)] },
     ...scenes.flatMap((paragraphs, i) => [
       ...(i > 0 ? [{ centred: true, runs: [plain(SCENE_BREAK)] }] : []),
-      ...paragraphs.map((spans) => ({
+      ...paragraphs.map(({ spans, quote }) => ({
+        ...(quote && { style: 'quote' as const }),
         runs: spans.map(({ text, marks }) => ({
           text,
           bold: marks.includes('bold'),

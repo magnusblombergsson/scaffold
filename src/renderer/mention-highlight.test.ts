@@ -94,6 +94,9 @@ describe('mention highlighting', () => {
   it("doesn't change the text the editor holds", () => {
     const editor = prose('Anna');
     expect(editor.getText()).toBe('Anna');
-    expect(editor.getJSON()).toEqual(markdownToDoc('Anna'));
+    // As the schema fills in defaults, such as a paragraph's blockQuote.
+    expect(editor.getJSON()).toEqual(
+      editor.schema.nodeFromJSON(markdownToDoc('Anna')).toJSON(),
+    );
   });
 });

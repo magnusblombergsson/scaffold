@@ -14,7 +14,8 @@ import type { NewChapter } from '../project-store/project-store';
 
 // The Import: a Word or Markdown manuscript read as blocks of Prose, which
 // the Author splits into Chapters and Scenes (src/shared/manuscript-import)
-// before it becomes a new Project. Only paragraphs, italic and bold come in.
+// before it becomes a new Project. Only paragraphs, block quotes, italic and
+// bold come in.
 
 export type ImportFormat = 'docx' | 'markdown';
 
@@ -114,9 +115,10 @@ class SpanBuilder {
   }
 }
 
-/** A paragraph block; none when it has no text. */
-function paragraph(spans: Span[]): ImportBlock[] {
-  return spans.length === 0 ? [] : [{ kind: 'paragraph', spans }];
+/** A paragraph block, quoted or not; none when it has no text. */
+function paragraph(spans: Span[], quote: boolean): ImportBlock[] {
+  if (spans.length === 0) return [];
+  return [{ kind: 'paragraph', spans, ...(quote && { quote }) }];
 }
 
 // --- Markdown ---
@@ -124,6 +126,8 @@ function paragraph(spans: Span[]): ImportBlock[] {
 function readMarkdown(source: string): ImportBlock[] {
   const blocks: ImportBlock[] = [];
   const builder = new SpanBuilder();
+  /** How deep within block quotes. */
+  let quoted = 0;
 
   const inline = (nodes: PhrasingContent[], marks: Mark[]) => {
     for (const node of nodes) {
@@ -169,7 +173,7 @@ function readMarkdown(source: string): ImportBlock[] {
         } else if (node.depth === 2 && !/^ {0,3}#/.test(raw)) {
           // `---` under a paragraph makes it a heading in CommonMark, but in
           // a manuscript it is a scene break after it.
-          blocks.push(...paragraph(spans), { kind: 'separator' });
+          blocks.push(...paragraph(spans, quoted > 0), { kind: 'separator' });
         } else {
           blocks.push({ kind: 'heading', level: node.depth, spans });
         }
@@ -177,7 +181,7 @@ function readMarkdown(source: string): ImportBlock[] {
       }
       case 'paragraph':
         inline(node.children, []);
-        blocks.push(...paragraph(builder.take()));
+        blocks.push(...paragraph(builder.take(), quoted > 0));
         break;
       case 'thematicBreak':
         blocks.push({ kind: 'separator' });
@@ -186,11 +190,15 @@ function readMarkdown(source: string): ImportBlock[] {
         // Most likely Prose indented by the Author.
         for (const text of node.value.split(/\n\s*\n/)) {
           builder.add(text.replace(/\s*\n\s*/g, ' '), []);
-          blocks.push(...paragraph(builder.take()));
+          blocks.push(...paragraph(builder.take(), quoted > 0));
         }
         break;
-      case 'root':
       case 'blockquote':
+        quoted++;
+        for (const child of node.children) block(child);
+        quoted--;
+        break;
+      case 'root':
       case 'list':
       case 'listItem':
         for (const child of node.children) block(child);
@@ -207,9 +215,12 @@ function readMarkdown(source: string): ImportBlock[] {
 
 /**
  * How mammoth turns Word's styles into HTML: italic and bold set by a
- * character style, as by Word's Emphasis, and page breaks as `<hr>`.
+ * character style, as by Word's Emphasis, quote styles as `<blockquote>`,
+ * and page breaks as `<hr>`.
  */
 const STYLE_MAP = [
+  "p[style-name='Quote'] => blockquote > p:fresh",
+  "p[style-name='Intense Quote'] => blockquote > p:fresh",
   "r[style-name='Emphasis'] => em",
   "r[style-name='Intense Emphasis'] => em",
   "r[style-name='Subtle Emphasis'] => em",
@@ -240,13 +251,15 @@ function readMammothHtml(html: string): ImportBlock[] {
   let level = 0;
   /** How deep within elements left out, such as notes. */
   let skipping = 0;
+  /** How deep within block quotes. */
+  let quoted = 0;
 
   const endBlock = () => {
     const spans = builder.take();
     if (level > 0 && spans.length > 0) {
       blocks.push({ kind: 'heading', level, spans });
     } else {
-      blocks.push(...wordParagraph(spans));
+      blocks.push(...wordParagraph(spans, quoted > 0));
     }
   };
 
@@ -272,6 +285,7 @@ function readMammothHtml(html: string): ImportBlock[] {
       continue;
     }
     if (closing) {
+      if (name === 'blockquote') quoted--;
       if (name === 'em' || name === 'i') remove(marks, 'italic');
       if (name === 'strong' || name === 'b') remove(marks, 'bold');
       if (isBlock(name)) {
@@ -287,6 +301,7 @@ function readMammothHtml(html: string): ImportBlock[] {
       skipping = 1;
       continue;
     }
+    if (name === 'blockquote') quoted++;
     if (name === 'em' || name === 'i') marks.push('italic');
     if (name === 'strong' || name === 'b') marks.push('bold');
     if (isBlock(name)) {
@@ -305,10 +320,10 @@ function readMammothHtml(html: string): ImportBlock[] {
  */
 const SCENE_BREAK_TEXT = /^[\s*#~]*[*#~][\s*#~]*$/;
 
-function wordParagraph(spans: Span[]): ImportBlock[] {
+function wordParagraph(spans: Span[], quote: boolean): ImportBlock[] {
   return SCENE_BREAK_TEXT.test(plainText(spans))
     ? [{ kind: 'separator' }]
-    : paragraph(spans);
+    : paragraph(spans, quote);
 }
 
 function isBlock(name: string): boolean {

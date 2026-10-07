@@ -376,6 +376,19 @@ button.recent-open:hover {
   margin: 0 0 1em;
 }
 
+/* A block quote: indented on both sides, with a rule beside it that runs on
+   through quoted paragraphs in a row, which read as one passage. */
+.editor .prose p.block-quote {
+  margin-inline: 2em;
+  padding-left: 1em;
+  border-left: 2px solid var(--rule);
+}
+
+.editor .prose p.block-quote:has(+ p.block-quote) {
+  margin-bottom: 0;
+  padding-bottom: 1em;
+}
+
 /* The sheet. */
 .centre {
   flex: 1;

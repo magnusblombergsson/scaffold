@@ -1,15 +1,16 @@
 import { crc32, deflateRawSync } from 'node:zlib';
 import type { ProseLanguage } from '../../shared/project-types';
 
-// A minimal .docx: one document part, and a styles part holding only Word's
-// built-in Normal and Heading 1, so the reader's Word restyles it as they like.
+// A minimal .docx: one document part, and a styles part holding Word's
+// built-in Normal and Heading 1, so the reader's Word restyles it as they
+// like, and a Quote of our own, as Word's own is italic and centred.
 
 /** A run of text, and whether it is bold or italic. */
 export type DocxRun = { text: string; bold: boolean; italic: boolean };
 
-/** A paragraph: Normal, Heading 1, or Normal centred. */
+/** A paragraph: Normal, Heading 1 or Quote, and whether it is centred. */
 export type DocxParagraph = {
-  style?: 'heading1';
+  style?: 'heading1' | 'quote';
   centred?: boolean;
   runs: DocxRun[];
 };
@@ -40,12 +41,17 @@ function documentXml(paragraphs: DocxParagraph[]): string {
 
 function paragraphXml({ style, centred, runs }: DocxParagraph): string {
   const properties =
-    (style === 'heading1' ? '<w:pStyle w:val="Heading1"/>' : '') +
+    (style ? `<w:pStyle w:val="${STYLE_IDS[style]}"/>` : '') +
     (centred ? '<w:jc w:val="center"/>' : '');
   return `<w:p>${properties && `<w:pPr>${properties}</w:pPr>`}${runs
     .map(runXml)
     .join('')}</w:p>`;
 }
+
+const STYLE_IDS: Record<NonNullable<DocxParagraph['style']>, string> = {
+  heading1: 'Heading1',
+  quote: 'Quote',
+};
 
 function runXml({ text, bold, italic }: DocxRun): string {
   const properties = (bold ? '<w:b/>' : '') + (italic ? '<w:i/>' : '');
@@ -83,6 +89,10 @@ function stylesXml(language: ProseLanguage): string {
     '<w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:uiPriority w:val="9"/><w:qFormat/>' +
     '<w:pPr><w:keepNext/><w:keepLines/><w:spacing w:before="480" w:after="240"/><w:outlineLvl w:val="0"/></w:pPr>' +
     '<w:rPr><w:b/><w:bCs/><w:sz w:val="32"/><w:szCs w:val="32"/></w:rPr></w:style>' +
+    // Indented half an inch on both sides.
+    '<w:style w:type="paragraph" w:styleId="Quote"><w:name w:val="Quote"/>' +
+    '<w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:uiPriority w:val="29"/><w:qFormat/>' +
+    '<w:pPr><w:ind w:left="720" w:right="720"/></w:pPr></w:style>' +
     '</w:styles>'
   );
 }
