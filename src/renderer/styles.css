@@ -2881,6 +2881,106 @@ header.entry-header {
   white-space: nowrap;
 }
 
+/* A Scene's or Chapter's Status and Tags, edited on a card or Overview row. */
+.status-and-tags {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.85rem;
+
+  > .menu .menu-items {
+    left: 0;
+    right: auto;
+  }
+
+  .menu-button {
+    padding: 0.05rem 0.5rem;
+    border: 1px solid var(--pill-line);
+    border-radius: 999px;
+    color: inherit;
+  }
+
+  .menu-button:hover:not(:disabled) {
+    border-color: var(--fg);
+  }
+
+  .menu-button:disabled {
+    cursor: default;
+  }
+
+  .tag-input {
+    flex: 1 1 6rem;
+  }
+
+  .tag-chip {
+    font-size: 0.8rem;
+  }
+
+  /* Its own width, not the browser's, so it fits beside the Status. */
+  .tag-input input {
+    width: 5rem;
+    flex-basis: 5rem;
+    min-width: 5rem;
+    padding: 0.1rem 0.3rem;
+    border-color: transparent;
+    background: none;
+    font-size: 0.85rem;
+  }
+
+  .tag-input input:hover,
+  .tag-input input:focus {
+    border-color: var(--line);
+  }
+}
+
+.unit-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.unit-status[data-empty] {
+  color: var(--muted);
+}
+
+/* A card's Status and Tags sit at its foot. */
+.card > .status-and-tags {
+  margin-top: auto;
+  padding-top: 0.35rem;
+  border-top: 1px dashed var(--line);
+}
+
+.overview-row-body > .status-and-tags {
+  margin-bottom: 0.5rem;
+}
+
+.overview-row-head > .status-dot {
+  align-self: center;
+}
+
+/*
+ * The Outline skeleton's dots before a title, its Tags under it. The dot
+ * comes after the title in the heading, so its name starts with the title.
+ */
+.reference-skeleton :is(h3, h4) {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+
+  > .status-dot {
+    order: -1;
+  }
+}
+
+.reference-skeleton :is(h3, h4) + .tag-list {
+  margin-bottom: 0.25rem;
+}
+
+.reference-skeleton h4 + .tag-list {
+  margin-left: 0.75rem;
+}
+
 /* The Entry header's Tags: chips, then a quiet box to type more in. */
 .entry-header-foot .tag-input input {
   padding: 0.1rem 0.3rem;

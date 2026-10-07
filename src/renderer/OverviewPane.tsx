@@ -2,11 +2,13 @@ import { useEffect, useState, type ReactNode } from 'react';
 import {
   PROJECT_OUTLINE,
   type Manuscript,
+  type ManuscriptChapter,
   type ManuscriptScene,
   type OutlineValue,
   type ProseLanguage,
 } from '../shared/project-types';
 import { OutlineNotes } from './OutlineNotes';
+import { StatusAndTagsEditor, UnitStatusDot } from './StatusAndTags';
 import {
   defaultScope,
   expandable,
@@ -25,10 +27,11 @@ type Navigation = {
 
 /**
  * The column between the Binder and the Prose: a row per unit of the Chapter
- * being written, or of the whole Project, each its title and its Outline's
- * first line, opening to edit its Outline and Notes in place. The Scene
- * being written is marked, and doesn't open: its Outline & Notes are above
- * the Prose, and one unit's field is open in only one place.
+ * being written, or of the whole Project, each its Status dot, title and its
+ * Outline's first line, opening to edit its Status, Tags, Outline and Notes
+ * in place. The Scene being written is marked, and doesn't open: its
+ * Outline & Notes are above the Prose, and one unit's field is open in only
+ * one place.
  */
 export function OverviewPane({
   manuscript,
@@ -169,6 +172,7 @@ function Rows({
     id,
     title,
     kind,
+    unit,
     missing = false,
     lists = false,
     children,
@@ -176,6 +180,8 @@ function Rows({
     id: string;
     title: string;
     kind: 'project' | 'chapter' | 'scene';
+    /** A Chapter or Scene, with its Status and Tags; none for the Project. */
+    unit?: ManuscriptChapter | ManuscriptScene;
     missing?: boolean;
     /** Whether the row lists Scenes under it while expanded. */
     lists?: boolean;
@@ -208,6 +214,7 @@ function Rows({
           >
             <span aria-hidden="true">{expanded ? '▾' : '▸'}</span>
           </button>
+          {unit && <UnitStatusDot unit={unit} />}
           <button
             className="overview-title"
             aria-label={`Open ${title}`}
@@ -231,6 +238,7 @@ function Rows({
         </div>
         {isOpen && (
           <div className="overview-row-body">
+            {unit && <StatusAndTagsEditor unit={unit} />}
             <OutlineNotes
               unitId={id}
               language={language}
@@ -253,6 +261,7 @@ function Rows({
             id: scene.id,
             title: scene.title,
             kind: 'scene',
+            unit: scene,
             missing: scene.missing,
           }),
         )}
@@ -296,7 +305,12 @@ function Rows({
         {scope === 'chapter' ? (
           chapter && (
             <>
-              {row({ id: chapter.id, title: chapter.title, kind: 'chapter' })}
+              {row({
+                id: chapter.id,
+                title: chapter.title,
+                kind: 'chapter',
+                unit: chapter,
+              })}
               {sceneRows(chapter.scenes)}
             </>
           )
@@ -312,6 +326,7 @@ function Rows({
                 id: c.id,
                 title: c.title,
                 kind: 'chapter',
+                unit: c,
                 lists: true,
                 children:
                   (open.has(c.id) || listed.has(c.id)) && sceneRows(c.scenes),

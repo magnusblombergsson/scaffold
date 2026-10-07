@@ -124,6 +124,16 @@ for (const theme of ['light', 'dark'] as const) {
       await page.keyboard.type('- The train arrives');
       await field(card(page, 'Scene 1'), 'Notes').click();
       await page.keyboard.type('Check the weather.');
+
+      // Each card's foot sets its Status and Tags.
+      const scene1 = card(page, 'Scene 1');
+      await button(scene1, 'Status of Scene 1').click();
+      await page.getByRole('menuitemradio', { name: 'Drafted' }).click();
+      await scene1.getByLabel('Add a Tag').click();
+      await page.keyboard.type('Mara,');
+      await expect(
+        scene1.getByRole('list', { name: 'Tags' }).getByRole('listitem'),
+      ).toHaveText(['Mara×']);
       await expect(page).toHaveScreenshot(`chapter-corkboard-${theme}.png`, {
         mask: changing(page),
       });

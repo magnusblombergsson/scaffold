@@ -213,23 +213,12 @@ export function Binder({
 
   /** The Status ▸ submenu: none, or one of the list. */
   function statusItem(node: { id: string; status?: string }): MenuItem {
-    const current = statusOf(statuses, node.status);
     return {
       label: 'Status',
       disabled: readOnly,
-      items: [
-        {
-          label: 'No Status',
-          checked: !current,
-          run: () => onSetStatus(node.id, null),
-        },
-        ...statuses.map((status) => ({
-          label: status.name,
-          before: <StatusDot status={status} named={false} />,
-          checked: current?.id === status.id,
-          run: () => onSetStatus(node.id, status.id),
-        })),
-      ],
+      items: statusChoices(statuses, node.status, (statusId) =>
+        onSetStatus(node.id, statusId),
+      ),
     };
   }
 
@@ -555,6 +544,27 @@ export function StatusDot({
   );
 }
 
+/**
+ * The choices of a unit's Status: none, or one of the list, the one it has
+ * checked. `onChoose` gets the chosen Status's id, or null for none.
+ */
+export function statusChoices(
+  statuses: readonly Status[],
+  statusId: string | undefined,
+  onChoose: (statusId: string | null) => void,
+): MenuItem[] {
+  const current = statusOf(statuses, statusId);
+  return [
+    { label: 'No Status', checked: !current, run: () => onChoose(null) },
+    ...statuses.map((status) => ({
+      label: status.name,
+      before: <StatusDot status={status} named={false} />,
+      checked: current?.id === status.id,
+      run: () => onChoose(status.id),
+    })),
+  ];
+}
+
 /** Marks a unit in Conflict; it stays editable. */
 export function ConflictMarker({ shown }: { shown: boolean }) {
   return shown ? <span className="binder-conflict"> Conflict</span> : null;
@@ -648,6 +658,7 @@ export function Menu({
   items,
   children,
   title,
+  disabled = false,
   open: controlledOpen,
   onOpenChange,
   returnFocus,
@@ -657,6 +668,8 @@ export function Menu({
   children?: ReactNode;
   /** The button's tooltip, such as its shortcut. */
   title?: string;
+  /** Whether the button can't open it, as once the Project is read-only. */
+  disabled?: boolean;
   open?: boolean;
   onOpenChange?(open: boolean): void;
   returnFocus?(): void;
@@ -699,6 +712,7 @@ export function Menu({
         className="menu-button"
         aria-label={label}
         title={title}
+        disabled={disabled}
         aria-haspopup="menu"
         aria-expanded={open}
         onClick={() => setOpen(!open)}
