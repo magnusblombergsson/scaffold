@@ -91,15 +91,13 @@ test('visibility changes, deletes and restores can be undone from the toast', as
   await newEntry(page, 'Place');
   await fill(page, 'Name', 'Harbour');
 
-  const visibility = page.getByRole('group', {
-    name: 'Assistant sees this Entry',
-  });
-  await expect(visibility.getByLabel('When mentioned')).toBeChecked();
-  await visibility.getByLabel('Never').click();
+  const visibility = page.getByLabel('Assistant sees it');
+  await expect(visibility).toHaveValue('mentioned');
+  await visibility.selectOption('Never');
   await expect(toast(page)).toContainText('Visibility set to Never');
-  await expect(visibility.getByLabel('Never')).toBeChecked();
+  await expect(visibility).toHaveValue('never');
   await toast(page).getByRole('button', { name: 'Undo' }).click();
-  await expect(visibility.getByLabel('When mentioned')).toBeChecked();
+  await expect(visibility).toHaveValue('mentioned');
   await save(page);
   const [file] = await readdir(path.join(projectPath, 'bible'));
   expect(
@@ -248,11 +246,11 @@ test('a Character, a Place and a Plot Thread show and save their own fields', as
   await newEntry(page, 'Place');
   const senses = page.getByRole('region', { name: 'Senses' });
   await expect(senses.locator('h4')).toHaveText([
-    'Smells',
+    'Atmosphere',
     'Sight',
     'Sound',
+    'Smells',
     'Touch',
-    'Atmosphere',
   ]);
   await fill(page, 'Smells', 'tar and salt');
   await fill(page, 'Atmosphere', 'waiting');

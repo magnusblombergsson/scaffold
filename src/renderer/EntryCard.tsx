@@ -2,6 +2,7 @@ import { roleText } from '../shared/entry';
 import { ENTRY_TYPE_LABELS, type EntryValue } from '../shared/project-types';
 import { VISIBILITY_LABELS } from './EntryView';
 import { entryFields, type CardField } from './card-fields';
+import { EntryThumbnail } from './EntryImage';
 import { entryTitle } from './StoryBible';
 
 /**
@@ -19,7 +20,10 @@ export function EntryCard({
     <article className="entry-card" aria-label={entryTitle(entry)}>
       <header>
         <span className="entry-card-type">{ENTRY_TYPE_LABELS[entry.type]}</span>
-        <h2>{entryTitle(entry)}</h2>
+        <h2>
+          {entryTitle(entry)}
+          <EntryThumbnail entry={entry} />
+        </h2>
         <button
           className="entry-card-open"
           aria-label={`Open “${entryTitle(entry)}”`}
