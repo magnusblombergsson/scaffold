@@ -4,6 +4,8 @@ import {
   PROJECT_OUTLINE,
   type EntryValue,
   type Manuscript,
+  type ManuscriptChapter,
+  type ManuscriptScene,
 } from '../shared/project-types';
 import { anyAdded, NoProviderState, useProviders } from './Providers';
 import {
@@ -18,6 +20,8 @@ import { EntryCard } from './EntryCard';
 import { ModelPicker } from './ModelPicker';
 import { PanelResizer, type PaneSize } from './PanelResizer';
 import { RoomList } from './RoomList';
+import { TagChips } from './TagsDialog';
+import { UnitStatusDot } from './StatusAndTags';
 
 /**
  * The Brainstorm room: its Conversations on the left, the one open in the
@@ -236,7 +240,8 @@ function BibleReference({
 
 /**
  * The Outline of the whole story, then each Chapter and Scene in Manuscript
- * order with its Outline, as the Assistant is sent it.
+ * order with its Outline, as the Assistant is sent it, its Status dot and
+ * Tags shown, not edited.
  */
 function OutlineSkeleton({
   manuscript,
@@ -278,6 +283,19 @@ function OutlineSkeleton({
       <p className="reference-outline reference-empty">No Outline.</p>
     );
   };
+  /** A Chapter's or Scene's title, its dot shown first, then its Tags. */
+  const heading = (
+    Heading: 'h3' | 'h4',
+    unit: ManuscriptChapter | ManuscriptScene,
+  ) => (
+    <>
+      <Heading>
+        {unit.title}
+        <UnitStatusDot unit={unit} />
+      </Heading>
+      <TagChips tags={unit.tags} />
+    </>
+  );
   return (
     <div className="reference-skeleton">
       <section aria-label="The story">
@@ -286,11 +304,11 @@ function OutlineSkeleton({
       </section>
       {manuscript.chapters.map((chapter) => (
         <section key={chapter.id} aria-label={chapter.title}>
-          <h3>{chapter.title}</h3>
+          {heading('h3', chapter)}
           {outline(chapter.id)}
           {chapter.scenes.map((scene) => (
             <section key={scene.id} aria-label={scene.title}>
-              <h4>{scene.title}</h4>
+              {heading('h4', scene)}
               {outline(scene.id)}
             </section>
           ))}

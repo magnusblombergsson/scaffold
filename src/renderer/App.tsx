@@ -74,7 +74,6 @@ import {
 import { MentionPeek } from './MentionPeek';
 import { MAC } from './platform';
 import { flushPendingEdits } from './pending-edits';
-import { ReadOnlyContext } from './read-only';
 import type { Reveal } from './reveal';
 import { SaveFailureBanner, useSaveStatus } from './SaveStatus';
 import { SceneEditor, type QuoteJump } from './SceneEditor';
@@ -83,6 +82,7 @@ import { ShortcutsDialog } from './ShortcutsDialog';
 import { StartScreen } from './StartScreen';
 import { StatusBar, useSceneCounts } from './StatusBar';
 import { entryTitle, StoryBible } from './StoryBible';
+import { ProjectContexts } from './StatusAndTags';
 import { TagsDialog } from './TagsDialog';
 import { TodoList, type TodoDraft } from './TodoList';
 import { trashTitle, TrashView } from './TrashView';
@@ -1054,7 +1054,14 @@ function ProjectView({
   }
 
   return (
-    <ReadOnlyContext.Provider value={readOnly !== null}>
+    <ProjectContexts
+      readOnly={readOnly !== null}
+      statusAndTags={{
+        statuses,
+        setStatus: (unitId, statusId) => void setStatus(unitId, statusId),
+        setTags,
+      }}
+    >
       <div
         className="project-view"
         data-zen={zen || undefined}
@@ -1657,7 +1664,7 @@ function ProjectView({
           )}
         </div>
       </div>
-    </ReadOnlyContext.Provider>
+    </ProjectContexts>
   );
 }
 

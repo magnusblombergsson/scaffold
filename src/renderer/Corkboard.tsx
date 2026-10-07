@@ -12,11 +12,12 @@ import { OutlineNotes } from './OutlineNotes';
 import { ReadOnlyContext } from './read-only';
 import type { Reveal } from './reveal';
 import { UNPLACED } from './overview';
+import { StatusAndTagsEditor } from './StatusAndTags';
 
 /**
  * A Chapter as index cards: its own Outline and Notes in a wide card, then
- * its Scenes as numbered cards, each editable in place. `reveal` goes to
- * the Chapter's Outline.
+ * its Scenes as numbered cards, each editable in place, Status and Tags
+ * too. `reveal` goes to the Chapter's Outline.
  */
 export function ChapterCorkboard({
   chapter,
@@ -42,6 +43,7 @@ export function ChapterCorkboard({
           withNotes
           reveal={reveal}
         />
+        <StatusAndTagsEditor unit={chapter} />
       </article>
       <div className="scene-cards">
         <SceneCards
@@ -136,6 +138,7 @@ export function ProjectCorkboard({
               onAddTodo={() => onAddTodo({ kind: 'chapter', id: chapter.id })}
             />
             <OutlineNotes unitId={chapter.id} language={language} withNotes />
+            <StatusAndTagsEditor unit={chapter} />
           </article>
         </Lane>
       ))}
@@ -259,7 +262,10 @@ function SceneCard({
       {scene.missing ? (
         <p className="corkboard-empty">Missing, possibly not synced yet.</p>
       ) : (
-        <OutlineNotes unitId={scene.id} language={language} withNotes />
+        <>
+          <OutlineNotes unitId={scene.id} language={language} withNotes />
+          <StatusAndTagsEditor unit={scene} />
+        </>
       )}
     </article>
   );
