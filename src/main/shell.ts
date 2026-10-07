@@ -92,6 +92,8 @@ let providers: ProviderSettings;
 const stores = new Map<number, ProjectStore>();
 /** Which of Writing's side panes each window, by its contents' id, has docked. */
 const dockedPanes = new Map<number, DockedPanes>();
+/** The windows, by their contents' id, whose Prose has focus, for the Format menu. */
+const proseFocused = new Set<number>();
 /**
  * The windows in zen mode, by their contents' id, each with whether it was
  * full screen before zen.
@@ -511,6 +513,12 @@ const shellHandlers: Handlers<ShellApi, typeof shellMethods, WindowContext> = {
     dockedPanes.set(sender.id, docked);
     updateMenu();
   },
+  showProseFocus: ({ sender }, focused) => {
+    if (focused === proseFocused.has(sender.id)) return;
+    if (focused) proseFocused.add(sender.id);
+    else proseFocused.delete(sender.id);
+    updateMenu();
+  },
   setZen: ({ sender, window }, on) => {
     if (!window || on === zenWindows.has(sender.id)) return;
     if (on) {
@@ -679,6 +687,7 @@ function setApplicationMenu(): void {
           readOnly: store.readOnly() !== null,
           docked: dockedPanes.get(window.webContents.id) ?? ALL_DOCKED,
           zen: zenWindows.has(window.webContents.id),
+          proseFocused: proseFocused.has(window.webContents.id),
         }
       : null,
     recent: settings
@@ -854,6 +863,7 @@ function closeProject(window: BrowserWindow): Promise<void> {
         unsubscribes.delete(id);
         stores.delete(id);
         dockedPanes.delete(id);
+        proseFocused.delete(id);
         leaveZen(id, window);
         updateMenu();
       } finally {

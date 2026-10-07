@@ -17,7 +17,12 @@ const noProject: MenuState = {
 const docked = { left: true, assistant: true };
 const writable: MenuState = {
   ...noProject,
-  project: { readOnly: false, docked, zen: false },
+  project: { readOnly: false, docked, zen: false, proseFocused: false },
+};
+/** A writable Project, typing in its Prose. */
+const inProse: MenuState = {
+  ...writable,
+  project: { ...writable.project!, proseFocused: true },
 };
 
 function build(state: MenuState) {
@@ -54,13 +59,14 @@ const labels = (items: MenuItemConstructorOptions[]) =>
   items.filter((item) => item.type !== 'separator').map((item) => item.label);
 
 describe('menuTemplate', () => {
-  it('has File, Edit, View, Insert, Tools, Window and Help', () => {
+  it('has File, Edit, View, Insert, Format, Tools, Window and Help', () => {
     const { template } = build(writable);
     expect(template.map((item) => item.label ?? item.role)).toEqual([
       'File',
       'editMenu',
       'View',
       'Insert',
+      'Format',
       'Tools',
       'windowMenu',
       'Help',
@@ -113,6 +119,7 @@ describe('menuTemplate', () => {
         readOnly: true,
         docked: { left: false, assistant: true },
         zen: false,
+        proseFocused: false,
       },
     });
     const view = menu(template, 'View');
@@ -145,7 +152,7 @@ describe('menuTemplate', () => {
   it('enters and leaves zen mode from View, a check item before the panes, with its key taken by the window', () => {
     const { template, sent } = build({
       ...writable,
-      project: { readOnly: true, docked, zen: true },
+      project: { readOnly: true, docked, zen: true, proseFocused: false },
     });
     const view = menu(template, 'View');
     const zen = item(view, 'Zen Mode');
@@ -311,11 +318,51 @@ describe('menuTemplate', () => {
   it('can insert nothing without a Project, or in a read-only one', () => {
     for (const state of [
       noProject,
-      { ...writable, project: { readOnly: true, docked, zen: false } },
+      { ...writable, project: { ...writable.project!, readOnly: true } },
     ]) {
       const insert = menu(build(state).template, 'Insert');
       expect(
         insert.every(
+          (entry) => entry.type === 'separator' || entry.enabled === false,
+        ),
+      ).toBe(true);
+    }
+  });
+
+  it('formats the Prose from Format, with keys the editor takes', () => {
+    const { template, sent } = build(inProse);
+    const format = menu(template, 'Format');
+    expect(labels(format)).toEqual(['Bold', 'Italic', 'Block Quote']);
+    expect(format.map((entry) => entry.type ?? entry.accelerator)).toEqual([
+      'CmdOrCtrl+B',
+      'CmdOrCtrl+I',
+      'separator',
+      'CmdOrCtrl+Shift+B',
+    ]);
+    for (const entry of format) {
+      if (entry.type === 'separator') continue;
+      expect(entry.registerAccelerator).toBe(false);
+      expect(entry.enabled).toBe(true);
+    }
+    click(item(format, 'Bold'));
+    click(item(format, 'Italic'));
+    click(item(format, 'Block Quote'));
+    expect(sent).toEqual([
+      { type: 'format', format: 'bold' },
+      { type: 'format', format: 'italic' },
+      { type: 'format', format: 'blockQuote' },
+    ]);
+  });
+
+  it('formats nothing unless the Prose of a writable Project has focus', () => {
+    for (const state of [
+      noProject,
+      writable,
+      { ...inProse, project: { ...inProse.project!, readOnly: true } },
+    ]) {
+      const format = menu(build(state).template, 'Format');
+      expect(
+        format.every(
           (entry) => entry.type === 'separator' || entry.enabled === false,
         ),
       ).toBe(true);
@@ -360,7 +407,7 @@ describe('menuTemplate', () => {
   it('keeps Project Settings open to a read-only Project, to see its values', () => {
     const { template } = build({
       ...writable,
-      project: { readOnly: true, docked, zen: false },
+      project: { readOnly: true, docked, zen: false, proseFocused: false },
     });
     expect(item(menu(template, 'Tools'), 'Project Settings…').enabled).toBe(
       true,

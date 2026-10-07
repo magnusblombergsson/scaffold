@@ -25,7 +25,7 @@ function shape(chapters: ImportedChapter[]) {
     title,
     scenes.map(({ title, paragraphs }) => [
       title,
-      paragraphs.map((spans) => spans.map((s) => s.text).join('')),
+      paragraphs.map(({ spans }) => spans.map((s) => s.text).join('')),
     ]),
   ]);
 }

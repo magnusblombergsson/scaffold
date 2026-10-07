@@ -1,4 +1,4 @@
-import type { Span } from './prose-markdown';
+import type { Paragraph, Span } from './prose-markdown';
 
 // An Import: a Word or Markdown manuscript read as a run of blocks, then split
 // into Chapters and Scenes by a convention the Author can change after seeing
@@ -8,7 +8,7 @@ import type { Span } from './prose-markdown';
 /** One block of an imported file, its text as spans of Prose. */
 export type ImportBlock =
   | { kind: 'heading'; level: number; spans: Span[] }
-  | { kind: 'paragraph'; spans: Span[] }
+  | ({ kind: 'paragraph' } & Paragraph)
   /** A scene break, such as `***`, `* * *` or `#`. */
   | { kind: 'separator' }
   | { kind: 'pageBreak' };
@@ -33,7 +33,7 @@ export const SCENE_SPLIT_LABELS: Record<SceneSplit, string> = {
   none: 'Nowhere: one Scene per Chapter',
 };
 
-export type ImportedScene = { title: string; paragraphs: Span[][] };
+export type ImportedScene = { title: string; paragraphs: Paragraph[] };
 export type ImportedChapter = { title: string; scenes: ImportedScene[] };
 
 /** The break a separator stands for, kept as Prose when Scenes aren't split on it. */
@@ -77,10 +77,10 @@ export function splitManuscript(
   convention: ImportConvention,
 ): ImportedChapter[] {
   type Part<T> = { title?: string } & T;
-  const chapters: Part<{ scenes: Part<{ paragraphs: Span[][] }>[] }>[] = [];
+  const chapters: Part<{ scenes: Part<{ paragraphs: Paragraph[] }>[] }>[] = [];
   // Null until something goes in, so that breaks in a row make one.
   let chapter: (typeof chapters)[number] | null = null;
-  let scene: Part<{ paragraphs: Span[][] }> | null = null;
+  let scene: Part<{ paragraphs: Paragraph[] }> | null = null;
 
   // An empty heading titles nothing.
   const startChapter = (title?: string) => {
@@ -93,9 +93,9 @@ export function splitManuscript(
     scene = { title: title || undefined, paragraphs: [] };
     chapter!.scenes.push(scene);
   };
-  const add = (spans: Span[]) => {
+  const add = (paragraph: Paragraph) => {
     if (!scene) startScene();
-    scene!.paragraphs.push(spans);
+    scene!.paragraphs.push(paragraph);
   };
 
   for (const block of blocks) {
@@ -107,16 +107,18 @@ export function splitManuscript(
         } else if (block.level === HEADING_LEVEL[convention.scenes]) {
           startScene(title);
         } else {
-          add(block.spans);
+          add({ spans: block.spans });
         }
         break;
       }
-      case 'paragraph':
-        add(block.spans);
+      case 'paragraph': {
+        const { kind: _, ...paragraph } = block;
+        add(paragraph);
         break;
+      }
       case 'separator':
         if (convention.scenes === 'separator') scene = null;
-        else add([{ text: SCENE_BREAK, marks: [] }]);
+        else add({ spans: [{ text: SCENE_BREAK, marks: [] }] });
         break;
       case 'pageBreak':
         if (convention.chapters === 'pageBreak') {
@@ -153,9 +155,9 @@ export function plainText(spans: Span[]): string {
 }
 
 /** How many words a Scene's Prose has, for the preview. */
-export function wordCount(paragraphs: Span[][]): number {
+export function wordCount(paragraphs: Paragraph[]): number {
   return paragraphs.reduce(
-    (sum, spans) => sum + (plainText(spans).match(/\S+/g)?.length ?? 0),
+    (sum, { spans }) => sum + (plainText(spans).match(/\S+/g)?.length ?? 0),
     0,
   );
 }

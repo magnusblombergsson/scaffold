@@ -5,7 +5,12 @@ import type {
 } from 'electron';
 import { MODE_LABELS } from '../shared/conversation';
 import { ENTRY_TYPE_LABELS, ENTRY_TYPES } from '../shared/project-types';
-import { SHORTCUTS, type Command, type DockedPanes } from '../shared/shortcuts';
+import {
+  SHORTCUTS,
+  type Command,
+  type DockedPanes,
+  type ProseFormat,
+} from '../shared/shortcuts';
 import {
   THEME_LABELS,
   THEMES,
@@ -20,10 +25,15 @@ export type MenuState = {
   /** A development build, which has Electron's Reload and Developer Tools. */
   dev: boolean;
   /**
-   * The Project the window in front shows, if any, its Writing panes, and
-   * whether it is in zen mode.
+   * The Project the window in front shows, if any, its Writing panes,
+   * whether it is in zen mode, and whether its Prose has focus.
    */
-  project: { readOnly: boolean; docked: DockedPanes; zen: boolean } | null;
+  project: {
+    readOnly: boolean;
+    docked: DockedPanes;
+    zen: boolean;
+    proseFocused: boolean;
+  } | null;
   /** Latest first. */
   recent: { path: string; displayName: string }[];
   view: ViewSettings;
@@ -40,7 +50,7 @@ export type MenuActions = {
 /**
  * The menu bar. The window takes the shortcuts of Mode, zen, the panes and
  * Insert, and Ctrl+/, itself, so that they work inside an editor and only
- * where they apply; the menus only show them.
+ * where they apply, and the Prose takes Format's; the menus only show them.
  */
 export function menuTemplate(
   { mac, dev, project, recent, view }: MenuState,
@@ -80,6 +90,17 @@ export function menuTemplate(
       checked: view[key] === value,
       click: () => actions.setViewSettings({ [key]: value }),
     }));
+  const formatting = writable && project.proseFocused;
+  /** A Format item, enabled while the Prose has focus. */
+  const formatItem = (
+    label: string,
+    format: ProseFormat,
+  ): MenuItemConstructorOptions => ({
+    label,
+    enabled: formatting,
+    ...windowKey(SHORTCUTS[format]),
+    ...sending({ type: 'format', format }),
+  });
   const projectSettings: MenuItemConstructorOptions = {
     label: 'Project Settings…',
     accelerator: SHORTCUTS.projectSettings,
@@ -256,6 +277,15 @@ export function menuTemplate(
           ...windowKey(SHORTCUTS.newTodo),
           ...sending({ type: 'newTodo' }),
         },
+      ],
+    },
+    {
+      label: 'Format',
+      submenu: [
+        formatItem('Bold', 'bold'),
+        formatItem('Italic', 'italic'),
+        { type: 'separator' },
+        formatItem('Block Quote', 'blockQuote'),
       ],
     },
     // On macOS Settings… is in the app menu.

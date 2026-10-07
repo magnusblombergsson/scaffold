@@ -1,6 +1,12 @@
 import type { JSONContent } from '@tiptap/core';
 import { describe, expect, it } from 'vitest';
-import { docToMarkdown, markdownToDoc } from './prose-markdown';
+import {
+  docToMarkdown,
+  markdownToDoc,
+  readProse,
+  writeProse,
+} from './prose-markdown';
+import * as v2 from './v2-prose-markdown';
 
 type Mark = 'italic' | 'bold';
 type Run = string | [text: string, ...marks: Mark[]];
@@ -17,6 +23,11 @@ const p = (...runs: Run[]): JSONContent =>
           return { type: 'text', text, marks: marks.map((type) => ({ type })) };
         }),
       };
+/** A paragraph of `p`, quoted. */
+const quote = (...runs: Run[]): JSONContent => ({
+  ...p(...runs),
+  attrs: { blockQuote: true },
+});
 const doc = (...paragraphs: JSONContent[]): JSONContent => ({
   type: 'doc',
   content: paragraphs,
@@ -116,5 +127,119 @@ describe('Prose at the restricted-Markdown boundary', () => {
     expect(markdownToDoc('**bold** and *dangling')).toEqual(
       doc(p(['bold', 'bold'], ' and *dangling')),
     );
+  });
+});
+
+describe('block quotes at the boundary (ADR 0007)', () => {
+  it('writes a quoted paragraph with a `> ` marker', () => {
+    expect(
+      docToMarkdown(doc(p('She wrote:'), quote('Come ', ['home', 'italic']))),
+    ).toBe('She wrote:\n\n> Come *home*');
+  });
+
+  it('reads a paragraph that starts with `> ` as quoted', () => {
+    expect(markdownToDoc('She wrote:\n\n> Come *home*')).toEqual(
+      doc(p('She wrote:'), quote('Come ', ['home', 'italic'])),
+    );
+  });
+
+  it('gives each of consecutive quoted paragraphs its own marker', () => {
+    expect(docToMarkdown(doc(quote('One.'), quote('Two.'), p('After.')))).toBe(
+      '> One.\n\n> Two.\n\nAfter.',
+    );
+  });
+
+  it('drops an empty quoted paragraph', () => {
+    expect(docToMarkdown(doc(p('One.'), quote(), p('Two.')))).toBe(
+      'One.\n\nTwo.',
+    );
+  });
+
+  it('escapes a literal leading `>` or `{.`, and reads it back', () => {
+    const literal = doc(
+      p('>sigh'),
+      p('> not a quote'),
+      p('{.centre} not centred'),
+      quote('> quoted'),
+    );
+    const markdown = [
+      String.raw`\>sigh`,
+      String.raw`\> not a quote`,
+      String.raw`\{.centre} not centred`,
+      String.raw`> \> quoted`,
+    ].join('\n\n');
+    expect(docToMarkdown(literal)).toBe(markdown);
+    expect(markdownToDoc(markdown)).toEqual(literal);
+  });
+
+  it('escapes a `>` or `{.` after leading whitespace, which reading trims', () => {
+    const markdown = docToMarkdown(doc(p('  > x'), p(' {.right} y')));
+    expect(markdown).toBe(
+      String.raw`  \> x` + '\n\n' + String.raw` \{.right} y`,
+    );
+    expect(markdownToDoc(markdown)).toEqual(doc(p('> x'), p('{.right} y')));
+  });
+
+  it('drops a quoted paragraph of only whitespace', () => {
+    expect(docToMarkdown(doc(p('One.'), quote('  '), p('Two.')))).toBe(
+      'One.\n\nTwo.',
+    );
+  });
+
+  it('leaves `>` and `{.` within a paragraph alone', () => {
+    expect(docToMarkdown(doc(p('a > b {.c}')))).toBe('a > b {.c}');
+  });
+
+  it('reads `>` without a space after it as text', () => {
+    expect(markdownToDoc('>sigh')).toEqual(doc(p('>sigh')));
+  });
+
+  it('opens Prose written before v3 that starts with `> ` as a quote', () => {
+    expect(markdownToDoc('> An old line.')).toEqual(doc(quote('An old line.')));
+  });
+
+  it.each([
+    ['a quote', '> Quoted *words*.'],
+    ['consecutive quotes', 'Before.\n\n> One.\n\n> Two.\n\nAfter.'],
+    ['an escaped `>` in a quote', String.raw`> \>> arrows`],
+    [
+      'escaped leading `>` and `{.`',
+      String.raw`\> no` + '\n\n' + String.raw`\{.right} no`,
+    ],
+  ])('round-trips %s', (_, markdown) => {
+    expect(docToMarkdown(markdownToDoc(markdown))).toBe(markdown);
+  });
+
+  it('reads and writes paragraphs with whether each is quoted', () => {
+    const paragraphs = [
+      { spans: [{ text: 'Plain.', marks: [] }] },
+      { spans: [{ text: 'Quoted', marks: ['italic' as const] }], quote: true },
+    ];
+    expect(writeProse(paragraphs)).toBe('Plain.\n\n> *Quoted*');
+    expect(readProse('Plain.\n\n> *Quoted*')).toEqual(paragraphs);
+  });
+
+  describe('in the v2 app, which knows no markers', () => {
+    it.each([
+      ['a quote', '> Quoted *words*.'],
+      ['consecutive quotes', '> One.\n\n> Two.'],
+    ])('shows %s as text and keeps it', (_, markdown) => {
+      expect(v2.docToMarkdown(v2.markdownToDoc(markdown))).toBe(markdown);
+    });
+
+    it('shows the marker as text, and escaped characters as themselves', () => {
+      expect(v2.markdownToDoc('> Come.\n\n' + String.raw`\>sigh`)).toEqual(
+        doc(p('> Come.'), p('>sigh')),
+      );
+    });
+
+    it('writes an escaped leading `>` back unescaped, so this app then reads a quote', () => {
+      // Known and accepted: rare, visible, and one toggle fixes it (ADR 0007).
+      const rewritten = v2.docToMarkdown(
+        v2.markdownToDoc(String.raw`\> not a quote`),
+      );
+      expect(rewritten).toBe('> not a quote');
+      expect(markdownToDoc(rewritten)).toEqual(doc(quote('not a quote')));
+    });
   });
 });
