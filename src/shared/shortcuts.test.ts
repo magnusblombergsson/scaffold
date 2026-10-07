@@ -82,6 +82,23 @@ describe('commandForKey', () => {
     ).toBeNull();
   });
 
+  it('collapses or docks the left pane with Ctrl+Shift+M, and the Assistant with Ctrl+Shift+A', () => {
+    expect(
+      commandForKey(key('M', { ctrlKey: true, shiftKey: true }), false),
+    ).toEqual({ type: 'togglePane', pane: 'left' });
+    expect(
+      commandForKey(key('A', { ctrlKey: true, shiftKey: true }), false),
+    ).toEqual({ type: 'togglePane', pane: 'assistant' });
+    // Ctrl+A selects all.
+    expect(commandForKey(key('a', { ctrlKey: true }), false)).toBeNull();
+    expect(
+      commandForKey(
+        key('M', { ctrlKey: true, shiftKey: true, altKey: true }),
+        false,
+      ),
+    ).toBeNull();
+  });
+
   it('never takes Ctrl+Alt with a letter or digit, which is AltGr on Windows', () => {
     expect(
       commandForKey(key('e', { ctrlKey: true, altKey: true }), false),
@@ -130,6 +147,14 @@ describe('CHEAT_SHEET', () => {
     for (const accelerator of Object.values(SHORTCUTS)) {
       expect(listed).toContain(accelerator);
     }
+  });
+
+  it('lists the pane keys in a View group', () => {
+    const view = CHEAT_SHEET.find((group) => group.title === 'View');
+    expect(view?.shortcuts.flatMap((s) => s.keys)).toEqual([
+      'CmdOrCtrl+Shift+M',
+      'CmdOrCtrl+Shift+A',
+    ]);
   });
 
   it('lists Ctrl+S, which saves at once', () => {

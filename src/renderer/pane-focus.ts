@@ -32,7 +32,13 @@ export function usePaneCycle(
 
     const paneOf = (node: Node | null): Pane | null => {
       const child = [...element.children].find((c) => c.contains(node));
-      if (!child || child.classList.contains('panel-resizer')) return null;
+      if (
+        !child ||
+        child.classList.contains('panel-resizer') ||
+        child.classList.contains('edge-tabs')
+      ) {
+        return null;
+      }
       return child.classList.contains('left-pane')
         ? 'left'
         : child.classList.contains('overview-pane')
@@ -43,7 +49,8 @@ export function usePaneCycle(
     };
     const paneElement = (pane: Pane) =>
       [...element.children].find(
-        (c) => !c.classList.contains('panel-resizer') && paneOf(c) === pane,
+        // A collapsed pane is passed.
+        (c) => !(c as HTMLElement).hidden && paneOf(c) === pane,
       ) as HTMLElement | undefined;
 
     const onFocusIn = (event: FocusEvent) => {

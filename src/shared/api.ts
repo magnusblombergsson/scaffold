@@ -15,7 +15,7 @@ import type { Status } from './status';
 import type { Todo, TodoChange, TodoLink } from './todo';
 import type { ImportBlock, ImportConvention } from './manuscript-import';
 import type { ListedModel, Model, ProviderId, ProviderStatus } from './models';
-import type { Command } from './shortcuts';
+import type { Command, DockedPanes } from './shortcuts';
 import type { PendingProposal, ProposedValue } from './proposal';
 import type { MeteredTurn } from './usage';
 import { bridge, type MethodTable } from './bridge';
@@ -569,6 +569,11 @@ export interface ShellApi {
    */
   onCommand(listener: (command: Command) => void): () => void;
   /**
+   * Says which of Writing's side panes this window has docked, for the View
+   * menu's check items. Kept in memory only.
+   */
+  showDocked(docked: DockedPanes): void;
+  /**
    * What the Author left unticked at this window's last Manuscript Export, on
    * this computer; a unit created since starts ticked.
    */
@@ -812,6 +817,7 @@ export const shellMethods = {
   chooseImport: 'invoke',
   importProject: 'invoke',
   onCommand: 'event',
+  showDocked: 'send',
   exportChoice: 'invoke',
   exportManuscript: 'invoke',
   openRecent: 'invoke',

@@ -1,6 +1,7 @@
 import { useContext, useState } from 'react';
 import { MODE_LABELS, type Mode } from '../shared/conversation';
 import { reviewText, type ReviewCommand } from '../shared/finding';
+import { SHORTCUTS, withShortcut } from '../shared/shortcuts';
 import { anyAdded, NoProviderState, useProviders } from './Providers';
 import {
   Composer,
@@ -15,6 +16,7 @@ import {
 } from './Conversation';
 import { Menu, TitleInput } from './Binder';
 import { ModelPicker } from './ModelPicker';
+import { MAC } from './platform';
 import { ReadOnlyContext } from './read-only';
 
 /**
@@ -23,6 +25,8 @@ import { ReadOnlyContext } from './read-only';
  */
 export function AssistantPanel({
   active,
+  docked,
+  onCollapse,
   width,
   onAddProvider,
   sceneId,
@@ -33,6 +37,9 @@ export function AssistantPanel({
 }: {
   /** Whether the panel is shown, its Mode the window's. */
   active: boolean;
+  /** Whether it is docked, rather than collapsed to its edge tab. */
+  docked: boolean;
+  onCollapse(): void;
   /** In CSS pixels. */
   width: number;
   onAddProvider(): void;
@@ -46,8 +53,27 @@ export function AssistantPanel({
 }) {
   const providers = useProviders();
   return (
-    <aside className="assistant-panel" aria-label="Assistant" style={{ width }}>
-      <h2 className="assistant-heading">Assistant</h2>
+    <aside
+      className="assistant-panel"
+      aria-label="Assistant"
+      hidden={!docked}
+      style={{ width }}
+    >
+      <div className="assistant-bar">
+        <button
+          className="collapse-pane"
+          aria-label="Collapse the Assistant"
+          title={withShortcut(
+            'Collapse the Assistant',
+            SHORTCUTS.assistant,
+            MAC,
+          )}
+          onClick={onCollapse}
+        >
+          »
+        </button>
+        <h2 className="assistant-heading">Assistant</h2>
+      </div>
       {providers &&
         (anyAdded(providers) ? (
           <Conversations

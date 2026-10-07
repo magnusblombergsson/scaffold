@@ -5,13 +5,13 @@ import type {
 } from 'electron';
 import { MODE_LABELS } from '../shared/conversation';
 import { ENTRY_TYPE_LABELS, ENTRY_TYPES } from '../shared/project-types';
-import { SHORTCUTS, type Command } from '../shared/shortcuts';
+import { SHORTCUTS, type Command, type DockedPanes } from '../shared/shortcuts';
 
 /** What the menus show for the window in front. */
 export type MenuState = {
   mac: boolean;
-  /** The Project the window in front shows, if any. */
-  project: { readOnly: boolean } | null;
+  /** The Project the window in front shows, if any, and its Writing panes. */
+  project: { readOnly: boolean; docked: DockedPanes } | null;
   /** Latest first. */
   recent: { path: string; displayName: string }[];
 };
@@ -23,8 +23,8 @@ export type MenuActions = {
 };
 
 /**
- * The menu bar. The window takes the shortcuts of Mode and Insert, and
- * Ctrl+/, itself, so that they work inside an editor and only where they
+ * The menu bar. The window takes the shortcuts of Mode, the panes and Insert,
+ * and Ctrl+/, itself, so that they work inside an editor and only where they
  * apply; the menus only show them.
  */
 export function menuTemplate(
@@ -126,6 +126,23 @@ export function menuTemplate(
           ...windowKey(SHORTCUTS[mode]),
           ...sending({ type: 'mode', mode }),
         })),
+        { type: 'separator' },
+        {
+          label: 'Left Pane',
+          type: 'checkbox',
+          checked: project?.docked.left ?? false,
+          enabled: !!project,
+          ...windowKey(SHORTCUTS.leftPane),
+          ...sending({ type: 'togglePane', pane: 'left' }),
+        },
+        {
+          label: 'Assistant',
+          type: 'checkbox',
+          checked: project?.docked.assistant ?? false,
+          enabled: !!project,
+          ...windowKey(SHORTCUTS.assistant),
+          ...sending({ type: 'togglePane', pane: 'assistant' }),
+        },
         { type: 'separator' },
         // Electron's own View menu.
         { role: 'reload' },
