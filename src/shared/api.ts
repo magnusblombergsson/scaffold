@@ -148,6 +148,13 @@ export type EntriesChanged = {
 export type EntryImageChanged = { type: 'entryImageChanged'; id: string };
 
 /**
+ * A Scene's or Chapter's image was set, replaced or removed here, or came
+ * back from Trash. The file can keep its name, so the Manuscript may not
+ * change.
+ */
+export type UnitImageChanged = { type: 'unitImageChanged'; id: string };
+
+/**
  * A Scene's or Chapter's unit details, such as its Status, changed, here or
  * on another computer: `manuscript` shows them now.
  */
@@ -204,6 +211,7 @@ export type ProjectEvent =
   | ConflictsChanged
   | EntriesChanged
   | EntryImageChanged
+  | UnitImageChanged
   | ProposalsChanged
   | ConversationsChanged
   | ReadOnly
@@ -281,6 +289,15 @@ export interface ProjectApi {
   removeEntryImage(entryId: string): Promise<void>;
   /** An Entry's image as a `data:` URL; null without one, or before it syncs. */
   entryImage(entryId: string): Promise<string | null>;
+  /**
+   * Asks the Author for a JPEG or PNG, then makes it a Scene's or Chapter's
+   * image, as `chooseEntryImage` does an Entry's. There is no undo.
+   */
+  chooseUnitImage(unitId: string): Promise<boolean>;
+  /** Removes a Scene's or Chapter's image; there is no undo. */
+  removeUnitImage(unitId: string): Promise<void>;
+  /** A Scene's or Chapter's image as a `data:` URL; null without one, or before it syncs. */
+  unitImage(unitId: string): Promise<string | null>;
   /** Puts a Trash item back where it was, as near as the Manuscript allows. */
   restore(id: string): Promise<Changed>;
   /** Reverts `step` if it is still the latest structure operation. */
@@ -801,6 +818,9 @@ export const projectMethods = {
   chooseEntryImage: 'invoke',
   removeEntryImage: 'invoke',
   entryImage: 'invoke',
+  chooseUnitImage: 'invoke',
+  removeUnitImage: 'invoke',
+  unitImage: 'invoke',
   restore: 'invoke',
   undo: 'invoke',
   listTrash: 'invoke',

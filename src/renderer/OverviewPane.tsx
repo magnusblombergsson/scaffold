@@ -9,6 +9,7 @@ import {
 } from '../shared/project-types';
 import { OutlineNotes } from './OutlineNotes';
 import { StatusAndTagsEditor, UnitStatusDot } from './StatusAndTags';
+import { UnitImageButtons, UnitThumbnail } from './UnitImage';
 import {
   defaultScope,
   expandable,
@@ -28,10 +29,10 @@ type Navigation = {
 /**
  * The column between the Binder and the Prose: a row per unit of the Chapter
  * being written, or of the whole Project, each its Status dot, title and its
- * Outline's first line, opening to edit its Status, Tags, Outline and Notes
- * in place. The Scene being written is marked, and doesn't open: its
- * Outline & Notes are above the Prose, and one unit's field is open in only
- * one place.
+ * Outline's first line, and its image, opening to edit its Status, Tags,
+ * image, Outline and Notes in place. The Scene being written is marked, and
+ * doesn't open: its Outline & Notes are above the Prose, and one unit's
+ * field is open in only one place.
  */
 export function OverviewPane({
   manuscript,
@@ -235,10 +236,12 @@ function Rows({
               </span>
             )
           )}
+          {unit && <UnitThumbnail unit={unit} />}
         </div>
         {isOpen && (
           <div className="overview-row-body">
             {unit && <StatusAndTagsEditor unit={unit} />}
+            {unit && <UnitImageButtons unit={unit} />}
             <OutlineNotes
               unitId={id}
               language={language}

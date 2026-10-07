@@ -36,11 +36,11 @@ The view of the Manuscript's Chapters and Scenes in order, where the Author open
 _Avoid_: Outline (that is the structural description), tree, navigator, sidebar
 
 **Corkboard**:
-The view in Writing mode of the Project Outline or a Chapter as index cards, each with its Outline and Notes editable in place; a Scene's or Chapter's card sets its Status and Tags too. A Chapter's Corkboard shows its Scenes as cards; the Project's shows each Chapter as a lane that opens to its Scenes.
+The view in Writing mode of the Project Outline or a Chapter as index cards, each with its Outline and Notes editable in place; a Scene's or Chapter's card sets its Status, Tags and image too, and shows the image beside its title. A Chapter's Corkboard shows its Scenes as cards; the Project's shows each Chapter as a lane that opens to its Scenes.
 _Avoid_: Board, grid, overview (that is the pane)
 
 **Overview pane**:
-A pane beside the Prose in Writing mode that lists the Chapter or the whole Project one row per unit, so the Author keeps the whole story in view while writing a Scene. A Scene's or Chapter's row shows its Status dot, and opens to edit its Status, Tags, Outline and Notes.
+A pane beside the Prose in Writing mode that lists the Chapter or the whole Project one row per unit, so the Author keeps the whole story in view while writing a Scene. A Scene's or Chapter's row shows its Status dot and image, and opens to edit its Status, Tags, image, Outline and Notes.
 _Avoid_: Outline skeleton (that is Brainstorm's read-only view), navigator, sidebar
 
 **Unplaced Scene**:

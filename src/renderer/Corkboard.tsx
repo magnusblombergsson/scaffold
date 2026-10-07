@@ -13,11 +13,13 @@ import { ReadOnlyContext } from './read-only';
 import type { Reveal } from './reveal';
 import { UNPLACED } from './overview';
 import { StatusAndTagsEditor } from './StatusAndTags';
+import { UnitImageButtons, unitImageItems, UnitThumbnail } from './UnitImage';
 
 /**
  * A Chapter as index cards: its own Outline and Notes in a wide card, then
  * its Scenes as numbered cards, each editable in place, Status and Tags
- * too. `reveal` goes to the Chapter's Outline.
+ * too. Its image is beside its title, and set from its card. `reveal` goes
+ * to the Chapter's Outline.
  */
 export function ChapterCorkboard({
   chapter,
@@ -35,7 +37,10 @@ export function ChapterCorkboard({
 }) {
   return (
     <div className="corkboard">
-      <h2 className="centre-title">{chapter.title}</h2>
+      <div className="corkboard-title">
+        <h2 className="centre-title">{chapter.title}</h2>
+        <UnitThumbnail unit={chapter} />
+      </div>
       <article className="card wide own" aria-label={chapter.title}>
         <OutlineNotes
           unitId={chapter.id}
@@ -44,6 +49,7 @@ export function ChapterCorkboard({
           reveal={reveal}
         />
         <StatusAndTagsEditor unit={chapter} />
+        <UnitImageButtons unit={chapter} />
       </article>
       <div className="scene-cards">
         <SceneCards
@@ -132,7 +138,7 @@ export function ProjectCorkboard({
         >
           <article className="card own" aria-label={chapter.title}>
             <CardTitle
-              title={chapter.title}
+              unit={chapter}
               number={i + 1}
               onOpen={() => onOpenChapter(chapter.id)}
               onAddTodo={() => onAddTodo({ kind: 'chapter', id: chapter.id })}
@@ -254,7 +260,7 @@ function SceneCard({
   return (
     <article className="card" aria-label={scene.title}>
       <CardTitle
-        title={scene.title}
+        unit={scene}
         number={number}
         onOpen={onOpen}
         onAddTodo={onAddTodo}
@@ -272,22 +278,23 @@ function SceneCard({
 }
 
 /**
- * A card's number, title and ⋯ menu, which a right-click on it opens too;
- * the title opens the unit.
+ * A card's number, title, image and ⋯ menu, which a right-click on it opens
+ * too; the title opens the unit.
  */
 function CardTitle({
-  title,
+  unit,
   number,
   onOpen,
   onAddTodo,
 }: {
-  title: string;
+  unit: ManuscriptChapter | ManuscriptScene;
   number: number;
   onOpen(): void;
   onAddTodo(): void;
 }) {
   const readOnly = useContext(ReadOnlyContext);
   const [menuOpen, setMenuOpen] = useState(false);
+  const { title } = unit;
   return (
     <header
       onContextMenu={(event) => {
@@ -303,11 +310,15 @@ function CardTitle({
       >
         {title}
       </button>
+      <UnitThumbnail unit={unit} />
       <Menu
         label={`Card actions: ${title}`}
         open={menuOpen}
         onOpenChange={setMenuOpen}
-        items={[addTodoItem(readOnly, onAddTodo)]}
+        items={[
+          ...unitImageItems(unit, readOnly),
+          addTodoItem(readOnly, onAddTodo),
+        ]}
       />
     </header>
   );

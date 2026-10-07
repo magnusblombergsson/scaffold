@@ -6,6 +6,42 @@ import {
   type SyntheticEvent,
 } from 'react';
 import { createPortal } from 'react-dom';
+import type { ProjectEvent } from '../shared/api';
+
+/**
+ * The image file `image` names, as a `data:` URL from `load`, or null
+ * without one; it is loaded again on each event `changed` says is of it,
+ * as the file can be replaced under the same name.
+ */
+export function useImageUrl(
+  image: string | undefined,
+  load: () => Promise<string | null>,
+  changed: (event: ProjectEvent) => boolean,
+): string | null {
+  const [url, setUrl] = useState<string | null>(null);
+  const latest = useRef({ load, changed });
+  useEffect(() => {
+    latest.current = { load, changed };
+  });
+  useEffect(() => {
+    setUrl(null);
+    if (!image) return;
+    let current = true;
+    const reload = () =>
+      void latest.current.load().then((loaded) => {
+        if (current) setUrl(loaded);
+      });
+    reload();
+    const unsubscribe = window.project.subscribe((event) => {
+      if (latest.current.changed(event)) reload();
+    });
+    return () => {
+      current = false;
+      unsubscribe();
+    };
+  }, [image]);
+  return image ? url : null;
+}
 
 /**
  * An image that opens the large view when clicked, captioned with `caption`.

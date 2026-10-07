@@ -458,6 +458,24 @@ button.recent-open:hover {
   padding: 1rem 0 0.75rem;
 }
 
+/* A Chapter's Corkboard: its title, and its image beside it. */
+.corkboard-title {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 1rem 0 0.75rem;
+
+  > .centre-title {
+    padding: 0;
+  }
+
+  > .unit-thumbnail {
+    width: 3rem;
+    height: 3rem;
+    border-radius: 4px;
+  }
+}
+
 .card {
   display: flex;
   flex-direction: column;
@@ -2942,6 +2960,42 @@ header.entry-header {
 
 .unit-status[data-empty] {
   color: var(--muted);
+}
+
+/* A Scene's or Chapter's image: small, beside its title. */
+.unit-thumbnail {
+  width: 1.25rem;
+  height: 1.25rem;
+  object-fit: cover;
+  border-radius: 3px;
+  flex-shrink: 0;
+}
+
+.card header > .unit-thumbnail {
+  align-self: center;
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 4px;
+}
+
+.overview-row-head > .unit-thumbnail {
+  align-self: center;
+}
+
+/* Add or Replace, and Remove, a Scene's or Chapter's image. */
+.unit-image-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+
+  button {
+    font-size: 0.75rem;
+    padding: 0.1rem 0.5rem;
+  }
+}
+
+.overview-row-body > .unit-image-actions {
+  margin-bottom: 0.5rem;
 }
 
 /* A card's Status and Tags sit at its foot. */

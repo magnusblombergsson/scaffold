@@ -185,10 +185,10 @@ export type EntrySummary = {
   tags?: string[];
 };
 
-/** The extensions an Entry image is stored with. */
+/** The extensions an Entry's, Scene's or Chapter's image is stored with. */
 export type ImageExtension = 'jpg' | 'png';
 
-/** An Entry image's bytes, as stored in `images/`. */
+/** An Entry's, Scene's or Chapter's image's bytes, as stored in `images/`. */
 export type EntryImage = { data: Uint8Array; extension: ImageExtension };
 
 export type SceneNode = { id: string; title: string };
@@ -206,7 +206,7 @@ export type Manuscript = {
 /**
  * `status`: the id of its Status, as its Outline file holds it, which may
  * not be in the Project's Status list. `tags`: its Tags, by spelling; none
- * when it has none.
+ * when it has none. `image`: its image's file in `images/`, if it has one.
  */
 export type ManuscriptChapter = {
   id: string;
@@ -214,12 +214,14 @@ export type ManuscriptChapter = {
   scenes: ManuscriptScene[];
   status?: string;
   tags?: string[];
+  image?: string;
 };
 /** `missing`: in the tree, but its file isn't there (possibly not synced yet). */
 export type ManuscriptScene = SceneNode & {
   missing?: true;
   status?: string;
   tags?: string[];
+  image?: string;
 };
 
 /**
