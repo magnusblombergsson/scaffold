@@ -45,6 +45,7 @@ import { ConflictList, ConflictResolver } from './Conflicts';
 import { ChapterCorkboard, ProjectCorkboard } from './Corkboard';
 import { EntryTypePicker } from './EntryTypePicker';
 import { EntryView, VISIBILITY_LABELS } from './EntryView';
+import { ExportManuscriptDialog } from './ExportManuscriptDialog';
 import { ImportDialog } from './ImportDialog';
 import { chapterInsertion, sceneInsertion, type Current } from './insertion';
 import { InterviewRoom } from './InterviewRoom';
@@ -572,6 +573,7 @@ function ProjectView({
   /** The language the Prose is spellchecked and typeset in; the Author may change it. */
   const [language, setLanguage] = useState(project.language);
   const [projectSettingsOpen, setProjectSettingsOpen] = useState(false);
+  const [exportOpen, setExportOpen] = useState(false);
 
   /** The latest unit another computer changed; `count` starts its toast's time over. */
   const [reloaded, setReloaded] = useState<{ ref: UnitRef; count: number }>();
@@ -712,6 +714,10 @@ function ProjectView({
     }
     if (command.type === 'projectSettings') {
       setProjectSettingsOpen(true);
+      return true;
+    }
+    if (command.type === 'exportManuscript') {
+      setExportOpen(true);
       return true;
     }
     if (
@@ -1265,6 +1271,12 @@ function ProjectView({
               )
             }
             onOpen={showEntry}
+          />
+        )}
+        {exportOpen && (
+          <ExportManuscriptDialog
+            manuscript={manuscript}
+            onClose={() => setExportOpen(false)}
           />
         )}
         {projectSettingsOpen && (

@@ -13,7 +13,6 @@ function build(state: MenuState) {
   const sent: Command[] = [];
   const template = menuTemplate(state, {
     send: (command) => sent.push(command),
-    export: () => {},
   });
   return { template, sent };
 }
@@ -66,16 +65,18 @@ describe('menuTemplate', () => {
       'Open Project…',
       'Open Recent',
       'Import…',
-      'Export…',
+      'Export Manuscript…',
       undefined,
     ]);
     expect(item(file, 'New Project…').accelerator).toBe('CmdOrCtrl+Shift+N');
     expect(item(file, 'Open Project…').accelerator).toBe('CmdOrCtrl+O');
     click(item(file, 'New Project…'));
     click(item(menu(file, 'Open Recent'), 'The Ferry'));
+    click(item(file, 'Export Manuscript…'));
     expect(sent).toEqual([
       { type: 'newProject' },
       { type: 'openRecent', path: 'D:/Stories/Ferry' },
+      { type: 'exportManuscript' },
     ]);
   });
 

@@ -11,6 +11,8 @@ export type Command = (
   | { type: 'openProject' }
   | { type: 'openRecent'; path: string }
   | { type: 'import' }
+  /** File › Export Manuscript…, which asks which Scenes and Chapters. */
+  | { type: 'exportManuscript' }
   | { type: 'settings' }
   | { type: 'projectSettings' }
   /** The Keyboard Shortcuts cheat sheet. */

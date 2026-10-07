@@ -10,6 +10,7 @@ import {
   splitManuscript,
   type ImportBlock,
 } from '../../shared/manuscript-import';
+import { TICK_ALL } from '../../shared/export-choice';
 import { zip } from '../export/docx';
 import {
   exportManuscript,
@@ -267,6 +268,7 @@ describe('Importing an Export', () => {
           }),
         },
         format,
+        TICK_ALL,
       );
       const read = await readImport(file, format);
       const chapters = newChapters(
@@ -313,6 +315,7 @@ describe('Importing an Export', () => {
         read: async (ref) => ({ id: ref.id, markdown: prose.get(ref.id)! }),
       },
       format,
+      TICK_ALL,
     );
     const read = await readImport(file, format);
     return newChapters(splitManuscript(read, defaultConvention(read))).map(

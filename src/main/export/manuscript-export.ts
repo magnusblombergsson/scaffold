@@ -1,5 +1,9 @@
 import path from 'node:path';
 import type { Conflict } from '../../shared/api';
+import {
+  pickedManuscript,
+  type ExportUnticked,
+} from '../../shared/export-choice';
 import type {
   Manuscript,
   ProseLanguage,
@@ -9,9 +13,9 @@ import type {
 import { readProse, type Mark, type Span } from '../../shared/prose-markdown';
 import { docx, type DocxParagraph, type DocxRun } from './docx';
 
-// The Export: the whole Manuscript's Prose, for others to read. Chapter titles
-// are headings and Scenes are separated by a break; nothing else from the
-// Project goes in, not even Scene titles.
+// The Manuscript Export: the Prose of the Scenes the Author ticked, for others
+// to read. Chapter titles are headings and Scenes are separated by a break;
+// nothing else from the Project goes in, not even Scene titles.
 
 export type ExportFormat = 'docx' | 'markdown';
 
@@ -38,22 +42,30 @@ const SCENE_BREAK = '***';
 type ExportedChapter = { title: string; scenes: Span[][][] };
 
 /**
- * The Manuscript's Prose as a file of `format`. Empty, Missing and Unplaced
- * Scenes are left out; a Chapter with no Prose still has its heading.
+ * The Prose of the ticked part of the Manuscript as a file of `format`.
+ * Empty, Missing and Unplaced Scenes are left out; a Chapter that goes in
+ * has its heading even with no Prose.
  */
 export async function exportManuscript(
   source: ExportSource,
   format: ExportFormat,
+  unticked: ExportUnticked,
 ): Promise<Uint8Array> {
-  const chapters = await readChapters(source);
+  const chapters = await readChapters(
+    source,
+    pickedManuscript(source.manuscript(), unticked),
+  );
   return format === 'markdown'
     ? Buffer.from(markdownOf(chapters), 'utf8')
     : docx(docxParagraphs(chapters), source.language);
 }
 
-async function readChapters(source: ExportSource): Promise<ExportedChapter[]> {
+async function readChapters(
+  source: ExportSource,
+  manuscript: Manuscript,
+): Promise<ExportedChapter[]> {
   return Promise.all(
-    source.manuscript().chapters.map(async (chapter) => {
+    manuscript.chapters.map(async (chapter) => {
       const scenes = await Promise.all(
         chapter.scenes
           .filter((scene) => !scene.missing)
@@ -212,15 +224,16 @@ export function insideProjectMessage(displayName: string): {
 
 // --- Conflicts ---
 
-/** The titles of the Scenes in the Manuscript that are in Conflict, in order. */
+/** The titles of the ticked Scenes that are in Conflict, in order. */
 export function conflictedScenes(
   manuscript: Manuscript,
   conflicts: Conflict[],
+  unticked: ExportUnticked,
 ): string[] {
   const ids = new Set(
     conflicts.filter((c) => c.ref.kind === 'scene').map((c) => c.ref.id),
   );
-  return manuscript.chapters.flatMap((chapter) =>
+  return pickedManuscript(manuscript, unticked).chapters.flatMap((chapter) =>
     chapter.scenes.filter((scene) => ids.has(scene.id)).map((s) => s.title),
   );
 }

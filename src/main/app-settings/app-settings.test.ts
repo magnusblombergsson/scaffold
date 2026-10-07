@@ -416,6 +416,30 @@ describe('a bad or newer settings file', () => {
     expect(settings.project('d')).toEqual({});
   });
 
+  it('reads the Export choice kept for a Project, or a bad one as everything ticked', async () => {
+    await writeFile(
+      file,
+      JSON.stringify({
+        version: 1,
+        global: {},
+        projects: {
+          a: { exportUnticked: { chapters: ['c1'], scenes: ['s1', 's2'] } },
+          b: { exportUnticked: { chapters: 'c1', scenes: ['s1'] } },
+          c: { exportUnticked: ['s1'] },
+        },
+        recent: [],
+      }),
+    );
+    const settings = await load();
+
+    expect(settings.project('a').exportUnticked).toEqual({
+      chapters: ['c1'],
+      scenes: ['s1', 's2'],
+    });
+    expect(settings.project('b')).toEqual({});
+    expect(settings.project('c')).toEqual({});
+  });
+
   it('reads a newer version leniently and never overwrites it', async () => {
     const newer = JSON.stringify({
       version: 2,

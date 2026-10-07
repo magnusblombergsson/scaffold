@@ -20,7 +20,6 @@ export type MenuState = {
 export type MenuActions = {
   /** Hands a command to the window, which knows what is current in it. */
   send(command: Command, window: BaseWindow | undefined): void;
-  export(window: BaseWindow | undefined): void;
 };
 
 /**
@@ -106,11 +105,12 @@ export function menuTemplate(
         },
         // The window shows the file's split before anything is written.
         { label: 'Import…', ...sending({ type: 'import' }) },
+        // The window asks which Scenes and Chapters first.
         {
-          id: 'export',
-          label: 'Export…',
+          id: 'exportManuscript',
+          label: 'Export Manuscript…',
           enabled: !!project,
-          click: (_item, window) => actions.export(window),
+          ...sending({ type: 'exportManuscript' }),
         },
         { type: 'separator' },
         mac ? { role: 'close' } : { role: 'quit' },

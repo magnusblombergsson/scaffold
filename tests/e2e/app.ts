@@ -115,13 +115,26 @@ export async function answerQuestions(
     app.evaluate(() => (globalThis as { asked?: string[] }).asked ?? []);
 }
 
-/** Chooses File → Export… in the menu, as the Author would in the first window. */
-export async function chooseExport(app: ElectronApplication) {
+/**
+ * Chooses File → Export Manuscript… in the menu, as the Author would in the
+ * first window, which shows the dialog of what to export.
+ */
+export async function openExportManuscript(app: ElectronApplication) {
   await app.evaluate(({ BrowserWindow, Menu }) => {
-    const item = Menu.getApplicationMenu()?.getMenuItemById('export');
-    if (!item?.enabled) throw new Error('File → Export… is disabled');
+    const item = Menu.getApplicationMenu()?.getMenuItemById('exportManuscript');
+    if (!item?.enabled) {
+      throw new Error('File → Export Manuscript… is disabled');
+    }
     item.click(undefined, BrowserWindow.getAllWindows()[0]);
   });
+}
+
+/** Exports the Manuscript as ticked, from File → Export Manuscript… in `page`. */
+export async function chooseExport(app: ElectronApplication, page: Page) {
+  await openExportManuscript(app);
+  const dialog = page.getByRole('dialog', { name: 'Export Manuscript' });
+  await dialog.getByRole('button', { name: 'Export…' }).click();
+  await expect(dialog).toBeHidden();
 }
 
 /**

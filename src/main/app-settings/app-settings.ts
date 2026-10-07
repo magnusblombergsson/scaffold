@@ -4,6 +4,7 @@ import type { FileSystem } from '../project-store/file-system';
 import type { ProjectLookup } from '../project-store/project-store';
 import { safeWrite, setAside } from '../project-store/safe-write';
 import type { PanelWidths, PinnedNote, Tip } from '../../shared/api';
+import type { ExportUnticked } from '../../shared/export-choice';
 import {
   DEFAULT_MODEL,
   isClaudeModelId,
@@ -47,6 +48,8 @@ export type ProjectSettings = {
   /** The Pinned notes, the one on top last. */
   pinnedNotes?: PinnedNote[];
   dismissedTips?: Tip[];
+  /** What the Author left unticked at the last Manuscript Export. */
+  exportUnticked?: ExportUnticked;
 };
 
 /**
@@ -217,6 +220,14 @@ function parseProjectSettings(raw: JsonObject): ProjectSettings & JsonObject {
     settings.pinnedNotes = pinnedNotes(settings.pinnedNotes);
   } else {
     delete settings.pinnedNotes;
+  }
+  const unticked = settings.exportUnticked;
+  if (
+    !isJsonObject(unticked) ||
+    !isStringArray(unticked.chapters) ||
+    !isStringArray(unticked.scenes)
+  ) {
+    delete settings.exportUnticked;
   }
   return settings;
 }
