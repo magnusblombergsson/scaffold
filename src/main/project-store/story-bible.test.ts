@@ -7,6 +7,7 @@ import type { EntryFields, EntryType } from '../../shared/project-types';
 import { createProject, openProject } from './project-store';
 import { nodeFileSystem } from './file-system';
 import { instantClock } from './clock';
+import { parseUnitFile } from './unit-file';
 
 let dir: string;
 const deps = () => ({ fs: nodeFileSystem, clock: instantClock() });
@@ -692,6 +693,47 @@ describe('Entry images', () => {
     expect(await store.readEntryImage(id)).toBeNull();
     await store.close();
   });
+
+  it.each([
+    ['the copy', (removed: string, older: string) => [removed, older]],
+    ['the original', (removed: string, older: string) => [older, removed]],
+  ])(
+    'stays removed when an older version still naming it is synced in as %s',
+    async (_, arrange) => {
+      const projectPath = path.join(dir, 'My Novel');
+      const at = (now: number) => ({
+        fs: nodeFileSystem,
+        clock: instantClock(now),
+      });
+      const creating = await createProject(projectPath, at(0));
+      const { id } = await creating.createEntry('place', 'Harbour');
+      await creating.close();
+      const file = path.join(projectPath, 'bible', `${id}.md`);
+      const setting = await openProject(projectPath, at(1000));
+      await setting.setEntryImage(id, { data: JPEG, extension: 'jpg' });
+      await setting.close();
+      const older = await readFile(file, 'utf8');
+      const removing = await openProject(projectPath, at(2000));
+      await removing.removeEntryImage(id);
+      await removing.close();
+      const removed = await readFile(file, 'utf8');
+
+      const [original, copy] = arrange(removed, older);
+      await writeFile(file, original);
+      await writeFile(path.join(projectPath, 'bible', `${id}-OTHER.md`), copy);
+      const reopened = await openProject(projectPath, at(3000));
+      // The merge is written on opening, and reloaded on the next check.
+      await reopened.checkForChanges();
+
+      expect(reopened.listConflicts()).toEqual([]);
+      expect(reopened.listEntries()[0].image).toBeUndefined();
+      expect(await reopened.readEntryImage(id)).toBeNull();
+      await reopened.close();
+      const { frontmatter } = parseUnitFile(await readFile(file, 'utf8'));
+      expect(frontmatter).not.toHaveProperty('image');
+      expect(frontmatter).toHaveProperty('keysSavedAt.image');
+    },
+  );
 
   it('keeps the image when an editor writes an Entry value read before it was set', async () => {
     const { projectPath, store } = await newProject();

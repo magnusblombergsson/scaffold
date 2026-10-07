@@ -1,6 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { parseUnitFile } from '../../src/main/project-store/unit-file';
 import { answerDialogs, launch, useTempDir } from './app';
 
 const tempDir = useTempDir();
@@ -391,8 +392,10 @@ test('the Author adds an image to an Entry, scaled and shown in the list and the
   const [entryFile] = await readdir(path.join(projectPath, 'bible'));
   const id = path.basename(entryFile, '.md');
   const images = path.join(projectPath, 'images');
-  const frontmatter = () =>
-    readFile(path.join(projectPath, 'bible', entryFile), 'utf8');
+  const frontmatter = async () =>
+    parseUnitFile(
+      await readFile(path.join(projectPath, 'bible', entryFile), 'utf8'),
+    ).frontmatter;
 
   await answerOpen(await imageFile('photo.png', 2000, 1000, 255));
   await page.getByRole('button', { name: 'Add image…' }).click();
@@ -403,12 +406,12 @@ test('the Author adds an image to an Entry, scaled and shown in the list and the
   ).toBe(1024);
   await expect(storyBible(page).locator('img.entry-thumbnail')).toBeVisible();
   expect(await readdir(images)).toEqual([`${id}.jpg`]);
-  expect(await frontmatter()).toContain(`image: ${id}.jpg\n`);
+  expect(await frontmatter()).toMatchObject({ image: `${id}.jpg` });
 
   await answerOpen(await imageFile('logo.png', 300, 200, 0));
   await page.getByRole('button', { name: 'Replace image…' }).click();
   await expect.poll(() => readdir(images)).toEqual([`${id}.png`]);
-  expect(await frontmatter()).toContain(`image: ${id}.png\n`);
+  expect(await frontmatter()).toMatchObject({ image: `${id}.png` });
   await expect
     .poll(() => shown.evaluate((img: HTMLImageElement) => img.naturalWidth))
     .toBe(300);
@@ -417,6 +420,9 @@ test('the Author adds an image to an Entry, scaled and shown in the list and the
   await expect(shown).toHaveCount(0);
   await expect(storyBible(page).locator('img.entry-thumbnail')).toHaveCount(0);
   expect(await readdir(images)).toEqual([]);
-  expect(await frontmatter()).not.toContain('image:');
+  // Removed, but its save time stays, so an older copy can't bring it back.
+  const header = await frontmatter();
+  expect(header).not.toHaveProperty('image');
+  expect(header).toHaveProperty('keysSavedAt.image');
   await app.close();
 });
