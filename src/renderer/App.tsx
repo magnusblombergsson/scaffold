@@ -94,6 +94,7 @@ import { StatusBar, useSceneCounts } from './StatusBar';
 import { StoryBible } from './StoryBible';
 import { ProjectContexts } from './StatusAndTags';
 import { TagsDialog } from './TagsDialog';
+import { WordTargetDialog } from './WordTarget';
 import { TodoList, type TodoDraft } from './TodoList';
 import { trashTitle, TrashView } from './TrashView';
 import { Toast } from './Toast';
@@ -782,6 +783,15 @@ function ProjectView({
   /** It, as the Manuscript has it now; gone if it is no longer there. */
   const taggingUnit =
     tagging === null ? undefined : unitOf(tagging, manuscript);
+  /** The Chapter or Scene whose Set word target… is open, by id. */
+  const [settingWordTarget, setSettingWordTarget] = useState<string | null>(
+    null,
+  );
+  /** It, as the Manuscript has it now; gone if it is no longer there. */
+  const wordTargetUnit =
+    settingWordTarget === null
+      ? undefined
+      : unitOf(settingWordTarget, manuscript);
 
   /** The latest unit another computer changed; `count` starts its toast's time over. */
   const [reloaded, setReloaded] = useState<{ ref: UnitRef; count: number }>();
@@ -846,6 +856,19 @@ function ProjectView({
       onError(null);
     } catch (error) {
       onError(`Can't set the Status: ${(error as CallFailure).message}`);
+    }
+  }
+
+  /**
+   * Gives a Chapter, Scene or the Manuscript a Word target, or none; the
+   * Manuscript showing it follows from main.
+   */
+  async function setWordTarget(unitId: string, words: number | null) {
+    try {
+      await window.project.setWordTarget(unitId, words);
+      onError(null);
+    } catch (error) {
+      onError(`Can't set the Word target: ${(error as CallFailure).message}`);
     }
   }
 
@@ -1413,6 +1436,7 @@ function ProjectView({
                         void setStatus(unitId, statusId)
                       }
                       onEditTags={setTagging}
+                      onSetWordTarget={setSettingWordTarget}
                       onAddTodo={(link) => startTodo(link)}
                     />
                   ) : tab === 'bible' ? (
@@ -1698,9 +1722,12 @@ function ProjectView({
                   ? { kind: 'scene', id: open.scene.id }
                   : openChapter
                     ? { kind: 'chapter', id: openChapter.id }
-                    : null,
+                    : selected?.kind === 'project'
+                      ? { kind: 'project' }
+                      : null,
             selection: mode === 'writing' ? selectionCounts : null,
           })}
+          onSetWordTarget={(unitId, words) => void setWordTarget(unitId, words)}
         />
         {pickingEntryType && (
           <EntryTypePicker
@@ -1755,6 +1782,16 @@ function ProjectView({
             tags={taggingUnit.node.tags ?? NO_TAGS}
             onChange={(tags) => setTags(taggingUnit.node.id, tags)}
             onClose={() => setTagging(null)}
+          />
+        )}
+        {wordTargetUnit && (
+          <WordTargetDialog
+            unitName={`${wordTargetUnit.kind === 'chapter' ? 'Chapter' : 'Scene'} “${wordTargetUnit.node.title}”`}
+            wordTarget={wordTargetUnit.node.wordTarget}
+            onSave={(words) =>
+              void setWordTarget(wordTargetUnit.node.id, words)
+            }
+            onClose={() => setSettingWordTarget(null)}
           />
         )}
         {exportOpen && (

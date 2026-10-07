@@ -92,6 +92,7 @@ import {
   tagVocabulary,
   type TagUse,
 } from '../../shared/tags';
+import { isWordTarget } from '../../shared/word-target';
 import type {
   Compaction,
   Conversation,
@@ -1852,6 +1853,27 @@ export class ProjectStore {
   }
 
   /**
+   * Gives a Scene, a Chapter or, with `PROJECT_OUTLINE`, the Manuscript a
+   * Word target of `words`, or none with null: it goes in the unit's Outline
+   * file's header, a unit detail (ADR 0008). There is no undo.
+   */
+  setWordTarget(unitId: string, words: number | null): Promise<void> {
+    return this.enqueueWrite(async () => {
+      if (words !== null && !isWordTarget(words)) {
+        throw new Error(`A Word target is a whole number of words: ${words}`);
+      }
+      const ref = outlineRef(unitId);
+      this.refuseUnavailable(ref);
+      // Already so: nothing to save, nor to sync.
+      if (this.unitDetails.get(unitId)?.wordTarget === (words ?? undefined)) {
+        return;
+      }
+      await this.saveDetail(ref, WORD_TARGET, words ?? undefined);
+      this.emit({ type: 'unitDetailsChanged', manuscript: this.manuscript() });
+    });
+  }
+
+  /**
    * The Tags in use on Chapters, Scenes and Entries, those in Trash too,
    * each once in its first spelling, sorted: the Project's vocabulary.
    */
@@ -2183,7 +2205,7 @@ export class ProjectStore {
    */
   private async saveDetail(
     ref: OutlineRef,
-    key: typeof STATUS | typeof TAGS | typeof IMAGE,
+    key: typeof STATUS | typeof TAGS | typeof IMAGE | typeof WORD_TARGET,
     value: unknown,
   ): Promise<void> {
     const held = unitKey(ref);
@@ -2221,16 +2243,18 @@ export class ProjectStore {
   }
 
   /**
-   * Reads the Status and Tags of each Chapter and Scene whose Outline file
-   * changed since it was last read or written here, as on another computer;
-   * resolves with whether any of them did.
+   * Reads the details of each Chapter and Scene, and the Manuscript's, whose
+   * Outline file changed since it was last read or written here, as on
+   * another computer; resolves with whether any of them did.
    */
   async readUnitDetails(): Promise<boolean> {
     const dir = path.join(this.path, UNIT_DIRS.outline);
     const seen = new Set<string>();
     let changed = false;
     for (const name of await this.deps.fs.readdir(dir)) {
-      const id = ID_FILE.exec(name)?.[1];
+      const id =
+        ID_FILE.exec(name)?.[1] ??
+        (name === `${PROJECT_OUTLINE}.md` ? PROJECT_OUTLINE : undefined);
       if (!id) continue;
       seen.add(id);
       const file = path.join(dir, name);
@@ -2245,7 +2269,7 @@ export class ProjectStore {
         if (this.noteDetails(id, fingerprint, frontmatter)) changed = true;
       } catch (error) {
         // Gone, or still arriving: the next check reads it again.
-        console.error(`Can't read the Status and Tags in ${file}:`, error);
+        console.error(`Can't read the unit details in ${file}:`, error);
       }
     }
     for (const id of this.outlineFingerprints.keys()) {
@@ -2255,8 +2279,8 @@ export class ProjectStore {
   }
 
   /**
-   * Notes a unit's Status, Tags and image as the header of its Outline file
-   * holds them; true if any changed.
+   * Notes a unit's Status, Tags, image and Word target as the header of its
+   * Outline file holds them; true if any changed.
    */
   private noteDetails(
     id: string,
@@ -2269,10 +2293,12 @@ export class ProjectStore {
     const status = header[STATUS];
     const tags = readTags(header[TAGS]);
     const image = imageFile(id, header[IMAGE]);
+    const wordTarget = header[WORD_TARGET];
     const details: HeldDetails = {
       ...(typeof status === 'string' && { status }),
       ...(tags.length > 0 && { tags }),
       ...(image && { image }),
+      ...(isWordTarget(wordTarget) && { wordTarget }),
     };
     if (Object.keys(details).length > 0) this.unitDetails.set(id, details);
     else this.unitDetails.delete(id);
@@ -2351,10 +2377,11 @@ export class ProjectStore {
   /**
    * The tree, with Scenes whose file isn't in `scenes/` marked Missing, and
    * the Scene files it doesn't place as Unplaced, sorted by id; each
-   * Chapter and Scene with a Status has its id, and with Tags, them.
+   * Chapter and Scene has its details, and the Manuscript its Word target.
    */
   manuscript(): Manuscript {
     const placed = new Set(sceneIds(this.manifest.tree));
+    const wordTarget = this.unitDetails.get(PROJECT_OUTLINE)?.wordTarget;
     const withUnitDetails = <T extends { id: string }>(node: T): T => {
       const details = this.unitDetails.get(node.id);
       return details ? { ...node, ...structuredClone(details) } : node;
@@ -2376,6 +2403,7 @@ export class ProjectStore {
         .filter((id) => !placed.has(id))
         .sort()
         .map((id) => withUnitDetails({ id, title: UNPLACED_TITLE })),
+      ...(wordTarget !== undefined && { wordTarget }),
     };
   }
 
@@ -5015,8 +5043,22 @@ const TAGS = 'tags';
  */
 const IMAGE = 'image';
 
-/** A Chapter's or Scene's details, as its Outline file holds them. */
-type HeldDetails = { status?: string; tags?: string[]; image?: string };
+/**
+ * The header key of a Chapter's, Scene's or, in the Project Outline's file,
+ * the Manuscript's Word target, in words. Only `setWordTarget` changes it.
+ */
+const WORD_TARGET = 'wordTarget';
+
+/**
+ * A Chapter's or Scene's details, or the Manuscript's, as its Outline file
+ * holds them.
+ */
+type HeldDetails = {
+  status?: string;
+  tags?: string[];
+  image?: string;
+  wordTarget?: number;
+};
 
 /**
  * An Outline's metadata is the rest of its frontmatter, so it already holds
@@ -5101,6 +5143,7 @@ function unitValue(ref: UnitRef, file: UnitFile): UnitValue {
     [STATUS]: _status,
     [TAGS]: _tags,
     [IMAGE]: _image,
+    [WORD_TARGET]: _wordTarget,
     ...meta
   } = frontmatter;
   return { id: ref.id, body, meta };

@@ -126,6 +126,18 @@ describe('Split Scene', () => {
     );
   });
 
+  it('leaves the Word target with the original', async () => {
+    const { store, a } = await newProject();
+    await store.setWordTarget(a, 2000);
+
+    const { id } = await store.splitScene(a, CUT, false);
+
+    const [original, added] = store.manuscript().chapters[0].scenes;
+    expect(original).toMatchObject({ id: a, wordTarget: 2000 });
+    expect(added.id).toBe(id);
+    expect(added).not.toHaveProperty('wordTarget');
+  });
+
   it('leaves the Todos linked to the original', async () => {
     const { store, a } = await newProject();
     await store.addTodo('Check the date', { kind: 'scene', id: a });

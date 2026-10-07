@@ -213,11 +213,14 @@ export type ProjectTree = { chapters: ChapterNode[] };
 export type Manuscript = {
   chapters: ManuscriptChapter[];
   unplaced: ManuscriptScene[];
+  /** The Manuscript's Word target, as the Project Outline's file holds it. */
+  wordTarget?: number;
 };
 /**
  * `status`: the id of its Status, as its Outline file holds it, which may
  * not be in the Project's Status list. `tags`: its Tags, by spelling; none
  * when it has none. `image`: its image's file in `images/`, if it has one.
+ * `wordTarget`: its Word target, in words, if it has one.
  */
 export type ManuscriptChapter = {
   id: string;
@@ -226,6 +229,7 @@ export type ManuscriptChapter = {
   status?: string;
   tags?: string[];
   image?: string;
+  wordTarget?: number;
 };
 /** `missing`: in the tree, but its file isn't there (possibly not synced yet). */
 export type ManuscriptScene = SceneNode & {
@@ -233,6 +237,7 @@ export type ManuscriptScene = SceneNode & {
   status?: string;
   tags?: string[];
   image?: string;
+  wordTarget?: number;
 };
 
 /**

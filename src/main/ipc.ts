@@ -92,6 +92,8 @@ const projectHandlers: Handlers<
   setLanguage: ({ store, sender }, language) =>
     setLanguage(sender, store, language),
   setStatus: ({ store }, unitId, statusId) => store.setStatus(unitId, statusId),
+  setWordTarget: ({ store }, unitId, words) =>
+    store.setWordTarget(unitId, words),
   editStatus: ({ store, sender }, edit) =>
     saveProjectSetting(
       sender,

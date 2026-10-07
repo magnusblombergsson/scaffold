@@ -62,6 +62,8 @@ type Props = {
   onSetStatus(unitId: string, statusId: string | null): void;
   /** Opens Tags… on a Chapter or Scene. */
   onEditTags(unitId: string): void;
+  /** Opens Set word target… on a Chapter or Scene. */
+  onSetWordTarget(unitId: string): void;
   /** Starts a Todo linked to a Chapter or Scene. */
   onAddTodo(link: TodoLink): void;
 };
@@ -82,6 +84,7 @@ export function Binder({
   statuses,
   onSetStatus,
   onEditTags,
+  onSetWordTarget,
   onAddTodo,
 }: Props) {
   const project = window.project;
@@ -231,6 +234,14 @@ export function Binder({
     };
   }
 
+  function wordTargetItem(node: { id: string }): MenuItem {
+    return {
+      label: 'Set word target…',
+      disabled: readOnly,
+      run: () => onSetWordTarget(node.id),
+    };
+  }
+
   function sceneMenu(
     scene: ManuscriptScene,
     chapter: ManuscriptChapter | null,
@@ -250,6 +261,7 @@ export function Binder({
       return [
         statusItem(scene),
         tagsItem(scene),
+        wordTargetItem(scene),
         ...unitImageItems(scene, readOnly),
         addTodoItem(readOnly, () => onAddTodo({ kind: 'scene', id: scene.id })),
         ...moves,
@@ -287,6 +299,7 @@ export function Binder({
       ...moves,
       statusItem(scene),
       tagsItem(scene),
+      wordTargetItem(scene),
       ...unitImageItems(scene, readOnly),
       addTodoItem(readOnly, () => onAddTodo({ kind: 'scene', id: scene.id })),
       toTrash,
@@ -333,6 +346,7 @@ export function Binder({
       ...moveItems({ kind: 'chapter', id: chapter.id }),
       statusItem(chapter),
       tagsItem(chapter),
+      wordTargetItem(chapter),
       ...unitImageItems(chapter, readOnly),
       addTodoItem(readOnly, () =>
         onAddTodo({ kind: 'chapter', id: chapter.id }),
