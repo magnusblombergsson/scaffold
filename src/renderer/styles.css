@@ -1098,6 +1098,38 @@ h2.binder-title > button:hover::after {
   background: var(--status-purple);
 }
 
+.status-settings {
+  margin: 0 0 0.5rem;
+  padding: 0;
+  list-style: none;
+}
+
+.status-settings li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.15rem 0;
+}
+
+.status-settings input {
+  flex: 1;
+  min-width: 0;
+}
+
+.status-delete {
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.status-delete p {
+  margin: 0 0 0.5rem;
+}
+
+.status-delete .settings-actions {
+  margin-top: 0.5rem;
+}
+
 .binder-missing {
   color: var(--muted);
   font-style: italic;

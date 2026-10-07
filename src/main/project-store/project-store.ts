@@ -79,6 +79,7 @@ import { capitalized, unitName } from '../../shared/unit-name';
 import {
   DEFAULT_STATUSES,
   readStatusList,
+  STATUS_COLOURS,
   type Status,
 } from '../../shared/status';
 import type {
@@ -1800,6 +1801,107 @@ export class ProjectStore {
     });
   }
 
+  /** Adds `status` to the end of the Status list. */
+  addStatus(status: Status): Promise<void> {
+    return this.editStatuses((statuses) => {
+      if (statuses.some((s) => s.id === status.id)) {
+        throw new Error(`There is a Status ${status.id} already`);
+      }
+      return [...statuses, checkedStatus(status)];
+    });
+  }
+
+  /**
+   * Renames or recolours the Status of `statusId`. Units name a Status by
+   * id, so a rename relabels them all and none of their files change.
+   */
+  changeStatus(
+    statusId: string,
+    change: Partial<Pick<Status, 'name' | 'colour'>>,
+  ): Promise<void> {
+    return this.editStatuses((statuses) => {
+      const index = indexOfStatus(statuses, statusId);
+      const list = [...statuses];
+      list[index] = checkedStatus({ ...list[index], ...change });
+      return list;
+    });
+  }
+
+  /** Moves the Status of `statusId` to `index` in the list. */
+  moveStatus(statusId: string, index: number): Promise<void> {
+    return this.editStatuses((statuses) => {
+      const list = [...statuses];
+      const [status] = list.splice(indexOfStatus(list, statusId), 1);
+      list.splice(index, 0, status);
+      return list;
+    });
+  }
+
+  /**
+   * Changes the Status list as `edit` does, from the list as now saved, so
+   * what another computer changed meanwhile is kept.
+   */
+  private editStatuses(edit: (statuses: Status[]) => Status[]): Promise<void> {
+    return this.enqueueWrite(async () => {
+      const before = this.statuses();
+      const statuses = edit(before);
+      if (isDeepStrictEqual(statuses, before)) return;
+      await this.writeManifest({ ...this.manifest, statuses });
+      this.emit({ type: 'statusesChanged', statuses: this.statuses() });
+    });
+  }
+
+  /** How many Chapters and Scenes have the Status of `statusId`, those in Trash too. */
+  statusUses(statusId: string): number {
+    return this.unitsWithStatus(statusId).length;
+  }
+
+  /** The Chapters and Scenes that have the Status of `statusId`, those in Trash too. */
+  private unitsWithStatus(statusId: string): string[] {
+    return [...this.unitStatuses]
+      .filter(([id, status]) => status === statusId && id !== PROJECT_OUTLINE)
+      .map(([id]) => id);
+  }
+
+  /**
+   * Takes the Status of `statusId` out of the list, first moving the
+   * Chapters and Scenes that have it, those in Trash too, to the Status of
+   * `moveTo`, or to none with null. There is no undo.
+   */
+  deleteStatus(statusId: string, moveTo: string | null): Promise<void> {
+    return this.enqueueWrite(async () => {
+      const statuses = this.statuses();
+      indexOfStatus(statuses, statusId);
+      if (moveTo === statusId) {
+        throw new Error(`Can't move units to the Status being deleted`);
+      }
+      if (moveTo !== null) indexOfStatus(statuses, moveTo);
+      // Units are rewritten before the list: refused at once, not midway.
+      this.refuseIfUpgraded();
+      // Including those another computer gave it, not yet read here.
+      let changed = await this.readStatuses();
+      try {
+        for (const id of this.unitsWithStatus(statusId)) {
+          await this.saveStatus(outlineRef(id), moveTo);
+          changed = true;
+        }
+        await this.writeManifest({
+          ...this.manifest,
+          statuses: statuses.filter((s) => s.id !== statusId),
+        });
+      } finally {
+        // Those moved show, whether or not the rest could be.
+        if (changed) {
+          this.emit({
+            type: 'unitDetailsChanged',
+            manuscript: this.manuscript(),
+          });
+        }
+      }
+      this.emit({ type: 'statusesChanged', statuses: this.statuses() });
+    });
+  }
+
   /**
    * Saves a Status id in an Outline's file, or takes it away with null, as
    * changed now; the rest of the file stays as on disk. The unit's writes
@@ -2723,6 +2825,7 @@ export class ProjectStore {
     this.settle(key);
     const file = unitPath(this.path, ref);
     if (await this.deps.fs.exists(file)) await this.deps.fs.unlink(file);
+    if (ref.kind === 'outline') this.noteStatus(ref.id, null, undefined);
   }
 
   /** Runs a structure operation that the Author can undo while it's latest. */
@@ -4345,6 +4448,25 @@ function sceneFile(value: SceneValue, previous?: UnknownKeys): string {
     frontmatter: frontmatterOf(value.id, previous),
     body: value.markdown,
   });
+}
+
+/** Where the Status of `statusId` is in `statuses`; refused if it isn't. */
+function indexOfStatus(statuses: readonly Status[], statusId: string): number {
+  const index = statuses.findIndex((s) => s.id === statusId);
+  if (index === -1) throw new Error(`No Status ${statusId}`);
+  return index;
+}
+
+/** `status` as the list keeps it: refused without an id, a name or a colour in the palette. */
+function checkedStatus({ id, name, colour }: Status): Status {
+  if (typeof id !== 'string' || id === '') {
+    throw new Error('A Status needs an id');
+  }
+  if (typeof name !== 'string' || name.trim() === '') {
+    throw new Error('A Status needs a name');
+  }
+  if (!STATUS_COLOURS.includes(colour)) throw new Error(`No colour ${colour}`);
+  return { id, name: name.trim(), colour };
 }
 
 /**

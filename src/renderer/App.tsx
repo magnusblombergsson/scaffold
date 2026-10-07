@@ -597,7 +597,7 @@ function ProjectView({
   const [readOnly, setReadOnly] = useState(project.readOnly);
   /** The language the Prose is spellchecked and typeset in; the Author may change it. */
   const [language, setLanguage] = useState(project.language);
-  /** The Project's Status list, which another computer may change. */
+  /** The Project's Status list, which Project Settings or another computer may change. */
   const [statuses, setStatuses] = useState(project.statuses);
   const [projectSettingsOpen, setProjectSettingsOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -1353,6 +1353,7 @@ function ProjectView({
             displayName={project.displayName}
             language={language}
             foldedNoteImage={foldedNoteImage}
+            statuses={statuses}
             readOnly={readOnly !== null}
             onClose={() => setProjectSettingsOpen(false)}
           />

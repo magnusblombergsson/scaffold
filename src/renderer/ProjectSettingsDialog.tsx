@@ -1,5 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { PROSE_LANGUAGES, type ProseLanguage } from '../shared/project-types';
+import type { Status } from '../shared/status';
+import { StatusSettings } from './StatusSettings';
 
 /**
  * Tools ▸ Project Settings…: the Project settings, saved with the Project.
@@ -10,6 +12,7 @@ export function ProjectSettingsDialog({
   displayName,
   language,
   foldedNoteImage,
+  statuses,
   readOnly,
   onClose,
 }: {
@@ -18,6 +21,8 @@ export function ProjectSettingsDialog({
   language: ProseLanguage;
   /** Whether a folded Pinned note shows its Entry's image, as main last said. */
   foldedNoteImage: boolean;
+  /** The Status list as main last said. */
+  statuses: Status[];
   readOnly: boolean;
   onClose(): void;
 }) {
@@ -98,6 +103,7 @@ export function ProjectSettingsDialog({
           Show the image when a Pinned note is folded
         </label>
       </section>
+      <StatusSettings statuses={statuses} readOnly={readOnly} />
       <div className="settings-close">
         <button onClick={() => dialogRef.current?.close()}>Close</button>
       </div>
