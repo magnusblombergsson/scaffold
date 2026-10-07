@@ -699,7 +699,10 @@ function ProjectView({
     }
   }
 
-  /** Gives a Chapter or Scene Tags; the Manuscript showing them follows from main. */
+  /**
+   * Gives a Chapter, Scene or Entry Tags; the Manuscript or Entries showing
+   * them follow from main.
+   */
   async function setTags(unitId: string, tags: string[]) {
     try {
       await window.project.setTags(unitId, tags);
@@ -1261,6 +1264,7 @@ function ProjectView({
                         `Visibility set to ${VISIBILITY_LABELS[visibility]}`,
                       )
                     }
+                    onTags={(tags) => setTags(openEntry.id, tags)}
                     onShowProposal={(conversationId, proposalId) =>
                       setShowProposal({
                         conversationId,

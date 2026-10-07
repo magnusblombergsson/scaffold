@@ -1,9 +1,11 @@
 import { expect, test, type Page } from '@playwright/test';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { answerDialogs, launch, useTempDir } from './app';
+import { addAnthropicKey, answerDialogs, launch, useTempDir } from './app';
+import { useFakeAnthropic } from './fake-anthropic';
 
 const tempDir = useTempDir();
+const anthropic = useFakeAnthropic();
 
 /** Opens Tags… from a Scene's or Chapter's menu in the binder. */
 async function openTags(page: Page, actions: string) {
@@ -88,6 +90,52 @@ test('the Author tags Scenes and Chapters from the binder, reusing Tags in use, 
     reopened.getByRole('menuitem', { name: 'Tags…' }),
   ).toBeDisabled();
   await second.close();
+});
+
+test('the Author tags an Entry in its header, from the Tags of Scenes, and sees them in the list and on its card', async () => {
+  const projectPath = path.join(tempDir(), 'My Novel');
+  const app = await launch(tempDir(), { anthropicUrl: anthropic.url });
+  await answerDialogs(app, projectPath);
+  const page = await app.firstWindow();
+  await page.getByRole('button', { name: 'New Project…' }).click();
+  await expect(page.getByLabel('Prose')).toBeFocused();
+  await openTags(page, 'Scene actions: Scene 1');
+  await page.keyboard.type('Mara,');
+  await page.keyboard.press('Escape');
+
+  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await page.getByRole('button', { name: 'New Entry' }).click();
+  await page.getByRole('menuitem', { name: 'Character', exact: true }).click();
+  // The Name has focus, as for any new Entry; the Tags wait below it.
+  await expect(page.getByLabel('Name', { exact: true })).toBeFocused();
+  const header = page.locator('.entry-header');
+  await header.getByLabel('Add a Tag').click();
+  await page.keyboard.type('mara, the war');
+  await page.keyboard.press('Enter');
+  await expect(
+    header.getByRole('list', { name: 'Tags' }).getByRole('listitem'),
+  ).toHaveText(['Mara×', 'the war×']);
+
+  // Small chips after the name in the list, read-only.
+  const list = page.getByRole('navigation', { name: 'Story Bible' });
+  await expect(list.locator('.tag-chip')).toHaveText(['Mara', 'the war']);
+  await expect(list.getByRole('button', { name: /^Remove/ })).toHaveCount(0);
+  const [entryFile] = await readdir(path.join(projectPath, 'bible'));
+  await expect
+    .poll(() => readFile(path.join(projectPath, 'bible', entryFile), 'utf8'))
+    .toMatch(/tags:\s+- Mara\s+- the war/);
+
+  // And under the name on its card in Brainstorm.
+  await addAnthropicKey(page);
+  await page
+    .getByRole('group', { name: 'Mode' })
+    .getByRole('button', { name: 'Brainstorm' })
+    .click();
+  const card = page
+    .getByRole('complementary', { name: 'Reference' })
+    .locator('.entry-card');
+  await expect(card.locator('.tag-chip')).toHaveText(['Mara', 'the war']);
+  await app.close();
 });
 
 /** The id of the Project's only Scene. */

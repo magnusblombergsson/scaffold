@@ -555,6 +555,8 @@ type TrashedEntry = {
   name: string;
   type: EntryType;
   trashedAt: number;
+  /** Its Tags, still in use while it is in Trash. */
+  tags?: string[];
 };
 
 /** A Conversation in Trash: its whole log, at `trash/<id>.jsonl`. */
@@ -787,10 +789,14 @@ function entrySummary({
   aliases,
   visibility,
   image,
+  tags,
 }: EntryValue): EntrySummary {
-  return withImage<EntrySummary>(
-    { id, type, name, aliases: [...aliases], visibility },
-    image,
+  return withTags(
+    withImage<EntrySummary>(
+      { id, type, name, aliases: [...aliases], visibility },
+      image,
+    ),
+    tags,
   );
 }
 
@@ -798,6 +804,34 @@ function entrySummary({
 function withImage<T extends { image?: string }>(value: T, image?: string): T {
   const rest = withoutImage(value);
   return image ? { ...rest, image } : rest;
+}
+
+/** `value` with `tags` as its Tags; none without any. */
+function withTags<T extends { tags?: string[] }>(
+  value: T,
+  tags?: readonly string[],
+): T {
+  const { tags: _, ...rest } = value;
+  return (tags && tags.length > 0 ? { ...rest, tags: [...tags] } : rest) as T;
+}
+
+/** An Entry's unit details (ADR 0008): its image and its Tags. */
+type EntryDetails = { image?: string; tags?: string[] };
+
+/**
+ * An Entry's `value` with the unit details of `held`, as the store has
+ * them: only setEntryImage, removeEntryImage and setTags change those.
+ */
+function withEntryDetails<T extends EntryDetails>(
+  value: T,
+  held: EntryDetails | undefined,
+): T {
+  return withTags(withImage(value, held?.image), held?.tags);
+}
+
+/** An Entry's `value` without its unit details: its text alone. */
+function withoutEntryDetails<T extends EntryDetails>(value: T): T {
+  return withEntryDetails(value, undefined);
 }
 
 function withoutImage<T extends { image?: string }>(value: T): T {
@@ -812,6 +846,7 @@ function trashedEntry(value: EntryValue, info: TrashedEntryInfo): TrashedEntry {
     name: value.name,
     type: value.type,
     trashedAt: info.at,
+    ...(value.tags && { tags: [...value.tags] }),
   };
 }
 
@@ -1347,11 +1382,12 @@ export class ProjectStore {
     // An Entry's value accepted here and not yet saved is newer.
     for (const { ref, value } of this.unsaved.values()) {
       if (ref.kind === 'entry') {
-        // Its image is as on disk: only setEntryImage changes it here.
-        const image = units.entries.get(ref.id)?.image;
+        // Its image and Tags are as on disk: nothing else changes them here.
         units.entries.set(
           ref.id,
-          entrySummary(withImage(value as EntryValue, image)),
+          entrySummary(
+            withEntryDetails(value as EntryValue, units.entries.get(ref.id)),
+          ),
         );
       }
     }
@@ -1805,8 +1841,8 @@ export class ProjectStore {
   }
 
   /**
-   * The Tags in use on Chapters and Scenes, those in Trash too, each once in
-   * its first spelling, sorted: the Project's vocabulary.
+   * The Tags in use on Chapters, Scenes and Entries, those in Trash too,
+   * each once in its first spelling, sorted: the Project's vocabulary.
    */
   tags(): string[] {
     return tagVocabulary(this.tagLists());
@@ -1815,7 +1851,7 @@ export class ProjectStore {
   /**
    * The Tags of each Chapter and Scene, but `except`, in the tree's order
    * first, then those Unplaced or in Trash; not those of an Outline whose
-   * unit is gone.
+   * unit is gone. Then those of each Entry, those in Trash too.
    */
   private tagLists(except?: string): string[][] {
     const { chapters } = this.manifest.tree;
@@ -1823,21 +1859,35 @@ export class ProjectStore {
       ...chapters.flatMap((c) => [c.id, ...c.scenes.map((s) => s.id)]),
       ...this.unitDetails.keys(),
     ]);
-    return [...ids]
-      .filter((id) => id !== except && this.outlineOrphaned(id) !== 'gone')
-      .filter((id) => id !== PROJECT_OUTLINE)
-      .map((id) => this.unitDetails.get(id)?.tags ?? []);
+    const entries = [
+      ...this.entries.values(),
+      ...[...this.trash.values()].filter((item) => item.kind === 'entry'),
+    ];
+    return [
+      ...[...ids]
+        .filter((id) => id !== except && this.outlineOrphaned(id) !== 'gone')
+        .filter((id) => id !== PROJECT_OUTLINE)
+        .map((id) => this.unitDetails.get(id)?.tags ?? []),
+      ...entries
+        .filter((entry) => entry.id !== except)
+        .map((entry) => entry.tags ?? []),
+    ];
   }
 
   /**
-   * Gives a Scene or Chapter `tags`, by spelling, in its Outline file's
-   * header, a unit detail (ADR 0008). Each is spelt as the Tag in use on
-   * another unit, ignoring case, if there is one. There is no undo.
+   * Gives a Scene, Chapter or Entry `tags`, by spelling, in the header of
+   * its Outline file or Entry file, a unit detail (ADR 0008). Each is spelt
+   * as the Tag in use on another unit, ignoring case, if there is one.
+   * There is no undo.
    */
   setTags(unitId: string, tags: readonly string[]): Promise<void> {
     return this.enqueueWrite(async () => {
       if (unitId === PROJECT_OUTLINE) {
-        throw new Error('Only a Scene or Chapter has Tags');
+        throw new Error('Only a Scene, Chapter or Entry has Tags');
+      }
+      if (this.isEntry(unitId)) {
+        await this.setEntryTags(unitId, tags);
+        return;
       }
       const ref = outlineRef(unitId);
       this.refuseUnavailable(ref);
@@ -1855,6 +1905,33 @@ export class ProjectStore {
       );
       this.emit({ type: 'unitDetailsChanged', manuscript: this.manuscript() });
     });
+  }
+
+  /** Whether `id` is an Entry's, one in Trash too. */
+  private isEntry(id: string): boolean {
+    return this.entries.has(id) || this.trash.get(id)?.kind === 'entry';
+  }
+
+  /**
+   * `setTags` of an Entry, whose list shows them as it changes; refused for
+   * one in Trash, as for a Scene.
+   */
+  private async setEntryTags(
+    entryId: string,
+    tags: readonly string[],
+  ): Promise<void> {
+    this.refuseUnavailable(entryRef(entryId));
+    const spelled = spelledTags(tags, tagVocabulary(this.tagLists(entryId)));
+    // Already so: nothing to save, nor to sync.
+    if (isDeepStrictEqual(spelled, this.entries.get(entryId)?.tags ?? [])) {
+      return;
+    }
+    // A write takes the Entry's Tags from here.
+    this.setEntries(() => {
+      const entry = this.entries.get(entryId);
+      if (entry) this.entries.set(entryId, withTags(entry, spelled));
+    });
+    await this.changeEntry(entryId, (value) => withTags(value, spelled));
   }
 
   /** Adds `status` to the end of the Status list. */
@@ -3310,9 +3387,12 @@ export class ProjectStore {
     this.refuseUnavailable(ref);
     const key = unitKey(ref);
     if (ref.kind === 'entry') {
-      // Only setEntryImage and removeEntryImage change its image.
-      const image = this.entries.get(ref.id)?.image;
-      value = withImage(value as EntryValue, image) as ValueOf<R>;
+      // Only setEntryImage, removeEntryImage and setTags change its image
+      // and Tags.
+      value = withEntryDetails(
+        value as EntryValue,
+        this.entries.get(ref.id),
+      ) as ValueOf<R>;
     }
     this.unsaved.set(key, { ref, value: structuredClone(value) });
     if (ref.kind === 'entry') {
@@ -4579,6 +4659,7 @@ function entryFile(value: EntryValue, previous: UnknownKeys = {}): string {
     aliases: _aliases,
     visibility: previousVisibility,
     image: previousImage,
+    [TAGS]: _tags,
     ...unknown
   } = previous;
   const { id, name, aliases, description } = value;
@@ -4610,6 +4691,7 @@ function entryFile(value: EntryValue, previous: UnknownKeys = {}): string {
       aliases,
       visibility,
       ...(image !== undefined && { image }),
+      ...(value.tags && value.tags.length > 0 && { [TAGS]: value.tags }),
       ...fields,
     },
     body: description,
@@ -4644,13 +4726,16 @@ function textOf(ref: UnitRef, value: UnitValue): unknown {
     const { meta: _, ...text } = value as OutlineValue;
     return text;
   }
-  return ref.kind === 'entry' ? withoutImage(value as EntryValue) : value;
+  return ref.kind === 'entry'
+    ? withoutEntryDetails(value as EntryValue)
+    : value;
 }
 
 /** An Entry from its file; a field that is missing or not understood reads as its default. */
 function entryValue(id: string, { frontmatter, body }: UnitFile): EntryValue {
   const { type, name, aliases, visibility } = frontmatter;
   const image = imageFile(id, frontmatter.image);
+  const tags = readTags(frontmatter[TAGS]);
   const entryType = ENTRY_TYPES.includes(type as EntryType)
     ? (type as EntryType)
     : 'other';
@@ -4667,6 +4752,7 @@ function entryValue(id: string, { frontmatter, body }: UnitFile): EntryValue {
     description: body,
     fields: readEntryFields(entryType, frontmatter),
     ...(image && { image }),
+    ...(tags.length > 0 && { tags }),
   };
 }
 

@@ -45,7 +45,7 @@ export function TagsDialog({
       }}
     >
       <h2 id="tags-heading">Tags: {unitName}</h2>
-      <TagInput tags={tags} onChange={onChange} />
+      <TagInput tags={tags} onChange={onChange} autoFocus />
       <p className="field-hint">A comma or Enter ends a Tag.</p>
       <div className="settings-close">
         <button onClick={() => dialogRef.current?.close()}>Done</button>
@@ -55,18 +55,40 @@ export function TagsDialog({
 }
 
 /**
+ * A unit's Tags as small chips, read-only, as Story Bible list rows and
+ * Entry cards show them; nothing without any.
+ */
+export function TagChips({ tags }: { tags?: string[] }) {
+  if (!tags || tags.length === 0) return null;
+  // Spans, as a list row is a button.
+  return (
+    <span className="tag-list">
+      {tags.map((tag) => (
+        <span key={tag} className="tag-chip">
+          {tag}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+/**
  * A unit's Tags as chips, each with × to remove it, then a box to type more
  * in, which suggests the Tags in use. A comma or Enter ends a Tag;
  * Backspace in the empty box removes the last. Read-only Projects show the
- * Tags only. Also for the Corkboard's cards, which edit Tags in place.
+ * Tags only. Also for the Entry view's header, and the Corkboard's cards,
+ * which edit Tags in place.
  */
 export function TagInput({
   tags: saved,
   onChange,
+  autoFocus = false,
 }: {
   tags: string[];
   /** Saves them; resolves once main has, or has told the Author it couldn't. */
   onChange(tags: string[]): Promise<void>;
+  /** Whether the box takes focus as it shows, as in the Tags… dialog. */
+  autoFocus?: boolean;
 }) {
   const readOnly = useContext(ReadOnlyContext);
   /**
@@ -147,7 +169,7 @@ export function TagInput({
             placeholder={tags.length === 0 ? 'Add a Tag' : 'Add another'}
             list={listId}
             value={typing}
-            autoFocus
+            autoFocus={autoFocus}
             onChange={(event) => {
               const { tags: ended, rest } = typedTags(event.target.value);
               if (ended.length > 0) add(ended);

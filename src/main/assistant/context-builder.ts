@@ -226,6 +226,9 @@ function entryText(entry: EntryValue): string {
   if (entry.aliases.length > 0) {
     lines.push(`Also called: ${entry.aliases.join(', ')}`);
   }
+  if (entry.tags && entry.tags.length > 0) {
+    lines.push(`Tags: ${entry.tags.join(', ')}`);
+  }
   const { role, roleNote, appearance, voice, senses, status } = entry.fields;
   const roles = roleText(role, roleNote);
   if (roles) lines.push(`Role: ${roles}`);

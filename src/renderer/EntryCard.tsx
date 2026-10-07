@@ -4,6 +4,7 @@ import { VISIBILITY_LABELS } from './EntryView';
 import { entryFields, type CardField } from './card-fields';
 import { EntryThumbnail } from './EntryImage';
 import { entryTitle } from './StoryBible';
+import { TagChips } from './TagsDialog';
 
 /**
  * An Entry's fields at a glance, read-only, as the Brainstorm and Interview
@@ -24,6 +25,7 @@ export function EntryCard({
           {entryTitle(entry)}
           <EntryThumbnail entry={entry} />
         </h2>
+        <TagChips tags={entry.tags} />
         <button
           className="entry-card-open"
           aria-label={`Open “${entryTitle(entry)}”`}

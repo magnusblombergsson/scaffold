@@ -1692,6 +1692,20 @@ h2.binder-title > button:hover::after {
   text-overflow: ellipsis;
 }
 
+/* Its Tags after the name; they give way first in a narrow pane. */
+.story-bible .tag-list {
+  flex: 0 1 auto;
+  flex-wrap: nowrap;
+  overflow: hidden;
+}
+
+.story-bible .tag-list .tag-chip {
+  flex: 0 1 auto;
+  min-width: 1.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .story-bible .entry-thumbnail {
   margin-left: auto;
 }
@@ -2231,6 +2245,12 @@ header.entry-header {
   margin: 0;
 }
 
+.entry-card > header > .tag-list {
+  grid-column: 1;
+  justify-self: start;
+  margin-top: 0.2rem;
+}
+
 .entry-card .entry-thumbnail {
   width: 2rem;
   height: 2rem;
@@ -2656,6 +2676,34 @@ header.entry-header {
 .tag-input input {
   flex: 1 1 8rem;
   min-width: 8rem;
+}
+
+/* Tags shown, not edited: small chips, as in list rows and on cards. */
+.tag-list {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.tag-list .tag-chip {
+  padding: 0 0.4rem;
+  font-size: 0.72rem;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+/* The Entry header's Tags: chips, then a quiet box to type more in. */
+.entry-header-foot .tag-input input {
+  padding: 0.1rem 0.3rem;
+  border-color: transparent;
+  background: none;
+  font-size: 0.9rem;
+}
+
+.entry-header-foot .tag-input input:hover,
+.entry-header-foot .tag-input input:focus {
+  border-color: var(--line);
 }
 
 /* The prompt is a slip of paper on the dialog's sheet, to copy from. */
