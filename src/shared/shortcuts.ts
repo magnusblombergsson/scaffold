@@ -1,6 +1,15 @@
 import type { Mode } from './conversation';
 import type { EntryType } from './project-types';
 
+/** A side pane of Writing that collapses on its own: the left pane or the Assistant. */
+export type SidePane = 'left' | 'assistant';
+
+/** Whether each side pane is docked, rather than collapsed to its edge tabs. */
+export type DockedPanes = Record<SidePane, boolean>;
+
+/** How a window shows Writing's side panes until the Author collapses one. */
+export const ALL_DOCKED: DockedPanes = { left: true, assistant: true };
+
 /**
  * What the Author asked for from the menu bar or a shortcut, sent to the
  * window in front. `byKey` is set when a menu's shortcut sent it rather than
@@ -24,6 +33,8 @@ export type Command = (
   | { type: 'newChapter'; above: boolean }
   /** An Entry of `entryType`, or without one, the menu of types to pick from. */
   | { type: 'newEntry'; entryType?: EntryType }
+  /** Collapses the pane, or docks it back at the tab it last showed. */
+  | { type: 'togglePane'; pane: SidePane }
 ) & { byKey?: true };
 
 /**
@@ -45,12 +56,20 @@ export const SHORTCUTS = {
   newChapterAbove: 'CmdOrCtrl+Shift+Alt+Enter',
   newEntry: 'CmdOrCtrl+E',
   shortcuts: 'CmdOrCtrl+/',
+  leftPane: 'CmdOrCtrl+Shift+M',
+  assistant: 'CmdOrCtrl+Shift+A',
   // In the Binder and Story Bible list, while it has focus.
   rename: 'F2',
   moveUp: 'Alt+Up',
   moveDown: 'Alt+Down',
   undoStructure: 'CmdOrCtrl+Z',
 } as const satisfies Record<string, string>;
+
+/** The letter after Ctrl+Shift that collapses or docks each pane, as in `SHORTCUTS`. */
+const PANE_LETTERS: Record<string, SidePane> = {
+  m: 'left',
+  a: 'assistant',
+};
 
 /** The digit after Ctrl that switches to each Mode, as in `SHORTCUTS`. */
 const MODE_DIGITS: Record<string, Mode> = {
@@ -69,7 +88,8 @@ type KeyPress = {
 
 /**
  * The command a key press in a window asks for, if any: the create chords,
- * Ctrl+E and Ctrl+1/2/3, which apply where a Project is shown, and Ctrl+/.
+ * Ctrl+E, Ctrl+1/2/3 and the pane keys, which apply where a Project is
+ * shown, and Ctrl+/.
  * Ctrl is ⌘ on macOS. The menus take the others.
  */
 export function commandForKey(press: KeyPress, mac: boolean): Command | null {
@@ -84,7 +104,11 @@ export function commandForKey(press: KeyPress, mac: boolean): Command | null {
   }
   // Wherever / is: some keyboards type it with Shift, as Swedish Shift+7.
   if (key === '/' && !alt) return { type: 'shortcuts' };
-  if (shift || alt) return null;
+  if (alt) return null;
+  if (shift) {
+    const pane = PANE_LETTERS[key.toLowerCase()];
+    return pane ? { type: 'togglePane', pane } : null;
+  }
   if (key.toLowerCase() === 'e') return { type: 'newEntry' };
   const mode = MODE_DIGITS[key];
   return mode ? { type: 'mode', mode } : null;
@@ -191,6 +215,19 @@ export const CHEAT_SHEET: {
       {
         keys: ['Left', 'Right'],
         action: 'On the left pane’s tabs: the tab before or after',
+      },
+    ],
+  },
+  {
+    title: 'View',
+    shortcuts: [
+      {
+        keys: [SHORTCUTS.leftPane],
+        action: 'Collapse the left pane, or dock it back at its last tab',
+      },
+      {
+        keys: [SHORTCUTS.assistant],
+        action: 'Collapse the Assistant, or dock it back',
       },
     ],
   },

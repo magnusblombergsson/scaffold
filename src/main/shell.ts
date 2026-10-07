@@ -31,6 +31,7 @@ import { TICK_ALL, type ExportUnticked } from '../shared/export-choice';
 import { splitManuscript } from '../shared/manuscript-import';
 import { isProviderId, type Model } from '../shared/models';
 import type { ProseLanguage } from '../shared/project-types';
+import { ALL_DOCKED, type DockedPanes } from '../shared/shortcuts';
 import { unitName } from '../shared/unit-name';
 import {
   loadAppSettings,
@@ -86,6 +87,8 @@ let providers: ProviderSettings;
 
 /** The open Project of each window, keyed by its webContents id. */
 const stores = new Map<number, ProjectStore>();
+/** Which of Writing's side panes each window, by its contents' id, has docked. */
+const dockedPanes = new Map<number, DockedPanes>();
 /** Stops sending a window its store's events, by webContents id. */
 const unsubscribes = new Map<number, () => void>();
 
@@ -487,6 +490,10 @@ const shellHandlers: Handlers<ShellApi, typeof shellMethods, WindowContext> = {
     updateMenu();
     return recentProjects();
   },
+  showDocked: ({ sender }, docked) => {
+    dockedPanes.set(sender.id, docked);
+    updateMenu();
+  },
   saveView: ({ sender }, change) => {
     const store = stores.get(sender.id);
     if (!store) return;
@@ -600,7 +607,12 @@ function setApplicationMenu(): void {
   const store = window && stores.get(window.webContents.id);
   const state: MenuState = {
     mac: process.platform === 'darwin',
-    project: store ? { readOnly: store.readOnly() !== null } : null,
+    project: store
+      ? {
+          readOnly: store.readOnly() !== null,
+          docked: dockedPanes.get(window.webContents.id) ?? ALL_DOCKED,
+        }
+      : null,
     recent: settings
       .recent()
       .map(({ path, displayName }) => ({ path, displayName })),
@@ -763,6 +775,7 @@ function closeProject(window: BrowserWindow): Promise<void> {
         unsubscribes.get(id)?.();
         unsubscribes.delete(id);
         stores.delete(id);
+        dockedPanes.delete(id);
         updateMenu();
       } finally {
         closing.delete(id);

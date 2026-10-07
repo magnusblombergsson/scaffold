@@ -34,7 +34,10 @@ import {
   commandForKey,
   SHORTCUTS,
   withShortcut,
+  ALL_DOCKED,
   type Command,
+  type DockedPanes,
+  type SidePane,
 } from '../shared/shortcuts';
 import type { Todo, TodoLink } from '../shared/todo';
 import { capitalized, unitName } from '../shared/unit-name';
@@ -464,6 +467,32 @@ function ProjectView({
   }
 
   const [tab, setTab] = useState<Tab>('manuscript');
+  /**
+   * Which side panes are docked in Writing, rather than collapsed to their
+   * edge tabs. In memory for the window, across Mode switches.
+   */
+  const [docked, setDocked] = useState<DockedPanes>(ALL_DOCKED);
+  useEffect(() => window.shell.showDocked(docked), [docked]);
+  /**
+   * Collapses a side pane, or docks it back at the tab it last showed. Focus
+   * in a pane that collapses goes to the Prose.
+   */
+  function togglePane(pane: SidePane) {
+    const element = writingRoom.current?.querySelector(
+      pane === 'left' ? '.left-pane' : '.assistant-panel',
+    );
+    if (docked[pane] && element?.contains(document.activeElement)) {
+      writingRoom.current
+        ?.querySelector<HTMLElement>('[aria-label="Prose"]')
+        ?.focus();
+    }
+    setDocked({ ...docked, [pane]: !docked[pane] });
+  }
+  /** Docks the left pane back, open at `at`, from its edge tab. */
+  function dockLeftPaneAt(at: Tab) {
+    setTab(at);
+    setDocked({ ...docked, left: true });
+  }
   const writingRoom = useRef<HTMLDivElement>(null);
   usePaneCycle(writingRoom, mode === 'writing');
   const [entries, setEntries] = useState<EntrySummary[]>([]);
@@ -779,6 +808,14 @@ function ProjectView({
       setExportOpen(true);
       return true;
     }
+    if (command.type === 'togglePane') {
+      if (mode !== 'writing') {
+        if (command.byKey) return false;
+        switchMode('writing');
+      }
+      togglePane(command.pane);
+      return true;
+    }
     if (
       command.type !== 'newScene' &&
       command.type !== 'newChapter' &&
@@ -968,68 +1005,100 @@ function ProjectView({
           </ProposalTargetContext.Provider>
           {visited.has('writing') && (
             <div className="room" hidden={mode !== 'writing'} ref={writingRoom}>
-              <aside className="left-pane" style={{ width: binderWidth }}>
+              {!docked.left && (
                 <div
-                  role="tablist"
-                  aria-label="Left pane"
-                  className="tabs"
-                  onKeyDown={(event) => {
-                    const next = tabAfter(event.key, tab, tabs);
-                    if (!next) return;
-                    event.preventDefault();
-                    setTab(next);
-                    document.getElementById(`${next}-tab`)?.focus();
-                  }}
+                  role="group"
+                  aria-label="Left pane, collapsed"
+                  className="edge-tabs edge-tabs-left"
                 >
-                  <button
-                    role="tab"
-                    aria-selected={tab === 'manuscript'}
-                    tabIndex={tab === 'manuscript' ? 0 : -1}
-                    id="manuscript-tab"
-                    onClick={() => setTab('manuscript')}
-                  >
+                  <button onClick={() => dockLeftPaneAt('manuscript')}>
                     Manuscript
                   </button>
-                  <button
-                    role="tab"
-                    aria-selected={tab === 'bible'}
-                    tabIndex={tab === 'bible' ? 0 : -1}
-                    id="bible-tab"
-                    onClick={() => setTab('bible')}
-                  >
+                  <button onClick={() => dockLeftPaneAt('bible')}>
                     Story Bible
                   </button>
-                  <button
-                    role="tab"
-                    aria-selected={tab === 'todos'}
-                    tabIndex={tab === 'todos' ? 0 : -1}
-                    id="todos-tab"
-                    onClick={() => setTab('todos')}
+                </div>
+              )}
+              <aside
+                className="left-pane"
+                hidden={!docked.left}
+                style={{ width: binderWidth }}
+              >
+                <div className="left-pane-bar">
+                  <div
+                    role="tablist"
+                    aria-label="Left pane"
+                    className="tabs"
+                    onKeyDown={(event) => {
+                      const next = tabAfter(event.key, tab, tabs);
+                      if (!next) return;
+                      event.preventDefault();
+                      setTab(next);
+                      document.getElementById(`${next}-tab`)?.focus();
+                    }}
                   >
-                    Todos
-                  </button>
-                  {tabs.includes('conflicts') && (
                     <button
                       role="tab"
-                      aria-selected={tab === 'conflicts'}
-                      tabIndex={tab === 'conflicts' ? 0 : -1}
-                      id="conflicts-tab"
-                      onClick={() => setTab('conflicts')}
+                      aria-selected={tab === 'manuscript'}
+                      tabIndex={tab === 'manuscript' ? 0 : -1}
+                      id="manuscript-tab"
+                      onClick={() => setTab('manuscript')}
                     >
-                      Conflicts
-                      {conflicts.length > 0 && (
-                        <span className="badge">{conflicts.length}</span>
-                      )}
+                      Manuscript
                     </button>
-                  )}
+                    <button
+                      role="tab"
+                      aria-selected={tab === 'bible'}
+                      tabIndex={tab === 'bible' ? 0 : -1}
+                      id="bible-tab"
+                      onClick={() => setTab('bible')}
+                    >
+                      Story Bible
+                    </button>
+                    <button
+                      role="tab"
+                      aria-selected={tab === 'todos'}
+                      tabIndex={tab === 'todos' ? 0 : -1}
+                      id="todos-tab"
+                      onClick={() => setTab('todos')}
+                    >
+                      Todos
+                    </button>
+                    {tabs.includes('conflicts') && (
+                      <button
+                        role="tab"
+                        aria-selected={tab === 'conflicts'}
+                        tabIndex={tab === 'conflicts' ? 0 : -1}
+                        id="conflicts-tab"
+                        onClick={() => setTab('conflicts')}
+                      >
+                        Conflicts
+                        {conflicts.length > 0 && (
+                          <span className="badge">{conflicts.length}</span>
+                        )}
+                      </button>
+                    )}
+                    <button
+                      role="tab"
+                      aria-selected={tab === 'trash'}
+                      tabIndex={tab === 'trash' ? 0 : -1}
+                      id="trash-tab"
+                      onClick={() => setTab('trash')}
+                    >
+                      Trash{trash.length > 0 && ` (${trash.length})`}
+                    </button>
+                  </div>
                   <button
-                    role="tab"
-                    aria-selected={tab === 'trash'}
-                    tabIndex={tab === 'trash' ? 0 : -1}
-                    id="trash-tab"
-                    onClick={() => setTab('trash')}
+                    className="collapse-pane"
+                    aria-label="Collapse the left pane"
+                    title={withShortcut(
+                      'Collapse the left pane',
+                      SHORTCUTS.leftPane,
+                      MAC,
+                    )}
+                    onClick={() => togglePane('left')}
                   >
-                    Trash{trash.length > 0 && ` (${trash.length})`}
+                    «
                   </button>
                 </div>
                 <div role="tabpanel" aria-labelledby={`${tab}-tab`}>
@@ -1108,12 +1177,14 @@ function ProjectView({
                   )}
                 </div>
               </aside>
-              <PanelResizer
-                label="Binder width"
-                min={160}
-                max={600}
-                {...pane('binder')}
-              />
+              {docked.left && (
+                <PanelResizer
+                  label="Binder width"
+                  min={160}
+                  max={600}
+                  {...pane('binder')}
+                />
+              )}
               {overviewOpen &&
                 !resolvingConflict &&
                 open &&
@@ -1272,18 +1343,22 @@ function ProjectView({
                   />
                 </main>
               )}
-              <PanelResizer
-                label="Assistant width"
-                panel="right"
-                {...pane('assistant')}
-                min={220}
-                max={640}
-              />
+              {docked.assistant && (
+                <PanelResizer
+                  label="Assistant width"
+                  panel="right"
+                  {...pane('assistant')}
+                  min={220}
+                  max={640}
+                />
+              )}
               <ProposalTargetContext.Provider
                 value={(proposal, target) => goToTarget(target, proposal.id)}
               >
                 <AssistantPanel
                   active={mode === 'writing'}
+                  docked={docked.assistant}
+                  onCollapse={() => togglePane('assistant')}
                   width={pane('assistant').width}
                   onAddProvider={onAddProvider}
                   sceneId={open && !open.scene.missing ? open.scene.id : null}
@@ -1293,6 +1368,17 @@ function ProjectView({
                   onChange={change}
                 />
               </ProposalTargetContext.Provider>
+              {!docked.assistant && (
+                <div
+                  role="group"
+                  aria-label="Assistant, collapsed"
+                  className="edge-tabs edge-tabs-right"
+                >
+                  <button onClick={() => togglePane('assistant')}>
+                    Assistant
+                  </button>
+                </div>
+              )}
             </div>
           )}
         </div>

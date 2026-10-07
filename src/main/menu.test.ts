@@ -4,9 +4,10 @@ import type { Command } from '../shared/shortcuts';
 import { menuTemplate, type MenuState } from './menu';
 
 const noProject: MenuState = { mac: false, project: null, recent: [] };
+const docked = { left: true, assistant: true };
 const writable: MenuState = {
   ...noProject,
-  project: { readOnly: false },
+  project: { readOnly: false, docked },
 };
 
 function build(state: MenuState) {
@@ -93,6 +94,38 @@ describe('menuTemplate', () => {
     expect(sent).toEqual([{ type: 'mode', mode: 'brainstorm' }]);
   });
 
+  it('collapses and docks the left pane and the Assistant from View, as check items, with keys taken by the window', () => {
+    const { template, sent } = build({
+      ...writable,
+      project: { readOnly: true, docked: { left: false, assistant: true } },
+    });
+    const view = menu(template, 'View');
+    const left = item(view, 'Left Pane');
+    const assistant = item(view, 'Assistant');
+    expect(left).toMatchObject({
+      type: 'checkbox',
+      checked: false,
+      enabled: true,
+      accelerator: 'CmdOrCtrl+Shift+M',
+      registerAccelerator: false,
+    });
+    expect(assistant).toMatchObject({
+      type: 'checkbox',
+      checked: true,
+      accelerator: 'CmdOrCtrl+Shift+A',
+      registerAccelerator: false,
+    });
+    click(left);
+    click(assistant, true);
+    expect(sent).toEqual([
+      { type: 'togglePane', pane: 'left' },
+      { type: 'togglePane', pane: 'assistant', byKey: true },
+    ]);
+    const none = menu(build(noProject).template, 'View');
+    expect(item(none, 'Left Pane').enabled).toBe(false);
+    expect(item(none, 'Assistant').enabled).toBe(false);
+  });
+
   it('creates from Insert, below or above, and Entries of each type', () => {
     const { template, sent } = build(writable);
     const insert = menu(template, 'Insert');
@@ -135,7 +168,7 @@ describe('menuTemplate', () => {
   it('can insert nothing without a Project, or in a read-only one', () => {
     for (const state of [
       noProject,
-      { ...writable, project: { readOnly: true } },
+      { ...writable, project: { readOnly: true, docked } },
     ]) {
       const insert = menu(build(state).template, 'Insert');
       expect(
@@ -184,7 +217,7 @@ describe('menuTemplate', () => {
   it('keeps Project Settings open to a read-only Project, to see its values', () => {
     const { template } = build({
       ...writable,
-      project: { readOnly: true },
+      project: { readOnly: true, docked },
     });
     expect(item(menu(template, 'Tools'), 'Project Settings…').enabled).toBe(
       true,
