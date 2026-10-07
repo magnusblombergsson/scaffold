@@ -2348,8 +2348,8 @@ header.entry-header {
   padding: 0.6rem 0.75rem 0.75rem;
 }
 
-/* The Entry's image, the note's full width; one too tall for the note is cut
-   at the bottom, whole in the large view. */
+/* The Entry's image, the note's full width; one too tall for the note is
+   shrunk to fit it, whole. */
 .pinned-note-picture {
   display: flex;
   flex-direction: column;
@@ -2361,8 +2361,7 @@ header.entry-header {
 .pinned-note-picture img {
   min-height: 0;
   width: 100%;
-  object-fit: cover;
-  object-position: top;
+  object-fit: contain;
   border-radius: 0 0 7px 7px;
 }
 
