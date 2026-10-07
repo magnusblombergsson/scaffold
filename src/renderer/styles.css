@@ -2314,6 +2314,11 @@ header.entry-header {
   cursor: grabbing;
 }
 
+/* Showing the image. */
+.pinned-note-header .peek-card-icon[aria-pressed='true'] {
+  color: var(--accent);
+}
+
 .pinned-note-grip {
   color: var(--muted);
   margin-right: 0.15rem;
@@ -2341,6 +2346,24 @@ header.entry-header {
 .pinned-note-body {
   overflow-y: auto;
   padding: 0.6rem 0.75rem 0.75rem;
+}
+
+/* The Entry's image, the note's full width; one too tall for the note is cut
+   at the bottom, whole in the large view. */
+.pinned-note-picture {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+}
+
+.pinned-note-picture img {
+  min-height: 0;
+  width: 100%;
+  object-fit: cover;
+  object-position: top;
+  border-radius: 0 0 7px 7px;
 }
 
 .entry-card + .entry-card {

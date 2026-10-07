@@ -312,6 +312,83 @@ test('the Project setting says whether a folded note shows its image, and is sav
   await app.close();
 });
 
+test('a Pinned note shows its Entry’s image instead of its text, after a restart too, and is text again once the image goes', async () => {
+  const { app, page } = await newProject(path.join(tempDir(), 'My Novel'));
+  await offerImage(app);
+  await newEntry(
+    page,
+    'Character',
+    'Anna',
+    'A pilot who never flies at night.',
+  );
+  await newEntry(page, 'Place', 'Harbour', 'Grey water, three piers.');
+  await page.getByRole('button', { name: 'Add image…' }).click();
+  await expect(
+    page.getByRole('img', { name: 'Image of Harbour' }),
+  ).toBeVisible();
+  await writeScene(page, 'Anna walked to the Harbour.');
+  await pin(page, 'Anna');
+  await pin(page, 'Harbour');
+
+  // Only for an Entry with an image.
+  const anna = note(page, 'Anna');
+  await expect(anna).toContainText('A pilot who never flies at night.');
+  await expect(
+    anna.getByRole('button', { name: 'Show the image of “Anna”' }),
+  ).toHaveCount(0);
+
+  const harbour = note(page, 'Harbour');
+  const toggle = harbour.getByRole('button', {
+    name: 'Show the image of “Harbour”',
+  });
+  await expect(toggle).toHaveAttribute('aria-pressed', 'false');
+  await toggle.click();
+  await expect(toggle).toHaveAttribute('aria-pressed', 'true');
+  await expect(harbour).not.toContainText('Grey water');
+  const picture = harbour.getByRole('img', { name: 'Image of Harbour' });
+  await expect(picture).toBeVisible();
+  await expect
+    .poll(() => picture.evaluate((img: HTMLImageElement) => img.naturalWidth))
+    .toBeGreaterThan(0);
+  // The note's full width.
+  const noteBox = (await harbour.boundingBox())!;
+  const pictureBox = (await picture.boundingBox())!;
+  expect(noteBox.width - pictureBox.width).toBeLessThan(4);
+
+  // Clicked, the large view.
+  await picture.click();
+  const view = page.getByRole('dialog', { name: 'Harbour' });
+  await expect(view).toBeVisible();
+  await view.getByRole('button', { name: 'Close' }).click();
+  await expect(view).toBeHidden();
+
+  // Folded, like any note.
+  await harbour.getByRole('button', { name: 'Fold “Harbour”' }).click();
+  await expect(picture).toBeHidden();
+  await harbour.getByRole('button', { name: 'Unfold “Harbour”' }).click();
+  await expect(picture).toBeVisible();
+  await app.close();
+
+  const second = await launch(tempDir());
+  const reopened = await second.firstWindow();
+  const restored = note(reopened, 'Harbour');
+  await expect(
+    restored.getByRole('img', { name: 'Image of Harbour' }),
+  ).toBeVisible();
+  await expect(
+    restored.getByRole('button', { name: 'Show the image of “Harbour”' }),
+  ).toHaveAttribute('aria-pressed', 'true');
+
+  await reopened.getByRole('tab', { name: 'Story Bible' }).click();
+  await reopened.getByRole('button', { name: 'Harbour', exact: true }).click();
+  await reopened.getByRole('button', { name: 'Remove image' }).click();
+  await expect(restored).toContainText('Grey water, three piers.');
+  await expect(
+    restored.getByRole('button', { name: 'Show the image of “Harbour”' }),
+  ).toHaveCount(0);
+  await second.close();
+});
+
 for (const theme of ['light', 'dark'] as const) {
   test(`a Pinned note is a sheet over the page, ${theme}`, async () => {
     const { app, page } = await newProject(path.join(tempDir(), 'My Novel'));
