@@ -1042,6 +1042,79 @@ span.overview-title {
   color: var(--accent);
 }
 
+/* The header's way into zen mode, and out of it once the header slides in. */
+.zen-button {
+  background: none;
+  border: 1px solid var(--pill-line);
+  border-radius: 999px;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 1px 0.8rem;
+  cursor: pointer;
+}
+
+.zen-button:hover {
+  background: var(--hover);
+}
+
+.zen-button[aria-pressed='true'] {
+  color: var(--accent);
+}
+
+/* Zen mode: the header and status bar wait off the window's top and bottom
+   edges, sliding in when the pointer reaches one; notices wait until zen
+   ends. Outline & Notes and the edge tabs stay, faint until hovered. */
+.project-view[data-zen] > header,
+.project-view[data-zen] > .status-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  z-index: 40;
+  background: var(--desk);
+  box-shadow: var(--float-shadow);
+  transition: translate 0.18s ease-out;
+}
+
+.project-view[data-zen] > header {
+  top: 0;
+  translate: 0 -110%;
+}
+
+.project-view[data-zen] > .status-bar {
+  bottom: 0;
+  padding-top: 0.35rem;
+  translate: 0 110%;
+}
+
+.project-view[data-revealed='top'] > header,
+.project-view[data-revealed='bottom'] > .status-bar,
+.project-view[data-zen] > header:has(:focus-visible),
+.project-view[data-zen] > .status-bar:has(:focus-visible) {
+  translate: 0 0;
+}
+
+.project-view[data-zen] > .notices {
+  display: none;
+}
+
+.project-view[data-zen] > .project-body {
+  padding-top: 0.5rem;
+}
+
+.project-view[data-zen] .outline-notes,
+.project-view[data-zen] .edge-tabs {
+  opacity: 0.25;
+  transition: opacity 0.2s;
+}
+
+.project-view[data-zen] .outline-notes:hover,
+.project-view[data-zen] .outline-notes:focus-within,
+.project-view[data-zen] .edge-tabs:hover,
+.project-view[data-zen] .edge-tabs:focus-within {
+  opacity: 1;
+}
+
 .tabs {
   display: flex;
   /* Tabs that don't fit a narrow pane go on to a second line. */

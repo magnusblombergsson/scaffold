@@ -585,6 +585,11 @@ export interface ShellApi {
    */
   showDocked(docked: DockedPanes): void;
   /**
+   * Puts this window in zen mode, full screen and ticked in the View menu, or
+   * takes it out, back to the full screen it had before. Kept in memory only.
+   */
+  setZen(on: boolean): void;
+  /**
    * What the Author left unticked at this window's last Manuscript Export, on
    * this computer; a unit created since starts ticked.
    */
@@ -831,6 +836,7 @@ export const shellMethods = {
   importProject: 'invoke',
   onCommand: 'event',
   showDocked: 'send',
+  setZen: 'send',
   exportChoice: 'invoke',
   exportManuscript: 'invoke',
   openRecent: 'invoke',

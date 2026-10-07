@@ -290,7 +290,7 @@ test('the Insert menu creates above or below, and Entries of a type, switching t
   }
 });
 
-test('the toolbar keeps only the Mode switch, and buttons show their shortcut', async () => {
+test('the toolbar keeps only the Mode switch and, in Writing, Zen, and buttons show their shortcut', async () => {
   const { app, page } = await newProject();
   try {
     const header = page.locator('.project-view header');
@@ -298,10 +298,15 @@ test('the toolbar keeps only the Mode switch, and buttons show their shortcut', 
       'Writing',
       'Brainstorm',
       'Interview',
+      'Zen',
     ]);
     await expect(
       header.getByRole('button', { name: 'Brainstorm' }),
     ).toHaveAttribute('title', 'Brainstorm (Ctrl+2)');
+    await expect(header.getByRole('button', { name: 'Zen' })).toHaveAttribute(
+      'title',
+      'Zen Mode (Ctrl+Shift+F)',
+    );
     await expect(
       page.getByRole('button', { name: 'New Chapter' }),
     ).toHaveAttribute('title', 'New Chapter (Ctrl+Shift+Enter)');

@@ -10,8 +10,11 @@ import { SHORTCUTS, type Command, type DockedPanes } from '../shared/shortcuts';
 /** What the menus show for the window in front. */
 export type MenuState = {
   mac: boolean;
-  /** The Project the window in front shows, if any, and its Writing panes. */
-  project: { readOnly: boolean; docked: DockedPanes } | null;
+  /**
+   * The Project the window in front shows, if any, its Writing panes, and
+   * whether it is in zen mode.
+   */
+  project: { readOnly: boolean; docked: DockedPanes; zen: boolean } | null;
   /** Latest first. */
   recent: { path: string; displayName: string }[];
 };
@@ -23,9 +26,9 @@ export type MenuActions = {
 };
 
 /**
- * The menu bar. The window takes the shortcuts of Mode, the panes and Insert,
- * and Ctrl+/, itself, so that they work inside an editor and only where they
- * apply; the menus only show them.
+ * The menu bar. The window takes the shortcuts of Mode, zen, the panes and
+ * Insert, and Ctrl+/, itself, so that they work inside an editor and only
+ * where they apply; the menus only show them.
  */
 export function menuTemplate(
   { mac, project, recent }: MenuState,
@@ -127,6 +130,14 @@ export function menuTemplate(
           ...sending({ type: 'mode', mode }),
         })),
         { type: 'separator' },
+        {
+          label: 'Zen Mode',
+          type: 'checkbox',
+          checked: project?.zen ?? false,
+          enabled: !!project,
+          ...windowKey(SHORTCUTS.zen),
+          ...sending({ type: 'zen' }),
+        },
         {
           label: 'Left Pane',
           type: 'checkbox',
