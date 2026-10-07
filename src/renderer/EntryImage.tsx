@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { EntrySummary } from '../shared/project-types';
 import { ImagePromptDialog } from './ImagePromptDialog';
+import { ViewableImage } from './ImageView';
 import { entryTitle } from './StoryBible';
 
 /**
@@ -29,17 +30,27 @@ export function useEntryImage({ id, image }: EntrySummary): string | null {
   return image ? url : null;
 }
 
-/** An Entry's image, small, right of its name in a list row or on a card. */
+/**
+ * An Entry's image, small, right of its name in a list row or on a card;
+ * clicked, the large view.
+ */
 export function EntryThumbnail({ entry }: { entry: EntrySummary }) {
   const url = useEntryImage(entry);
   // Its name is beside it: the image adds nothing to read aloud.
-  return url ? <img className="entry-thumbnail" src={url} alt="" /> : null;
+  return url ? (
+    <ViewableImage
+      className="entry-thumbnail"
+      src={url}
+      alt=""
+      caption={entryTitle(entry)}
+    />
+  ) : null;
 }
 
 /**
- * The Entry view's image as a portrait, with Add, Replace and Remove, and
- * Image prompt…, which has the Assistant describe the Entry for an image
- * generator, stacked to its right. Without an image a dashed frame keeps the
+ * The Entry view's image as a portrait, which opens the large view, with Add,
+ * Replace and Remove, and Image prompt…, which has the Assistant describe the
+ * Entry for an image generator, stacked to its right. Without an image a dashed frame keeps the
  * portrait's place.
  */
 export function EntryImageSection({ entry }: { entry: EntrySummary }) {
@@ -48,7 +59,11 @@ export function EntryImageSection({ entry }: { entry: EntrySummary }) {
   return (
     <section className="entry-image">
       {url ? (
-        <img src={url} alt={`Image of ${entryTitle(entry)}`} />
+        <ViewableImage
+          src={url}
+          alt={`Image of ${entryTitle(entry)}`}
+          caption={entryTitle(entry)}
+        />
       ) : (
         <div className="entry-image-empty" />
       )}

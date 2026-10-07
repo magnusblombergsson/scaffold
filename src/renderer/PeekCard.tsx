@@ -2,6 +2,7 @@ import { useRef, useState } from 'react';
 import { roleText } from '../shared/entry';
 import { ENTRY_TYPE_LABELS, type EntryValue } from '../shared/project-types';
 import { useEntryImage } from './EntryImage';
+import { ViewableImage } from './ImageView';
 import { VISIBILITY_LABELS } from './EntryView';
 import { entryFields, keyFields } from './card-fields';
 import { entryTitle } from './StoryBible';
@@ -11,7 +12,7 @@ import { entryTitle } from './StoryBible';
  * note, aliases, the description cut to three lines and the type's key
  * fields cut to two. Read more unfolds it in place: the whole description,
  * every field with a value, who the Assistant sees it for and the image at
- * full size.
+ * full size. Either image opens the large view.
  *
  * In a Peek, its header has ↗ and, in Writing, 📌; in a Pinned note, whose
  * header has the name and those, it has neither.
@@ -41,16 +42,22 @@ export function PeekCard({
       aria-label={inNote ? undefined : title}
     >
       {expanded && image && (
-        <img
+        <ViewableImage
           className="peek-card-image"
           src={image}
           alt={`Image of ${title}`}
+          caption={title}
         />
       )}
       <header>
         {/* Its name is beside it: the thumbnail adds nothing to read aloud. */}
         {!expanded && image && (
-          <img className="peek-card-thumbnail" src={image} alt="" />
+          <ViewableImage
+            className="peek-card-thumbnail"
+            src={image}
+            alt=""
+            caption={title}
+          />
         )}
         <div className="peek-card-titles">
           <span className="peek-card-type">
