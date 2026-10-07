@@ -104,8 +104,8 @@ for (const theme of ['light', 'dark'] as const) {
       const chapter = card(page, 'Chapter 1');
       await expect(page.getByRole('article')).toHaveText([
         /^Outline.*Notes/,
-        /^1Scene 1Outline.*Notes/,
-        /^2Scene 2Outline.*Notes/,
+        /^1Scene 1⋯Outline.*Notes/,
+        /^2Scene 2⋯Outline.*Notes/,
       ]);
       await expect(page.getByLabel('Prose')).toHaveCount(0);
 
@@ -168,8 +168,8 @@ for (const theme of ['light', 'dark'] as const) {
         ]);
       await expect(page.getByRole('article')).toHaveText([
         /^Outline/,
-        /^1Chapter 1Outline.*Notes/,
-        /^2Part TwoOutline.*Notes/,
+        /^1Chapter 1⋯Outline.*Notes/,
+        /^2Part Two⋯Outline.*Notes/,
       ]);
       const project = card(page, 'Project Outline');
       await expect(field(project, 'Notes')).toHaveCount(0);

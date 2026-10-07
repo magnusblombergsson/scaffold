@@ -45,7 +45,8 @@ const LEAKS = {
 
 /**
  * The only controls a message may have: deciding Proposals, editing one's
- * value first, and retrying a call.
+ * value first, retrying a call, and starting a Todo from a Finding, which
+ * the Author writes in the Todos tab, never the Manuscript.
  */
 const ALLOWED_CONTROLS = [
   'Accept',
@@ -62,6 +63,7 @@ const ALLOWED_CONTROLS = [
   'Undo',
   'Retry',
   'Open Settings',
+  'Add as Todo',
 ];
 
 /**
@@ -148,6 +150,7 @@ test('nothing the Assistant writes reaches the Manuscript, in any Mode or room',
     'New Chapter',
     'New Chapter Above',
     'New Entry',
+    'New Todo',
   ]);
 
   // Writing, beside the editor: a question, with Proposals aimed at the Prose.

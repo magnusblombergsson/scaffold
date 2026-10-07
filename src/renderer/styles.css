@@ -464,6 +464,11 @@ button.recent-open:hover {
     display: flex;
     align-items: baseline;
     gap: 0.5rem;
+
+    /* Its ⋯ menu at the far end. */
+    .menu {
+      margin-left: auto;
+    }
   }
 
   /* A card grows with its text; it never scrolls. */
@@ -1497,6 +1502,15 @@ h2.binder-title > button:hover::after {
 .todo:hover .todo-delete,
 .todo:focus-within .todo-delete {
   visibility: visible;
+}
+
+.todos-only-open {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+  padding: 0 0.5rem 0.5rem;
 }
 
 .todos-empty {
@@ -2864,6 +2878,23 @@ button.finding-quote {
 
 button.finding-quote:hover {
   border-left-color: var(--muted);
+  text-decoration: underline;
+}
+
+.finding-todo {
+  display: block;
+  margin-top: 0.3rem;
+  padding: 0;
+  border: none;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 0.8rem;
+  cursor: pointer;
+}
+
+.finding-todo:hover:not(:disabled) {
+  color: var(--accent);
   text-decoration: underline;
 }
 

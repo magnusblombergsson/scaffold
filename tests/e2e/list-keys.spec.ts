@@ -376,7 +376,7 @@ test('the Story Bible list takes the same keys', async () => {
     await expect(
       menu.getByRole('menuitem', { name: 'Image prompt…' }),
     ).toBeFocused();
-    await page.keyboard.press('ArrowDown');
+    await page.keyboard.press('End');
     await expect(
       menu.getByRole('menuitem', { name: 'Move to Trash' }),
     ).toBeFocused();

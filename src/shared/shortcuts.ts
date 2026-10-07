@@ -33,6 +33,8 @@ export type Command = (
   | { type: 'newChapter'; above: boolean }
   /** An Entry of `entryType`, or without one, the menu of types to pick from. */
   | { type: 'newEntry'; entryType?: EntryType }
+  /** Focuses the Todos tab's New Todo field, docking the left pane if collapsed. */
+  | { type: 'newTodo' }
   /** Collapses the pane, or docks it back at the tab it last showed. */
   | { type: 'togglePane'; pane: SidePane }
 ) & { byKey?: true };
@@ -55,6 +57,7 @@ export const SHORTCUTS = {
   newChapter: 'CmdOrCtrl+Shift+Enter',
   newChapterAbove: 'CmdOrCtrl+Shift+Alt+Enter',
   newEntry: 'CmdOrCtrl+E',
+  newTodo: 'CmdOrCtrl+T',
   shortcuts: 'CmdOrCtrl+/',
   leftPane: 'CmdOrCtrl+Shift+M',
   assistant: 'CmdOrCtrl+Shift+A',
@@ -88,7 +91,7 @@ type KeyPress = {
 
 /**
  * The command a key press in a window asks for, if any: the create chords,
- * Ctrl+E, Ctrl+1/2/3 and the pane keys, which apply where a Project is
+ * Ctrl+E, Ctrl+T, Ctrl+1/2/3 and the pane keys, which apply where a Project is
  * shown, and Ctrl+/.
  * Ctrl is ⌘ on macOS. The menus take the others.
  */
@@ -110,6 +113,7 @@ export function commandForKey(press: KeyPress, mac: boolean): Command | null {
     return pane ? { type: 'togglePane', pane } : null;
   }
   if (key.toLowerCase() === 'e') return { type: 'newEntry' };
+  if (key.toLowerCase() === 't') return { type: 'newTodo' };
   const mode = MODE_DIGITS[key];
   return mode ? { type: 'mode', mode } : null;
 }
@@ -165,6 +169,10 @@ export const CHEAT_SHEET: {
       },
       { keys: [SHORTCUTS.newChapterAbove], action: 'New Chapter above' },
       { keys: [SHORTCUTS.newEntry], action: 'New Entry of a type' },
+      {
+        keys: [SHORTCUTS.newTodo],
+        action: 'New Todo, linked to the open Scene, Chapter or Entry',
+      },
     ],
   },
   {

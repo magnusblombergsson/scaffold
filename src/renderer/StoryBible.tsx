@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useContext, useState } from 'react';
 import type { Changed } from '../shared/api';
 import {
   ENTRY_TYPE_LABELS,
@@ -7,12 +7,13 @@ import {
   type EntryType,
 } from '../shared/project-types';
 import { SHORTCUTS, withShortcut } from '../shared/shortcuts';
-import { ConflictMarker, Menu } from './Binder';
+import { addTodoItem, ConflictMarker, Menu } from './Binder';
 import { EntryThumbnail } from './EntryImage';
 import { ImagePromptDialog } from './ImagePromptDialog';
 import type { Row } from './binder-keys';
 import { useListKeys } from './list-keys';
 import { MAC } from './platform';
+import { ReadOnlyContext } from './read-only';
 
 const GROUP_TITLES: Record<EntryType, string> = {
   character: 'Characters',
@@ -44,6 +45,7 @@ export function StoryBible({
   onUndo,
   highlight,
   onHighlight,
+  onAddTodo,
 }: {
   entries: EntrySummary[];
   /** The Entry the centre shows, if any. */
@@ -61,7 +63,10 @@ export function StoryBible({
   onUndo(): Promise<void>;
   highlight: boolean;
   onHighlight(on: boolean): void;
+  /** Starts a Todo linked to an Entry. */
+  onAddTodo(entryId: string): void;
 }) {
+  const readOnly = useContext(ReadOnlyContext);
   // The Entries in the order they show, grouped by type.
   const rows = ENTRY_TYPES.flatMap((type) =>
     entries
@@ -152,6 +157,7 @@ export function StoryBible({
                         label: 'Image prompt…',
                         run: () => setImagePromptFor(entry.id),
                       },
+                      addTodoItem(readOnly, () => onAddTodo(entry.id)),
                       {
                         label: 'Move to Trash',
                         run: () =>

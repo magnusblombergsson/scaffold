@@ -1,6 +1,7 @@
 import {
   useContext,
   useEffect,
+  useRef,
   useState,
   type DragEvent,
   type FormEvent,
@@ -8,6 +9,7 @@ import {
 } from 'react';
 import type { CallFailure } from '../shared/bridge';
 import {
+  linkedTo,
   linkView,
   type LinkNames,
   type Todo,
@@ -19,15 +21,30 @@ import { ReadOnlyContext } from './read-only';
 const TODO = 'application/x-scaffold-todo';
 
 /**
+ * A Todo the Author started from elsewhere, as by Add Todo… or Ctrl+T: the
+ * New Todo field takes its link, its text when it has one, and focus.
+ * `count` asks again for the same.
+ */
+export type TodoDraft = {
+  link: TodoLink | null;
+  text?: string;
+  count: number;
+};
+
+/**
  * The Todos tab: a New Todo field, pre-linked to the open unit, over the
  * Todos not done, in the Author's order, and a folded Done section. Each
  * Todo's link opens its unit, or its Trash item while the unit is in Trash.
+ * In Writing, a toggle shows only the open unit's Todos.
  * A read-only Project shows the list and changes nothing.
  */
 export function TodoList({
   todos,
   names,
   prelink,
+  draft,
+  onlyOpen,
+  onOnlyOpen,
   onOpen,
   onOpenTrash,
   onError,
@@ -36,13 +53,19 @@ export function TodoList({
   names: LinkNames;
   /** What a new Todo links to unless the Author unlinks it: the open unit. */
   prelink: TodoLink | null;
+  draft?: TodoDraft;
+  /** Whether only the Todos linked to `prelink` show. */
+  onlyOpen?: boolean;
+  /** Sets `onlyOpen`; without it, there is no toggle. */
+  onOnlyOpen?(on: boolean): void;
   onOpen(link: TodoLink): void;
   onOpenTrash(trashId: string): void;
   onError(message: string | null): void;
 }) {
   const readOnly = useContext(ReadOnlyContext);
-  const open = todos.filter((todo) => !todo.done);
-  const done = todos.filter((todo) => todo.done);
+  const shown = onlyOpen ? linkedTo(todos, prelink) : todos;
+  const open = shown.filter((todo) => !todo.done);
+  const done = shown.filter((todo) => todo.done);
 
   /**
    * Runs a change to the Todos, the list showing it following from main;
@@ -62,9 +85,12 @@ export function TodoList({
     }
   }
 
-  /** Moves the Todo dragged to before or after `target`, among those done as it is, or not. */
+  /**
+   * Moves the Todo dragged to before or after `target`, among those done as
+   * it is, or not, shown or not.
+   */
   function drop(id: string, target: Todo, after: boolean) {
-    const group = target.done ? done : open;
+    const group = todos.filter((todo) => todo.done === target.done);
     if (id === target.id || !group.some((todo) => todo.id === id)) return;
     const rest = group.filter((todo) => todo.id !== id);
     const at = rest.findIndex((todo) => todo.id === target.id);
@@ -74,12 +100,11 @@ export function TodoList({
     );
   }
 
-  /** Moves a Todo one place up or down, by Alt+↑/↓. */
+  /** Moves a Todo past the one shown above or below it, by Alt+↑/↓. */
   function step(todo: Todo, by: -1 | 1) {
     const group = todo.done ? done : open;
-    const at = group.findIndex((t) => t.id === todo.id) + by;
-    if (at < 0 || at >= group.length) return;
-    void run(() => window.project.moveTodo(todo.id, at), 'move the Todo');
+    const next = group[group.findIndex((t) => t.id === todo.id) + by];
+    if (next) drop(todo.id, next, by === 1);
   }
 
   const row = (todo: Todo) => (
@@ -101,11 +126,22 @@ export function TodoList({
       <NewTodo
         names={names}
         prelink={prelink}
+        draft={draft}
         readOnly={readOnly}
         onAdd={(text, link) =>
           run(() => window.project.addTodo(text, link), 'add the Todo')
         }
       />
+      {onOnlyOpen && (
+        <label className="todos-only-open">
+          <input
+            type="checkbox"
+            checked={!!onlyOpen}
+            onChange={(event) => onOnlyOpen(event.target.checked)}
+          />
+          Only the open unit’s Todos
+        </label>
+      )}
       {open.length > 0 ? (
         <ol className="todo-list" aria-label="To do">
           {open.map(row)}
@@ -124,7 +160,13 @@ export function TodoList({
             disabled={readOnly}
             onClick={() =>
               void run(
-                () => window.project.clearDoneTodos(),
+                // Only those shown: the Author doesn't see the others go.
+                async () => {
+                  if (!onlyOpen) return window.project.clearDoneTodos();
+                  for (const todo of done) {
+                    await window.project.deleteTodo(todo.id);
+                  }
+                },
                 'clear the done Todos',
               )
             }
@@ -138,32 +180,44 @@ export function TodoList({
 }
 
 /**
- * The New Todo field. It links what it adds to the open unit, unless the
- * Author unlinks it, which holds until another unit opens or it is added.
+ * The New Todo field. It links what it adds to the open unit, unless a
+ * draft brings another link, which holds until it is added, or the Author
+ * unlinks it, which holds until another unit opens or it is added.
  */
 function NewTodo({
   names,
   prelink,
+  draft,
   readOnly,
   onAdd,
 }: {
   names: LinkNames;
   prelink: TodoLink | null;
+  draft?: TodoDraft;
   readOnly: boolean;
   /** Resolves with whether it was added. */
   onAdd(text: string, link: TodoLink | null): Promise<boolean>;
 }) {
   const [text, setText] = useState('');
-  const [unlinked, setUnlinked] = useState<TodoLink | null>(null);
+  /** The link chosen over the open unit: another, or none once unlinked. */
+  const [chosen, setChosen] = useState<{ link: TodoLink | null } | null>(null);
+  const input = useRef<HTMLInputElement>(null);
   const prelinkKey = prelink && `${prelink.kind}:${prelink.id}`;
-  useEffect(() => setUnlinked(null), [prelinkKey]);
-  const link =
-    prelink &&
-    !(unlinked?.kind === prelink.kind && unlinked.id === prelink.id) &&
-    linkView(prelink, names)
-      ? prelink
-      : null;
-  const view = link && linkView(link, names);
+  useEffect(
+    () => setChosen((now) => (now?.link === null ? null : now)),
+    [prelinkKey],
+  );
+  const draftCount = draft?.count;
+  useEffect(() => {
+    if (!draft) return;
+    setChosen({ link: draft.link });
+    if (draft.text !== undefined) setText(draft.text);
+    input.current?.focus();
+    // Asked for anew by its count alone.
+  }, [draftCount]);
+  const wanted = chosen ? chosen.link : prelink;
+  const view = wanted && linkView(wanted, names);
+  const link = view ? wanted : null;
 
   async function submit(event: FormEvent) {
     event.preventDefault();
@@ -171,12 +225,13 @@ function NewTodo({
     // Kept until it is added, so a failed add loses nothing.
     if (!(await onAdd(text, link))) return;
     setText('');
-    setUnlinked(null);
+    setChosen(null);
   }
 
   return (
     <form className="new-todo" onSubmit={(event) => void submit(event)}>
       <input
+        ref={input}
         aria-label="New Todo"
         placeholder="New Todo"
         value={text}
@@ -195,7 +250,7 @@ function NewTodo({
             aria-label={`Unlink from “${view.title}”`}
             title="Unlink"
             disabled={readOnly}
-            onClick={() => setUnlinked(link)}
+            onClick={() => setChosen({ link: null })}
           >
             ×
           </button>

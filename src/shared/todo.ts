@@ -28,6 +28,14 @@ export type Todo = {
   link?: TodoLink;
 };
 
+/** The Todos linked to `link`, as “Only the open unit’s Todos” shows; none without one. */
+export function linkedTo(todos: Todo[], link: TodoLink | null): Todo[] {
+  if (!link) return [];
+  return todos.filter(
+    (todo) => todo.link?.kind === link.kind && todo.link.id === link.id,
+  );
+}
+
 /** What changing a Todo sets: its text, its tick, or its link, which null drops. */
 export type TodoChange = {
   text?: string;

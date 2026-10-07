@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { PanelWidths } from '../shared/api';
 import {
   PROJECT_OUTLINE,
@@ -21,7 +21,7 @@ import { RoomList } from './RoomList';
 
 /**
  * The Brainstorm room: its Conversations on the left, the one open in the
- * centre, and the Story Bible and Outline skeleton on the right for
+ * centre, and the Story Bible, Outline skeleton and Todos on the right for
  * reference. No editor: a reply's Proposals are decided inline, and the
  * reference shows what they change at once.
  */
@@ -32,6 +32,7 @@ export function BrainstormRoom({
   onAddProvider,
   onOpenEntry,
   onChange,
+  todos,
 }: {
   /** Whether the room is shown, its Mode the window's. */
   active: boolean;
@@ -42,6 +43,8 @@ export function BrainstormRoom({
   /** Opens an Entry in the Writing Mode. */
   onOpenEntry(entryId: string): void;
   onChange: OnChange;
+  /** The Todos tab of the Reference pane. */
+  todos: ReactNode;
 }) {
   const providers = useProviders();
   const conversation = useConversation({
@@ -109,6 +112,7 @@ export function BrainstormRoom({
         manuscript={names.manuscript}
         entries={names.entries}
         onOpenEntry={onOpenEntry}
+        todos={todos}
       />
     </>
   );
@@ -116,20 +120,23 @@ export function BrainstormRoom({
 
 /**
  * The Story Bible and the Outline skeleton, read-only, kept up to date as
- * Proposals are accepted. Each Entry says whether the Assistant sees it.
+ * Proposals are accepted, and the Todos. Each Entry says whether the
+ * Assistant sees it.
  */
 function Reference({
   width,
   manuscript,
   entries,
   onOpenEntry,
+  todos,
 }: {
   width: number;
   manuscript: Manuscript;
   entries: Names['entries'];
   onOpenEntry(entryId: string): void;
+  todos: ReactNode;
 }) {
-  const [tab, setTab] = useState<'bible' | 'outlines'>('bible');
+  const [tab, setTab] = useState<'bible' | 'outlines' | 'todos'>('bible');
   /** Counts what may have changed what the reference shows, to read it anew. */
   const [changes, setChanges] = useState(0);
   useEffect(
@@ -163,6 +170,14 @@ function Reference({
         >
           Outline skeleton
         </button>
+        <button
+          role="tab"
+          aria-selected={tab === 'todos'}
+          id="reference-todos-tab"
+          onClick={() => setTab('todos')}
+        >
+          Todos
+        </button>
       </div>
       <div role="tabpanel" aria-labelledby={`reference-${tab}-tab`}>
         {tab === 'bible' ? (
@@ -171,8 +186,10 @@ function Reference({
             changes={changes}
             onOpenEntry={onOpenEntry}
           />
-        ) : (
+        ) : tab === 'outlines' ? (
           <OutlineSkeleton manuscript={manuscript} changes={changes} />
+        ) : (
+          todos
         )}
       </div>
     </aside>

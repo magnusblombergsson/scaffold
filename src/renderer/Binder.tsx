@@ -22,6 +22,7 @@ import { SHORTCUTS, shortcutText, withShortcut } from '../shared/shortcuts';
 import { MAC } from './platform';
 import { ReadOnlyContext } from './read-only';
 import { statusOf, type Status } from '../shared/status';
+import type { TodoLink } from '../shared/todo';
 import {
   PROJECT_OUTLINE,
   type Manuscript,
@@ -60,6 +61,8 @@ type Props = {
   onSetStatus(unitId: string, statusId: string | null): void;
   /** Opens Tags… on a Chapter or Scene. */
   onEditTags(unitId: string): void;
+  /** Starts a Todo linked to a Chapter or Scene. */
+  onAddTodo(link: TodoLink): void;
 };
 
 const SCENE = 'application/x-scaffold-scene';
@@ -78,6 +81,7 @@ export function Binder({
   statuses,
   onSetStatus,
   onEditTags,
+  onAddTodo,
 }: Props) {
   const project = window.project;
   const readOnly = useContext(ReadOnlyContext);
@@ -253,7 +257,13 @@ export function Binder({
       run: () => trash(scene, 'scene'),
     };
     if (!chapter) {
-      return [statusItem(scene), tagsItem(scene), ...moves, toTrash];
+      return [
+        statusItem(scene),
+        tagsItem(scene),
+        addTodoItem(readOnly, () => onAddTodo({ kind: 'scene', id: scene.id })),
+        ...moves,
+        toTrash,
+      ];
     }
     const index = chapter.scenes.indexOf(scene);
     return [
@@ -286,6 +296,7 @@ export function Binder({
       ...moves,
       statusItem(scene),
       tagsItem(scene),
+      addTodoItem(readOnly, () => onAddTodo({ kind: 'scene', id: scene.id })),
       toTrash,
     ];
   }
@@ -330,6 +341,9 @@ export function Binder({
       ...moveItems({ kind: 'chapter', id: chapter.id }),
       statusItem(chapter),
       tagsItem(chapter),
+      addTodoItem(readOnly, () =>
+        onAddTodo({ kind: 'chapter', id: chapter.id }),
+      ),
       {
         label: 'Move to Trash',
         // The Manuscript keeps at least one Chapter, and a Missing Scene has
@@ -605,6 +619,11 @@ export type MenuItem = {
   /** A submenu, which →, Enter or a click opens and ← or Escape closes. */
   | { items: MenuItem[] }
 );
+
+/** Add Todo…, in the menu of a Scene, Chapter or Entry, linked to it. */
+export function addTodoItem(readOnly: boolean, run: () => void): MenuItem {
+  return { label: 'Add Todo…', disabled: readOnly, run };
+}
 
 /** Keys as `aria-keyshortcuts` names them, such as Control+Shift+Enter or Alt+ArrowUp. */
 function ariaKeys(text: string): string {

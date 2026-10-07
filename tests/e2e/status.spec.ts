@@ -49,9 +49,10 @@ test('the Author sets a Status from the binder menu, by mouse or keys, and it sh
   await page
     .getByRole('button', { name: 'Chapter actions: Chapter 1' })
     .click();
-  // Above the last item it can do, Tags…: the only Chapter can't go to
-  // Trash.
+  // Above Tags… and Add Todo…, the last items it can do: the only Chapter
+  // can't go to Trash.
   await page.keyboard.press('End');
+  await page.keyboard.press('ArrowUp');
   await page.keyboard.press('ArrowUp');
   await expect(page.getByRole('menuitem', { name: 'Status' })).toBeFocused();
   await page.keyboard.press('ArrowRight');

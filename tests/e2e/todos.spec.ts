@@ -1,9 +1,18 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { answerDialogs, answerQuestions, launch, useTempDir } from './app';
+import {
+  addAnthropicKey,
+  answerDialogs,
+  answerQuestions,
+  chooseMenu,
+  launch,
+  useTempDir,
+} from './app';
+import { useFakeAnthropic } from './fake-anthropic';
 
 const tempDir = useTempDir();
+const anthropic = useFakeAnthropic();
 
 async function newProject(projectPath: string) {
   const app = await launch(tempDir());
@@ -195,4 +204,196 @@ test('a new Todo is linked to the open unit, its link opens it, and follows it t
     0,
   );
   await app.close();
+});
+
+/** The New Todo field, and the unit it links what it adds to. */
+function newTodo(page: Page) {
+  return {
+    field: todos(page).getByLabel('New Todo'),
+    link: todos(page).locator('.new-todo-link'),
+  };
+}
+
+test('Ctrl+T docks a collapsed left pane and focuses New Todo, linked to the open unit; it does nothing outside Writing', async () => {
+  const projectPath = path.join(tempDir(), 'My Novel');
+  const { app, page } = await newProject(projectPath);
+  try {
+    await page.keyboard.press('Control+Shift+M');
+    await expect(page.locator('.left-pane')).toBeHidden();
+
+    await page.keyboard.press('Control+t');
+    await expect(page.getByRole('tab', { name: 'Todos' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
+    await expect(newTodo(page).field).toBeFocused();
+    await expect(newTodo(page).link).toHaveText(/Scene 1/);
+    await page.keyboard.type('Name the ferry');
+    await page.keyboard.press('Enter');
+    await expect(row(page, 'Name the ferry').locator('.todo-link')).toHaveText(
+      'Scene 1',
+    );
+
+    // Insert › New Todo does the same, from another tab.
+    await page.getByRole('tab', { name: 'Manuscript' }).click();
+    await chooseMenu(app, ['Insert', 'New Todo'], page);
+    await expect(newTodo(page).field).toBeFocused();
+
+    await page.keyboard.press('Control+2');
+    await expect(
+      page.getByRole('button', { name: 'Brainstorm', pressed: true }),
+    ).toBeVisible();
+    await page.keyboard.press('Control+t');
+    await expect(
+      page.getByRole('button', { name: 'Brainstorm', pressed: true }),
+    ).toBeVisible();
+  } finally {
+    await app.close();
+  }
+});
+
+test('the toggle shows only the open unit’s Todos, and Brainstorm’s Reference has a Todos tab linking nothing', async () => {
+  const projectPath = path.join(tempDir(), 'My Novel');
+  const { app, page } = await newProject(projectPath);
+  try {
+    await page.getByRole('tab', { name: 'Todos' }).click();
+    await addTodo(page, 'Fix the opening');
+    await todos(page)
+      .getByRole('button', { name: 'Unlink from “Scene 1”' })
+      .click();
+    await addTodo(page, 'Anywhere');
+    await page.getByRole('tab', { name: 'Manuscript' }).click();
+    await page.getByRole('button', { name: 'Chapter 1', exact: true }).click();
+    await page.getByRole('tab', { name: 'Todos' }).click();
+    await addTodo(page, 'Tighten the chapter');
+
+    const toDo = todos(page).getByRole('list', { name: 'To do' });
+    const only = todos(page).getByLabel('Only the open unit’s Todos');
+    await only.check();
+    await expect.poll(textsIn(toDo)).toEqual(['Tighten the chapter']);
+    // It follows the unit opened.
+    await page.getByRole('tab', { name: 'Manuscript' }).click();
+    await page.getByRole('button', { name: 'Scene 1', exact: true }).click();
+    await page.getByRole('tab', { name: 'Todos' }).click();
+    await expect.poll(textsIn(toDo)).toEqual(['Fix the opening']);
+    await only.uncheck();
+    await expect
+      .poll(textsIn(toDo))
+      .toEqual(['Tighten the chapter', 'Anywhere', 'Fix the opening']);
+
+    await page.keyboard.press('Control+2');
+    const reference = page.getByRole('complementary', { name: 'Reference' });
+    await reference.getByRole('tab', { name: 'Todos' }).click();
+    await expect(newTodo(page).link).toHaveCount(0);
+    await expect(
+      todos(page).getByLabel('Only the open unit’s Todos'),
+    ).toHaveCount(0);
+    await addTodo(page, 'Brainstormed');
+    await expect(row(page, 'Brainstormed').locator('.todo-link')).toHaveCount(
+      0,
+    );
+
+    // A link opens its unit in Writing.
+    await row(page, 'Tighten the chapter').locator('.todo-link').click();
+    await expect(
+      page.getByRole('button', { name: 'Writing', pressed: true }),
+    ).toBeVisible();
+    await expect(page.locator('.scene-title')).toHaveText('Chapter 1');
+  } finally {
+    await app.close();
+  }
+});
+
+test('Add Todo… in the Binder, Story Bible and Corkboard menus starts a Todo linked to that unit', async () => {
+  const projectPath = path.join(tempDir(), 'My Novel');
+  const { app, page } = await newProject(projectPath);
+  try {
+    /** Adds the Todo started, as `text`, and checks its link. */
+    async function add(text: string, linked: string) {
+      await expect(newTodo(page).field).toBeFocused();
+      await expect(newTodo(page).link).toHaveText(new RegExp(linked));
+      await page.keyboard.type(text);
+      await page.keyboard.press('Enter');
+      await expect(row(page, text).locator('.todo-link')).toHaveText(linked);
+    }
+
+    await page
+      .getByRole('button', { name: 'Chapter actions: Chapter 1' })
+      .click();
+    await page.getByRole('menuitem', { name: 'Add Todo…' }).click();
+    await add('Tighten the chapter', 'Chapter 1');
+
+    await page.getByRole('tab', { name: 'Manuscript' }).click();
+    await page
+      .getByRole('button', { name: 'Scene actions: Scene 1', exact: true })
+      .click();
+    await page.getByRole('menuitem', { name: 'Add Todo…' }).click();
+    await add('Fix the opening', 'Scene 1');
+
+    await page.getByRole('tab', { name: 'Story Bible' }).click();
+    await page.getByRole('button', { name: 'New Entry' }).click();
+    await page
+      .getByRole('menuitem', { name: 'Character', exact: true })
+      .click();
+    await page
+      .getByRole('button', { name: 'Entry actions: New Character' })
+      .click();
+    await page.getByRole('menuitem', { name: 'Add Todo…' }).click();
+    await add('Give her a past', 'New Character');
+
+    // On the Chapter's Corkboard, a Scene card's menu links its Scene.
+    await page.getByRole('tab', { name: 'Manuscript' }).click();
+    await page.getByRole('button', { name: 'Chapter 1', exact: true }).click();
+    // Right-clicked, as the Author would.
+    await page
+      .getByRole('article', { name: 'Scene 1' })
+      .locator('header')
+      .click({ button: 'right' });
+    await page.getByRole('menuitem', { name: 'Add Todo…' }).click();
+    await add('Cut the weather', 'Scene 1');
+  } finally {
+    await app.close();
+  }
+});
+
+test('Add as Todo on a Finding starts a Todo of its text, linked to the Scene reviewed', async () => {
+  const projectPath = path.join(tempDir(), 'My Novel');
+  const finding = {
+    type: 'missing',
+    quote: 'dark night',
+    comment: 'Nobody sees the night.',
+  };
+  anthropic.calls.push({
+    reply: [
+      'One thing.',
+      `\n\`\`\`finding\n${JSON.stringify(finding)}\n\`\`\`\n`,
+    ],
+  });
+  const app = await launch(tempDir(), { anthropicUrl: anthropic.url });
+  try {
+    await answerDialogs(app, projectPath);
+    const page = await app.firstWindow();
+    await page.getByRole('button', { name: 'New Project…' }).click();
+    await page.getByLabel('Prose').pressSequentially('It was a dark night.');
+    const assistant = await addAnthropicKey(page);
+    await assistant.getByRole('button', { name: 'Review Scene' }).click();
+    const findings = assistant
+      .getByRole('list', { name: 'Findings' })
+      .getByRole('listitem');
+    await expect(findings).toHaveCount(1);
+
+    // With the Chapter open instead, the link is still the Scene reviewed.
+    await page.getByRole('button', { name: 'Chapter 1', exact: true }).click();
+    await findings.getByRole('button', { name: 'Add as Todo' }).click();
+    await expect(newTodo(page).field).toBeFocused();
+    await expect(newTodo(page).field).toHaveValue('Nobody sees the night.');
+    await expect(newTodo(page).link).toHaveText(/Scene 1/);
+    await page.keyboard.type(' Add stars.');
+    await page.keyboard.press('Enter');
+    await expect(
+      row(page, 'Nobody sees the night. Add stars.').locator('.todo-link'),
+    ).toHaveText('Scene 1');
+  } finally {
+    await app.close();
+  }
 });

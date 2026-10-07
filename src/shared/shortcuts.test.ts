@@ -55,6 +55,18 @@ describe('commandForKey', () => {
     });
   });
 
+  it('asks for a new Todo with Ctrl+T, either case', () => {
+    expect(commandForKey(key('t', { ctrlKey: true }), false)).toEqual({
+      type: 'newTodo',
+    });
+    expect(commandForKey(key('T', { ctrlKey: true }), false)).toEqual({
+      type: 'newTodo',
+    });
+    expect(
+      commandForKey(key('t', { ctrlKey: true, shiftKey: true }), false),
+    ).toBeNull();
+  });
+
   it('switches Mode with Ctrl+1/2/3', () => {
     expect(commandForKey(key('1', { ctrlKey: true }), false)).toEqual({
       type: 'mode',
@@ -155,6 +167,13 @@ describe('CHEAT_SHEET', () => {
       'CmdOrCtrl+Shift+M',
       'CmdOrCtrl+Shift+A',
     ]);
+  });
+
+  it('lists New Todo with the creates, in Writing', () => {
+    const create = CHEAT_SHEET.find(
+      (group) => group.title === 'Create, in Writing',
+    );
+    expect(create?.shortcuts.flatMap((s) => s.keys)).toContain('CmdOrCtrl+T');
   });
 
   it('lists Ctrl+S, which saves at once', () => {
