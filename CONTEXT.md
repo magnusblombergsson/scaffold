@@ -51,6 +51,10 @@ _Avoid_: Orphan, stray, lost Scene
 Said of a Scene that the Manuscript lists but whose Prose isn't on this computer, usually because it hasn't synced yet. A Missing Scene is shown but can't be written, and is never replaced by an empty one.
 _Avoid_: Deleted, broken, lost
 
+**Split**:
+Cutting a Scene in two at the cursor: the Prose after the cut becomes a new Scene right after it, or the first Scene of the next Chapter. The new Scene has the original's Status and Tags; its Outline and Notes start empty, and the image, Word target and Todos stay with the original. Undoing a Split joins the new Scene's Prose, as it is by then, back onto the end of the original's. A Missing or Unplaced Scene, or one in Conflict, can't be split.
+_Avoid_: Break (that separates Scenes in an Export or Import), divide, cut (that is where it splits)
+
 **Prose**:
 The story text itself — narration and dialogue — as written by the Author. The Assistant never writes, rewrites, or exemplifies Prose; it may comment on it. Text about the story, such as a blurb, tagline or caption, is not Prose, so the Assistant may suggest it; an epigraph it suggests by naming where to find one, never by quoting it.
 _Avoid_: Text, draft (when meaning the words themselves)
