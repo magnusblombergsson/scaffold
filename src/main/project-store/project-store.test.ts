@@ -191,7 +191,7 @@ describe('ProjectStore', () => {
     });
   });
 
-  it('writes project.json with format 1, an id, a language and the tree', async () => {
+  it('writes project.json with format 1, an id, a language, the Status list and the tree', async () => {
     const projectPath = path.join(dir, 'My Novel');
     const store = await createProject(projectPath, deps(), {
       language: 'sv-SE',
@@ -205,6 +205,7 @@ describe('ProjectStore', () => {
       format: 1,
       id: expect.stringMatching(/^[0-9a-f-]{36}$/),
       language: 'sv-SE',
+      statuses: store.statuses(),
       tree: store.tree(),
     });
     expect(manifest).not.toHaveProperty('title');
@@ -1095,7 +1096,7 @@ describe('Outlines and Notes', () => {
     await store.write(outline(a), {
       id: a,
       body: '- Anna finds the letter\n- She hides it',
-      meta: { pov: 'Anna', status: 'draft' },
+      meta: { pov: 'Anna', mood: 'tense' },
     });
     await store.write(outline(one), { id: one, body: '- Arrival', meta: {} });
     await store.close();
@@ -1103,15 +1104,15 @@ describe('Outlines and Notes', () => {
     expect(
       await readFile(path.join(projectPath, 'outlines', `${a}.md`), 'utf8'),
     ).toBe(
-      `---\nid: ${a}\nformat: 1\npov: Anna\nstatus: draft\n` +
-        'keysSavedAt:\n  pov: 0\n  status: 0\n---\n' +
+      `---\nid: ${a}\nformat: 1\npov: Anna\nmood: tense\n` +
+        'keysSavedAt:\n  pov: 0\n  mood: 0\n---\n' +
         '- Anna finds the letter\n- She hides it',
     );
     const reopened = await openProject(projectPath, deps());
     expect(await reopened.read(outline(a))).toEqual({
       id: a,
       body: '- Anna finds the letter\n- She hides it',
-      meta: { pov: 'Anna', status: 'draft' },
+      meta: { pov: 'Anna', mood: 'tense' },
     });
     expect(await reopened.read(outline(one))).toEqual({
       id: one,

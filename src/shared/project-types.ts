@@ -194,15 +194,20 @@ export type ProjectTree = { chapters: ChapterNode[] };
  */
 export type Manuscript = {
   chapters: ManuscriptChapter[];
-  unplaced: SceneNode[];
+  unplaced: ManuscriptScene[];
 };
+/**
+ * `status`: the id of its Status, as its Outline file holds it, which may
+ * not be in the Project's Status list.
+ */
 export type ManuscriptChapter = {
   id: string;
   title: string;
   scenes: ManuscriptScene[];
+  status?: string;
 };
 /** `missing`: in the tree, but its file isn't there (possibly not synced yet). */
-export type ManuscriptScene = SceneNode & { missing?: true };
+export type ManuscriptScene = SceneNode & { missing?: true; status?: string };
 
 /**
  * A deleted Scene or Chapter, or a version of a unit set aside when its

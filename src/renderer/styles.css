@@ -21,6 +21,15 @@
   --sheet-shadow: 0 1px 2px rgb(0 0 0 / 8%), 0 4px 14px rgb(0 0 0 / 7%);
   --float-shadow: 0 4px 16px rgb(0 0 0 / 15%);
   --raised-shadow: 0 1px 3px rgb(0 0 0 / 15%);
+  /* The fixed palette of Status colours. */
+  --status-grey: #8a857c;
+  --status-red: #c4473a;
+  --status-orange: #d27a1e;
+  --status-yellow: #b99a00;
+  --status-green: #3f8f5a;
+  --status-teal: #2a8a8a;
+  --status-blue: #3b6fc4;
+  --status-purple: #8455b8;
   color-scheme: light dark;
   accent-color: var(--accent);
 }
@@ -42,6 +51,14 @@
     --sheet-shadow: 0 1px 2px rgb(0 0 0 / 40%), 0 4px 14px rgb(0 0 0 / 30%);
     --float-shadow: 0 4px 16px rgb(0 0 0 / 50%);
     --raised-shadow: 0 1px 3px rgb(0 0 0 / 60%);
+    --status-grey: #9d9a94;
+    --status-red: #ef8478;
+    --status-orange: #f0a35c;
+    --status-yellow: #e3c849;
+    --status-green: #7cc794;
+    --status-teal: #6cc3c3;
+    --status-blue: #82a8ec;
+    --status-purple: #b597e2;
   }
 }
 
@@ -1047,6 +1064,36 @@ h2.binder-title > button:hover::after {
   font-weight: normal;
 }
 
+.status-dot {
+  flex: none;
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: var(--status-grey);
+}
+
+.status-dot[data-colour='red'] {
+  background: var(--status-red);
+}
+.status-dot[data-colour='orange'] {
+  background: var(--status-orange);
+}
+.status-dot[data-colour='yellow'] {
+  background: var(--status-yellow);
+}
+.status-dot[data-colour='green'] {
+  background: var(--status-green);
+}
+.status-dot[data-colour='teal'] {
+  background: var(--status-teal);
+}
+.status-dot[data-colour='blue'] {
+  background: var(--status-blue);
+}
+.status-dot[data-colour='purple'] {
+  background: var(--status-purple);
+}
+
 .binder-missing {
   color: var(--muted);
   font-style: italic;
@@ -1099,7 +1146,7 @@ h2.binder-title > button:hover::after {
   box-shadow: var(--float-shadow);
 }
 
-.menu-items [role='menuitem'] {
+.menu-items [role^='menuitem'] {
   background: none;
   border: none;
   color: inherit;
@@ -1110,8 +1157,47 @@ h2.binder-title > button:hover::after {
   border-radius: 4px;
 }
 
-.menu-items [role='menuitem']:hover:not(:disabled) {
+.menu-items [role^='menuitem']:hover:not(:disabled),
+.menu-items [aria-expanded='true'] {
   background: var(--hover);
+}
+
+.menu-parent {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+}
+
+.menu-arrow {
+  color: var(--muted);
+}
+
+[aria-expanded='true'] > .menu-arrow {
+  rotate: 90deg;
+}
+
+/* Opens below its item, inside the menu: a pane's edge never cuts it off. */
+.menu-submenu {
+  position: static;
+  min-width: 0;
+  padding: 0 0 0 0.75rem;
+  border: none;
+  box-shadow: none;
+}
+
+/* A choice: a tick before the one chosen, then its dot, if any, and its label. */
+.menu-items [role='menuitemradio'] {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.menu-items [role='menuitemradio']::before {
+  content: '✓' / '';
+  width: 0.8rem;
+  visibility: hidden;
+}
+.menu-items [role='menuitemradio'][aria-checked='true']::before {
+  visibility: visible;
 }
 
 .editor.empty,

@@ -571,6 +571,8 @@ function ProjectView({
   const [readOnly, setReadOnly] = useState(project.readOnly);
   /** The language the Prose is spellchecked and typeset in; the Author may change it. */
   const [language, setLanguage] = useState(project.language);
+  /** The Project's Status list, which another computer may change. */
+  const [statuses, setStatuses] = useState(project.statuses);
   const [projectSettingsOpen, setProjectSettingsOpen] = useState(false);
 
   /** The latest unit another computer changed; `count` starts its toast's time over. */
@@ -608,6 +610,10 @@ function ProjectView({
           setLanguage(event.language);
         } else if (event.type === 'foldedNoteImageChanged') {
           setFoldedNoteImage(event.on);
+        } else if (event.type === 'unitDetailsChanged') {
+          setManuscript(event.manuscript);
+        } else if (event.type === 'statusesChanged') {
+          setStatuses(event.statuses);
         } else if (event.type === 'readOnly') {
           // Main still takes edits for a moment: these are the last.
           flushPendingEdits();
@@ -618,6 +624,16 @@ function ProjectView({
       }),
     [refreshTrash, changeLatest],
   );
+
+  /** Gives a Chapter or Scene a Status; the Manuscript showing it follows from main. */
+  async function setStatus(unitId: string, statusId: string | null) {
+    try {
+      await window.project.setStatus(unitId, statusId);
+      onError(null);
+    } catch (error) {
+      onError(`Can't set the Status: ${(error as CallFailure).message}`);
+    }
+  }
 
   /** Runs a structure operation, and offers to undo it; null when the Author cancelled it. */
   async function change(
@@ -969,6 +985,10 @@ function ProjectView({
                       renaming={renaming}
                       onRename={setRenaming}
                       onUndo={undoLatest}
+                      statuses={statuses}
+                      onSetStatus={(unitId, statusId) =>
+                        void setStatus(unitId, statusId)
+                      }
                     />
                   ) : tab === 'bible' ? (
                     <StoryBible

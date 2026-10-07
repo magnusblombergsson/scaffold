@@ -75,6 +75,7 @@ const projectHandlers: Handlers<
   emptyTrash: ({ store, sender }) => emptyTrash(sender, store),
   setLanguage: ({ store, sender }, language) =>
     setLanguage(sender, store, language),
+  setStatus: ({ store }, unitId, statusId) => store.setStatus(unitId, statusId),
   setFoldedNoteImage: ({ store, sender }, on) =>
     saveProjectSetting(
       sender,
