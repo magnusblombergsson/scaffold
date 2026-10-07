@@ -2180,7 +2180,7 @@ export class ProjectStore {
    */
   private async saveDetail(
     ref: OutlineRef,
-    key: typeof STATUS | typeof TAGS,
+    key: typeof STATUS | typeof TAGS | typeof IMAGE,
     value: unknown,
   ): Promise<void> {
     const held = unitKey(ref);
@@ -2252,8 +2252,8 @@ export class ProjectStore {
   }
 
   /**
-   * Notes a unit's Status and Tags as the header of its Outline file holds
-   * them; true if either changed.
+   * Notes a unit's Status, Tags and image as the header of its Outline file
+   * holds them; true if any changed.
    */
   private noteDetails(
     id: string,
@@ -2265,9 +2265,11 @@ export class ProjectStore {
     const before = this.unitDetails.get(id) ?? {};
     const status = header[STATUS];
     const tags = readTags(header[TAGS]);
+    const image = imageFile(id, header[IMAGE]);
     const details: HeldDetails = {
       ...(typeof status === 'string' && { status }),
       ...(tags.length > 0 && { tags }),
+      ...(image && { image }),
     };
     if (Object.keys(details).length > 0) this.unitDetails.set(id, details);
     else this.unitDetails.delete(id);
@@ -2643,8 +2645,12 @@ export class ProjectStore {
    * file isn't here, as before it syncs. Other files in `images/`, such as
    * a sync client's conflict copies, are never read.
    */
-  async readEntryImage(entryId: string): Promise<EntryImage | null> {
-    const name = this.entries.get(entryId)?.image;
+  readEntryImage(entryId: string): Promise<EntryImage | null> {
+    return this.readImage(this.entries.get(entryId)?.image);
+  }
+
+  /** The image file `name` in `images/`; null without one, or while it isn't here. */
+  private async readImage(name?: string): Promise<EntryImage | null> {
     if (!name) return null;
     const file = imagePath(this.path, name);
     if (!(await this.deps.fs.exists(file))) return null;
@@ -2668,6 +2674,81 @@ export class ProjectStore {
       if (await this.deps.fs.exists(file)) await this.deps.fs.unlink(file);
     }
     this.emit({ type: 'entryImageChanged', id: entryId });
+  }
+
+  /**
+   * Sets a Scene's or Chapter's image, stored as `images/<id>.<extension>`
+   * and named in its Outline file's header, a unit detail (ADR 0008), in
+   * place of any it had. There is no undo, as for an Entry's.
+   */
+  setUnitImage(unitId: string, image: EntryImage): Promise<void> {
+    return this.enqueueWrite(async () => {
+      const ref = this.unitImageRef(unitId);
+      const name = `${unitId}.${image.extension}`;
+      await this.deps.fs.mkdir(path.join(this.path, IMAGES));
+      await safeWrite(
+        this.deps.fs,
+        this.deps.clock,
+        imagePath(this.path, name),
+        image.data,
+      );
+      await this.changeUnitImage(ref, name);
+    });
+  }
+
+  /** Removes a Scene's or Chapter's image, deleting its file. No undo either. */
+  removeUnitImage(unitId: string): Promise<void> {
+    return this.enqueueWrite(async () => {
+      await this.changeUnitImage(this.unitImageRef(unitId), undefined);
+    });
+  }
+
+  /**
+   * The image a Scene's or Chapter's Outline header names; null without one,
+   * or while its file isn't here, as before it syncs.
+   */
+  readUnitImage(unitId: string): Promise<EntryImage | null> {
+    return this.readImage(this.unitDetails.get(unitId)?.image);
+  }
+
+  /** The Outline of a Scene or Chapter whose image may change now. */
+  private unitImageRef(unitId: string): OutlineRef {
+    if (unitId === PROJECT_OUTLINE) {
+      throw new Error('Only a Scene, Chapter or Entry has an image');
+    }
+    const ref = outlineRef(unitId);
+    this.refuseUnavailable(ref);
+    return ref;
+  }
+
+  /** Names `image` in the Outline's header, then deletes the file it named before. */
+  private async changeUnitImage(
+    ref: OutlineRef,
+    image: string | undefined,
+  ): Promise<void> {
+    const before = this.unitDetails.get(ref.id)?.image;
+    await this.saveDetail(ref, IMAGE, image);
+    if (before && before !== image) {
+      const file = imagePath(this.path, before);
+      if (await this.deps.fs.exists(file)) await this.deps.fs.unlink(file);
+    }
+    this.emit({ type: 'unitImageChanged', id: ref.id });
+    this.emit({ type: 'unitDetailsChanged', manuscript: this.manuscript() });
+  }
+
+  /** Moves the images the Chapters and Scenes of `ids` have, to Trash or back. */
+  private async moveUnitImages(
+    ids: readonly string[],
+    to: 'trash' | 'images',
+  ): Promise<void> {
+    for (const id of ids) {
+      const name = this.unitDetails.get(id)?.image;
+      if (!name) continue;
+      const inTrash = path.join(trashDir(this.path), name);
+      const inImages = imagePath(this.path, name);
+      if (to === 'trash') await this.moveFile(inImages, inTrash);
+      else await this.moveFile(inTrash, inImages);
+    }
   }
 
   /** Changes the Entries, and says so if that changes the list. */
@@ -3053,11 +3134,19 @@ export class ProjectStore {
       for (const name of names) {
         const file = path.join(dir, name);
         // The image of an Entry back in the Story Bible, as when an MVP app
-        // restored it, goes back to images/.
+        // restored it, goes back to images/; so does a Scene's or Chapter's
+        // back in the Manuscript.
         const owner = IMAGE_FILE.exec(name)?.[1];
         if (owner && this.entries.get(owner)?.image === name) {
           await this.moveFile(file, imagePath(this.path, name));
           this.emit({ type: 'entryImageChanged', id: owner });
+        } else if (
+          owner &&
+          this.isLive(owner) &&
+          this.unitDetails.get(owner)?.image === name
+        ) {
+          await this.moveFile(file, imagePath(this.path, name));
+          this.emit({ type: 'unitImageChanged', id: owner });
         } else {
           await this.deps.fs.unlink(file);
         }
@@ -3152,6 +3241,8 @@ export class ProjectStore {
       if (found) await this.writeManifest({ ...this.manifest, tree });
       this.trash.set(sceneId, trashedScene(sceneId, info));
     });
+    // Last: a crash before leaves it in images/, where restoring finds it.
+    await this.moveUnitImages([sceneId], 'trash');
   }
 
   private async moveChapterToTrash(chapterId: string): Promise<void> {
@@ -3197,6 +3288,8 @@ export class ProjectStore {
       await this.writeManifest({ ...this.manifest, tree });
       this.trash.set(chapter.id, trashedChapter(record));
     });
+    // Its Scenes' images go with its own.
+    await this.moveUnitImages([chapterId, ...ids], 'trash');
   }
 
   /**
@@ -3286,6 +3379,12 @@ export class ProjectStore {
       );
     }
 
+    // Images first: a crash after leaves them in images/, where restoring
+    // finds them.
+    await this.moveUnitImages(
+      item.kind === 'chapter' ? [id, ...item.scenes.map((s) => s.id)] : [id],
+      'images',
+    );
     // Scene files first, the tree next, the Trash copies last.
     const restored: string[] = [];
     const restoreFile = async (sceneId: string) => {
@@ -3462,7 +3561,8 @@ export class ProjectStore {
   /** A narrower handle for building the Assistant's context; it has no private notes. */
   assistantView(): AssistantView {
     return {
-      manuscript: () => this.manuscript(),
+      // Nor a Scene's or Chapter's image.
+      manuscript: () => withoutUnitImages(this.manuscript()),
       statuses: () => this.statuses(),
       // Nor an Entry's image.
       listEntries: () => this.listEntries().map(withoutImage),
@@ -4626,18 +4726,29 @@ function unitPath(projectPath: string, ref: UnitRef): string {
   return path.join(projectPath, UNIT_DIRS[ref.kind], `${ref.id}.md`);
 }
 
-/** Where Entry images are, each named by its Entry's `image`. */
+/** Where Entry, Scene and Chapter images are, each named by its unit's `image`. */
 const IMAGES = 'images';
 
 function imagePath(projectPath: string, name: string): string {
   return path.join(projectPath, IMAGES, name);
 }
 
-/** `image` when it names the Entry's own image file, `<id>.jpg` or `<id>.png`. */
-function imageFile(entryId: string, image: unknown): string | undefined {
-  return typeof image === 'string' && IMAGE_FILE.exec(image)?.[1] === entryId
+/** `image` when it names the unit's own image file, `<id>.jpg` or `<id>.png`. */
+function imageFile(unitId: string, image: unknown): string | undefined {
+  return typeof image === 'string' && IMAGE_FILE.exec(image)?.[1] === unitId
     ? image
     : undefined;
+}
+
+/** `manuscript` without the image of any Chapter or Scene. */
+function withoutUnitImages(manuscript: Manuscript): Manuscript {
+  return {
+    chapters: manuscript.chapters.map((chapter) => ({
+      ...withoutImage(chapter),
+      scenes: chapter.scenes.map(withoutImage),
+    })),
+    unplaced: manuscript.unplaced.map(withoutImage),
+  };
 }
 
 const CONVERSATIONS = 'conversations';
@@ -4762,8 +4873,14 @@ const STATUS = 'status';
  */
 const TAGS = 'tags';
 
+/**
+ * The header key naming a Chapter's or Scene's image file in `images/`, in
+ * its Outline file. Only `setUnitImage` and `removeUnitImage` change it.
+ */
+const IMAGE = 'image';
+
 /** A Chapter's or Scene's details, as its Outline file holds them. */
-type HeldDetails = { status?: string; tags?: string[] };
+type HeldDetails = { status?: string; tags?: string[]; image?: string };
 
 /**
  * An Outline's metadata is the rest of its frontmatter, so it already holds
@@ -4847,6 +4964,7 @@ function unitValue(ref: UnitRef, file: UnitFile): UnitValue {
     [KEYS_SAVED_AT]: _savedAt,
     [STATUS]: _status,
     [TAGS]: _tags,
+    [IMAGE]: _image,
     ...meta
   } = frontmatter;
   return { id: ref.id, body, meta };

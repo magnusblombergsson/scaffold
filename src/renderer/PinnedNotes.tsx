@@ -17,8 +17,9 @@ const NOTE_WIDTH = 320;
 
 /**
  * The Pinned notes, floating over the Writing room, the one on top last.
- * Each is dragged by its header, folded to its title, opened or unpinned;
- * the window shrinking never leaves one outside it.
+ * Each is dragged by its header, folded to its title, switched between its
+ * Entry's text and image, opened or unpinned; the window shrinking never
+ * leaves one outside it.
  */
 export function PinnedNotes({
   notes,
@@ -109,6 +110,8 @@ function Note({
     if (at) onChange({ type: 'move', at }, true);
   };
   const shown = placeInside(note, size, room);
+  /** Shown as its image: only while the Entry has one. */
+  const asImage = Boolean(note.image && summary.image);
 
   return (
     <section
@@ -160,6 +163,17 @@ function Note({
           />
         )}
         <h2 className="pinned-note-title">{title}</h2>
+        {summary.image && (
+          <button
+            className="peek-card-icon"
+            aria-label={`Show the image of “${title}”`}
+            aria-pressed={asImage}
+            title="Show image"
+            onClick={() => onChange({ type: 'show', image: !asImage }, true)}
+          >
+            <span aria-hidden="true">▣</span>
+          </button>
+        )}
         <button
           className="peek-card-icon"
           aria-label={note.folded ? `Unfold “${title}”` : `Fold “${title}”`}
@@ -186,11 +200,24 @@ function Note({
           <span aria-hidden="true">×</span>
         </button>
       </header>
-      {!note.folded && entry && (
-        <div className="pinned-note-body">
-          <PeekCard entry={entry} inNote />
-        </div>
-      )}
+      {!note.folded &&
+        (asImage ? (
+          <div className="pinned-note-body pinned-note-picture">
+            {image && (
+              <ViewableImage
+                src={image}
+                alt={`Image of ${title}`}
+                caption={title}
+              />
+            )}
+          </div>
+        ) : (
+          entry && (
+            <div className="pinned-note-body">
+              <PeekCard entry={entry} inNote />
+            </div>
+          )
+        ))}
     </section>
   );
 }

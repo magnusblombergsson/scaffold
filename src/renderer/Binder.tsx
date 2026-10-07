@@ -23,6 +23,7 @@ import { MAC } from './platform';
 import { ReadOnlyContext } from './read-only';
 import { statusOf, type Status } from '../shared/status';
 import type { TodoLink } from '../shared/todo';
+import { unitImageItems } from './UnitImage';
 import {
   PROJECT_OUTLINE,
   type Manuscript,
@@ -249,6 +250,7 @@ export function Binder({
       return [
         statusItem(scene),
         tagsItem(scene),
+        ...unitImageItems(scene, readOnly),
         addTodoItem(readOnly, () => onAddTodo({ kind: 'scene', id: scene.id })),
         ...moves,
         toTrash,
@@ -285,6 +287,7 @@ export function Binder({
       ...moves,
       statusItem(scene),
       tagsItem(scene),
+      ...unitImageItems(scene, readOnly),
       addTodoItem(readOnly, () => onAddTodo({ kind: 'scene', id: scene.id })),
       toTrash,
     ];
@@ -330,6 +333,7 @@ export function Binder({
       ...moveItems({ kind: 'chapter', id: chapter.id }),
       statusItem(chapter),
       tagsItem(chapter),
+      ...unitImageItems(chapter, readOnly),
       addTodoItem(readOnly, () =>
         onAddTodo({ kind: 'chapter', id: chapter.id }),
       ),

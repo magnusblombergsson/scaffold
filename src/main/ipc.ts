@@ -9,7 +9,11 @@ import {
 } from '../shared/api';
 import type { Handlers } from '../shared/bridge';
 import { renameTagInFilter, withValue } from '../shared/filter';
-import { PROSE_LANGUAGES, type ProseLanguage } from '../shared/project-types';
+import {
+  PROSE_LANGUAGES,
+  type EntryImage,
+  type ProseLanguage,
+} from '../shared/project-types';
 import { spelledTags } from '../shared/tags';
 import { createConversationEngine } from './assistant/conversation-engine';
 import { createImagePrompts } from './assistant/image-prompt';
@@ -62,10 +66,17 @@ const projectHandlers: Handlers<
     store.setEntryVisibility(entryId, visibility),
   setEntryType: ({ store }, entryId, type) => store.setEntryType(entryId, type),
   chooseEntryImage: ({ store, sender }, entryId) =>
-    chooseEntryImage(sender, store, entryId),
+    chooseImage(sender, (image) => store.setEntryImage(entryId, image)),
   removeEntryImage: ({ store }, entryId) => store.removeEntryImage(entryId),
   entryImage: async ({ store }, entryId) => {
     const image = await store.readEntryImage(entryId);
+    return image && imageDataUrl(image);
+  },
+  chooseUnitImage: ({ store, sender }, unitId) =>
+    chooseImage(sender, (image) => store.setUnitImage(unitId, image)),
+  removeUnitImage: ({ store }, unitId) => store.removeUnitImage(unitId),
+  unitImage: async ({ store }, unitId) => {
+    const image = await store.readUnitImage(unitId);
     return image && imageDataUrl(image);
   },
   restore: ({ store }, id) => store.restore(id),
@@ -279,13 +290,12 @@ async function emptyTrash(
 }
 
 /**
- * Asks for an image and makes it the Entry's, scaled down; tells the Author
- * when it can't be read or stored.
+ * Asks for an image and hands it to `use`, scaled down, to make it an Entry's,
+ * Scene's or Chapter's; tells the Author when it can't be read or stored.
  */
-async function chooseEntryImage(
+async function chooseImage(
   sender: WebContents,
-  store: ProjectStore,
-  entryId: string,
+  use: (image: EntryImage) => Promise<void>,
 ): Promise<boolean> {
   const window = BrowserWindow.fromWebContents(sender);
   const options = {
@@ -300,10 +310,10 @@ async function chooseEntryImage(
   if (canceled || filePaths.length === 0) return false;
   try {
     const image = entryImageOf(nativeImage.createFromPath(filePaths[0]));
-    await store.setEntryImage(entryId, image);
+    await use(image);
     return true;
   } catch (error) {
-    console.error(`Can't set the image of Entry ${entryId}:`, error);
+    console.error(`Can't set the image:`, error);
     const warning = {
       type: 'warning' as const,
       buttons: ['OK'],

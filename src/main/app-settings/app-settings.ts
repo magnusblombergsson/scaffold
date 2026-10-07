@@ -269,8 +269,12 @@ function pinnedNotes(raw: unknown[]): PinnedNote[] {
       typeof note.folded === 'boolean' &&
       !notes.some((kept) => kept.entryId === note.entryId)
     ) {
-      const { entryId, x, y, folded } = note;
-      notes.push({ entryId, x, y, folded });
+      const { entryId, x, y, folded, image } = note;
+      notes.push(
+        typeof image === 'boolean'
+          ? { entryId, x, y, folded, image }
+          : { entryId, x, y, folded },
+      );
     }
   }
   return notes;

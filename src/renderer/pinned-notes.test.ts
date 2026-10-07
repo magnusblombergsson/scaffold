@@ -5,6 +5,7 @@ import {
   changeNote,
   placeInside,
   raise,
+  textWithoutImage,
   togglePin,
   withoutTrashed,
 } from './pinned-notes';
@@ -64,6 +65,24 @@ describe('withoutTrashed', () => {
   });
 });
 
+describe('textWithoutImage', () => {
+  it('turns back to text the notes showing an image their Entry no longer has', () => {
+    const notes = [
+      { ...anna, image: true },
+      { ...harbour, image: true },
+    ];
+    expect(textWithoutImage(notes, ['harbour'])).toEqual([
+      { ...anna, image: false },
+      { ...harbour, image: true },
+    ]);
+  });
+
+  it('leaves the notes as they are when every one shown as image has one', () => {
+    const notes = [{ ...anna, image: true }, harbour];
+    expect(textWithoutImage(notes, ['anna'])).toBe(notes);
+  });
+});
+
 describe('placeInside', () => {
   const window = { width: 1000, height: 800 };
   const note = { width: 300, height: 200 };
@@ -111,6 +130,18 @@ describe('applyChange', () => {
       anna,
     ]);
     expect(applyChange(notes, 'anna', { type: 'unpin' })).toEqual([harbour]);
+  });
+
+  it('switches the Entry’s note between its image and its text', () => {
+    const shown = applyChange([anna, harbour], 'anna', {
+      type: 'show',
+      image: true,
+    });
+    expect(shown).toEqual([{ ...anna, image: true }, harbour]);
+    expect(applyChange(shown, 'anna', { type: 'show', image: false })).toEqual([
+      { ...anna, image: false },
+      harbour,
+    ]);
   });
 
   it('leaves the notes as they are when raising the one on top', () => {
