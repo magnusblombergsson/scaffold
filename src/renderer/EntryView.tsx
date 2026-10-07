@@ -38,6 +38,7 @@ import {
   textToDoc,
 } from './plain-text-editor';
 import { entryTitle } from './StoryBible';
+import { TagInput } from './TagsDialog';
 import { UnitEditor } from './UnitEditor';
 import { tellEntryWritten } from './entry-written';
 
@@ -54,6 +55,9 @@ export function textToLines(text: string): string[] {
     .map((line) => line.trim())
     .filter(Boolean);
 }
+
+/** No Tags, the same each time. */
+const NO_TAGS: string[] = [];
 
 /** All of a one-line field's text. */
 const selectAll = (doc: Node) => ({ from: 1, to: doc.content.size - 1 });
@@ -160,6 +164,7 @@ export function EntryView({
   reveal,
   onType,
   onVisibility,
+  onTags,
   onShowProposal,
 }: {
   entry: EntrySummary;
@@ -175,6 +180,8 @@ export function EntryView({
   reveal?: Reveal;
   onType(type: EntryType): void;
   onVisibility(visibility: Visibility): void;
+  /** Gives the Entry Tags; resolves once main has, or the Author is told it couldn't. */
+  onTags(tags: string[]): Promise<void>;
   /** Opens a pending Proposal's Conversation at its card. */
   onShowProposal(conversationId: string, proposalId: string): void;
 }) {
@@ -437,8 +444,10 @@ export function EntryView({
               <p className="field-hint">One per line</p>
               {ghosts('aliases')}
             </section>
-            {/* The header's bottom line, level with the image's foot, where the Tags go. */}
-            <div className="entry-header-foot" />
+            {/* The header's bottom line, level with the image's foot. */}
+            <div className="entry-header-foot">
+              <TagInput tags={summary.tags ?? NO_TAGS} onChange={onTags} />
+            </div>
           </div>
           <EntryImageSection entry={summary} />
         </header>

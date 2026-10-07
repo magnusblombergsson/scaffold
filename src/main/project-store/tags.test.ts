@@ -362,3 +362,162 @@ describe('Tags set on two computers', () => {
     });
   });
 });
+
+// Entries share the vocabulary. An Entry keeps its Tags, by spelling, in
+// its own file's header, a unit detail as well.
+describe('Entry Tags', () => {
+  const entryPath = (id: string, name = `${id}.md`) =>
+    path.join(projectPath, 'bible', name);
+  const entry = (id: string) => ({ kind: 'entry', id }) as const;
+  const summaryOf = (store: ProjectStore, id: string) =>
+    store.listEntries().find((e) => e.id === id);
+
+  it('show on the Entry and in the list, and survive reopening', async () => {
+    await newProject();
+    const store = await open();
+    const { id } = await store.createEntry('character', 'Anna');
+
+    await store.setTags(id, ['Mara', 'flashback']);
+
+    expect((await store.read(entry(id))).tags).toEqual(['Mara', 'flashback']);
+    expect(summaryOf(store, id)?.tags).toEqual(['Mara', 'flashback']);
+    await store.close();
+    const reopened = await open();
+    expect((await reopened.read(entry(id))).tags).toEqual([
+      'Mara',
+      'flashback',
+    ]);
+    expect(summaryOf(reopened, id)?.tags).toEqual(['Mara', 'flashback']);
+  });
+
+  it('are kept in the Entry file’s header by spelling; none takes the key away', async () => {
+    await newProject();
+    const store = await open();
+    const { id } = await store.createEntry('place', 'Harbour');
+
+    await store.setTags(id, ['Mara']);
+    const header = async () =>
+      parseUnitFile(await readFile(entryPath(id), 'utf8')).frontmatter;
+    expect(await header()).toMatchObject({ name: 'Harbour', tags: ['Mara'] });
+
+    await store.setTags(id, []);
+    expect(await header()).not.toHaveProperty('tags');
+    expect((await store.read(entry(id))).tags).toBeUndefined();
+    expect(summaryOf(store, id)).not.toHaveProperty('tags');
+  });
+
+  it('share one vocabulary with Scenes and Chapters, either way', async () => {
+    const { sceneId, otherId } = await newProject();
+    const store = await open();
+    const { id } = await store.createEntry('character', 'Anna');
+    await store.setTags(sceneId, ['Mara']);
+
+    await store.setTags(id, ['MARA', 'the war']);
+    await store.setTags(otherId, ['The War']);
+
+    expect((await store.read(entry(id))).tags).toEqual(['Mara', 'the war']);
+    expect(tagsOf(store, otherId)).toEqual(['the war']);
+    expect(store.tags()).toEqual(['Mara', 'the war']);
+  });
+
+  it('tell the window the Entries with them', async () => {
+    await newProject();
+    const store = await open();
+    const { id } = await store.createEntry('character', 'Anna');
+    const events = eventsOf(store);
+
+    await store.setTags(id, ['Mara']);
+
+    expect(events).toContainEqual({
+      type: 'entriesChanged',
+      entries: store.listEntries(),
+    });
+  });
+
+  it('are kept as the Entry is written, by an editor that never saw them', async () => {
+    await newProject();
+    const store = await open();
+    const { id } = await store.createEntry('character', 'Anna');
+    const value = await store.read(entry(id));
+    await store.setTags(id, ['Mara']);
+
+    await store.write(entry(id), { ...value, description: 'Later.' });
+    await store.flush();
+
+    expect((await store.read(entry(id))).tags).toEqual(['Mara']);
+    expect(summaryOf(store, id)?.tags).toEqual(['Mara']);
+    expect(store.listConflicts()).toEqual([]);
+  });
+
+  it('count an Entry in Trash, which keeps them to be restored', async () => {
+    await newProject();
+    const store = await open();
+    const { id } = await store.createEntry('character', 'Anna');
+    await store.setTags(id, ['Mara']);
+
+    await store.trashEntry(id);
+
+    expect(store.tags()).toEqual(['Mara']);
+    await store.close();
+    const reopened = await open();
+    expect(reopened.tags()).toEqual(['Mara']);
+    await reopened.restore(id);
+    expect(summaryOf(reopened, id)?.tags).toEqual(['Mara']);
+    await reopened.emptyTrash();
+    expect(reopened.tags()).toEqual(['Mara']);
+  });
+
+  it('lose those of an Entry deleted for good as Trash is emptied', async () => {
+    await newProject();
+    const store = await open();
+    const { id } = await store.createEntry('character', 'Anna');
+    await store.setTags(id, ['Mara']);
+    await store.trashEntry(id);
+
+    await store.emptyTrash();
+
+    expect(store.tags()).toEqual([]);
+  });
+
+  it('merge per key as copies of the Entry meet, with no Conflict', async () => {
+    await newProject();
+    const first = await open('ALPHA', 1000);
+    const { id } = await first.createEntry('character', 'Anna');
+    await first.close();
+    const base = await readFile(entryPath(id), 'utf8');
+    const alpha = await open('ALPHA', 2000);
+    await alpha.setTags(id, ['Mara']);
+    await alpha.close();
+    const alphas = await readFile(entryPath(id), 'utf8');
+    await writeFile(entryPath(id), base);
+    const beta = await open('BETA', 3000);
+    await beta.setEntryImage(id, {
+      data: new Uint8Array([1, 2, 3]),
+      extension: 'png',
+    });
+    await beta.close();
+    await writeFile(entryPath(id, `${id}-ALPHA.md`), alphas);
+
+    const store = await open();
+
+    expect(store.listConflicts()).toEqual([]);
+    expect(
+      parseUnitFile(await readFile(entryPath(id), 'utf8')).frontmatter,
+    ).toMatchObject({ image: `${id}.png`, tags: ['Mara'] });
+    // Read again, as any change from another computer, on the next check.
+    await store.checkForChanges();
+    expect(summaryOf(store, id)).toMatchObject({
+      image: `${id}.png`,
+      tags: ['Mara'],
+    });
+  });
+
+  it('are refused for an Entry there isn’t', async () => {
+    await newProject();
+    const store = await open();
+
+    await expect(
+      store.setTags('5e6dbfac-0000-4000-8000-000000000000', ['Mara']),
+    ).rejects.toThrow();
+  });
+});

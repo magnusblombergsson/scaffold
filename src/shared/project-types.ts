@@ -137,6 +137,11 @@ export type EntryValue = {
    * `removeEntryImage` change it; a write keeps the image the Entry has.
    */
   image?: string;
+  /**
+   * Its Tags, by spelling; none when it has none. Only `setTags` changes
+   * them; a write keeps the Tags the Entry has.
+   */
+  tags?: string[];
 };
 export type PrivateValue = { id: string; body: string };
 export type UnitValue =
@@ -176,6 +181,8 @@ export type EntrySummary = {
   visibility: Visibility;
   /** Its image's file in `images/`, if it has one. */
   image?: string;
+  /** Its Tags, by spelling; none when it has none. */
+  tags?: string[];
 };
 
 /** The extensions an Entry image is stored with. */

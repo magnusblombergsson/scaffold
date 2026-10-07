@@ -10,6 +10,7 @@ import { SHORTCUTS, withShortcut } from '../shared/shortcuts';
 import { addTodoItem, ConflictMarker, Menu } from './Binder';
 import { EntryThumbnail } from './EntryImage';
 import { ImagePromptDialog } from './ImagePromptDialog';
+import { TagChips } from './TagsDialog';
 import type { Row } from './binder-keys';
 import { useListKeys } from './list-keys';
 import { MAC } from './platform';
@@ -144,6 +145,7 @@ export function StoryBible({
                     <span className="story-bible-name">
                       {entryTitle(entry)}
                     </span>
+                    <TagChips tags={entry.tags} />
                     <EntryThumbnail entry={entry} />
                     <ConflictMarker shown={conflicted.has(entry.id)} />
                   </button>

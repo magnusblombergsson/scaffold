@@ -332,14 +332,15 @@ export interface ProjectApi {
    */
   deleteStatus(statusId: string, moveTo: string | null): Promise<boolean>;
   /**
-   * The Tags in use on Chapters and Scenes, those in Trash too, each once
-   * in its first spelling, sorted.
+   * The Tags in use on Chapters, Scenes and Entries, those in Trash too,
+   * each once in its first spelling, sorted.
    */
   tags(): Promise<string[]>;
   /**
-   * Gives a Scene or Chapter `tags`, each spelt as the Tag in use on another
-   * unit, ignoring case, if there is one; there is no undo. The Manuscript
-   * showing them follows as a `unitDetailsChanged`.
+   * Gives a Scene, Chapter or Entry `tags`, each spelt as the Tag in use on
+   * another unit, ignoring case, if there is one; there is no undo. The
+   * Manuscript showing them follows as a `unitDetailsChanged`, the Entries
+   * as an `entriesChanged`.
    */
   setTags(unitId: string, tags: string[]): Promise<void>;
   /** The Todos: those not done, then the done, each in list order. */

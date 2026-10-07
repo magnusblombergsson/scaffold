@@ -289,6 +289,41 @@ describe('the Story Bible', () => {
   });
 });
 
+describe('Entry Tags', () => {
+  it('sends an Entry’s Tags after its aliases', async () => {
+    const { store, view, entries } = await fixture();
+    const anna = await store.read({ kind: 'entry', id: entries.anna });
+    await store.write(
+      { kind: 'entry', id: entries.anna },
+      { ...anna, visibility: 'always' },
+    );
+    await store.setTags(entries.anna, ['Mara', 'the war']);
+
+    const context = await buildContext(view, {
+      mode: 'brainstorm',
+      messages: [message('author', 'Hm.')],
+    });
+
+    expect(sent(context)).toContain(
+      `Id: ${entries.anna}
+Also called: Annie
+Tags: Mara, the war`,
+    );
+  });
+
+  it('never sends the Tags of an Entry seen never', async () => {
+    const { store, view, entries } = await fixture();
+    await store.setTags(entries.pact, ['oath-tag']);
+
+    const context = await buildContext(view, {
+      mode: 'brainstorm',
+      messages: [message('author', 'What is The Pact?')],
+    });
+
+    expect(sent(context)).not.toContain('oath-tag');
+  });
+});
+
 describe('Prose by Mode and command', () => {
   it('Writing · free question: the Scene in focus with its Outline and Notes, and its Chapter’s Outline', async () => {
     const { view, scenes, chapters, entries } = await fixture();
