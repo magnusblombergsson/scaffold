@@ -1,10 +1,10 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { PinnedNote } from '../shared/api';
+import { entryTitle } from '../shared/entry';
 import type { EntrySummary, EntryValue } from '../shared/project-types';
 import { useEntryImage } from './EntryImage';
 import { ViewableImage } from './ImageView';
 import { PeekCard } from './PeekCard';
-import { entryTitle } from './StoryBible';
 import { onEntryWritten } from './entry-written';
 import {
   placeInside,

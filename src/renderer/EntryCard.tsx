@@ -1,9 +1,8 @@
-import { roleText } from '../shared/entry';
+import { entryTitle, roleText } from '../shared/entry';
 import { ENTRY_TYPE_LABELS, type EntryValue } from '../shared/project-types';
 import { VISIBILITY_LABELS } from './EntryView';
 import { entryFields, type CardField } from './card-fields';
 import { EntryThumbnail } from './EntryImage';
-import { entryTitle } from './StoryBible';
 import { TagChips } from './TagsDialog';
 
 /**

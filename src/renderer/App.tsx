@@ -27,6 +27,7 @@ import {
   type UnitValue,
 } from '../shared/project-types';
 import { MODE_LABELS, type Mode } from '../shared/conversation';
+import { entryTitle } from '../shared/entry';
 import type { ProposalTarget, ProposalView } from '../shared/proposal';
 import type { ImportConvention } from '../shared/manuscript-import';
 import { upgradedMessage } from '../shared/format-gate';
@@ -50,6 +51,7 @@ import { ChapterCorkboard, ProjectCorkboard } from './Corkboard';
 import { EntryTypePicker } from './EntryTypePicker';
 import { EntryView, VISIBILITY_LABELS } from './EntryView';
 import { ExportManuscriptDialog } from './ExportManuscriptDialog';
+import { ExportStoryBibleDialog } from './ExportStoryBibleDialog';
 import { ImportDialog } from './ImportDialog';
 import { chapterInsertion, sceneInsertion, type Current } from './insertion';
 import { InterviewRoom } from './InterviewRoom';
@@ -87,7 +89,7 @@ import { SettingsDialog } from './SettingsDialog';
 import { ShortcutsDialog } from './ShortcutsDialog';
 import { StartScreen } from './StartScreen';
 import { StatusBar, useSceneCounts } from './StatusBar';
-import { entryTitle, StoryBible } from './StoryBible';
+import { StoryBible } from './StoryBible';
 import { ProjectContexts } from './StatusAndTags';
 import { TagsDialog } from './TagsDialog';
 import { TodoList, type TodoDraft } from './TodoList';
@@ -752,6 +754,7 @@ function ProjectView({
   const [statuses, setStatuses] = useState(project.statuses);
   const [projectSettingsOpen, setProjectSettingsOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  const [storyBibleExportOpen, setStoryBibleExportOpen] = useState(false);
   /** The Chapter or Scene whose Tags… is open, by id. */
   const [tagging, setTagging] = useState<string | null>(null);
   /** It, as the Manuscript has it now; gone if it is no longer there. */
@@ -930,6 +933,10 @@ function ProjectView({
     }
     if (command.type === 'exportManuscript') {
       setExportOpen(true);
+      return true;
+    }
+    if (command.type === 'exportStoryBible') {
+      setStoryBibleExportOpen(true);
       return true;
     }
     if (command.type === 'zen') {
@@ -1667,6 +1674,12 @@ function ProjectView({
           <ExportManuscriptDialog
             manuscript={manuscript}
             onClose={() => setExportOpen(false)}
+          />
+        )}
+        {storyBibleExportOpen && (
+          <ExportStoryBibleDialog
+            entries={entries}
+            onClose={() => setStoryBibleExportOpen(false)}
           />
         )}
         {projectSettingsOpen && (

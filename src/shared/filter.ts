@@ -33,6 +33,7 @@ export const FILTER_PLACES = [
   'writing-bible',
   'outline-skeleton',
   'export-manuscript',
+  'export-story-bible',
 ] as const;
 export type FilterPlace = (typeof FILTER_PLACES)[number];
 

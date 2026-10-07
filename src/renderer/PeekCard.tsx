@@ -1,11 +1,10 @@
 import { useRef, useState } from 'react';
-import { roleText } from '../shared/entry';
+import { entryTitle, roleText } from '../shared/entry';
 import { ENTRY_TYPE_LABELS, type EntryValue } from '../shared/project-types';
 import { useEntryImage } from './EntryImage';
 import { ViewableImage } from './ImageView';
 import { VISIBILITY_LABELS } from './EntryView';
 import { entryFields, keyFields } from './card-fields';
-import { entryTitle } from './StoryBible';
 
 /**
  * An Entry in the Peek, shortened: its image small, type, name, Role and Role

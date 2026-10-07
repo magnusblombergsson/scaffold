@@ -18,6 +18,11 @@ import {
   type Paragraph,
   type Span,
 } from '../../shared/prose-markdown';
+import {
+  commonMarkHeading,
+  escapeCommonMark,
+  oneParagraph,
+} from './common-mark';
 import { docx, type DocxParagraph, type DocxRun } from './docx';
 
 // The Manuscript Export: the Prose of the Scenes the Author ticked, for others
@@ -96,7 +101,7 @@ async function readChapters(
 
 function markdownOf(chapters: ExportedChapter[]): string {
   const blocks = chapters.flatMap(({ title, scenes }) => [
-    `# ${escapeCommonMark(title).replace(/#/g, '\\#')}`,
+    commonMarkHeading(1, title),
     ...scenes.flatMap((paragraphs, i) => [
       ...(i > 0 ? [SCENE_BREAK] : []),
       ...markdownBlocks(paragraphs),
@@ -170,16 +175,7 @@ function commonMarkParagraph(spans: Span[]): string {
     open = [...open, ...opening];
   });
   closeFrom(0);
-  // A line break stays one, and no line starts a block of its own.
-  return out
-    .split('\n')
-    .map((line) =>
-      line
-        .replace(/^\s+/, '')
-        .replace(/^[#>+=|-]/, '\\$&')
-        .replace(/^(\d+)([.)])/, '$1\\$2'),
-    )
-    .join('\\\n');
+  return oneParagraph(out);
 }
 
 const TAG: Record<Mark, string> = { bold: 'strong', italic: 'em' };
@@ -227,11 +223,6 @@ function lastsUntil(spans: Span[], start: number, mark: Mark): number {
   let end = start;
   while (end + 1 < spans.length && spans[end + 1].marks.includes(mark)) end++;
   return end;
-}
-
-/** Text with what CommonMark would read as formatting escaped. */
-function escapeCommonMark(text: string): string {
-  return text.replace(/[\\*_`[\]<~&]/g, '\\$&');
 }
 
 // --- .docx ---
@@ -314,19 +305,31 @@ export function conflictedScenes(
   );
 }
 
+/** What the Author is asked before an Export, as a message box shows it. */
+export type ExportQuestion = { message: string; detail: string };
+
 /**
  * What the Author is asked before exporting Scenes in Conflict: the Export
  * holds the main version of each.
  */
-export function exportConflictQuestion(titles: string[]): {
-  message: string;
-  detail: string;
-} {
-  const one = titles.length === 1;
+export function exportConflictQuestion(titles: string[]): ExportQuestion {
+  return conflictQuestion(titles, 'Scene', 'Scenes');
+}
+
+/**
+ * What the Author is asked before exporting the units `names`, `one` or
+ * `many` of them, in Conflict: the Export holds the main version of each.
+ */
+export function conflictQuestion(
+  names: string[],
+  one: string,
+  many: string,
+): ExportQuestion {
+  const single = names.length === 1;
   return {
-    message: one
-      ? '1 Scene has an unresolved Conflict'
-      : `${titles.length} Scenes have unresolved Conflicts`,
-    detail: `${titles.join('\n')}\n\nThe Export will hold the main version of ${one ? 'it' : 'each'}, not the others.`,
+    message: single
+      ? `1 ${one} has an unresolved Conflict`
+      : `${names.length} ${many} have unresolved Conflicts`,
+    detail: `${names.join('\n')}\n\nThe Export will hold the main version of ${single ? 'it' : 'each'}, not the others.`,
   };
 }

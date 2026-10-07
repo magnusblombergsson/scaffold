@@ -526,6 +526,25 @@ describe('a bad or newer settings file', () => {
     expect(settings.project('c')).toEqual({});
   });
 
+  it('reads whether a Story Bible Export last had images, dropping a bad value', async () => {
+    await writeFile(
+      file,
+      JSON.stringify({
+        version: 1,
+        global: {},
+        projects: {
+          a: { storyBibleExportImages: false },
+          b: { storyBibleExportImages: 'no' },
+        },
+        recent: [],
+      }),
+    );
+    const settings = await load();
+
+    expect(settings.project('a').storyBibleExportImages).toBe(false);
+    expect(settings.project('b')).toEqual({});
+  });
+
   it('reads the Filters kept for a Project, the valid values of each place', async () => {
     await writeFile(
       file,

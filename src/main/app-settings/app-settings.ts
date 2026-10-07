@@ -61,6 +61,8 @@ export type ProjectSettings = {
   dismissedTips?: Tip[];
   /** What the Author left unticked at the last Manuscript Export. */
   exportUnticked?: ExportUnticked;
+  /** Whether the last Story Bible Export had images. */
+  storyBibleExportImages?: boolean;
   /** The Filter of each place that has one on. */
   filters?: Filters;
 };
@@ -247,6 +249,9 @@ function parseProjectSettings(raw: JsonObject): ProjectSettings & JsonObject {
     !isStringArray(unticked.scenes)
   ) {
     delete settings.exportUnticked;
+  }
+  if (typeof settings.storyBibleExportImages !== 'boolean') {
+    delete settings.storyBibleExportImages;
   }
   const filters = readFilters(settings.filters);
   if (Object.keys(filters).length > 0) {

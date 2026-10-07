@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { entryImageOf, imageDataUrl, type Picture } from './entry-image';
+import {
+  entryImageOf,
+  imageDataUrl,
+  imageSize,
+  type Picture,
+} from './entry-image';
 
 /** A picture of `width` × `height` whose pixels all have `alpha`. */
 function picture(width: number, height: number, alpha = 255): Picture {
@@ -48,5 +53,43 @@ describe('an imported Entry image', () => {
     expect(imageDataUrl({ data, extension: 'png' })).toBe(
       'data:image/png;base64,AQID',
     );
+  });
+});
+
+describe('the size of a stored image', () => {
+  it('is read from a PNG’s header', () => {
+    const header = Buffer.alloc(24);
+    Buffer.from('89504e470d0a1a0a0000000d49484452', 'hex').copy(header);
+    header.writeUInt32BE(640, 16);
+    header.writeUInt32BE(480, 20);
+    expect(imageSize({ data: header, extension: 'png' })).toEqual({
+      width: 640,
+      height: 480,
+    });
+  });
+
+  it('is read from a JPEG’s frame header, past the segments before it', () => {
+    const data = Buffer.from(
+      'ffd8' +
+        'ffe000040000' +
+        'ffdb00040000' +
+        'ffc2000b08' +
+        '01e00280' +
+        '00',
+      'hex',
+    );
+    expect(imageSize({ data, extension: 'jpg' })).toEqual({
+      width: 640,
+      height: 480,
+    });
+  });
+
+  it('is null when the file says nothing it can read', () => {
+    expect(imageSize({ data: Buffer.from('nonsense'), extension: 'png' })).toBe(
+      null,
+    );
+    expect(
+      imageSize({ data: Buffer.from('ffd8ffd9', 'hex'), extension: 'jpg' }),
+    ).toBe(null);
   });
 });

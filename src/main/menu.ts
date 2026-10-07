@@ -160,6 +160,13 @@ export function menuTemplate(
           enabled: !!project,
           ...sending({ type: 'exportManuscript' }),
         },
+        // The window asks which Entries, and with what, first.
+        {
+          id: 'exportStoryBible',
+          label: 'Export Story Bible…',
+          enabled: !!project,
+          ...sending({ type: 'exportStoryBible' }),
+        },
         { type: 'separator' },
         mac ? { role: 'close' } : { role: 'quit' },
       ],

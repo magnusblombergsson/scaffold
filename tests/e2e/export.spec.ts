@@ -1,4 +1,4 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { existsSync } from 'node:fs';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -8,6 +8,7 @@ import {
   chooseExport,
   launch,
   openExportManuscript,
+  openExportStoryBible,
   useTempDir,
 } from './app';
 
@@ -116,5 +117,55 @@ test('Export Manuscript… exports only the ticked Scenes, and remembers them fo
   await dialog.getByRole('button', { name: 'Tick all' }).click();
   await expect(box('Scene 1')).toBeChecked();
   await expect(box('Chapter 1')).toBeChecked();
+  await app.close();
+});
+
+/** Replaces the text of an editor field. */
+async function fill(page: Page, label: string, text: string) {
+  await page.getByLabel(label, { exact: true }).click();
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.type(text);
+}
+
+test('Export Story Bible… writes the Entries with their fields, private notes only when ticked, and remembers the images choice', async () => {
+  const projectPath = path.join(tempDir(), 'My Novel');
+  const exportPath = path.join(tempDir(), 'Bible.md');
+  const app = await launch(tempDir());
+  await answerDialogs(app, projectPath);
+  const page = await app.firstWindow();
+  await page.getByRole('button', { name: 'New Project…' }).click();
+  await expect(page.getByLabel('Prose')).toBeFocused();
+  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await page.getByRole('button', { name: 'New Entry' }).click();
+  await page.getByRole('menuitem', { name: 'Place', exact: true }).click();
+  await fill(page, 'Name', 'Harbour');
+  await fill(page, 'Description', 'Where the ferry docks.');
+  await fill(page, 'Private notes', 'Burns down later.');
+
+  await openExportStoryBible(app);
+  const dialog = page.getByRole('dialog', { name: 'Export Story Bible' });
+  const box = (name: string) =>
+    dialog.getByRole('checkbox', { name, exact: true });
+  await expect(box('Include images')).toBeChecked();
+  await expect(box('Include private notes')).not.toBeChecked();
+  await box('Include images').uncheck();
+  await box('Include private notes').check();
+  await answerDialogs(app, exportPath);
+  await dialog.getByRole('button', { name: 'Export…' }).click();
+  await expect
+    .poll(() => existsSync(exportPath) && readFile(exportPath, 'utf8'))
+    .toBe(
+      [
+        '# Places',
+        '## Harbour',
+        '**Type:** Place',
+        'Where the ferry docks.',
+        '**Private notes:** Burns down later.',
+      ].join('\n\n') + '\n',
+    );
+
+  await openExportStoryBible(app);
+  await expect(box('Include images')).not.toBeChecked();
+  await expect(box('Include private notes')).not.toBeChecked();
   await app.close();
 });

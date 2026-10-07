@@ -31,6 +31,8 @@ export type Command = (
   | { type: 'import' }
   /** File › Export Manuscript…, which asks which Scenes and Chapters. */
   | { type: 'exportManuscript' }
+  /** File › Export Story Bible…, which asks which Entries, and with what. */
+  | { type: 'exportStoryBible' }
   | { type: 'settings' }
   | { type: 'projectSettings' }
   /** The Keyboard Shortcuts cheat sheet. */
