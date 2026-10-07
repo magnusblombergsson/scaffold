@@ -1,7 +1,9 @@
 import { useContext, useState } from 'react';
 import type { Changed } from '../shared/api';
 import { filterOn, matchesFilter } from '../shared/filter';
+import { entryTitle } from '../shared/entry';
 import {
+  ENTRY_GROUP_TITLES,
   ENTRY_TYPE_LABELS,
   ENTRY_TYPES,
   type EntrySummary,
@@ -17,21 +19,6 @@ import type { Row } from './binder-keys';
 import { useListKeys } from './list-keys';
 import { MAC } from './platform';
 import { ReadOnlyContext } from './read-only';
-
-const GROUP_TITLES: Record<EntryType, string> = {
-  character: 'Characters',
-  place: 'Places',
-  item: 'Items',
-  'world-rule': 'World Rules',
-  'plot-thread': 'Plot Threads',
-  theme: 'Themes',
-  other: 'Other',
-};
-
-/** How an Entry is named in lists; one whose name was cleared still needs a label. */
-export function entryTitle(entry: { name: string }): string {
-  return entry.name.trim() || 'Untitled';
-}
 
 /**
  * The Story Bible tab: the Entries, grouped by type, narrowed by a Filter,
@@ -141,9 +128,9 @@ export function StoryBible({
           <section
             key={type}
             className="story-bible-group"
-            aria-label={GROUP_TITLES[type]}
+            aria-label={ENTRY_GROUP_TITLES[type]}
           >
-            <h2>{GROUP_TITLES[type]}</h2>
+            <h2>{ENTRY_GROUP_TITLES[type]}</h2>
             <ol>
               {group.map((entry) => (
                 <li

@@ -1,6 +1,7 @@
 import { useContext, useEffect, useRef, useState } from 'react';
 import type { PanelWidths } from '../shared/api';
 import { OPEN_FOCUS, type InterviewFocus } from '../shared/conversation';
+import { entryTitle } from '../shared/entry';
 import { hasTag, tagged } from '../shared/tags';
 import {
   FIELD_LABELS,
@@ -37,7 +38,6 @@ import {
 import { PanelResizer, type PaneSize } from './PanelResizer';
 import { ReadOnlyContext } from './read-only';
 import { RoomList } from './RoomList';
-import { entryTitle } from './StoryBible';
 
 /**
  * The Interview room: its Conversations with their focus on the left, the

@@ -1,8 +1,8 @@
 import { useState } from 'react';
+import { entryTitle } from '../shared/entry';
 import type { EntrySummary } from '../shared/project-types';
 import { ImagePromptDialog } from './ImagePromptDialog';
 import { useImageUrl, ViewableImage } from './ImageView';
-import { entryTitle } from './StoryBible';
 
 /**
  * An Entry's image as a `data:` URL, or null without one; it is read again

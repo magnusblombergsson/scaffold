@@ -44,6 +44,17 @@ export const ENTRY_TYPE_LABELS: Record<EntryType, string> = {
   other: 'Other',
 };
 
+/** Each type's heading over its Entries, in the Story Bible and its Export. */
+export const ENTRY_GROUP_TITLES: Record<EntryType, string> = {
+  character: 'Characters',
+  place: 'Places',
+  item: 'Items',
+  'world-rule': 'World Rules',
+  'plot-thread': 'Plot Threads',
+  theme: 'Themes',
+  other: 'Other',
+};
+
 /**
  * When the Assistant sees an Entry: `always`, `mentioned` when its name or
  * an alias is mentioned, or `never`.

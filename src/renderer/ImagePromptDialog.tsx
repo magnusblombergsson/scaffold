@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ImagePromptResult } from '../shared/api';
+import { entryTitle } from '../shared/entry';
 import { PROVIDER_NAMES } from '../shared/models';
 import type { EntrySummary } from '../shared/project-types';
 import { describeUsage } from '../shared/usage';
@@ -7,7 +8,6 @@ import { modelName } from './model-listing';
 import { flushPendingEdits } from './pending-edits';
 import { failureMessage } from './provider-messages';
 import { NO_SHORTLISTS, useProviders, useShortlists } from './Providers';
-import { entryTitle } from './StoryBible';
 
 /**
  * Image prompt… on an Entry: the Model chosen last writes one, for the

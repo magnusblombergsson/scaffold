@@ -9,7 +9,7 @@ import type {
   ValueOf,
   Visibility,
 } from './project-types';
-import type { ExportUnticked } from './export-choice';
+import type { ExportUnticked, StoryBibleChoice } from './export-choice';
 import type { Filter, FilterPlace, Filters } from './filter';
 import type { ReviewCommand } from './finding';
 import type { Status } from './status';
@@ -639,6 +639,17 @@ export interface ShellApi {
    * ticked Scenes in Conflict. Resolves when done or cancelled.
    */
   exportManuscript(unticked: ExportUnticked): Promise<void>;
+  /**
+   * Whether the last Story Bible Export of this window's Project had
+   * images, on this computer; they go in until the Author says otherwise.
+   */
+  storyBibleExportImages(): Promise<boolean>;
+  /**
+   * Remembers whether `choice` has images, then exports the Entries it
+   * holds where the Author chooses, once they have agreed to export the main
+   * version of those in Conflict. Resolves when done or cancelled.
+   */
+  exportStoryBible(choice: StoryBibleChoice): Promise<void>;
   /** Opens a Project from the recent list. */
   openRecent(path: string): Promise<OpenResult>;
   /** Asks where a recent Project that wasn't found is now, and opens it. */
@@ -903,6 +914,8 @@ export const shellMethods = {
   setZen: 'send',
   exportChoice: 'invoke',
   exportManuscript: 'invoke',
+  storyBibleExportImages: 'invoke',
+  exportStoryBible: 'invoke',
   openRecent: 'invoke',
   locateProject: 'invoke',
   recentProjects: 'invoke',

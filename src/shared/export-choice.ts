@@ -2,9 +2,9 @@ import { filterManuscript, type Filter } from './filter';
 import type { Manuscript, ManuscriptChapter } from './project-types';
 import type { Status } from './status';
 
-// Which Scenes and Chapters a Manuscript Export holds, as the Author ticks
-// them. Only what they left unticked is kept, so a unit created since the
-// last Export starts ticked.
+// What an Export holds, as the Author chooses it. For the Manuscript, the
+// Scenes and Chapters they tick: only what they left unticked is kept, so a
+// unit created since the last Export starts ticked.
 
 /** The ids of the Chapters and Scenes the Author left unticked. */
 export type ExportUnticked = { chapters: string[]; scenes: string[] };
@@ -125,3 +125,13 @@ export function pickedManuscript(
     unplaced: [],
   };
 }
+
+/**
+ * What a Story Bible Export holds: the Entries `filter` matches, all with
+ * none on, and their images and private notes if chosen.
+ */
+export type StoryBibleChoice = {
+  filter: Filter;
+  images: boolean;
+  privateNotes: boolean;
+};

@@ -2768,6 +2768,11 @@ header.entry-header {
   padding: 0 0 0.5rem;
 }
 
+.export-count {
+  margin: 0 0 0.75rem;
+  color: var(--muted);
+}
+
 /* Tick All stands apart from the buttons that close the dialog. */
 .export-tick-all {
   margin-right: auto;

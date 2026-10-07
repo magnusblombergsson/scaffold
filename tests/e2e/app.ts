@@ -120,13 +120,21 @@ export async function answerQuestions(
  * first window, which shows the dialog of what to export.
  */
 export async function openExportManuscript(app: ElectronApplication) {
-  await app.evaluate(({ BrowserWindow, Menu }) => {
-    const item = Menu.getApplicationMenu()?.getMenuItemById('exportManuscript');
-    if (!item?.enabled) {
-      throw new Error('File → Export Manuscript… is disabled');
-    }
+  await clickMenuItem(app, 'exportManuscript');
+}
+
+/** Chooses File → Export Story Bible… in the menu, as for the Manuscript. */
+export async function openExportStoryBible(app: ElectronApplication) {
+  await clickMenuItem(app, 'exportStoryBible');
+}
+
+/** Clicks the menu item `id` for the first window, as the Author would. */
+async function clickMenuItem(app: ElectronApplication, id: string) {
+  await app.evaluate(({ BrowserWindow, Menu }, id) => {
+    const item = Menu.getApplicationMenu()?.getMenuItemById(id);
+    if (!item?.enabled) throw new Error(`The menu item ${id} is disabled`);
     item.click(undefined, BrowserWindow.getAllWindows()[0]);
-  });
+  }, id);
 }
 
 /** Exports the Manuscript as ticked, from File → Export Manuscript… in `page`. */

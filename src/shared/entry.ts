@@ -9,6 +9,11 @@ import {
   type EntryValue,
 } from './project-types';
 
+/** How an Entry is named in lists; one whose name was cleared still needs a label. */
+export function entryTitle(entry: { name: string }): string {
+  return entry.name.trim() || 'Untitled';
+}
+
 /** The fields an Entry of `type` starts with: empty, and a Plot Thread open. */
 export function emptyFields(type: EntryType): EntryFields {
   switch (type) {

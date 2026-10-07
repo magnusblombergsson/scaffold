@@ -1,6 +1,6 @@
 import type { Node } from '@tiptap/pm/model';
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
-import { entryCollisions } from '../shared/entry';
+import { entryCollisions, entryTitle } from '../shared/entry';
 import {
   FIELD_LABELS,
   fieldText,
@@ -37,7 +37,6 @@ import {
   singleLineExtensions,
   textToDoc,
 } from './plain-text-editor';
-import { entryTitle } from './StoryBible';
 import { TagInput } from './TagsDialog';
 import { UnitEditor } from './UnitEditor';
 import { tellEntryWritten } from './entry-written';

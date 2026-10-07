@@ -28,7 +28,11 @@ import {
   shellMethods,
 } from '../shared/api';
 import type { Handlers } from '../shared/bridge';
-import { TICK_ALL, type ExportUnticked } from '../shared/export-choice';
+import {
+  TICK_ALL,
+  type ExportUnticked,
+  type StoryBibleChoice,
+} from '../shared/export-choice';
 import type { Filter } from '../shared/filter';
 import { splitManuscript } from '../shared/manuscript-import';
 import { isProviderId, type Model } from '../shared/models';
@@ -49,7 +53,14 @@ import {
   EXPORT_FORMATS,
   exportTarget,
   insideProjectMessage,
+  type ExportFormat,
+  type ExportQuestion,
 } from './export/manuscript-export';
+import {
+  conflictedEntries,
+  exportStoryBible,
+  storyBibleConflictQuestion,
+} from './export/story-bible-export';
 import {
   IMPORT_FORMATS,
   newChapters,
@@ -487,7 +498,19 @@ const shellHandlers: Handlers<ShellApi, typeof shellMethods, WindowContext> = {
     const store = stores.get(ctx.sender.id);
     if (!store) return;
     settings.updateProject(store.id, { exportUnticked: unticked });
-    await exportFrom(windowOf(ctx), store, unticked);
+    await exportFrom(windowOf(ctx), store, manuscriptExport(store, unticked));
+  },
+  storyBibleExportImages: (ctx) => {
+    const store = stores.get(ctx.sender.id);
+    return (store && settings.project(store.id).storyBibleExportImages) ?? true;
+  },
+  exportStoryBible: async (ctx, choice) => {
+    const store = stores.get(ctx.sender.id);
+    if (!store) return;
+    settings.updateProject(store.id, {
+      storyBibleExportImages: choice.images,
+    });
+    await exportFrom(windowOf(ctx), store, storyBibleExport(store, choice));
   },
   openRecent: (ctx, projectPath) => openPath(ctx, projectPath),
   locateProject: async (ctx, oldPath) => {
@@ -722,39 +745,82 @@ function realOrSame(target: string): Promise<string> {
   return realpath(target).catch(() => target);
 }
 
+/** What one Export asks and writes. */
+type ExportJob = {
+  /** The save dialog's title. */
+  title: string;
+  /** The file name offered, without its extension. */
+  name: string;
+  /** What the Author is asked first about what is in Conflict; null when nothing is. */
+  conflictQuestion(): ExportQuestion | null;
+  write(format: ExportFormat): Promise<Uint8Array>;
+};
+
+/** The ticked part of the Manuscript, as an Export. */
+function manuscriptExport(
+  store: ProjectStore,
+  unticked: ExportUnticked,
+): ExportJob {
+  return {
+    title: 'Export Manuscript',
+    name: store.displayName,
+    conflictQuestion: () => {
+      const titles = conflictedScenes(
+        store.manuscript(),
+        store.listConflicts(),
+        unticked,
+      );
+      return titles.length > 0 ? exportConflictQuestion(titles) : null;
+    },
+    write: (format) => exportManuscript(store, format, unticked),
+  };
+}
+
+/** The chosen Entries of the Story Bible, as an Export. */
+function storyBibleExport(
+  store: ProjectStore,
+  choice: StoryBibleChoice,
+): ExportJob {
+  return {
+    title: 'Export Story Bible',
+    name: `${store.displayName} Story Bible`,
+    conflictQuestion: () => {
+      const names = conflictedEntries(
+        store.listEntries(),
+        store.listConflicts(),
+        choice,
+      );
+      return names.length > 0 ? storyBibleConflictQuestion(names) : null;
+    },
+    write: (format) => exportStoryBible(store, format, choice),
+  };
+}
+
 /**
- * Exports the ticked part of the Manuscript of the window's Project where the
- * Author chooses, once they have agreed to export the main version of ticked
- * Scenes in Conflict.
+ * Writes an Export of the window's Project where the Author chooses, once
+ * they have agreed to export the main version of what it holds in Conflict.
  */
 async function exportFrom(
   window: BrowserWindow,
   store: ProjectStore,
-  unticked: ExportUnticked,
+  job: ExportJob,
 ): Promise<void> {
   await requestRendererFlush(window.webContents);
-  const titles = conflictedScenes(
-    store.manuscript(),
-    store.listConflicts(),
-    unticked,
-  );
-  if (titles.length > 0) {
+  const question = job.conflictQuestion();
+  if (question) {
     const { response } = await dialog.showMessageBox(window, {
       type: 'warning',
       buttons: ['Export Anyway', 'Cancel'],
       defaultId: 1,
       cancelId: 1,
-      ...exportConflictQuestion(titles),
+      ...question,
     });
     if (response !== 0) return;
   }
   const { canceled, filePath } = await dialog.showSaveDialog(window, {
-    title: 'Export Manuscript',
+    title: job.title,
     buttonLabel: 'Export',
-    defaultPath: path.join(
-      app.getPath('documents'),
-      `${store.displayName}.docx`,
-    ),
+    defaultPath: path.join(app.getPath('documents'), `${job.name}.docx`),
     filters: [EXPORT_FORMATS.docx, EXPORT_FORMATS.markdown],
     properties: ['createDirectory', 'showOverwriteConfirmation'],
   });
@@ -793,10 +859,7 @@ async function exportFrom(
     }
   }
   try {
-    await writeFile(
-      target.path,
-      await exportManuscript(store, target.format, unticked),
-    );
+    await writeFile(target.path, await job.write(target.format));
   } catch (error) {
     await dialog.showMessageBox(window, {
       type: 'error',

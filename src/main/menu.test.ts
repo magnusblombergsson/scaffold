@@ -79,6 +79,7 @@ describe('menuTemplate', () => {
       'Open Recent',
       'Import…',
       'Export Manuscript…',
+      'Export Story Bible…',
       undefined,
     ]);
     expect(item(file, 'New Project…').accelerator).toBe('CmdOrCtrl+Shift+N');
@@ -86,10 +87,12 @@ describe('menuTemplate', () => {
     click(item(file, 'New Project…'));
     click(item(menu(file, 'Open Recent'), 'The Ferry'));
     click(item(file, 'Export Manuscript…'));
+    click(item(file, 'Export Story Bible…'));
     expect(sent).toEqual([
       { type: 'newProject' },
       { type: 'openRecent', path: 'D:/Stories/Ferry' },
       { type: 'exportManuscript' },
+      { type: 'exportStoryBible' },
     ]);
   });
 
