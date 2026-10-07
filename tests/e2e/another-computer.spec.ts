@@ -28,9 +28,7 @@ test('a Scene changed on another computer reloads in place, and the binder follo
   await expect(page.getByLabel('Prose')).toBeFocused();
   await page.keyboard.type('It was a dark night.');
   await page.keyboard.press('Control+s');
-  await expect(
-    page.getByRole('status').filter({ hasText: 'Saved' }),
-  ).toBeVisible();
+  await expect(page.locator('.save-status.confirmed')).toBeVisible();
 
   const file = await sceneFile(projectPath);
   const text = await readFile(file, 'utf8');
