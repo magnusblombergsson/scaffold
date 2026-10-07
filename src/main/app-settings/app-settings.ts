@@ -6,6 +6,12 @@ import { safeWrite, setAside } from '../project-store/safe-write';
 import type { PanelWidths, PinnedNote, Tip } from '../../shared/api';
 import type { ExportUnticked } from '../../shared/export-choice';
 import {
+  readFilters,
+  type Filter,
+  type FilterPlace,
+  type Filters,
+} from '../../shared/filter';
+import {
   DEFAULT_MODEL,
   isClaudeModelId,
   isModel,
@@ -55,6 +61,8 @@ export type ProjectSettings = {
   dismissedTips?: Tip[];
   /** What the Author left unticked at the last Manuscript Export. */
   exportUnticked?: ExportUnticked;
+  /** The Filter of each place that has one on. */
+  filters?: Filters;
 };
 
 /**
@@ -240,6 +248,12 @@ function parseProjectSettings(raw: JsonObject): ProjectSettings & JsonObject {
   ) {
     delete settings.exportUnticked;
   }
+  const filters = readFilters(settings.filters);
+  if (Object.keys(filters).length > 0) {
+    settings.filters = filters;
+  } else {
+    delete settings.filters;
+  }
   return settings;
 }
 
@@ -400,6 +414,45 @@ export class AppSettings {
   updateProject(id: string, change: ProjectSettings): void {
     this.data.projects[id] = { ...this.data.projects[id], ...change };
     this.changed();
+  }
+
+  /** The Filter at `place` for a Project; none chosen when it has none. */
+  filter(id: string, place: FilterPlace): Filter {
+    return structuredClone(this.data.projects[id]?.filters?.[place] ?? {});
+  }
+
+  /** Keeps the valid values of `filter`, as a window may send anything. */
+  setFilter(id: string, place: FilterPlace, filter: Filter): void {
+    const filters = { ...this.data.projects[id]?.filters };
+    const kept = readFilters({ [place]: filter })[place];
+    if (kept && Object.keys(kept).length > 0) {
+      filters[place] = kept;
+    } else {
+      delete filters[place];
+    }
+    this.updateProject(id, { filters });
+  }
+
+  /**
+   * Changes each Filter of a Project as `change` does, as when a Tag is
+   * renamed or deleted. Returns the Filters that changed, by place; `change`
+   * returns the same Filter for one it leaves as it is.
+   */
+  changeFilters(id: string, change: (filter: Filter) => Filter): Filters {
+    const changed: Filters = {};
+    for (const [place, filter] of Object.entries(
+      this.data.projects[id]?.filters ?? {},
+    ) as [FilterPlace, Filter][]) {
+      const next = change(filter);
+      if (next !== filter) changed[place] = next;
+    }
+    for (const [place, filter] of Object.entries(changed) as [
+      FilterPlace,
+      Filter,
+    ][]) {
+      this.setFilter(id, place, filter);
+    }
+    return structuredClone(changed);
   }
 
   /** The paths of the Projects to reopen at startup. */

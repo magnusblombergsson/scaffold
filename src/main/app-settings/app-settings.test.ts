@@ -13,6 +13,7 @@ import { instantClock, type Clock } from '../project-store/clock';
 import { nodeFileSystem, type FileSystem } from '../project-store/file-system';
 import { projectLookup } from '../project-store/project-store';
 import { loadAppSettings, type AppSettings } from './app-settings';
+import { renameTagInFilter, type Filter } from '../../shared/filter';
 import { DEFAULT_MODEL } from '../../shared/models';
 
 let dir: string;
@@ -258,6 +259,57 @@ describe('saving', () => {
     expect((await load()).welcomed()).toBe(true);
   });
 
+  it('remembers a Filter per Project and place', async () => {
+    const settings = await load();
+    expect(settings.filter('a', 'writing-bible')).toEqual({});
+
+    settings.setFilter('a', 'writing-bible', { types: ['place'] });
+    settings.setFilter('a', 'brainstorm-bible', { tags: [null] });
+    await settings.flush();
+
+    const reloaded = await load();
+    expect(reloaded.filter('a', 'writing-bible')).toEqual({ types: ['place'] });
+    expect(reloaded.filter('a', 'brainstorm-bible')).toEqual({ tags: [null] });
+    expect(reloaded.filter('b', 'writing-bible')).toEqual({});
+  });
+
+  it('keeps only the valid values of a Filter a window sends', async () => {
+    const settings = await load();
+    settings.setFilter('a', 'writing-bible', {
+      types: ['place', 'bad'],
+      tags: 'x',
+    } as never);
+
+    expect(settings.filter('a', 'writing-bible')).toEqual({ types: ['place'] });
+  });
+
+  it('changes each Filter of a Project, as for a renamed Tag, saying which changed', async () => {
+    const settings = await load();
+    settings.setFilter('a', 'writing-bible', { tags: ['Mara', null] });
+    settings.setFilter('a', 'brainstorm-bible', { tags: ['war'] });
+    settings.setFilter('b', 'writing-bible', { tags: ['mara'] });
+    const rename = (filter: Filter) =>
+      renameTagInFilter(filter, 'mara', 'Mara V');
+
+    expect(settings.changeFilters('a', rename)).toEqual({
+      'writing-bible': { tags: ['Mara V', null] },
+    });
+    expect(settings.filter('a', 'writing-bible')).toEqual({
+      tags: ['Mara V', null],
+    });
+    expect(settings.filter('a', 'brainstorm-bible')).toEqual({ tags: ['war'] });
+    expect(settings.filter('b', 'writing-bible')).toEqual({ tags: ['mara'] });
+  });
+
+  it('forgets a Filter changed to none chosen', async () => {
+    const settings = await load();
+    settings.setFilter('a', 'writing-bible', { tags: ['Mara'] });
+
+    settings.changeFilters('a', () => ({}));
+
+    expect(settings.project('a').filters).toEqual({});
+  });
+
   it('writes once, about 500 ms after a burst of changes', async () => {
     const time = heldTime();
     const settings = await loadAppSettings(file, { ...deps(), ...time });
@@ -472,6 +524,32 @@ describe('a bad or newer settings file', () => {
     });
     expect(settings.project('b')).toEqual({});
     expect(settings.project('c')).toEqual({});
+  });
+
+  it('reads the Filters kept for a Project, the valid values of each place', async () => {
+    await writeFile(
+      file,
+      JSON.stringify({
+        version: 1,
+        global: {},
+        projects: {
+          a: {
+            filters: {
+              'writing-bible': { types: ['place', 'bad'], tags: ['Mara'] },
+              elsewhere: { tags: ['x'] },
+            },
+          },
+          b: { filters: 'none' },
+        },
+        recent: [],
+      }),
+    );
+    const settings = await load();
+
+    expect(settings.project('a').filters).toEqual({
+      'writing-bible': { types: ['place'], tags: ['Mara'] },
+    });
+    expect(settings.project('b')).toEqual({});
   });
 
   it('reads a newer version leniently and never overwrites it', async () => {

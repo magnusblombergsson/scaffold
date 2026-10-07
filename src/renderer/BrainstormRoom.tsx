@@ -1,5 +1,6 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { PanelWidths } from '../shared/api';
+import { filterOn, matchesFilter } from '../shared/filter';
 import {
   PROJECT_OUTLINE,
   type EntryValue,
@@ -17,6 +18,7 @@ import {
   type OnChange,
 } from './Conversation';
 import { EntryCard } from './EntryCard';
+import { FilterControl, useFilter } from './Filter';
 import { ModelPicker } from './ModelPicker';
 import { PanelResizer, type PaneSize } from './PanelResizer';
 import { RoomList } from './RoomList';
@@ -200,7 +202,7 @@ function Reference({
   );
 }
 
-/** Every Entry of the Story Bible, its fields at a glance. */
+/** Every Entry of the Story Bible, its fields at a glance, narrowed by a Filter. */
 function BibleReference({
   entries,
   changes,
@@ -210,11 +212,16 @@ function BibleReference({
   changes: number;
   onOpenEntry(entryId: string): void;
 }) {
+  const { filter, setFilter, inUse } = useFilter('brainstorm-bible');
+  const shown = useMemo(
+    () => entries.filter((e) => matchesFilter(filter, e)),
+    [entries, filter],
+  );
   const [values, setValues] = useState<EntryValue[] | null>(null);
   useEffect(() => {
     let current = true;
     void Promise.all(
-      entries.map((e) =>
+      shown.map((e) =>
         // One trashed since it was listed is left out.
         window.project.read({ kind: 'entry', id: e.id }).catch(() => null),
       ),
@@ -224,17 +231,28 @@ function BibleReference({
     return () => {
       current = false;
     };
-  }, [entries, changes]);
-  if (!values) return null;
-  if (values.length === 0) {
+  }, [shown, changes]);
+  if (entries.length === 0) {
     return <p className="reference-empty">No Entries yet.</p>;
   }
   return (
-    <div className="reference-entries">
-      {values.map((entry) => (
-        <EntryCard key={entry.id} entry={entry} onOpen={onOpenEntry} />
-      ))}
-    </div>
+    <>
+      <FilterControl
+        filter={filter}
+        onChange={setFilter}
+        inUse={inUse}
+        shown={shown.length}
+        total={entries.length}
+      />
+      {values && values.length === 0 && filterOn(filter) && (
+        <p className="reference-empty">No Entries match the Filter.</p>
+      )}
+      <div className="reference-entries">
+        {values?.map((entry) => (
+          <EntryCard key={entry.id} entry={entry} onOpen={onOpenEntry} />
+        ))}
+      </div>
+    </>
   );
 }
 

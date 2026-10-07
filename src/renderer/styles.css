@@ -2074,6 +2074,104 @@ header.entry-header {
   margin: 0;
 }
 
+/* The Filter: a button summing it up, ✕ to clear, and its panel below. */
+.filter {
+  position: relative;
+  padding: 0.25rem 0.5rem;
+}
+
+.reference .filter {
+  padding: 0 0 0.5rem;
+}
+
+.filter-buttons {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  min-width: 0;
+}
+
+.filter-button,
+.filter-clear {
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--muted);
+  background: transparent;
+  border: 1px solid var(--pill-line);
+  border-radius: 999px;
+  padding: 0.1rem 0.7rem;
+  cursor: pointer;
+}
+
+.filter-button {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filter-button[aria-pressed='true'] {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-tint);
+}
+
+.filter-clear {
+  border: none;
+  padding: 0.1rem 0.4rem;
+}
+
+.filter-button:hover,
+.filter-clear:hover {
+  color: var(--fg);
+}
+
+.filter-panel {
+  position: absolute;
+  left: 0.5rem;
+  right: 0.5rem;
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  margin-top: 0.25rem;
+  padding: 0.75rem;
+  background: var(--sheet);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--float-shadow);
+  font-size: 0.85rem;
+}
+
+.filter-panel fieldset {
+  border: none;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 0.75rem;
+  margin: 0;
+  padding: 0;
+}
+
+.filter-panel legend {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin: 0 0 0.25rem;
+  padding: 0;
+}
+
+.filter-panel label {
+  display: flex;
+  align-items: center;
+  gap: 0.3rem;
+}
+
+.filter-panel .tag-input {
+  width: 100%;
+}
+
 .story-bible-highlight {
   display: flex;
   align-items: center;

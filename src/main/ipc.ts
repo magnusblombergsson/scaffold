@@ -8,11 +8,13 @@ import {
   type ProjectApi,
 } from '../shared/api';
 import type { Handlers } from '../shared/bridge';
+import { renameTagInFilter, withValue } from '../shared/filter';
 import {
   PROSE_LANGUAGES,
   type EntryImage,
   type ProseLanguage,
 } from '../shared/project-types';
+import { spelledTags } from '../shared/tags';
 import { createConversationEngine } from './assistant/conversation-engine';
 import { createImagePrompts } from './assistant/image-prompt';
 import { register } from './electron-transport';
@@ -23,6 +25,7 @@ import { isModel } from '../shared/models';
 import {
   assistantProvider,
   defaultModel,
+  changeFilters,
   rememberModel,
   storeOf,
 } from './shell';
@@ -111,13 +114,21 @@ const projectHandlers: Handlers<
   setTags: ({ store }, unitId, tags) => store.setTags(unitId, tags),
   tagUses: async ({ store }) => store.tagUses(),
   renameTag: ({ store, sender }, tag, to) =>
-    saveProjectSetting(sender, store, `The Tag ${tag}`, () =>
-      store.renameTag(tag, to),
-    ),
+    saveProjectSetting(sender, store, `The Tag ${tag}`, async () => {
+      await store.renameTag(tag, to);
+      // As the units now spell it, merged onto a Tag in use or not.
+      const [renamed = to] = spelledTags([to], store.tags());
+      changeFilters(sender, store.id, (filter) =>
+        renameTagInFilter(filter, tag, renamed),
+      );
+    }),
   deleteTag: ({ store, sender }, tag) =>
-    saveProjectSetting(sender, store, `The Tag ${tag}`, () =>
-      store.deleteTag(tag),
-    ),
+    saveProjectSetting(sender, store, `The Tag ${tag}`, async () => {
+      await store.deleteTag(tag);
+      changeFilters(sender, store.id, (filter) =>
+        withValue(filter, 'tags', tag, false),
+      );
+    }),
   listTodos: async ({ store }) => store.listTodos(),
   addTodo: ({ store }, text, link) => store.addTodo(text, link),
   changeTodo: ({ store }, id, change) => store.changeTodo(id, change),

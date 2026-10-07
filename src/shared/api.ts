@@ -10,6 +10,7 @@ import type {
   Visibility,
 } from './project-types';
 import type { ExportUnticked } from './export-choice';
+import type { Filter, FilterPlace, Filters } from './filter';
 import type { ReviewCommand } from './finding';
 import type { Status } from './status';
 import type { TagUse } from './tags';
@@ -654,6 +655,16 @@ export interface ShellApi {
   tips(): Promise<Tip[]>;
   /** Never shows the tip again for this window's Project on this computer. */
   dismissTip(tip: Tip): void;
+  /** The Filter at `place` for this window's Project, on this computer. */
+  filter(place: FilterPlace): Promise<Filter>;
+  /** Remembers the Filter at `place`; none chosen turns it off. */
+  setFilter(place: FilterPlace, filter: Filter): void;
+  /**
+   * Calls `listener` with the Filters of this window's Project that main
+   * changed, by place, as when they follow a renamed Tag. Returns an
+   * unsubscribe function.
+   */
+  onFilter(listener: (filters: Filters) => void): () => void;
   /** Whether Entry names and aliases are highlighted where mentioned, on this computer. */
   highlightMentions(): Promise<boolean>;
   /** Turns the highlighting on or off, in every window. */
@@ -899,6 +910,9 @@ export const shellMethods = {
   saveView: 'send',
   tips: 'invoke',
   dismissTip: 'send',
+  filter: 'invoke',
+  setFilter: 'send',
+  onFilter: 'event',
   highlightMentions: 'invoke',
   setHighlightMentions: 'send',
   onHighlightMentions: 'event',
