@@ -89,6 +89,11 @@ let providers: ProviderSettings;
 const stores = new Map<number, ProjectStore>();
 /** Which of Writing's side panes each window, by its contents' id, has docked. */
 const dockedPanes = new Map<number, DockedPanes>();
+/**
+ * The windows in zen mode, by their contents' id, each with whether it was
+ * full screen before zen.
+ */
+const zenWindows = new Map<number, boolean>();
 /** Stops sending a window its store's events, by webContents id. */
 const unsubscribes = new Map<number, () => void>();
 
@@ -201,6 +206,13 @@ function createWindow(store: ProjectStore | null): BrowserWindow {
   };
   window.on('resize', rememberBounds);
   window.on('move', rememberBounds);
+  // Full screen left some other way, as by F11, leaves zen too.
+  window.on('leave-full-screen', () => {
+    const id = window.webContents.id;
+    if (!zenWindows.delete(id)) return;
+    updateMenu();
+    emit(window.webContents, 'shell', 'onCommand', { type: 'zen' });
+  });
   flushBeforeClose(window);
 
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
@@ -494,6 +506,16 @@ const shellHandlers: Handlers<ShellApi, typeof shellMethods, WindowContext> = {
     dockedPanes.set(sender.id, docked);
     updateMenu();
   },
+  setZen: ({ sender, window }, on) => {
+    if (!window || on === zenWindows.has(sender.id)) return;
+    if (on) {
+      zenWindows.set(sender.id, window.isFullScreen());
+      window.setFullScreen(true);
+    } else {
+      leaveZen(sender.id, window);
+    }
+    updateMenu();
+  },
   saveView: ({ sender }, change) => {
     const store = stores.get(sender.id);
     if (!store) return;
@@ -611,6 +633,7 @@ function setApplicationMenu(): void {
       ? {
           readOnly: store.readOnly() !== null,
           docked: dockedPanes.get(window.webContents.id) ?? ALL_DOCKED,
+          zen: zenWindows.has(window.webContents.id),
         }
       : null,
     recent: settings
@@ -757,6 +780,14 @@ async function chooseFolder(
 /** The Projects being closed, by window, so each is closed once. */
 const closing = new Map<number, Promise<void>>();
 
+/** Takes a window out of zen mode, back to the full screen it had before. */
+function leaveZen(id: number, window: BrowserWindow): void {
+  const before = zenWindows.get(id);
+  if (before === undefined) return;
+  zenWindows.delete(id);
+  if (!window.isDestroyed()) window.setFullScreen(before);
+}
+
 /**
  * Asks the window's renderer to hand over pending edits, waits until they are
  * on disk, then closes its Project. Rejects, keeping the Project open, while
@@ -776,6 +807,7 @@ function closeProject(window: BrowserWindow): Promise<void> {
         unsubscribes.delete(id);
         stores.delete(id);
         dockedPanes.delete(id);
+        leaveZen(id, window);
         updateMenu();
       } finally {
         closing.delete(id);

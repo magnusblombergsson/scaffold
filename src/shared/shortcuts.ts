@@ -37,6 +37,8 @@ export type Command = (
   | { type: 'newTodo' }
   /** Collapses the pane, or docks it back at the tab it last showed. */
   | { type: 'togglePane'; pane: SidePane }
+  /** Enters zen mode in Writing, or leaves it. */
+  | { type: 'zen' }
 ) & { byKey?: true };
 
 /**
@@ -59,6 +61,7 @@ export const SHORTCUTS = {
   newEntry: 'CmdOrCtrl+E',
   newTodo: 'CmdOrCtrl+T',
   shortcuts: 'CmdOrCtrl+/',
+  zen: 'CmdOrCtrl+Shift+F',
   leftPane: 'CmdOrCtrl+Shift+M',
   assistant: 'CmdOrCtrl+Shift+A',
   // In the Binder and Story Bible list, while it has focus.
@@ -68,10 +71,11 @@ export const SHORTCUTS = {
   undoStructure: 'CmdOrCtrl+Z',
 } as const satisfies Record<string, string>;
 
-/** The letter after Ctrl+Shift that collapses or docks each pane, as in `SHORTCUTS`. */
-const PANE_LETTERS: Record<string, SidePane> = {
-  m: 'left',
-  a: 'assistant',
+/** The command of each letter after Ctrl+Shift that the window takes, as in `SHORTCUTS`. */
+const SHIFT_LETTERS: Record<string, Command> = {
+  f: { type: 'zen' },
+  m: { type: 'togglePane', pane: 'left' },
+  a: { type: 'togglePane', pane: 'assistant' },
 };
 
 /** The digit after Ctrl that switches to each Mode, as in `SHORTCUTS`. */
@@ -91,8 +95,8 @@ type KeyPress = {
 
 /**
  * The command a key press in a window asks for, if any: the create chords,
- * Ctrl+E, Ctrl+T, Ctrl+1/2/3 and the pane keys, which apply where a Project is
- * shown, and Ctrl+/.
+ * Ctrl+E, Ctrl+T, Ctrl+1/2/3, zen and the pane keys, which apply where a
+ * Project is shown, and Ctrl+/.
  * Ctrl is ⌘ on macOS. The menus take the others.
  */
 export function commandForKey(press: KeyPress, mac: boolean): Command | null {
@@ -108,10 +112,7 @@ export function commandForKey(press: KeyPress, mac: boolean): Command | null {
   // Wherever / is: some keyboards type it with Shift, as Swedish Shift+7.
   if (key === '/' && !alt) return { type: 'shortcuts' };
   if (alt) return null;
-  if (shift) {
-    const pane = PANE_LETTERS[key.toLowerCase()];
-    return pane ? { type: 'togglePane', pane } : null;
-  }
+  if (shift) return SHIFT_LETTERS[key.toLowerCase()] ?? null;
   if (key.toLowerCase() === 'e') return { type: 'newEntry' };
   if (key.toLowerCase() === 't') return { type: 'newTodo' };
   const mode = MODE_DIGITS[key];
@@ -229,6 +230,11 @@ export const CHEAT_SHEET: {
   {
     title: 'View',
     shortcuts: [
+      {
+        keys: [SHORTCUTS.zen],
+        action: 'Zen mode in Writing: full screen, the panes and header away',
+      },
+      { keys: ['Escape'], action: 'Leave zen mode' },
       {
         keys: [SHORTCUTS.leftPane],
         action: 'Collapse the left pane, or dock it back at its last tab',

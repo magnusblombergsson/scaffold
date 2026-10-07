@@ -63,6 +63,7 @@ import { ProposalTargetContext } from './ProposalCard';
 import { ProposalPeek, type TargetPeek } from './ProposalPeek';
 import { PinnedNotes } from './PinnedNotes';
 import { applyChange, togglePin, withoutTrashed } from './pinned-notes';
+import { revealedEdge, type ChromeEdge } from './zen';
 import {
   onMentionClick,
   setMentionEntries,
@@ -469,9 +470,10 @@ function ProjectView({
     window.shell.saveView({ outlineNotesOpen: !outlineNotesOpen });
   }
 
+  /** Opens or closes the Overview pane; saved, except in zen, which gives it back on leaving. */
   function toggleOverview() {
     setOverviewOpen(!overviewOpen);
-    window.shell.saveView({ overviewOpen: !overviewOpen });
+    if (!beforeZen) window.shell.saveView({ overviewOpen: !overviewOpen });
   }
 
   const [tab, setTab] = useState<Tab>('manuscript');
@@ -481,18 +483,26 @@ function ProjectView({
    */
   const [docked, setDocked] = useState<DockedPanes>(ALL_DOCKED);
   useEffect(() => window.shell.showDocked(docked), [docked]);
+  /** Moves focus to the Prose if it is in a pane of Writing matching `paneSelector`, about to go. */
+  function focusProseOutOf(paneSelector: string) {
+    const room = writingRoom.current;
+    const active = document.activeElement;
+    if (
+      ![...(room?.querySelectorAll(paneSelector) ?? [])].some((pane) =>
+        pane.contains(active),
+      )
+    ) {
+      return;
+    }
+    room?.querySelector<HTMLElement>('[aria-label="Prose"]')?.focus();
+  }
   /**
    * Collapses a side pane, or docks it back at the tab it last showed. Focus
    * in a pane that collapses goes to the Prose.
    */
   function togglePane(pane: SidePane) {
-    const element = writingRoom.current?.querySelector(
-      pane === 'left' ? '.left-pane' : '.assistant-panel',
-    );
-    if (docked[pane] && element?.contains(document.activeElement)) {
-      writingRoom.current
-        ?.querySelector<HTMLElement>('[aria-label="Prose"]')
-        ?.focus();
+    if (docked[pane]) {
+      focusProseOutOf(pane === 'left' ? '.left-pane' : '.assistant-panel');
     }
     setDocked({ ...docked, [pane]: !docked[pane] });
   }
@@ -504,6 +514,43 @@ function ProjectView({
     setTab(at);
     setDocked({ ...docked, left: true });
   }
+  /**
+   * While the Author is in zen mode, in Writing or away from it, the panes
+   * and Overview as they were before, to give back on leaving it. In memory
+   * for the window.
+   */
+  const [beforeZen, setBeforeZen] = useState<PanesBeforeZen | null>(null);
+  /** Zen is shown in Writing only, and resumes on the return to it. */
+  const zen = beforeZen !== null && mode === 'writing';
+  useEffect(() => window.shell.setZen(zen), [zen]);
+  /** Puts every pane away, the Overview too, leaving the Overview's saved state as is. */
+  function enterZen() {
+    focusProseOutOf('.left-pane, .overview-pane, .assistant-panel');
+    setBeforeZen({ docked, overviewOpen });
+    setDocked({ left: false, assistant: false });
+    setOverviewOpen(false);
+  }
+  /** Gives the panes back as they were before zen. */
+  function leaveZen() {
+    if (!beforeZen) return;
+    setBeforeZen(null);
+    setDocked(beforeZen.docked);
+    setOverviewOpen(beforeZen.overviewOpen);
+  }
+  /** The header or status bar zen shows, as the pointer reaches its edge. */
+  const [revealed, setRevealed] = useState<ChromeEdge | null>(null);
+  useEffect(() => {
+    if (!zen) return;
+    const onMove = (event: MouseEvent) =>
+      setRevealed((now) =>
+        revealedEdge(event.clientY, window.innerHeight, now),
+      );
+    document.addEventListener('mousemove', onMove);
+    return () => {
+      document.removeEventListener('mousemove', onMove);
+      setRevealed(null);
+    };
+  }, [zen]);
   const writingRoom = useRef<HTMLDivElement>(null);
   usePaneCycle(writingRoom, mode === 'writing');
   const [entries, setEntries] = useState<EntrySummary[]>([]);
@@ -849,6 +896,19 @@ function ProjectView({
       setExportOpen(true);
       return true;
     }
+    if (command.type === 'zen') {
+      if (mode !== 'writing') {
+        if (command.byKey) return false;
+        // Resumes zen, if the Author left Writing in it.
+        switchMode('writing');
+        if (!beforeZen) enterZen();
+      } else if (beforeZen) {
+        leaveZen();
+      } else {
+        enterZen();
+      }
+      return true;
+    }
     if (command.type === 'togglePane') {
       if (mode !== 'writing') {
         if (command.byKey) return false;
@@ -931,6 +991,25 @@ function ProjectView({
     window.addEventListener('keydown', onKey, true);
     return () => window.removeEventListener('keydown', onKey, true);
   }, []);
+  // Escape leaves zen, unless a dialog, menu, list or field takes it first.
+  useEffect(() => {
+    if (!zen) return;
+    const onKey = (event: KeyboardEvent) => {
+      if (
+        event.key !== 'Escape' ||
+        event.repeat ||
+        document.querySelector(
+          'dialog[open], [role="dialog"], [role="menu"], [role="listbox"]',
+        ) ||
+        document.activeElement?.matches('input, textarea, select')
+      ) {
+        return;
+      }
+      latestRun.current({ type: 'zen', byKey: true });
+    };
+    window.addEventListener('keydown', onKey, true);
+    return () => window.removeEventListener('keydown', onKey, true);
+  }, [zen]);
 
   async function undo(step: number) {
     flushPendingEdits();
@@ -970,7 +1049,11 @@ function ProjectView({
 
   return (
     <ReadOnlyContext.Provider value={readOnly !== null}>
-      <div className="project-view">
+      <div
+        className="project-view"
+        data-zen={zen || undefined}
+        data-revealed={revealed ?? undefined}
+      >
         <header>
           <span className="project-name">{project.displayName}</span>
           <div role="group" aria-label="Mode" className="mode-switch">
@@ -1000,6 +1083,16 @@ function ProjectView({
                       ? entryTitle(openEntry)
                       : selected?.kind === 'project' && 'Project Outline'}
           </span>
+          {mode === 'writing' && (
+            <button
+              className="zen-button"
+              aria-pressed={zen}
+              title={withShortcut('Zen Mode', SHORTCUTS.zen, MAC)}
+              onClick={() => run({ type: 'zen' })}
+            >
+              Zen
+            </button>
+          )}
         </header>
         {readOnly && (
           <p className="read-only-banner" role="alert">
@@ -1561,6 +1654,9 @@ function ProjectView({
     </ReadOnlyContext.Provider>
   );
 }
+
+/** What zen puts away in Writing, and gives back on leaving it. */
+type PanesBeforeZen = { docked: DockedPanes; overviewOpen: boolean };
 
 /** The left pane's tabs in Writing. */
 type Tab = 'manuscript' | 'bible' | 'todos' | 'conflicts' | 'trash';

@@ -7,7 +7,7 @@ const noProject: MenuState = { mac: false, project: null, recent: [] };
 const docked = { left: true, assistant: true };
 const writable: MenuState = {
   ...noProject,
-  project: { readOnly: false, docked },
+  project: { readOnly: false, docked, zen: false },
 };
 
 function build(state: MenuState) {
@@ -97,7 +97,11 @@ describe('menuTemplate', () => {
   it('collapses and docks the left pane and the Assistant from View, as check items, with keys taken by the window', () => {
     const { template, sent } = build({
       ...writable,
-      project: { readOnly: true, docked: { left: false, assistant: true } },
+      project: {
+        readOnly: true,
+        docked: { left: false, assistant: true },
+        zen: false,
+      },
     });
     const view = menu(template, 'View');
     const left = item(view, 'Left Pane');
@@ -124,6 +128,39 @@ describe('menuTemplate', () => {
     const none = menu(build(noProject).template, 'View');
     expect(item(none, 'Left Pane').enabled).toBe(false);
     expect(item(none, 'Assistant').enabled).toBe(false);
+  });
+
+  it('enters and leaves zen mode from View, a check item before the panes, with its key taken by the window', () => {
+    const { template, sent } = build({
+      ...writable,
+      project: { readOnly: true, docked, zen: true },
+    });
+    const view = menu(template, 'View');
+    const zen = item(view, 'Zen Mode');
+    expect(zen).toMatchObject({
+      type: 'checkbox',
+      checked: true,
+      enabled: true,
+      accelerator: 'CmdOrCtrl+Shift+F',
+      registerAccelerator: false,
+    });
+    const at = view.indexOf(zen);
+    expect(view[at - 1].type).toBe('separator');
+    expect(view.slice(at + 1, at + 3).map((i) => i.label)).toEqual([
+      'Left Pane',
+      'Assistant',
+    ]);
+    click(zen);
+    click(zen, true);
+    expect(sent).toEqual([{ type: 'zen' }, { type: 'zen', byKey: true }]);
+    expect(
+      item(menu(build(writable).template, 'View'), 'Zen Mode').checked,
+    ).toBe(false);
+    const none = menu(build(noProject).template, 'View');
+    expect(item(none, 'Zen Mode')).toMatchObject({
+      checked: false,
+      enabled: false,
+    });
   });
 
   it('creates from Insert, below or above, and Entries of each type', () => {
@@ -172,7 +209,7 @@ describe('menuTemplate', () => {
   it('can insert nothing without a Project, or in a read-only one', () => {
     for (const state of [
       noProject,
-      { ...writable, project: { readOnly: true, docked } },
+      { ...writable, project: { readOnly: true, docked, zen: false } },
     ]) {
       const insert = menu(build(state).template, 'Insert');
       expect(
@@ -221,7 +258,7 @@ describe('menuTemplate', () => {
   it('keeps Project Settings open to a read-only Project, to see its values', () => {
     const { template } = build({
       ...writable,
-      project: { readOnly: true, docked },
+      project: { readOnly: true, docked, zen: false },
     });
     expect(item(menu(template, 'Tools'), 'Project Settings…').enabled).toBe(
       true,

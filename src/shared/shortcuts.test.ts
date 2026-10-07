@@ -111,6 +111,16 @@ describe('commandForKey', () => {
     ).toBeNull();
   });
 
+  it('enters or leaves zen mode with Ctrl+Shift+F, but not Ctrl+F', () => {
+    expect(
+      commandForKey(key('F', { ctrlKey: true, shiftKey: true }), false),
+    ).toEqual({ type: 'zen' });
+    expect(
+      commandForKey(key('F', { metaKey: true, shiftKey: true }), true),
+    ).toEqual({ type: 'zen' });
+    expect(commandForKey(key('f', { ctrlKey: true }), false)).toBeNull();
+  });
+
   it('never takes Ctrl+Alt with a letter or digit, which is AltGr on Windows', () => {
     expect(
       commandForKey(key('e', { ctrlKey: true, altKey: true }), false),
@@ -161,9 +171,11 @@ describe('CHEAT_SHEET', () => {
     }
   });
 
-  it('lists the pane keys in a View group', () => {
+  it('lists zen mode, Escape leaving it, and the pane keys in a View group', () => {
     const view = CHEAT_SHEET.find((group) => group.title === 'View');
     expect(view?.shortcuts.flatMap((s) => s.keys)).toEqual([
+      'CmdOrCtrl+Shift+F',
+      'Escape',
       'CmdOrCtrl+Shift+M',
       'CmdOrCtrl+Shift+A',
     ]);
