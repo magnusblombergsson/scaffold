@@ -103,6 +103,13 @@ import {
 import { entryFieldsFrontmatter, readEntryFields } from './entry-fields-file';
 import type { FileSystem, Fingerprint } from './file-system';
 import { renameWithRetry, safeWrite, writeFailureReason } from './safe-write';
+import {
+  changeDetails,
+  formatWithDetails,
+  KEYS_SAVED_AT,
+  mergeDetails,
+  type Version,
+} from './unit-details';
 import { formatUnitFile, parseUnitFile, type UnitFile } from './unit-file';
 
 export const FORMAT = 1;
@@ -1044,6 +1051,8 @@ export class ProjectStore {
   private readonly resolving = new Set<string>();
   /** The units in Conflict, by key. */
   private conflicts = new Map<string, ConflictEntry>();
+  /** Units with copies to merge once their writes are done (ADR 0008). */
+  private readonly mergeLater = new Set<string>();
   /** Files with no id that names a unit or the Project, already logged. */
   private readonly unrecognised: Set<string>;
   /** What versions of `project.json` that met as the Project opened lost, until told. */
@@ -1442,9 +1451,11 @@ export class ProjectStore {
    * client leaves them when two computers saved one unit: any file in a unit
    * directory not named `<id>.md`. It is matched to its unit by the id inside
    * it, never by its name. One with no id that names a unit is logged and
-   * left alone, and so is a copy of a unit that isn't here, until it is.
+   * left alone, and so is a copy of a unit that isn't here, until it is. A
+   * copy with the same text as the unit's file is merged into it and makes
+   * no Conflict. `holding` is the unit whose writes the caller holds, if any.
    */
-  async findConflicts(): Promise<void> {
+  async findConflicts(holding?: string): Promise<void> {
     // Read only to label a copy: most checks find none.
     let hosts: string[] | undefined;
     const knownHosts = async () =>
@@ -1482,9 +1493,103 @@ export class ProjectStore {
       entry.copies.sort(
         (a, b) => a.savedAt - b.savedAt || a.name.localeCompare(b.name),
       );
+      entry.copies = await this.mergeSameText(entry, holding);
+      if (entry.copies.length === 0) {
+        found.delete(key);
+        continue;
+      }
       entry.original = await this.originalVersion(key, entry.ref);
     }
     this.setConflicts(found);
+  }
+
+  /**
+   * Merges the copies beside a unit's file that have its text into it, and
+   * resolves with the rest, which are in Conflict. A unit being resolved
+   * keeps all its copies. One with writes not done is merged once they are;
+   * until then its copies with the file's text are in no Conflict either.
+   */
+  private async mergeSameText(
+    { ref, copies }: ConflictEntry,
+    holding: string | undefined,
+  ): Promise<ConflictCopy[]> {
+    const key = unitKey(ref);
+    if (this.resolving.has(key)) return copies;
+    const merge = (write: boolean) =>
+      this.mergeCopies(ref, copies, write).catch((error: unknown) => {
+        console.error(`Can't merge the copies of ${key}:`, error);
+        return copies;
+      });
+    if (this.unsaved.has(key) || (key !== holding && this.writing.has(key))) {
+      // Its drain looks again once its writes are done.
+      this.mergeLater.add(key);
+      return merge(false);
+    }
+    this.mergeLater.delete(key);
+    const merging = merge(true);
+    if (key === holding) return merging;
+    // Writes to the unit wait for the merge.
+    this.writing.set(
+      key,
+      merging.then(() => {}),
+    );
+    try {
+      return await merging;
+    } finally {
+      this.writing.delete(key);
+      if (this.unsaved.has(key)) this.startWriting(key);
+    }
+  }
+
+  /**
+   * Writes the details of a unit's file and the copies with its text, merged
+   * one by one (ADR 0008), to the file, then deletes those copies, unless
+   * not to `write`. Resolves with the copies with other text.
+   */
+  private async mergeCopies(
+    ref: UnitRef,
+    copies: ConflictCopy[],
+    write: boolean,
+  ): Promise<ConflictCopy[]> {
+    const file = unitPath(this.path, ref);
+    const fingerprint = await this.deps.fs.stat(file);
+    if (!fingerprint) return copies;
+    const own = parseUnitFile(await this.deps.fs.readFile(file));
+    const value = unitValue(ref, own);
+    const versions: Version[] = [
+      { header: own.frontmatter, savedAt: fingerprint.mtimeMs },
+    ];
+    const merged: ConflictCopy[] = [];
+    const left: ConflictCopy[] = [];
+    for (const copy of copies) {
+      const theirs = parseUnitFile(
+        await this.deps.fs.readFile(copyPath(this.path, ref, copy)),
+      );
+      if (sameText(ref, unitValue(ref, theirs), value)) {
+        versions.push({ header: theirs.frontmatter, savedAt: copy.savedAt });
+        merged.push(copy);
+      } else {
+        left.push(copy);
+      }
+    }
+    if (merged.length === 0 || !write) return left;
+    const text = formatWithDetails(
+      ref.kind,
+      own,
+      mergeDetails(ref.kind, versions),
+    );
+    if (!isDeepStrictEqual(parseUnitFile(text).frontmatter, own.frontmatter)) {
+      // Changed since, as by another computer: merged on a later check.
+      if (!sameFingerprint(await this.deps.fs.stat(file), fingerprint)) {
+        return copies;
+      }
+      // Reloaded, as any change from another computer, on the next check.
+      await safeWrite(this.deps.fs, this.deps.clock, file, text);
+    }
+    for (const copy of merged) {
+      await this.deps.fs.unlink(copyPath(this.path, ref, copy));
+    }
+    return left;
   }
 
   /** When a unit's own file was saved, and whether by this computer. */
@@ -2114,7 +2219,9 @@ export class ProjectStore {
   /**
    * Writes `kept` to a unit's own file, after every other version to Trash:
    * the Author's unsaved text, what is in the file, which may have come from
-   * another computer since, and then each copy beside it.
+   * another computer since, and then each copy beside it. The details of
+   * every version merge into it (ADR 0008); a version that differs from it
+   * only in them goes nowhere.
    */
   private async keepVersion(
     { ref, original, copies }: ConflictEntry,
@@ -2124,19 +2231,21 @@ export class ProjectStore {
     const file = unitPath(this.path, ref);
     const differs = (text: string, from: UnitValue[] = []) => {
       const value = unitValue(ref, parseUnitFile(text));
-      return [kept, ...from].every((v) => !isDeepStrictEqual(value, v));
+      return [kept, ...from].every((v) => !sameText(ref, value, v));
     };
-    if (pending && !isDeepStrictEqual(pending.value, kept)) {
+    if (pending && !sameText(ref, pending.value, kept)) {
       await this.writeTrashedVersion(ref, unitFile(ref, pending.value), {
         host: this.host,
         savedAt: this.deps.clock.now(),
       });
     }
+    const versions: Version[] = [];
     const onDisk = await this.deps.fs.stat(file);
     let frontmatter: UnknownKeys = {};
     if (onDisk) {
       const text = await this.deps.fs.readFile(file);
       ({ frontmatter } = parseUnitFile(text));
+      versions.push({ header: frontmatter, savedAt: onDisk.mtimeMs });
       if (differs(text, pending ? [pending.value] : [])) {
         const known = this.loaded.get(unitKey(ref));
         const unchanged =
@@ -2147,7 +2256,28 @@ export class ProjectStore {
         });
       }
     }
-    const keptText = unitFile(ref, kept, frontmatter);
+    const copyTexts: string[] = [];
+    for (const copy of copies) {
+      const text = await this.deps.fs.readFile(copyPath(this.path, ref, copy));
+      copyTexts.push(text);
+      versions.push({
+        header: parseUnitFile(text).frontmatter,
+        savedAt: copy.savedAt,
+      });
+    }
+    if (pending) {
+      // The details it didn't change are the file's, saved when it was.
+      const saved = parseUnitFile(this.fileToSave(pending, frontmatter));
+      versions.push({
+        header: saved.frontmatter,
+        savedAt: onDisk?.mtimeMs ?? this.deps.clock.now(),
+      });
+    }
+    const keptText = formatWithDetails(
+      ref.kind,
+      parseUnitFile(unitFile(ref, kept, frontmatter)),
+      mergeDetails(ref.kind, versions),
+    );
     await safeWrite(this.deps.fs, this.deps.clock, file, keptText);
     const loaded: Loaded = {
       ref,
@@ -2157,9 +2287,10 @@ export class ProjectStore {
       savedHere: true,
     };
 
-    for (const copy of copies) {
-      const text = await this.deps.fs.readFile(copyPath(this.path, ref, copy));
-      if (differs(text)) await this.writeTrashedVersion(ref, text, copy);
+    for (const [i, copy] of copies.entries()) {
+      if (differs(copyTexts[i])) {
+        await this.writeTrashedVersion(ref, copyTexts[i], copy);
+      }
       await this.deps.fs.unlink(copyPath(this.path, ref, copy));
     }
     return loaded;
@@ -3508,7 +3639,9 @@ ${text}`);
       });
     } finally {
       // Its versions, or when its own file was saved, changed.
-      if (setAside || this.conflicts.has(key)) await this.refreshConflicts();
+      if (setAside || this.conflicts.has(key) || this.mergeLater.has(key)) {
+        await this.refreshConflicts(key);
+      }
     }
   }
 
@@ -3529,7 +3662,7 @@ ${text}`);
         }
         const onDisk = await this.checkBeforeSave(pending, file);
         if (onDisk.setAside) onSetAside();
-        const text = unitFile(pending.ref, pending.value, onDisk.frontmatter);
+        const text = this.fileToSave(pending, onDisk.frontmatter);
         await safeWrite(this.deps.fs, this.deps.clock, file, text);
         this.loaded.set(key, {
           ref: pending.ref,
@@ -3589,11 +3722,9 @@ ${text}`);
     ) {
       return unchanged;
     }
+    // Only text makes a Conflict: details merge as the file is saved.
     const theirs = unitValue(ref, onDisk);
-    if (
-      isDeepStrictEqual(theirs, known.value) ||
-      isDeepStrictEqual(theirs, value)
-    ) {
+    if (sameText(ref, theirs, known.value) || sameText(ref, theirs, value)) {
       return unchanged;
     }
     const dir = path.dirname(file);
@@ -3613,10 +3744,34 @@ ${text}`);
     return { setAside: true, frontmatter: onDisk.frontmatter };
   }
 
-  /** Finds the units in Conflict again; failing to only leaves the list as it was. */
-  private async refreshConflicts(): Promise<void> {
+  /**
+   * The file a pending value is saved as over `onDisk`, the header on disk:
+   * its text from the value, and its details as on disk, but for those the
+   * value changed from the version it was made on, saved now (ADR 0008).
+   */
+  private fileToSave({ ref, value }: Pending, onDisk: UnknownKeys): string {
+    const known = this.loaded.get(unitKey(ref));
+    const mine = parseUnitFile(unitFile(ref, value, onDisk));
+    const before = known
+      ? parseUnitFile(unitFile(ref, baseOf(known).value, onDisk)).frontmatter
+      : onDisk;
+    const details = changeDetails(
+      ref.kind,
+      onDisk,
+      before,
+      mine.frontmatter,
+      this.deps.clock.now(),
+    );
+    return formatWithDetails(ref.kind, mine, details);
+  }
+
+  /**
+   * Finds the units in Conflict again; failing to only leaves the list as it
+   * was. `holding` is the unit whose writes the caller holds, if any.
+   */
+  private async refreshConflicts(holding?: string): Promise<void> {
     try {
-      await this.findConflicts();
+      await this.findConflicts(holding);
     } catch (error) {
       console.error(`Can't look for Conflicts in ${this.path}:`, error);
     }
@@ -3973,8 +4128,26 @@ function unitValue(ref: UnitRef, file: UnitFile): UnitValue {
   if (ref.kind === 'notes' || ref.kind === 'private') {
     return { id: ref.id, body };
   }
-  const { id: _id, format: _format, ...meta } = frontmatter;
+  const {
+    id: _id,
+    format: _format,
+    [KEYS_SAVED_AT]: _savedAt,
+    ...meta
+  } = frontmatter;
   return { id: ref.id, body, meta };
+}
+
+/** Whether two values of a unit hold the same text, whatever their details (ADR 0008). */
+function sameText(ref: UnitRef, a: UnitValue, b: UnitValue): boolean {
+  return isDeepStrictEqual(textOf(ref, a), textOf(ref, b));
+}
+
+function textOf(ref: UnitRef, value: UnitValue): unknown {
+  if (ref.kind === 'outline') {
+    const { meta: _, ...text } = value as OutlineValue;
+    return text;
+  }
+  return ref.kind === 'entry' ? withoutImage(value as EntryValue) : value;
 }
 
 /** An Entry from its file; a field that is missing or not understood reads as its default. */
