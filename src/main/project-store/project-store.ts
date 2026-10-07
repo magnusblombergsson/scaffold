@@ -83,6 +83,7 @@ import {
   type Status,
 } from '../../shared/status';
 import {
+  hasTag,
   readTags,
   spelledTags,
   tagKey,
@@ -1964,9 +1965,7 @@ export class ProjectStore {
     tag: string,
     change: (tags: string[]) => string[],
   ): Promise<void> {
-    const key = tagKey(tag);
-    const has = ({ tags }: { tags?: string[] }) =>
-      tags?.some((t) => tagKey(t) === key) ?? false;
+    const has = ({ tags }: { tags?: string[] }) => hasTag(tags, tag);
     return this.enqueueWrite(async () => {
       // Refused at once, not midway.
       this.refuseIfUpgraded();

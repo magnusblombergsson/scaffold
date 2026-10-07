@@ -2,9 +2,49 @@
 // §1). The Project's Tags are simply those in use; matching ignores case,
 // and the first spelling wins. A comma ends a Tag.
 
+import type {
+  Manuscript,
+  ManuscriptChapter,
+  ManuscriptScene,
+} from './project-types';
+
 /** What a Tag matches by: its spelling, ignoring case. */
 export function tagKey(tag: string): string {
   return tag.toLocaleLowerCase();
+}
+
+/** Whether `tags` has `tag`, ignoring case. */
+export function hasTag(
+  tags: readonly string[] | undefined,
+  tag: string,
+): boolean {
+  return (tags ?? []).some((t) => tagKey(t) === tagKey(tag));
+}
+
+/** `tag` as the first of `lists` to have it spells it; undefined if none has it. */
+export function tagSpelling(
+  tag: string,
+  lists: Iterable<readonly string[]>,
+): string | undefined {
+  return [...lists].flat().find((t) => tagKey(t) === tagKey(tag));
+}
+
+/** The Chapters and Scenes with `tag`, in Manuscript order, Unplaced Scenes last, each with its name. */
+export function tagged(
+  manuscript: Manuscript,
+  tag: string,
+): { unit: ManuscriptChapter | ManuscriptScene; name: string }[] {
+  const scene = (unit: ManuscriptScene) => ({
+    unit,
+    name: `Scene “${unit.title}”`,
+  });
+  return [
+    ...manuscript.chapters.flatMap((chapter) => [
+      { unit: chapter, name: `Chapter “${chapter.title}”` },
+      ...chapter.scenes.map(scene),
+    ]),
+    ...manuscript.unplaced.map(scene),
+  ].filter(({ unit }) => hasTag(unit.tags, tag));
 }
 
 /**

@@ -17,11 +17,15 @@ export const MODE_LABELS: Record<Mode, string> = {
   writing: 'Writing',
 };
 
-/** What an Interview is about: one Entry, one Entry type, a Chapter or Scene, or open. */
+/**
+ * What an Interview is about: one Entry, one Entry type, a Chapter or Scene,
+ * a Tag, or open.
+ */
 export type InterviewFocus =
   | { kind: 'open' }
   | { kind: 'entry'; id: string }
   | { kind: 'entry-type'; type: EntryType }
+  | { kind: 'tag'; tag: string }
   | { kind: 'chapter'; id: string }
   | { kind: 'scene'; id: string };
 
@@ -34,6 +38,8 @@ export function isInterviewFocus(value: unknown): value is InterviewFocus {
       return true;
     case 'entry-type':
       return ENTRY_TYPES.includes(focus.type as EntryType);
+    case 'tag':
+      return typeof focus.tag === 'string' && focus.tag.trim() !== '';
     case 'entry':
     case 'chapter':
     case 'scene':
@@ -45,7 +51,7 @@ export function isInterviewFocus(value: unknown): value is InterviewFocus {
 
 /** The ids of the Entry, Chapter or Scene an Interview's focus is, if any. */
 export function focusIds(focus: InterviewFocus): string[] {
-  return focus.kind === 'open' || focus.kind === 'entry-type' ? [] : [focus.id];
+  return 'id' in focus ? [focus.id] : [];
 }
 
 /**

@@ -1,6 +1,7 @@
 import { useContext, useEffect, useRef, useState } from 'react';
 import type { PanelWidths } from '../shared/api';
 import { OPEN_FOCUS, type InterviewFocus } from '../shared/conversation';
+import { hasTag, tagged } from '../shared/tags';
 import {
   FIELD_LABELS,
   fieldOf,
@@ -118,7 +119,7 @@ export function InterviewRoom({
                 Focus
                 <select
                   aria-label="Focus"
-                  value={valueOf(focus)}
+                  value={valueOf(focus, names)}
                   onChange={(event) => pick(event.target.value)}
                   disabled={readOnly || streaming !== null}
                 >
@@ -141,8 +142,8 @@ export function InterviewRoom({
                   )}
                   {/* A focus no longer in the Project stays shown as it is. */}
                   {!options.some((g) =>
-                    g.options.some((o) => o.value === valueOf(focus)),
-                  ) && <option value={valueOf(focus)}>{label}</option>}
+                    g.options.some((o) => o.value === valueOf(focus, names)),
+                  ) && <option value={valueOf(focus, names)}>{label}</option>}
                 </select>
               </label>
               <ModelPicker conversation={conversation} />
@@ -268,12 +269,22 @@ function InFocus({
       );
     case 'entry-type':
       return (
-        <EntriesOfType
+        <EntriesInFocus
           ids={names.entries
             .filter((e) => e.type === focus.type)
             .map((e) => e.id)}
+          none="No Entries of this type yet."
           changes={changes}
           onOpen={onOpenEntry}
+        />
+      );
+    case 'tag':
+      return (
+        <TagFocus
+          tag={focus.tag}
+          names={names}
+          changes={changes}
+          onOpenEntry={onOpenEntry}
         />
       );
     case 'chapter':
@@ -382,13 +393,15 @@ function FocusEntry({
   );
 }
 
-/** The Entries of a type in focus, at a glance. */
-function EntriesOfType({
+/** The Entries in focus, of a type or with a Tag, at a glance; `none` when there are none. */
+function EntriesInFocus({
   ids,
+  none,
   changes,
   onOpen,
 }: {
   ids: string[];
+  none: string;
   changes: number;
   onOpen(entryId: string): void;
 }) {
@@ -409,7 +422,7 @@ function EntriesOfType({
   }, [key, changes]);
   if (!values) return null;
   if (values.length === 0) {
-    return <p className="reference-empty">No Entries of this type yet.</p>;
+    return <p className="reference-empty">{none}</p>;
   }
   return (
     <div className="reference-entries">
@@ -417,6 +430,77 @@ function EntriesOfType({
         <EntryCard key={entry.id} entry={entry} onOpen={onOpen} />
       ))}
     </div>
+  );
+}
+
+/**
+ * A Tag in focus: the Entries with it, then the Outlines of the Chapters and
+ * Scenes with it, in Manuscript order. Never their Prose.
+ */
+function TagFocus({
+  tag,
+  names,
+  changes,
+  onOpenEntry,
+}: {
+  tag: string;
+  names: Names;
+  changes: number;
+  onOpenEntry(entryId: string): void;
+}) {
+  const units = tagged(names.manuscript, tag);
+  const [outlines, setOutlines] = useState<Map<string, string> | null>(null);
+  const ids = units.map(({ unit }) => unit.id).join(',');
+  useEffect(() => {
+    let current = true;
+    void Promise.all(
+      units.map(({ unit }) =>
+        window.project
+          .read({ kind: 'outline', id: unit.id })
+          .then(({ body }) => [unit.id, body] as const)
+          .catch(() => [unit.id, ''] as const),
+      ),
+    ).then((read) => {
+      if (current) setOutlines(new Map(read));
+    });
+    return () => {
+      current = false;
+    };
+  }, [ids, changes]);
+  return (
+    <>
+      <EntriesInFocus
+        ids={names.entries.filter((e) => hasTag(e.tags, tag)).map((e) => e.id)}
+        none="No Entries with this Tag."
+        changes={changes}
+        onOpen={onOpenEntry}
+      />
+      {outlines && (
+        <div className="reference-skeleton">
+          {units.length === 0 ? (
+            <p className="reference-empty">
+              No Chapters or Scenes with this Tag.
+            </p>
+          ) : (
+            units.map(({ unit, name }) => {
+              const body = outlines.get(unit.id)?.trim();
+              return (
+                <section key={unit.id} aria-label={name}>
+                  <h3>{name}</h3>
+                  {body ? (
+                    <p className="reference-outline">{body}</p>
+                  ) : (
+                    <p className="reference-outline reference-empty">
+                      No Outline.
+                    </p>
+                  )}
+                </section>
+              );
+            })
+          )}
+        </div>
+      )}
+    </>
   );
 }
 
