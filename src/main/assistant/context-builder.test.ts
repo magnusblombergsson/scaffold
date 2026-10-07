@@ -350,6 +350,25 @@ describe('Prose by Mode and command', () => {
     expect(context.saw.entries).toContain(entries.anna);
   });
 
+  it('sends Prose with its block quote and alignment markers as stored', async () => {
+    const { store, view, scenes } = await fixture();
+    const markdown =
+      'She read:\n\n> Come *home*.\n\n> {.right} Now.\n\n\\>sigh\n\n{.centre} The End';
+    await store.write(
+      { kind: 'scene', id: scenes.harbour },
+      { id: scenes.harbour, markdown },
+    );
+
+    const context = await buildContext(view, {
+      mode: 'writing',
+      command: 'question',
+      sceneId: scenes.harbour,
+      messages: [message('author', 'Is the letter clear?')],
+    });
+
+    expect(sent(context)).toContain(markdown);
+  });
+
   it('Writing · free question: other Scenes and Chapters only when @-mentioned', async () => {
     const { view, scenes, chapters } = await fixture();
 

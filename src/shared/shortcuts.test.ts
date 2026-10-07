@@ -142,6 +142,12 @@ describe('commandForKey', () => {
     expect(commandForKey(key('Enter'), false)).toBeNull();
     expect(commandForKey(key('Enter', { shiftKey: true }), false)).toBeNull();
     expect(commandForKey(key('b', { ctrlKey: true }), false)).toBeNull();
+    // Block Quote and the alignments, which the Prose takes.
+    for (const letter of ['B', 'L', 'E', 'R']) {
+      expect(
+        commandForKey(key(letter, { ctrlKey: true, shiftKey: true }), false),
+      ).toBeNull();
+    }
     expect(
       commandForKey(key('1', { ctrlKey: true, shiftKey: true }), false),
     ).toBeNull();
@@ -187,6 +193,20 @@ describe('CHEAT_SHEET', () => {
       'CmdOrCtrl+Shift+M',
       'CmdOrCtrl+Shift+A',
       'CmdOrCtrl+Shift+W',
+    ]);
+  });
+
+  it('lists bold, italic, the alignments and block quote in a Formatting group', () => {
+    const formatting = CHEAT_SHEET.find(
+      (group) => group.title === 'Formatting, in the Prose',
+    );
+    expect(formatting?.shortcuts.flatMap((s) => s.keys)).toEqual([
+      'CmdOrCtrl+B',
+      'CmdOrCtrl+I',
+      'CmdOrCtrl+Shift+L',
+      'CmdOrCtrl+Shift+E',
+      'CmdOrCtrl+Shift+R',
+      'CmdOrCtrl+Shift+B',
     ]);
   });
 

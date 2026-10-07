@@ -9,12 +9,21 @@ import {
   type ImportBlock,
   type ImportedChapter,
 } from '../../shared/manuscript-import';
-import { writeProse, type Mark, type Span } from '../../shared/prose-markdown';
+import {
+  ALIGN_NAME,
+  ALIGNMENTS,
+  alignmentNamed,
+  writeProse,
+  type Alignment,
+  type Mark,
+  type Span,
+} from '../../shared/prose-markdown';
 import type { NewChapter } from '../project-store/project-store';
 
 // The Import: a Word or Markdown manuscript read as blocks of Prose, which
 // the Author splits into Chapters and Scenes (src/shared/manuscript-import)
-// before it becomes a new Project. Only paragraphs, italic and bold come in.
+// before it becomes a new Project. Only paragraphs, block quotes, centre and
+// right alignment, italic and bold come in.
 
 export type ImportFormat = 'docx' | 'markdown';
 
@@ -114,9 +123,21 @@ class SpanBuilder {
   }
 }
 
-/** A paragraph block; none when it has no text. */
-function paragraph(spans: Span[]): ImportBlock[] {
-  return spans.length === 0 ? [] : [{ kind: 'paragraph', spans }];
+/** A paragraph block, quoted or not and aligned; none when it has no text. */
+function paragraph(
+  spans: Span[],
+  quote: boolean,
+  align?: Alignment,
+): ImportBlock[] {
+  if (spans.length === 0) return [];
+  return [
+    {
+      kind: 'paragraph',
+      spans,
+      ...(quote && { quote }),
+      ...(align && { align }),
+    },
+  ];
 }
 
 // --- Markdown ---
@@ -124,6 +145,8 @@ function paragraph(spans: Span[]): ImportBlock[] {
 function readMarkdown(source: string): ImportBlock[] {
   const blocks: ImportBlock[] = [];
   const builder = new SpanBuilder();
+  /** How deep within block quotes. */
+  let quoted = 0;
 
   const inline = (nodes: PhrasingContent[], marks: Mark[]) => {
     for (const node of nodes) {
@@ -169,7 +192,7 @@ function readMarkdown(source: string): ImportBlock[] {
         } else if (node.depth === 2 && !/^ {0,3}#/.test(raw)) {
           // `---` under a paragraph makes it a heading in CommonMark, but in
           // a manuscript it is a scene break after it.
-          blocks.push(...paragraph(spans), { kind: 'separator' });
+          blocks.push(...paragraph(spans, quoted > 0), { kind: 'separator' });
         } else {
           blocks.push({ kind: 'heading', level: node.depth, spans });
         }
@@ -177,7 +200,7 @@ function readMarkdown(source: string): ImportBlock[] {
       }
       case 'paragraph':
         inline(node.children, []);
-        blocks.push(...paragraph(builder.take()));
+        blocks.push(...paragraph(builder.take(), quoted > 0));
         break;
       case 'thematicBreak':
         blocks.push({ kind: 'separator' });
@@ -186,16 +209,32 @@ function readMarkdown(source: string): ImportBlock[] {
         // Most likely Prose indented by the Author.
         for (const text of node.value.split(/\n\s*\n/)) {
           builder.add(text.replace(/\s*\n\s*/g, ' '), []);
-          blocks.push(...paragraph(builder.take()));
+          blocks.push(...paragraph(builder.take(), quoted > 0));
+        }
+        break;
+      case 'blockquote':
+        quoted++;
+        for (const child of node.children) block(child);
+        quoted--;
+        break;
+      case 'html':
+        // An aligned paragraph, as an Export writes it; other HTML isn't
+        // Prose.
+        if (!/^<p\b/i.test(node.value)) break;
+        for (const read of readHtml(node.value)) {
+          blocks.push(
+            read.kind === 'paragraph' && quoted > 0
+              ? { ...read, quote: true }
+              : read,
+          );
         }
         break;
       case 'root':
-      case 'blockquote':
       case 'list':
       case 'listItem':
         for (const child of node.children) block(child);
         break;
-      // HTML and definitions aren't Prose.
+      // Definitions aren't Prose.
     }
   };
 
@@ -205,11 +244,29 @@ function readMarkdown(source: string): ImportBlock[] {
 
 // --- Word ---
 
+/** The quote styles that come in as block quotes. */
+const QUOTE_STYLES = ['Quote', 'Intense Quote'];
+
+/**
+ * The style an aligned paragraph is given before mammoth reads it, as its
+ * style map can't tell how a paragraph is aligned.
+ */
+const alignedStyle = (quote: boolean, align: Alignment) =>
+  `Scaffold ${quote ? 'Quote ' : ''}${align}`;
+
 /**
  * How mammoth turns Word's styles into HTML: italic and bold set by a
- * character style, as by Word's Emphasis, and page breaks as `<hr>`.
+ * character style, as by Word's Emphasis, quote styles as `<blockquote>`,
+ * alignment as a class on the paragraph, and page breaks as `<hr>`.
  */
 const STYLE_MAP = [
+  ...QUOTE_STYLES.map(
+    (style) => `p[style-name='${style}'] => blockquote > p:fresh`,
+  ),
+  ...ALIGNMENTS.flatMap((align) => [
+    `p[style-name='${alignedStyle(false, align)}'] => p.${ALIGN_NAME[align]}:fresh`,
+    `p[style-name='${alignedStyle(true, align)}'] => blockquote > p.${ALIGN_NAME[align]}:fresh`,
+  ]),
   "r[style-name='Emphasis'] => em",
   "r[style-name='Intense Emphasis'] => em",
   "r[style-name='Subtle Emphasis'] => em",
@@ -217,49 +274,91 @@ const STYLE_MAP = [
   "br[type='page'] => hr",
 ];
 
+/** An element of the document mammoth reads, as far as alignment goes. */
+type WordElement = {
+  type: string;
+  children?: WordElement[];
+  styleId?: string | null;
+  styleName?: string | null;
+  alignment?: string | null;
+};
+
+/**
+ * The document with each centred or right-aligned paragraph, other than a
+ * heading, in the style that brings its alignment in.
+ */
+function alignedStyles(element: WordElement): WordElement {
+  element.children?.forEach(alignedStyles);
+  const align = alignmentNamed(element.alignment);
+  if (
+    element.type === 'paragraph' &&
+    align &&
+    !/^heading\s*\d?$/i.test(element.styleName ?? '') &&
+    !/^heading\d?$/i.test(element.styleId ?? '')
+  ) {
+    const quote = QUOTE_STYLES.includes(element.styleName ?? '');
+    element.styleId = null;
+    element.styleName = alignedStyle(quote, align);
+  }
+  return element;
+}
+
 /** Elements mammoth writes for what isn't Prose: notes, comments and their references. */
 const SKIPPED = new Set(['sup', 'sub', 'table', 'dl']);
 
 async function readDocx(file: Uint8Array): Promise<ImportBlock[]> {
   const { value: html } = await mammoth.convertToHtml(
     { buffer: Buffer.from(file) },
-    { styleMap: STYLE_MAP, ignoreEmptyParagraphs: true },
+    {
+      styleMap: STYLE_MAP,
+      ignoreEmptyParagraphs: true,
+      transformDocument: alignedStyles,
+    },
   );
-  return readMammothHtml(html);
+  return readHtml(html);
 }
 
 /**
- * The blocks of the HTML mammoth writes: well-formed, with escaped text, and
- * only the elements its style map names.
+ * The blocks of HTML that mammoth writes, or of an aligned paragraph in
+ * Markdown: escaped text, and the elements mammoth's style map names. A
+ * paragraph's alignment is its `align` attribute or the class mammoth gives
+ * it.
  */
-function readMammothHtml(html: string): ImportBlock[] {
+function readHtml(html: string): ImportBlock[] {
   const blocks: ImportBlock[] = [];
   const builder = new SpanBuilder();
   const marks: Mark[] = [];
   /** The heading level of the block being read; 0 for a paragraph. */
   let level = 0;
+  /** The alignment of the paragraph being read. */
+  let align: Alignment | undefined;
   /** How deep within elements left out, such as notes. */
   let skipping = 0;
+  /** How deep within block quotes. */
+  let quoted = 0;
 
   const endBlock = () => {
     const spans = builder.take();
     if (level > 0 && spans.length > 0) {
       blocks.push({ kind: 'heading', level, spans });
     } else {
-      blocks.push(...wordParagraph(spans));
+      blocks.push(...wordParagraph(spans, quoted > 0, align));
     }
   };
 
-  const tags = /<(\/?)([a-z0-9]+)([^>]*?)(\/?)>|([^<]+)/g;
-  for (const [, closing, name, attributes, selfClosing, text] of html.matchAll(
+  const tags = /<(\/?)([a-z0-9]+)([^>]*?)(\/?)>|([^<]+)/gi;
+  for (const [, closing, tag, attributes, selfClosing, text] of html.matchAll(
     tags,
   )) {
     if (text !== undefined) {
-      if (skipping === 0) builder.add(decodeEntities(text), marks);
+      // A line ending in HTML is a space.
+      const words = decodeEntities(text).replace(/[ \t]*\n[ \t]*/g, ' ');
+      if (skipping === 0) builder.add(words, marks);
       continue;
     }
-    if (selfClosing) {
-      if (skipping > 0) continue;
+    const name = tag.toLowerCase();
+    if (selfClosing || name === 'br' || name === 'hr') {
+      if (skipping > 0 || closing) continue;
       if (name === 'br') builder.add('\n', marks);
       if (name === 'hr') {
         endBlock();
@@ -272,11 +371,13 @@ function readMammothHtml(html: string): ImportBlock[] {
       continue;
     }
     if (closing) {
+      if (name === 'blockquote') quoted--;
       if (name === 'em' || name === 'i') remove(marks, 'italic');
       if (name === 'strong' || name === 'b') remove(marks, 'bold');
       if (isBlock(name)) {
         endBlock();
         level = 0;
+        align = undefined;
       }
       continue;
     }
@@ -287,15 +388,24 @@ function readMammothHtml(html: string): ImportBlock[] {
       skipping = 1;
       continue;
     }
+    if (name === 'blockquote') quoted++;
     if (name === 'em' || name === 'i') marks.push('italic');
     if (name === 'strong' || name === 'b') marks.push('bold');
     if (isBlock(name)) {
       endBlock();
       level = /^h[1-6]$/.test(name) ? Number(name[1]) : 0;
+      align = alignmentOf(attributes);
     }
   }
   endBlock();
   return blocks;
+}
+
+/** The alignment an element's `align` attribute, or mammoth's class, gives it. */
+function alignmentOf(attributes: string): Alignment | undefined {
+  return alignmentNamed(
+    /\b(?:align\s*=\s*["']?|class=")(\w+)/i.exec(attributes)?.[1],
+  );
 }
 
 /**
@@ -305,10 +415,14 @@ function readMammothHtml(html: string): ImportBlock[] {
  */
 const SCENE_BREAK_TEXT = /^[\s*#~]*[*#~][\s*#~]*$/;
 
-function wordParagraph(spans: Span[]): ImportBlock[] {
+function wordParagraph(
+  spans: Span[],
+  quote: boolean,
+  align?: Alignment,
+): ImportBlock[] {
   return SCENE_BREAK_TEXT.test(plainText(spans))
     ? [{ kind: 'separator' }]
-    : paragraph(spans);
+    : paragraph(spans, quote, align);
 }
 
 function isBlock(name: string): boolean {

@@ -163,7 +163,7 @@ describe('Exporting the Manuscript to Markdown', () => {
     const markdown = await markdownOf(
       { chapters: [chapter('c1', '#1 [draft]', 's1')], unplaced: [] },
       {
-        s1: '# not a heading\n\n1. not a list\n\n- not a list\n\n> not a quote\n\nsnake_case, `code`, <tag>, [link] and ~~struck~~\n\nA literal \\* star.',
+        s1: '# not a heading\n\n1. not a list\n\n- not a list\n\n\\> not a quote\n\nsnake_case, `code`, <tag>, [link] and ~~struck~~\n\nA literal \\* star.',
       },
     );
     expect(markdown).toBe(
@@ -275,6 +275,71 @@ describe('Italic and bold in a Markdown Export', () => {
   });
 });
 
+describe('Block quotes in a Markdown Export', () => {
+  const markdownOfProse = async (s1: string) =>
+    (
+      await markdownOf(
+        { chapters: [chapter('c1', 'One', 's1')], unplaced: [] },
+        { s1 },
+      )
+    ).replace(/^# One\n\n/, '');
+
+  it('writes a quoted paragraph with `> `', async () => {
+    expect(await markdownOfProse('Before.\n\n> *Come* home.\n\nAfter.')).toBe(
+      'Before.\n\n> *Come* home.\n\nAfter.\n',
+    );
+  });
+
+  it('keeps consecutive quoted paragraphs one passage', async () => {
+    expect(await markdownOfProse('> One.\n\n> Two.')).toBe(
+      '> One.\n>\n> Two.\n',
+    );
+  });
+
+  it('quotes every line of a quoted paragraph, and escapes a literal `>` in it', async () => {
+    expect(await markdownOfProse('> One\n> two')).toBe('> One\\\n> \\> two\n');
+  });
+});
+
+describe('Alignment in a Markdown Export', () => {
+  const markdownOfProse = async (s1: string) =>
+    (
+      await markdownOf(
+        { chapters: [chapter('c1', 'One', 's1')], unplaced: [] },
+        { s1 },
+      )
+    ).replace(/^# One\n\n/, '');
+
+  it('writes a centred or right-aligned paragraph as `<p align>`, with `<em>` and `<strong>` inside', async () => {
+    expect(
+      await markdownOfProse(
+        'Before.\n\n{.centre} The *End*\n\n{.right} **Signed** by *me*.',
+      ),
+    ).toBe(
+      'Before.\n\n<p align="center">The <em>End</em></p>\n\n' +
+        '<p align="right"><strong>Signed</strong> by <em>me</em>.</p>\n',
+    );
+  });
+
+  it('nests marks that cross, and escapes HTML', async () => {
+    expect(await markdownOfProse('{.centre} *a **b* c** & <x> \\*')).toBe(
+      '<p align="center"><em>a <strong>b</strong></em><strong> c</strong> &amp; &lt;x&gt; *</p>\n',
+    );
+  });
+
+  it('keeps a line break within the paragraph', async () => {
+    expect(await markdownOfProse('{.right} One\nTwo')).toBe(
+      '<p align="right">One<br>Two</p>\n',
+    );
+  });
+
+  it('quotes an aligned paragraph within its passage', async () => {
+    expect(await markdownOfProse('> One.\n\n> {.centre} Two.')).toBe(
+      '> One.\n>\n> <p align="center">Two.</p>\n',
+    );
+  });
+});
+
 describe('Exporting the Manuscript to .docx', () => {
   it('writes Chapter titles as Heading 1, Prose as Normal, and a centred break between Scenes', async () => {
     const { 'word/document.xml': document } = await docxOf(novel, prose);
@@ -347,6 +412,53 @@ describe('Exporting the Manuscript to .docx', () => {
       '<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/>',
     );
     expect(styles).toContain('<w:lang w:val="en-US"/>');
+  });
+
+  it('writes a quoted paragraph in the Quote style it defines, indented on both sides and not italic', async () => {
+    const files = await docxOf(
+      { chapters: [chapter('c1', 'One', 's1')], unplaced: [] },
+      { s1: 'Before.\n\n> *Come* home.\n\n> Now.' },
+    );
+    expect(
+      paragraphs(files['word/document.xml']).map(({ style, runs }) => [
+        style,
+        runs.map((run) => run.text).join(''),
+      ]),
+    ).toEqual([
+      ['Heading1', 'One'],
+      [undefined, 'Before.'],
+      ['Quote', 'Come home.'],
+      ['Quote', 'Now.'],
+    ]);
+    const quote =
+      /<w:style w:type="paragraph" w:styleId="Quote">.*?<\/w:style>/.exec(
+        files['word/styles.xml'],
+      )?.[0];
+    expect(quote).toContain('<w:name w:val="Quote"/>');
+    expect(quote).toMatch(/<w:ind w:left="(\d+)" w:right="\1"\/>/);
+    expect(quote).not.toContain('<w:i/>');
+  });
+
+  it('writes a centred or right-aligned paragraph with `w:jc`, quoted or not', async () => {
+    const files = await docxOf(
+      { chapters: [chapter('c1', 'One', 's1')], unplaced: [] },
+      {
+        s1: '{.centre} The End\n\n{.right} Signed.\n\n> {.centre} Quoted.\n\nLeft.',
+      },
+    );
+    expect(
+      [...files['word/document.xml'].matchAll(/<w:p>(.*?)<\/w:p>/g)]
+        .slice(1)
+        .map(([, p]) => [
+          /<w:pStyle w:val="([^"]+)"\/>/.exec(p)?.[1],
+          /<w:jc w:val="([^"]+)"\/>/.exec(p)?.[1],
+        ]),
+    ).toEqual([
+      [undefined, 'center'],
+      [undefined, 'right'],
+      ['Quote', 'center'],
+      [undefined, undefined],
+    ]);
   });
 
   it('keeps marks that overlap, and escapes XML', async () => {

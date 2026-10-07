@@ -1,6 +1,12 @@
 import type { JSONContent } from '@tiptap/core';
 import { describe, expect, it } from 'vitest';
-import { docToMarkdown, markdownToDoc } from './prose-markdown';
+import {
+  docToMarkdown,
+  markdownToDoc,
+  readProse,
+  writeProse,
+} from './prose-markdown';
+import * as v2 from './v2-prose-markdown';
 
 type Mark = 'italic' | 'bold';
 type Run = string | [text: string, ...marks: Mark[]];
@@ -17,6 +23,11 @@ const p = (...runs: Run[]): JSONContent =>
           return { type: 'text', text, marks: marks.map((type) => ({ type })) };
         }),
       };
+/** A paragraph of `p`, quoted. */
+const quote = (...runs: Run[]): JSONContent => ({
+  ...p(...runs),
+  attrs: { blockQuote: true },
+});
 const doc = (...paragraphs: JSONContent[]): JSONContent => ({
   type: 'doc',
   content: paragraphs,
@@ -116,5 +127,214 @@ describe('Prose at the restricted-Markdown boundary', () => {
     expect(markdownToDoc('**bold** and *dangling')).toEqual(
       doc(p(['bold', 'bold'], ' and *dangling')),
     );
+  });
+});
+
+describe('block quotes at the boundary (ADR 0007)', () => {
+  it('writes a quoted paragraph with a `> ` marker', () => {
+    expect(
+      docToMarkdown(doc(p('She wrote:'), quote('Come ', ['home', 'italic']))),
+    ).toBe('She wrote:\n\n> Come *home*');
+  });
+
+  it('reads a paragraph that starts with `> ` as quoted', () => {
+    expect(markdownToDoc('She wrote:\n\n> Come *home*')).toEqual(
+      doc(p('She wrote:'), quote('Come ', ['home', 'italic'])),
+    );
+  });
+
+  it('gives each of consecutive quoted paragraphs its own marker', () => {
+    expect(docToMarkdown(doc(quote('One.'), quote('Two.'), p('After.')))).toBe(
+      '> One.\n\n> Two.\n\nAfter.',
+    );
+  });
+
+  it('drops an empty quoted paragraph', () => {
+    expect(docToMarkdown(doc(p('One.'), quote(), p('Two.')))).toBe(
+      'One.\n\nTwo.',
+    );
+  });
+
+  it('escapes a literal leading `>` or `{.`, and reads it back', () => {
+    const literal = doc(
+      p('>sigh'),
+      p('> not a quote'),
+      p('{.centre} not centred'),
+      quote('> quoted'),
+    );
+    const markdown = [
+      String.raw`\>sigh`,
+      String.raw`\> not a quote`,
+      String.raw`\{.centre} not centred`,
+      String.raw`> \> quoted`,
+    ].join('\n\n');
+    expect(docToMarkdown(literal)).toBe(markdown);
+    expect(markdownToDoc(markdown)).toEqual(literal);
+  });
+
+  it('escapes a `>` or `{.` after leading whitespace, which reading trims', () => {
+    const markdown = docToMarkdown(doc(p('  > x'), p(' {.right} y')));
+    expect(markdown).toBe(
+      String.raw`  \> x` + '\n\n' + String.raw` \{.right} y`,
+    );
+    expect(markdownToDoc(markdown)).toEqual(doc(p('> x'), p('{.right} y')));
+  });
+
+  it('drops a quoted paragraph of only whitespace', () => {
+    expect(docToMarkdown(doc(p('One.'), quote('  '), p('Two.')))).toBe(
+      'One.\n\nTwo.',
+    );
+  });
+
+  it('leaves `>` and `{.` within a paragraph alone', () => {
+    expect(docToMarkdown(doc(p('a > b {.c}')))).toBe('a > b {.c}');
+  });
+
+  it('reads `>` without a space after it as text', () => {
+    expect(markdownToDoc('>sigh')).toEqual(doc(p('>sigh')));
+  });
+
+  it('opens Prose written before v3 that starts with `> ` as a quote', () => {
+    expect(markdownToDoc('> An old line.')).toEqual(doc(quote('An old line.')));
+  });
+
+  it.each([
+    ['a quote', '> Quoted *words*.'],
+    ['consecutive quotes', 'Before.\n\n> One.\n\n> Two.\n\nAfter.'],
+    ['an escaped `>` in a quote', String.raw`> \>> arrows`],
+    [
+      'escaped leading `>` and `{.`',
+      String.raw`\> no` + '\n\n' + String.raw`\{.right} no`,
+    ],
+  ])('round-trips %s', (_, markdown) => {
+    expect(docToMarkdown(markdownToDoc(markdown))).toBe(markdown);
+  });
+
+  it('reads and writes paragraphs with whether each is quoted', () => {
+    const paragraphs = [
+      { spans: [{ text: 'Plain.', marks: [] }] },
+      { spans: [{ text: 'Quoted', marks: ['italic' as const] }], quote: true },
+    ];
+    expect(writeProse(paragraphs)).toBe('Plain.\n\n> *Quoted*');
+    expect(readProse('Plain.\n\n> *Quoted*')).toEqual(paragraphs);
+  });
+
+  describe('in the v2 app, which knows no markers', () => {
+    it.each([
+      ['a quote', '> Quoted *words*.'],
+      ['consecutive quotes', '> One.\n\n> Two.'],
+    ])('shows %s as text and keeps it', (_, markdown) => {
+      expect(v2.docToMarkdown(v2.markdownToDoc(markdown))).toBe(markdown);
+    });
+
+    it('shows the marker as text, and escaped characters as themselves', () => {
+      expect(v2.markdownToDoc('> Come.\n\n' + String.raw`\>sigh`)).toEqual(
+        doc(p('> Come.'), p('>sigh')),
+      );
+    });
+
+    it('writes an escaped leading `>` back unescaped, so this app then reads a quote', () => {
+      // Known and accepted: rare, visible, and one toggle fixes it (ADR 0007).
+      const rewritten = v2.docToMarkdown(
+        v2.markdownToDoc(String.raw`\> not a quote`),
+      );
+      expect(rewritten).toBe('> not a quote');
+      expect(markdownToDoc(rewritten)).toEqual(doc(quote('not a quote')));
+    });
+  });
+});
+
+describe('alignment at the boundary (ADR 0007)', () => {
+  /** A paragraph of `p`, aligned as TipTap's `textAlign`, and quoted if `quoted`. */
+  const aligned = (
+    textAlign: 'center' | 'right',
+    runs: Run[],
+    quoted = false,
+  ): JSONContent => ({
+    ...p(...runs),
+    attrs: { ...(quoted && { blockQuote: true }), textAlign },
+  });
+
+  it('writes a centred or right-aligned paragraph with a `{.centre} ` or `{.right} ` marker', () => {
+    expect(
+      docToMarkdown(
+        doc(
+          aligned('center', ['The ', ['End', 'bold']]),
+          aligned('right', ['Signed.']),
+          p('Left.'),
+        ),
+      ),
+    ).toBe('{.centre} The **End**\n\n{.right} Signed.\n\nLeft.');
+  });
+
+  it('reads `{.centre} ` and `{.right} ` as alignment', () => {
+    expect(markdownToDoc('{.centre} The **End**\n\n{.right} Signed.')).toEqual(
+      doc(
+        aligned('center', ['The ', ['End', 'bold']]),
+        aligned('right', ['Signed.']),
+      ),
+    );
+  });
+
+  it('writes and reads a centred quote as `> {.centre} `', () => {
+    const centredQuote = doc(aligned('center', ['Come home.'], true));
+    expect(docToMarkdown(centredQuote)).toBe('> {.centre} Come home.');
+    expect(markdownToDoc('> {.centre} Come home.')).toEqual(centredQuote);
+  });
+
+  it('writes left, the default, unmarked', () => {
+    expect(
+      docToMarkdown(doc({ ...p('Left.'), attrs: { textAlign: null } })),
+    ).toBe('Left.');
+  });
+
+  it('escapes a literal `{.` after the alignment marker', () => {
+    const literal = doc(aligned('right', ['{.centre} text']));
+    expect(docToMarkdown(literal)).toBe(String.raw`{.right} \{.centre} text`);
+    expect(markdownToDoc(docToMarkdown(literal))).toEqual(literal);
+  });
+
+  it.each([
+    ['`{.centre}` without a space after it', '{.centre}x'],
+    ['an alignment it does not know', '{.left} x'],
+  ])('reads %s as text', (_, markdown) => {
+    expect(readProse(markdown)).toEqual([
+      { spans: [{ text: markdown, marks: [] }] },
+    ]);
+  });
+
+  it.each([
+    ['a centred paragraph', '{.centre} The *End*'],
+    ['a right-aligned one', '{.right} Signed.'],
+    ['a centred quote', '> {.centre} Come home.'],
+    [
+      'a right-aligned quote among quotes',
+      '> One.\n\n> {.right} Two.\n\nAfter.',
+    ],
+  ])('round-trips %s', (_, markdown) => {
+    expect(docToMarkdown(markdownToDoc(markdown))).toBe(markdown);
+  });
+
+  it('reads and writes paragraphs with their alignment', () => {
+    const paragraphs = [
+      { spans: [{ text: 'Plain.', marks: [] }] },
+      { spans: [{ text: 'Centred', marks: [] }], align: 'centre' as const },
+      {
+        spans: [{ text: 'Quoted', marks: [] }],
+        quote: true,
+        align: 'right' as const,
+      },
+    ];
+    const markdown = 'Plain.\n\n{.centre} Centred\n\n> {.right} Quoted';
+    expect(writeProse(paragraphs)).toBe(markdown);
+    expect(readProse(markdown)).toEqual(paragraphs);
+  });
+
+  it('shows the markers as text in the v2 app, and keeps them', () => {
+    const markdown = '{.centre} The End\n\n> {.right} Signed.';
+    expect(v2.markdownToDoc(markdown)).toEqual(
+      doc(p('{.centre} The End'), p('> {.right} Signed.')),
+    );
+    expect(v2.docToMarkdown(v2.markdownToDoc(markdown))).toBe(markdown);
   });
 });

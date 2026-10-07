@@ -80,6 +80,7 @@ import {
 } from './mention-highlight';
 import { MentionPeek } from './MentionPeek';
 import { MAC } from './platform';
+import { applyFormat, focusedProse } from './prose-format';
 import { flushPendingEdits } from './pending-edits';
 import type { Reveal } from './reveal';
 import { SaveFailureBanner, useSaveStatus } from './SaveStatus';
@@ -124,9 +125,35 @@ export function App() {
         else if (command.type === 'import') void chooseImport();
         else if (command.type === 'settings') openSettings();
         else if (command.type === 'shortcuts') setShortcutsOpen(true);
+        else if (command.type === 'format') {
+          const prose = focusedProse();
+          if (prose) applyFormat(prose, command.format);
+        }
       }),
     [],
   );
+  // The Format menu is enabled while the Prose has focus. Focus has moved
+  // on once its events are done; it stays put while the window is behind.
+  useEffect(() => {
+    let focused = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const check = () => {
+      clearTimeout(timer);
+      timer = setTimeout(() => {
+        const now = focusedProse() !== null;
+        if (now === focused) return;
+        focused = now;
+        window.shell.showProseFocus(now);
+      });
+    };
+    document.addEventListener('focusin', check);
+    document.addEventListener('focusout', check);
+    return () => {
+      clearTimeout(timer);
+      document.removeEventListener('focusin', check);
+      document.removeEventListener('focusout', check);
+    };
+  }, []);
   // Ctrl+/ on every screen; the Help menu only shows it.
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {

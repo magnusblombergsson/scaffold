@@ -623,6 +623,8 @@ export interface ShellApi {
    * menu's check items. Kept in memory only.
    */
   showDocked(docked: DockedPanes): void;
+  /** Says whether this window's Prose has focus, which enables the Format menu. */
+  showProseFocus(focused: boolean): void;
   /**
    * Puts this window in zen mode, full screen and ticked in the View menu, or
    * takes it out, back to the full screen it had before. Kept in memory only.
@@ -911,6 +913,7 @@ export const shellMethods = {
   importProject: 'invoke',
   onCommand: 'event',
   showDocked: 'send',
+  showProseFocus: 'send',
   setZen: 'send',
   exportChoice: 'invoke',
   exportManuscript: 'invoke',

@@ -20,10 +20,10 @@ export function countText(text: string): Counts {
   };
 }
 
-/** Counts a Scene's Prose as the Author reads it, without its Markdown. */
+/** Counts a Scene's Prose as the Author reads it, without its Markdown or markers. */
 export function proseCounts(markdown: string): Counts {
   return readProse(markdown)
-    .map((spans) => countText(spans.map((span) => span.text).join('')))
+    .map(({ spans }) => countText(spans.map((span) => span.text).join('')))
     .reduce(addCounts, NO_COUNTS);
 }
 

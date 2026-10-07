@@ -48,6 +48,20 @@ describe('proseCounts', () => {
     });
   });
 
+  it('skips block quote markers and their escapes', () => {
+    expect(proseCounts('> Come home.\n\n> Now.\n\n\\>sigh')).toEqual({
+      words: 4,
+      characters: 19,
+    });
+  });
+
+  it('skips alignment markers, also after a quote marker', () => {
+    expect(proseCounts('{.centre} The End\n\n> {.right} Signed.')).toEqual({
+      words: 3,
+      characters: 14,
+    });
+  });
+
   it('counts nothing in empty Prose', () => {
     expect(proseCounts('')).toEqual({ words: 0, characters: 0 });
   });

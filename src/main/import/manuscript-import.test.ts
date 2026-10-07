@@ -4,7 +4,7 @@ import type {
   SceneRef,
   SceneValue,
 } from '../../shared/project-types';
-import type { Span } from '../../shared/prose-markdown';
+import type { Paragraph } from '../../shared/prose-markdown';
 import {
   defaultConvention,
   splitManuscript,
@@ -57,6 +57,8 @@ function docxOf(body: string, footnotes = ''): Uint8Array {
       `<?xml version="1.0" encoding="UTF-8"?><w:styles xmlns:w="${W}">` +
         '<w:style w:type="paragraph" w:default="1" w:styleId="Normal"><w:name w:val="Normal"/></w:style>' +
         '<w:style w:type="paragraph" w:styleId="Heading1"><w:name w:val="heading 1"/></w:style>' +
+        '<w:style w:type="paragraph" w:styleId="Quote"><w:name w:val="Quote"/></w:style>' +
+        '<w:style w:type="paragraph" w:styleId="IntenseQuote"><w:name w:val="Intense Quote"/></w:style>' +
         '<w:style w:type="character" w:styleId="Emphasis"><w:name w:val="Emphasis"/><w:rPr><w:i/></w:rPr></w:style>' +
         '</w:styles>',
     ],
@@ -82,9 +84,9 @@ async function blocks(file: Promise<ImportBlock[]>) {
   return (await file).map((block) => {
     switch (block.kind) {
       case 'heading':
-        return `${'#'.repeat(block.level)} ${prose([block.spans])}`;
+        return `${'#'.repeat(block.level)} ${prose([{ spans: block.spans }])}`;
       case 'paragraph':
-        return prose([block.spans]);
+        return prose([block]);
       case 'separator':
         return '***';
       case 'pageBreak':
@@ -93,8 +95,8 @@ async function blocks(file: Promise<ImportBlock[]>) {
   });
 }
 
-/** Paragraphs of spans as restricted Markdown, as the Project stores them. */
-function prose(paragraphs: Span[][]) {
+/** Paragraphs as restricted Markdown, as the Project stores them. */
+function prose(paragraphs: Paragraph[]) {
   return newChapters([{ title: '', scenes: [{ title: '', paragraphs }] }])[0]
     .scenes[0].markdown;
 }
@@ -165,7 +167,32 @@ describe('Reading a Markdown manuscript', () => {
       await blocks(
         markdown('- One\n- Two\n\n> Quoted.\n\n    Indented\n    prose.'),
       ),
-    ).toEqual(['One', 'Two', 'Quoted.', 'Indented prose.']);
+    ).toEqual(['One', 'Two', '> Quoted.', 'Indented prose.']);
+  });
+
+  it('reads every paragraph within a quote as a block quote', async () => {
+    expect(
+      await blocks(markdown('> One *a*.\n>\n> Two.\n>\n> - Three.\n\nAfter.')),
+    ).toEqual(['> One *a*.', '> Two.', '> Three.', 'After.']);
+  });
+
+  it('reads `<p align>` centre and right as alignment, with italic and bold inside', async () => {
+    expect(
+      await blocks(
+        markdown(
+          'Before.\n\n<p align="center">The <em>End</em> &amp; <b>more</b></p>\n\n' +
+            "<P ALIGN='right'>Signed,\nme.</P>\n\n" +
+            '> <p align="center">Quoted.</p>\n\n' +
+            '<p align="justify">Justified.</p>\n\n<div>Not Prose.</div>',
+        ),
+      ),
+    ).toEqual([
+      'Before.',
+      '{.centre} The *End* & **more**',
+      '{.right} Signed, me.',
+      '> {.centre} Quoted.',
+      'Justified.',
+    ]);
   });
 });
 
@@ -212,6 +239,53 @@ describe('Reading a Word manuscript', () => {
     ]);
   });
 
+  it('reads `w:jc` centre and right as alignment, and leaves headings and other alignments be', async () => {
+    const aligned = (jc: string, text: string, style = '') =>
+      `<w:p><w:pPr>${style && `<w:pStyle w:val="${style}"/>`}<w:jc w:val="${jc}"/></w:pPr>${run(text)}</w:p>`;
+    expect(
+      await blocks(
+        readImport(
+          docxOf(
+            aligned('center', 'Title', 'Heading1') +
+              aligned('center', 'The End') +
+              aligned('right', 'Signed.') +
+              aligned('center', 'Quoted.', 'Quote') +
+              aligned('both', 'Justified.') +
+              aligned('left', 'Left.') +
+              para(run('Plain.')),
+          ),
+          'docx',
+        ),
+      ),
+    ).toEqual([
+      '# Title',
+      '{.centre} The End',
+      '{.right} Signed.',
+      '> {.centre} Quoted.',
+      'Justified.',
+      'Left.',
+      'Plain.',
+    ]);
+  });
+
+  it('reads paragraphs in the Quote and Intense Quote styles as block quotes', async () => {
+    const styled = (style: string, text: string) =>
+      `<w:p><w:pPr><w:pStyle w:val="${style}"/></w:pPr>${run(text)}</w:p>`;
+    expect(
+      await blocks(
+        readImport(
+          docxOf(
+            para(run('Before.')) +
+              styled('Quote', 'One.') +
+              styled('IntenseQuote', 'Two.') +
+              para(run('After.')),
+          ),
+          'docx',
+        ),
+      ),
+    ).toEqual(['Before.', '> One.', '> Two.', 'After.']);
+  });
+
   it('leaves out footnotes and their references', async () => {
     const file = docxOf(
       para(run('A claim.'), '<w:r><w:footnoteReference w:id="1"/></w:r>') +
@@ -253,7 +327,7 @@ describe('Importing an Export', () => {
   const scenes: Record<string, string> = {
     s1: 'It was a *dark* night.\n\nThe rain **fell**, ***hard***.\n\n# Not a heading, 1. not a list\n\nA line\nbroken.',
     s2: 'Morning: *came **slowly***.\n\n\\*\\*\\* and \\\\ stay literal; so do _ and [this].',
-    s3: '- Dash first.\n\n—\n\n**All** was *quiet*.',
+    s3: '- Dash first.\n\n—\n\n> Quoted *one*.\n\n> {.right} Two.\n\n**All** was *quiet*.\n\n{.centre} The ***End*** & <more>',
   };
 
   for (const format of ['markdown', 'docx'] as ExportFormat[]) {

@@ -29,11 +29,16 @@ function type(editor: Editor, text: string): void {
   }
 }
 
-/** Presses Ctrl (Cmd on macOS) with a key, as the keyboard does. */
-function pressMod(editor: Editor, key: string): void {
+/** Presses Ctrl (Cmd on macOS), with Shift if `shift`, and a key, as the keyboard does. */
+function pressMod(editor: Editor, key: string, shift = false): void {
   const mac = /Mac/.test(navigator.platform);
   editor.view.dom.dispatchEvent(
-    new KeyboardEvent('keydown', { key, ctrlKey: !mac, metaKey: mac }),
+    new KeyboardEvent('keydown', {
+      key,
+      ctrlKey: !mac,
+      metaKey: mac,
+      shiftKey: shift,
+    }),
   );
 }
 
@@ -53,8 +58,8 @@ describe('typographic quotes and dashes while typing', () => {
   });
 });
 
-describe('only paragraphs, italic and bold enter the editor', () => {
-  it('reduces pasted formatting to paragraphs, italic and bold', () => {
+describe('only paragraphs, block quotes, italic and bold enter the editor', () => {
+  it('reduces pasted formatting to paragraphs, block quotes, italic and bold', () => {
     const editor = open('en-US');
     editor.view.pasteHTML(
       '<h1>Title</h1>' +
@@ -64,8 +69,36 @@ describe('only paragraphs, italic and bold enter the editor', () => {
         '<p><span style="font-style: italic">styled</span> <i>i</i> <b>b</b></p>',
     );
     expect(markdownOf(editor)).toBe(
-      'Title\n\nUnder struck code link\n\nOne\n\n*Two*\n\nQuoted **bold**\n\n*styled* *i* **b**',
+      'Title\n\nUnder struck code link\n\nOne\n\n*Two*\n\n> Quoted **bold**\n\n*styled* *i* **b**',
     );
+  });
+
+  it('keeps every paragraph of a pasted block quote quoted, its paragraphs marked or not', () => {
+    const editor = open('en-US');
+    editor.view.pasteHTML(
+      '<p>Before.</p><blockquote><p>One.</p><p>Two.</p></blockquote>' +
+        '<blockquote>Bare.</blockquote><p>After.</p>',
+    );
+    expect(markdownOf(editor)).toBe(
+      'Before.\n\n> One.\n\n> Two.\n\n> Bare.\n\nAfter.',
+    );
+  });
+
+  it('keeps every line of a pasted quote with line breaks quoted', () => {
+    const editor = open('en-US');
+    editor.view.pasteHTML(
+      '<p>Before.</p><blockquote>One<br>Two</blockquote>' +
+        '<blockquote><p>Three<br>Four</p></blockquote><p>After.</p>',
+    );
+    expect(markdownOf(editor)).toBe(
+      'Before.\n\n> One\n\n> Two\n\n> Three\n\n> Four\n\nAfter.',
+    );
+  });
+
+  it('keeps a typed `> ` as Prose, not a block quote', () => {
+    const editor = open('en-US');
+    type(editor, '> Not a quote');
+    expect(markdownOf(editor)).toBe(String.raw`\> Not a quote`);
   });
 
   it('keeps line breaks in pasted text as paragraph breaks', () => {
@@ -90,6 +123,9 @@ describe('restricted Markdown through the editor', () => {
     '*She **never** said it.*\n\n**Two *nested* paragraphs.**',
     '*never***again** and **never***again*',
     String.raw`Footnote\* and C:\\Users`,
+    'Before.\n\n> One *quoted*.\n\n> Two.\n\nAfter.',
+    String.raw`\> not a quote` + '\n\n' + String.raw`\{.right} not right`,
+    '{.centre} The *End*\n\n> {.right} Signed.\n\nLeft.',
   ])('%s comes back unchanged', (markdown) => {
     expect(markdownOf(open('en-US', markdown))).toBe(markdown);
   });
@@ -104,5 +140,99 @@ describe('restricted Markdown through the editor', () => {
     pressMod(editor, 'b');
     type(editor, 'that');
     expect(markdownOf(editor)).toBe('She *never* said **that**');
+  });
+});
+
+/** Selects from `from` in one paragraph to the end of `to` in another. */
+function selectText(editor: Editor, from: string, to: string): void {
+  let start = -1;
+  let end = -1;
+  editor.state.doc.descendants((node, pos) => {
+    if (!node.isText) return;
+    const at = node.text!.indexOf(from);
+    if (start < 0 && at >= 0) start = pos + at;
+    const until = node.text!.indexOf(to);
+    if (until >= 0) end = pos + until + to.length;
+  });
+  editor.commands.setTextSelection({ from: start, to: end });
+}
+
+describe('block quotes from the keyboard', () => {
+  it('quotes the paragraph the cursor is in with Ctrl+Shift+B, and unquotes it again', () => {
+    const editor = open('en-US', 'One.\n\nTwo.');
+    pressMod(editor, 'B', true);
+    expect(markdownOf(editor)).toBe('One.\n\n> Two.');
+    pressMod(editor, 'B', true);
+    expect(markdownOf(editor)).toBe('One.\n\nTwo.');
+  });
+
+  it('quotes every paragraph the selection touches, unless all already are', () => {
+    const editor = open('en-US', 'One.\n\n> Two.\n\nThree.\n\nFour.');
+    selectText(editor, 'ne', 'Thr');
+    pressMod(editor, 'B', true);
+    expect(markdownOf(editor)).toBe('> One.\n\n> Two.\n\n> Three.\n\nFour.');
+    pressMod(editor, 'B', true);
+    expect(markdownOf(editor)).toBe('One.\n\nTwo.\n\nThree.\n\nFour.');
+  });
+
+  it('carries on the quote in a new paragraph started within it', () => {
+    const editor = open('en-US', '> One.');
+    editor.commands.enter();
+    type(editor, 'Two.');
+    expect(markdownOf(editor)).toBe('> One.\n\n> Two.');
+  });
+});
+
+describe('alignment from the keyboard', () => {
+  it('centres the paragraph the cursor is in with Ctrl+Shift+E, and returns it to left with it again', () => {
+    const editor = open('en-US', 'One.\n\nTwo.');
+    pressMod(editor, 'E', true);
+    expect(markdownOf(editor)).toBe('One.\n\n{.centre} Two.');
+    pressMod(editor, 'E', true);
+    expect(markdownOf(editor)).toBe('One.\n\nTwo.');
+  });
+
+  it('aligns right with Ctrl+Shift+R and left with Ctrl+Shift+L', () => {
+    const editor = open('en-US', '{.centre} One.');
+    pressMod(editor, 'R', true);
+    expect(markdownOf(editor)).toBe('{.right} One.');
+    pressMod(editor, 'L', true);
+    expect(markdownOf(editor)).toBe('One.');
+    pressMod(editor, 'L', true);
+    expect(markdownOf(editor)).toBe('One.');
+  });
+
+  it('aligns every paragraph the selection touches, unless all already are', () => {
+    const editor = open('en-US', 'One.\n\n> {.centre} Two.\n\nThree.\n\nFour.');
+    selectText(editor, 'ne', 'Thr');
+    pressMod(editor, 'E', true);
+    expect(markdownOf(editor)).toBe(
+      '{.centre} One.\n\n> {.centre} Two.\n\n{.centre} Three.\n\nFour.',
+    );
+    pressMod(editor, 'E', true);
+    expect(markdownOf(editor)).toBe('One.\n\n> Two.\n\nThree.\n\nFour.');
+  });
+
+  it('carries on the alignment in a new paragraph started within it', () => {
+    const editor = open('en-US', '{.right} One.');
+    editor.commands.enter();
+    type(editor, 'Two.');
+    expect(markdownOf(editor)).toBe('{.right} One.\n\n{.right} Two.');
+  });
+
+  it('keeps centre and right alignment of pasted paragraphs, and drops the rest', () => {
+    const editor = open('en-US');
+    editor.view.pasteHTML(
+      '<p>Before.</p><p style="text-align: center">Centred <em>here</em>.</p>' +
+        '<p style="text-align: right">Right.</p>' +
+        '<p align="center">As Word writes it.</p>' +
+        '<p style="text-align: justify">Justified.</p>' +
+        '<blockquote><p style="text-align: center">Quoted.</p></blockquote>' +
+        '<p>Left.</p>',
+    );
+    expect(markdownOf(editor)).toBe(
+      'Before.\n\n{.centre} Centred *here*.\n\n{.right} Right.\n\n{.centre} As Word writes it.\n\nJustified.\n\n' +
+        '> {.centre} Quoted.\n\nLeft.',
+    );
   });
 });

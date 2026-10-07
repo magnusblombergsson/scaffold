@@ -1,10 +1,12 @@
 import { crc32, deflateRawSync } from 'node:zlib';
 import type { ImageExtension, ProseLanguage } from '../../shared/project-types';
+import { ALIGN_NAME, type Alignment } from '../../shared/prose-markdown';
 import { MEDIA_TYPES } from '../entry-image';
 
 // A minimal .docx: one document part, its images, and a styles part holding
-// only Word's built-in Normal, Heading 1 and Heading 2, so the reader's Word
-// restyles it as they like.
+// Word's built-in Normal, Heading 1 and Heading 2, so the reader's Word
+// restyles it as they like, and a Quote of our own, as Word's own is italic
+// and centred.
 
 /** A run of text, and whether it is bold or italic. */
 export type DocxRun = { text: string; bold: boolean; italic: boolean };
@@ -19,10 +21,13 @@ export type DocxImage = {
   description: string;
 };
 
-/** A paragraph of text: Normal, Heading 1 or 2, or Normal centred. */
+/**
+ * A paragraph of text: Normal, Heading 1 or 2, or Quote, and how it is
+ * aligned if not left.
+ */
 export type DocxTextParagraph = {
-  style?: 'heading1' | 'heading2';
-  centred?: boolean;
+  style?: 'heading1' | 'heading2' | 'quote';
+  align?: Alignment;
   runs: DocxRun[];
 };
 
@@ -93,12 +98,16 @@ function documentXml(
   return `${XML_DECLARATION}<w:document xmlns:w="${W}"${namespaces}><w:body>${body}</w:body></w:document>`;
 }
 
-const STYLE_IDS = { heading1: 'Heading1', heading2: 'Heading2' };
+const STYLE_IDS: Record<NonNullable<DocxTextParagraph['style']>, string> = {
+  heading1: 'Heading1',
+  heading2: 'Heading2',
+  quote: 'Quote',
+};
 
-function paragraphXml({ style, centred, runs }: DocxTextParagraph): string {
+function paragraphXml({ style, align, runs }: DocxTextParagraph): string {
   const properties =
     (style ? `<w:pStyle w:val="${STYLE_IDS[style]}"/>` : '') +
-    (centred ? '<w:jc w:val="center"/>' : '');
+    (align ? `<w:jc w:val="${ALIGN_NAME[align]}"/>` : '');
   return `<w:p>${properties && `<w:pPr>${properties}</w:pPr>`}${runs
     .map(runXml)
     .join('')}</w:p>`;
@@ -173,6 +182,10 @@ function stylesXml(language: ProseLanguage): string {
     '<w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:uiPriority w:val="9"/><w:unhideWhenUsed/><w:qFormat/>' +
     '<w:pPr><w:keepNext/><w:keepLines/><w:spacing w:before="360" w:after="160"/><w:outlineLvl w:val="1"/></w:pPr>' +
     '<w:rPr><w:b/><w:bCs/><w:sz w:val="28"/><w:szCs w:val="28"/></w:rPr></w:style>' +
+    // Indented half an inch on both sides.
+    '<w:style w:type="paragraph" w:styleId="Quote"><w:name w:val="Quote"/>' +
+    '<w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:uiPriority w:val="29"/><w:qFormat/>' +
+    '<w:pPr><w:ind w:left="720" w:right="720"/></w:pPr></w:style>' +
     '</w:styles>'
   );
 }

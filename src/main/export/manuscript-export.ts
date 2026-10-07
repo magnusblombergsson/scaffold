@@ -10,7 +10,14 @@ import type {
   SceneRef,
   SceneValue,
 } from '../../shared/project-types';
-import { readProse, type Mark, type Span } from '../../shared/prose-markdown';
+import {
+  ALIGN_NAME,
+  readProse,
+  type Alignment,
+  type Mark,
+  type Paragraph,
+  type Span,
+} from '../../shared/prose-markdown';
 import {
   commonMarkHeading,
   escapeCommonMark,
@@ -44,7 +51,7 @@ export type ExportSource = {
 const SCENE_BREAK = '***';
 
 /** A Chapter's title, and the Prose paragraphs of each of its Scenes that has any. */
-type ExportedChapter = { title: string; scenes: Span[][][] };
+type ExportedChapter = { title: string; scenes: Paragraph[][] };
 
 /**
  * The Prose of the ticked part of the Manuscript as a file of `format`.
@@ -79,7 +86,7 @@ async function readChapters(
               kind: 'scene',
               id: scene.id,
             });
-            return readProse(markdown).filter((spans) => spans.length > 0);
+            return readProse(markdown).filter(({ spans }) => spans.length > 0);
           }),
       );
       return {
@@ -97,10 +104,35 @@ function markdownOf(chapters: ExportedChapter[]): string {
     commonMarkHeading(1, title),
     ...scenes.flatMap((paragraphs, i) => [
       ...(i > 0 ? [SCENE_BREAK] : []),
-      ...paragraphs.map(commonMarkParagraph),
+      ...markdownBlocks(paragraphs),
     ]),
   ]);
   return blocks.join('\n\n') + '\n';
+}
+
+/**
+ * A Scene's paragraphs as blocks of CommonMark. Quoted paragraphs in a row
+ * are one block quote, as they read as one passage. A centred or
+ * right-aligned paragraph is HTML, as CommonMark has no alignment.
+ */
+function markdownBlocks(paragraphs: Paragraph[]): string[] {
+  const blocks: string[] = [];
+  paragraphs.forEach(({ spans, quote, align }, i) => {
+    const text = align
+      ? htmlParagraph(spans, align)
+      : commonMarkParagraph(spans);
+    if (!quote) {
+      blocks.push(text);
+      return;
+    }
+    const quoted = text
+      .split('\n')
+      .map((line) => `> ${line}`)
+      .join('\n');
+    if (paragraphs[i - 1]?.quote) blocks[blocks.length - 1] += `\n>\n${quoted}`;
+    else blocks.push(quoted);
+  });
+  return blocks;
 }
 
 const DELIMITER: Record<Mark, string> = { bold: '**', italic: '*' };
@@ -146,6 +178,46 @@ function commonMarkParagraph(spans: Span[]): string {
   return oneParagraph(out);
 }
 
+const TAG: Record<Mark, string> = { bold: 'strong', italic: 'em' };
+
+/**
+ * An aligned paragraph as an HTML block, on one line, with its marks as
+ * `<em>` and `<strong>` nested where they would cross.
+ */
+function htmlParagraph(spans: Span[], align: Alignment): string {
+  let out = '';
+  /** Open marks, outermost first. */
+  let open: Mark[] = [];
+  const close = (marks: Mark[]) =>
+    [...marks]
+      .reverse()
+      .map((mark) => `</${TAG[mark]}>`)
+      .join('');
+  spans.forEach(({ text, marks }, i) => {
+    const first = open.findIndex((mark) => !marks.includes(mark));
+    if (first !== -1) {
+      out += close(open.slice(first));
+      open = open.slice(0, first);
+    }
+    // A mark that lasts longer opens first, outside the other.
+    const opening = marks
+      .filter((mark) => !open.includes(mark))
+      .sort((a, b) => lastsUntil(spans, i, b) - lastsUntil(spans, i, a));
+    out += opening.map((mark) => `<${TAG[mark]}>`).join('');
+    out += escapeHtml(text).replace(/\n/g, '<br>');
+    open = [...open, ...opening];
+  });
+  out += close(open);
+  return `<p align="${ALIGN_NAME[align]}">${out}</p>`;
+}
+
+function escapeHtml(text: string): string {
+  return text
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
+}
+
 /** The index of the last span, from `start` on, that still has `mark`. */
 function lastsUntil(spans: Span[], start: number, mark: Mark): number {
   let end = start;
@@ -159,8 +231,12 @@ function docxParagraphs(chapters: ExportedChapter[]): DocxParagraph[] {
   return chapters.flatMap(({ title, scenes }) => [
     { style: 'heading1' as const, runs: [plain(title)] },
     ...scenes.flatMap((paragraphs, i) => [
-      ...(i > 0 ? [{ centred: true, runs: [plain(SCENE_BREAK)] }] : []),
-      ...paragraphs.map((spans) => ({
+      ...(i > 0
+        ? [{ align: 'centre' as const, runs: [plain(SCENE_BREAK)] }]
+        : []),
+      ...paragraphs.map(({ spans, quote, align }) => ({
+        ...(quote && { style: 'quote' as const }),
+        ...(align && { align }),
         runs: spans.map(({ text, marks }) => ({
           text,
           bold: marks.includes('bold'),

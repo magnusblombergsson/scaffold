@@ -124,7 +124,11 @@ export function ImportDialog({
                     {countOf(wordCount(scene.paragraphs), 'word')}
                   </span>
                   <span className="import-opening">
-                    {opening(scene.paragraphs.map(plainText).join(' '))}
+                    {opening(
+                      scene.paragraphs
+                        .map(({ spans }) => plainText(spans))
+                        .join(' '),
+                    )}
                   </span>
                 </li>
               ))}

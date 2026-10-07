@@ -7,6 +7,15 @@ export type SidePane = 'left' | 'assistant';
 /** Whether each side pane is docked, rather than collapsed to its edge tabs. */
 export type DockedPanes = Record<SidePane, boolean>;
 
+/** Formatting the Author applies to the Prose from the Format menu. */
+export type ProseFormat =
+  | 'bold'
+  | 'italic'
+  | 'alignLeft'
+  | 'alignCentre'
+  | 'alignRight'
+  | 'blockQuote';
+
 /** How a window shows Writing's side panes until the Author collapses one. */
 export const ALL_DOCKED: DockedPanes = { left: true, assistant: true };
 
@@ -43,6 +52,8 @@ export type Command = (
   | { type: 'zen' }
   /** Narrow, Wide, Full, Narrow: Ctrl+Shift+W in Writing. */
   | { type: 'cycleWritingWidth' }
+  /** Formats the Prose where it has focus; the Prose takes the keys itself. */
+  | { type: 'format'; format: ProseFormat }
 ) & { byKey?: true };
 
 /**
@@ -69,6 +80,13 @@ export const SHORTCUTS = {
   leftPane: 'CmdOrCtrl+Shift+M',
   assistant: 'CmdOrCtrl+Shift+A',
   writingWidth: 'CmdOrCtrl+Shift+W',
+  // In the Prose, while it has focus.
+  bold: 'CmdOrCtrl+B',
+  italic: 'CmdOrCtrl+I',
+  alignLeft: 'CmdOrCtrl+Shift+L',
+  alignCentre: 'CmdOrCtrl+Shift+E',
+  alignRight: 'CmdOrCtrl+Shift+R',
+  blockQuote: 'CmdOrCtrl+Shift+B',
   // In the Binder and Story Bible list, while it has focus.
   rename: 'F2',
   moveUp: 'Alt+Up',
@@ -179,6 +197,29 @@ export const CHEAT_SHEET: {
       {
         keys: [SHORTCUTS.newTodo],
         action: 'New Todo, linked to the open Scene, Chapter or Entry',
+      },
+    ],
+  },
+  {
+    title: 'Formatting, in the Prose',
+    shortcuts: [
+      { keys: [SHORTCUTS.bold], action: 'Bold' },
+      { keys: [SHORTCUTS.italic], action: 'Italic' },
+      {
+        keys: [SHORTCUTS.alignLeft],
+        action: 'Align the paragraphs left',
+      },
+      {
+        keys: [SHORTCUTS.alignCentre],
+        action: 'Centre the paragraphs, or return them to left',
+      },
+      {
+        keys: [SHORTCUTS.alignRight],
+        action: 'Align the paragraphs right, or return them to left',
+      },
+      {
+        keys: [SHORTCUTS.blockQuote],
+        action: 'Block quote the paragraphs, or take them out of it',
       },
     ],
   },
