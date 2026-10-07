@@ -83,7 +83,7 @@ import {
   type ProjectStore,
 } from './project-store/project-store';
 import { writeFailureReason } from './project-store/safe-write';
-import { menuTemplate, type MenuState } from './menu';
+import { menuTemplate, proseMenuTemplate, type MenuState } from './menu';
 import {
   emit,
   register,
@@ -103,8 +103,11 @@ let providers: ProviderSettings;
 const stores = new Map<number, ProjectStore>();
 /** Which of Writing's side panes each window, by its contents' id, has docked. */
 const dockedPanes = new Map<number, DockedPanes>();
-/** The windows, by their contents' id, whose Prose has focus, for the Format menu. */
-const proseFocused = new Set<number>();
+/**
+ * The windows, by their contents' id, whose Prose has focus, for the Format
+ * menu, each with whether that Prose's Scene can be split.
+ */
+const focusedProse = new Map<number, { splittable: boolean }>();
 /**
  * The windows in zen mode, by their contents' id, each with whether it was
  * full screen before zen.
@@ -536,11 +539,20 @@ const shellHandlers: Handlers<ShellApi, typeof shellMethods, WindowContext> = {
     dockedPanes.set(sender.id, docked);
     updateMenu();
   },
-  showProseFocus: ({ sender }, focused) => {
-    if (focused === proseFocused.has(sender.id)) return;
-    if (focused) proseFocused.add(sender.id);
-    else proseFocused.delete(sender.id);
+  showProseFocus: ({ sender }, focused, splittable) => {
+    const was = focusedProse.get(sender.id);
+    if (focused === !!was && splittable === !!was?.splittable) return;
+    if (focused) focusedProse.set(sender.id, { splittable });
+    else focusedProse.delete(sender.id);
     updateMenu();
+  },
+  showProseMenu: ({ sender, window }, splittable) => {
+    if (!(window instanceof BrowserWindow)) return;
+    Menu.buildFromTemplate(
+      proseMenuTemplate(splittable, (command) =>
+        emit(sender, 'shell', 'onCommand', command),
+      ),
+    ).popup({ window });
   },
   setZen: ({ sender, window }, on) => {
     if (!window || on === zenWindows.has(sender.id)) return;
@@ -712,7 +724,9 @@ function setApplicationMenu(): void {
           readOnly: store.readOnly() !== null,
           docked: dockedPanes.get(window.webContents.id) ?? ALL_DOCKED,
           zen: zenWindows.has(window.webContents.id),
-          proseFocused: proseFocused.has(window.webContents.id),
+          proseFocused: focusedProse.has(window.webContents.id),
+          splittable:
+            focusedProse.get(window.webContents.id)?.splittable ?? false,
         }
       : null,
     recent: settings
@@ -928,7 +942,7 @@ function closeProject(window: BrowserWindow): Promise<void> {
         unsubscribes.delete(id);
         stores.delete(id);
         dockedPanes.delete(id);
-        proseFocused.delete(id);
+        focusedProse.delete(id);
         leaveZen(id, window);
         updateMenu();
       } finally {

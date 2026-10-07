@@ -67,6 +67,19 @@ describe('commandForKey', () => {
     ).toBeNull();
   });
 
+  it('splits the Scene with Ctrl+K, and to the next Chapter with Shift, either case', () => {
+    expect(commandForKey(key('k', { ctrlKey: true }), false)).toEqual({
+      type: 'splitScene',
+      toNextChapter: false,
+    });
+    expect(
+      commandForKey(key('K', { ctrlKey: true, shiftKey: true }), false),
+    ).toEqual({ type: 'splitScene', toNextChapter: true });
+    expect(
+      commandForKey(key('k', { ctrlKey: true, altKey: true }), false),
+    ).toBeNull();
+  });
+
   it('switches Mode with Ctrl+1/2/3', () => {
     expect(commandForKey(key('1', { ctrlKey: true }), false)).toEqual({
       type: 'mode',
@@ -210,11 +223,14 @@ describe('CHEAT_SHEET', () => {
     ]);
   });
 
-  it('lists New Todo with the creates, in Writing', () => {
+  it('lists New Todo and the two Splits with the creates, in Writing', () => {
     const create = CHEAT_SHEET.find(
       (group) => group.title === 'Create, in Writing',
     );
-    expect(create?.shortcuts.flatMap((s) => s.keys)).toContain('CmdOrCtrl+T');
+    const keys = create?.shortcuts.flatMap((s) => s.keys);
+    expect(keys).toContain('CmdOrCtrl+T');
+    expect(keys).toContain('CmdOrCtrl+K');
+    expect(keys).toContain('CmdOrCtrl+Shift+K');
   });
 
   it('lists Ctrl+S, which saves at once', () => {

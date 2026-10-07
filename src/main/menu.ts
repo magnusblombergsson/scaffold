@@ -26,13 +26,15 @@ export type MenuState = {
   dev: boolean;
   /**
    * The Project the window in front shows, if any, its Writing panes,
-   * whether it is in zen mode, and whether its Prose has focus.
+   * whether it is in zen mode, whether its Prose has focus, and whether
+   * that Prose's Scene can be split.
    */
   project: {
     readOnly: boolean;
     docked: DockedPanes;
     zen: boolean;
     proseFocused: boolean;
+    splittable: boolean;
   } | null;
   /** Latest first. */
   recent: { path: string; displayName: string }[];
@@ -101,6 +103,7 @@ export function menuTemplate(
     ...windowKey(SHORTCUTS[format]),
     ...sending({ type: 'format', format }),
   });
+  const canSplit = formatting && project.splittable;
   const projectSettings: MenuItemConstructorOptions = {
     label: 'Project Settings…',
     accelerator: SHORTCUTS.projectSettings,
@@ -257,6 +260,7 @@ export function menuTemplate(
           ...windowKey(SHORTCUTS.newSceneAbove),
           ...sending({ type: 'newScene', above: true }),
         },
+        ...splitItems(canSplit, actions.send),
         {
           label: 'New Chapter',
           enabled: writable,
@@ -317,4 +321,44 @@ export function menuTemplate(
       ],
     },
   ];
+}
+
+/**
+ * Split Scene and Split to Next Chapter, enabled when `splittable`, which
+ * hand their command to the window they were chosen in; the window takes
+ * their keys.
+ */
+function splitItems(
+  splittable: boolean,
+  send: MenuActions['send'],
+): MenuItemConstructorOptions[] {
+  return (
+    [
+      ['Split Scene', SHORTCUTS.splitScene, false],
+      ['Split to Next Chapter', SHORTCUTS.splitToNextChapter, true],
+    ] as const
+  ).map(([label, accelerator, toNextChapter]) => ({
+    label,
+    accelerator,
+    registerAccelerator: false,
+    enabled: splittable,
+    click: (_item, window, event: KeyboardEvent | undefined) => {
+      const command: Command = { type: 'splitScene', toNextChapter };
+      send(
+        event?.triggeredByAccelerator ? { ...command, byKey: true } : command,
+        window,
+      );
+    },
+  }));
+}
+
+/**
+ * The Prose's right-click menu: the two Splits, enabled when its Scene can
+ * be split. Its keys are only shown; the window takes them.
+ */
+export function proseMenuTemplate(
+  splittable: boolean,
+  send: (command: Command) => void,
+): MenuItemConstructorOptions[] {
+  return splitItems(splittable, send);
 }

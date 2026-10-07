@@ -27,6 +27,7 @@ import {
   type UnitValue,
 } from '../shared/project-types';
 import { MODE_LABELS, type Mode } from '../shared/conversation';
+import type { Cut } from '../shared/prose-split';
 import { entryTitle } from '../shared/entry';
 import type { ProposalTarget, ProposalView } from '../shared/proposal';
 import type { ImportConvention } from '../shared/manuscript-import';
@@ -81,6 +82,7 @@ import {
 import { MentionPeek } from './MentionPeek';
 import { MAC } from './platform';
 import { applyFormat, focusedProse } from './prose-format';
+import { cutAtSelection } from './split-scene';
 import { flushPendingEdits } from './pending-edits';
 import type { Reveal } from './reveal';
 import { SaveFailureBanner, useSaveStatus } from './SaveStatus';
@@ -133,24 +135,41 @@ export function App() {
       }),
     [],
   );
-  // The Format menu is enabled while the Prose has focus. Focus has moved
-  // on once its events are done; it stays put while the window is behind.
+  // The Format menu is enabled while the Prose has focus, and the Splits
+  // while its Scene can be split, as its element says. Focus has moved on
+  // once its events are done; it stays put while the window is behind.
   useEffect(() => {
-    let focused = false;
+    let shown = { focused: false, splittable: false };
     let timer: ReturnType<typeof setTimeout> | undefined;
     const check = () => {
       clearTimeout(timer);
       timer = setTimeout(() => {
-        const now = focusedProse() !== null;
-        if (now === focused) return;
-        focused = now;
-        window.shell.showProseFocus(now);
+        const prose = focusedProse();
+        const now = {
+          focused: prose !== null,
+          splittable: prose?.view.dom.dataset.split === 'true',
+        };
+        if (
+          now.focused === shown.focused &&
+          now.splittable === shown.splittable
+        ) {
+          return;
+        }
+        shown = now;
+        window.shell.showProseFocus(now.focused, now.splittable);
       });
     };
     document.addEventListener('focusin', check);
     document.addEventListener('focusout', check);
+    // A Scene can become one that can't be split, as when a Conflict comes.
+    const splits = new MutationObserver(check);
+    splits.observe(document.body, {
+      subtree: true,
+      attributeFilter: ['data-split'],
+    });
     return () => {
       clearTimeout(timer);
+      splits.disconnect();
       document.removeEventListener('focusin', check);
       document.removeEventListener('focusout', check);
     };
@@ -272,6 +291,9 @@ const DEFAULT_WIDTHS: Required<PanelWidths> = {
   conversations: 220,
   reference: 300,
 };
+/** How long the status bar shows a notice. */
+const NOTICE_MS = 4000;
+
 /** How long a structure change can be undone from its toast. */
 const UNDO_TOAST_MS = 10_000;
 const RELOADED_TOAST_MS = 5000;
@@ -788,7 +810,11 @@ function ProjectView({
           // Main can no longer undo it.
           changeLatest(undefined);
           void refreshTrash();
-        } else if (event.type === 'unitReloaded' && !event.byProposal) {
+        } else if (
+          event.type === 'unitReloaded' &&
+          !event.byProposal &&
+          !event.bySplit
+        ) {
           setReloaded({ ref: event.ref, count: ++reloads.current });
         } else if (event.type === 'conflictsChanged') {
           setConflicts(event.conflicts);
@@ -891,6 +917,55 @@ function ProjectView({
     }, message);
     return id;
   }
+
+  /**
+   * Whether a Scene can be split: one in a Chapter, here, and not in
+   * Conflict, in a Project that isn't read-only.
+   */
+  function splittable(sceneId: string): boolean {
+    const found = allScenes(manuscript).find((s) => s.scene.id === sceneId);
+    return (
+      readOnly === null &&
+      !!found?.chapter &&
+      !found.scene.missing &&
+      !conflicts.some((c) => c.ref.kind === 'scene' && c.ref.id === sceneId)
+    );
+  }
+
+  /**
+   * Splits a Scene at `cut`, as Insert › Split Scene does, then opens the
+   * new Scene at the start of its Prose; without a cut, the status bar says
+   * there is nothing to split.
+   */
+  async function split(
+    sceneId: string,
+    cut: Cut | null,
+    toNextChapter: boolean,
+  ) {
+    if (!cut) {
+      showNotice('Nothing to split at the start or end of the Prose');
+      return;
+    }
+    // The Prose as cut is what main has, before the split writes over it.
+    flushPendingEdits();
+    const id = await create(
+      () => window.project.splitScene(sceneId, cut, toNextChapter),
+      'Scene split',
+    );
+    // The start of its first paragraph.
+    if (id) continueAt(id, 1);
+  }
+
+  /** What the status bar says for a moment, as that there is nothing to split. */
+  const [notice, setNotice] = useState<{ text: string; count: number }>();
+  const notices = useRef(0);
+  const showNotice = (text: string) =>
+    setNotice({ text, count: ++notices.current });
+  useEffect(() => {
+    if (!notice) return;
+    const timer = setTimeout(() => setNotice(undefined), NOTICE_MS);
+    return () => clearTimeout(timer);
+  }, [notice]);
 
   /** The Chapter or Scene whose title the Binder is editing, if any. */
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -995,6 +1070,16 @@ function ProjectView({
         switchMode('writing');
       }
       startTodo(prelink);
+      return true;
+    }
+    if (command.type === 'splitScene') {
+      // Only with the cursor in a Scene's Prose, which is only in Writing.
+      const prose = focusedProse();
+      const sceneId = prose?.view.dom.dataset.scene;
+      if (mode !== 'writing' || !prose || !sceneId || !splittable(sceneId)) {
+        return false;
+      }
+      void split(sceneId, cutAtSelection(prose), command.toNextChapter);
       return true;
     }
     if (
@@ -1580,6 +1665,7 @@ function ProjectView({
                     onCursor={reportCursor}
                     onProse={setProse}
                     onSelection={onSelection}
+                    splittable={splittable(open.scene.id)}
                   />
                 </main>
               )}
@@ -1625,6 +1711,7 @@ function ProjectView({
         </div>
         <StatusBar
           saveStatus={saveStatus}
+          notice={notice?.text}
           {...statusCounts({
             manuscript,
             scenes: sceneCounts,

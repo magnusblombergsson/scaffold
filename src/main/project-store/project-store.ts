@@ -75,6 +75,7 @@ import {
   type Snapshot,
   type Target,
 } from '../../shared/proposal';
+import { joinProse, type Cut } from '../../shared/prose-split';
 import { capitalized, unitName } from '../../shared/unit-name';
 import {
   DEFAULT_STATUSES,
@@ -200,6 +201,8 @@ export class ProjectError extends Error {
       | 'in-story-bible'
       | 'in-trash'
       | 'not-latest'
+      | 'unplaced'
+      | 'in-conflict'
       | 'unsaved'
       | 'newer-format'
       | 'read-only'
@@ -2830,6 +2833,139 @@ export class ProjectStore {
       }),
     );
     return { id, ...changed };
+  }
+
+  /**
+   * Splits a Scene at a cut the window made in its Prose (v3 spec §9): it
+   * keeps `cut.before`, and `cut.after` becomes a new Scene right after it,
+   * or, `toNextChapter`, first in the next Chapter, which is created at the
+   * end if there is none. The new Scene has its Status and Tags, but none of
+   * its Outline, Notes, image or Todos. Undo joins the new Scene's Prose, as
+   * it is by then, back onto the end of the Scene's, and removes the new
+   * Scene, and a Chapter made for it, outright.
+   */
+  async splitScene(
+    sceneId: string,
+    cut: Cut,
+    toNextChapter: boolean,
+  ): Promise<Created> {
+    const id = randomUUID();
+    const changed = await this.step(async () => {
+      const ref = sceneRef(sceneId);
+      this.refuseUnavailable(ref);
+      this.refuseConflict(sceneId, "A Scene in Conflict can't be split");
+      const tree = this.tree();
+      const found = tryFindScene(tree, sceneId);
+      if (!found) {
+        throw new ProjectError(
+          'unplaced',
+          "An Unplaced Scene can't be split; place it in a Chapter first",
+        );
+      }
+      let chapter = found.chapter;
+      let index = chapter.scenes.indexOf(found.scene) + 1;
+      let created: string | undefined;
+      if (toNextChapter) {
+        const next = tree.chapters[tree.chapters.indexOf(chapter) + 1];
+        chapter = next ?? {
+          id: randomUUID(),
+          title: `Chapter ${tree.chapters.length + 1}`,
+          scenes: [],
+        };
+        if (!next) {
+          tree.chapters.push(chapter);
+          created = chapter.id;
+        }
+        index = 0;
+      }
+      chapter.scenes.splice(index, 0, {
+        id,
+        title: `Scene ${chapter.scenes.length + 1}`,
+      });
+      await safeWrite(
+        this.deps.fs,
+        this.deps.clock,
+        scenePath(this.path, id),
+        sceneFile({ id, markdown: cut.after }),
+      );
+      this.files.add(id);
+      const { status, tags } = this.unitDetails.get(sceneId) ?? {};
+      if (status) await this.saveDetail(outlineRef(id), STATUS, status);
+      if (tags) await this.saveDetail(outlineRef(id), TAGS, tags);
+      // A crash from here on leaves the text after the cut twice, never lost.
+      await this.writeManifest({ ...this.manifest, tree });
+      await this.write(ref, { id: sceneId, markdown: cut.before });
+      this.emit({
+        type: 'unitReloaded',
+        ref,
+        value: { id: sceneId, markdown: cut.before },
+        bySplit: true,
+      });
+      return () => this.joinSplit(sceneId, id, created, cut.joint);
+    });
+    return { id, ...changed };
+  }
+
+  /**
+   * Undoes a split: joins the new Scene's Prose back onto the end of the
+   * Scene's, then removes the new Scene, its Outline and Notes, and the
+   * Chapter `created` for it if it is empty, for good; Todos linked to it
+   * keep their text.
+   */
+  private async joinSplit(
+    sceneId: string,
+    newId: string,
+    created: string | undefined,
+    joint: string | null,
+  ): Promise<void> {
+    const ref = sceneRef(sceneId);
+    this.refuseUnavailable(ref);
+    this.refuseUnavailable(sceneRef(newId));
+    // Joined, a version beside either would be left behind.
+    for (const id of [sceneId, newId]) {
+      this.refuseConflict(id, "A Scene in Conflict can't be joined back");
+    }
+    const image = this.unitDetails.get(newId)?.image;
+    let markdown = '';
+    await this.closeScenes([newId], async (prose) => {
+      const before = (await this.settledScene(sceneId)).body;
+      markdown = joinProse(before, prose.get(newId)!.body, joint);
+      const tree = this.tree();
+      const found = tryFindScene(tree, newId);
+      found?.chapter.scenes.splice(
+        found.chapter.scenes.indexOf(found.scene),
+        1,
+      );
+      tree.chapters = tree.chapters.filter(
+        (c) => c.id !== created || c.scenes.length > 0,
+      );
+      await this.writeManifest({ ...this.manifest, tree });
+      await this.write(ref, { id: sceneId, markdown });
+    });
+    await this.deleteOutlineAndNotes(newId);
+    if (image) {
+      const file = imagePath(this.path, image);
+      if (await this.deps.fs.exists(file)) await this.deps.fs.unlink(file);
+    }
+    if (await this.todos.dropLinks((link) => link.id === newId)) {
+      this.emitTodos();
+    }
+    this.emit({
+      type: 'unitReloaded',
+      ref,
+      value: { id: sceneId, markdown },
+      bySplit: true,
+    });
+  }
+
+  /** Refuses, saying `refusal`, when a Scene's Prose is in Conflict. */
+  private refuseConflict(sceneId: string, refusal: string): void {
+    if (this.conflicts.has(unitKey(sceneRef(sceneId)))) {
+      throw new ProjectError(
+        'in-conflict',
+        `${refusal}; choose a version first`,
+      );
+    }
   }
 
   renameChapter(chapterId: string, title: string): Promise<Changed> {

@@ -16,6 +16,7 @@ import type { Status } from './status';
 import type { TagUse } from './tags';
 import type { Todo, TodoChange, TodoLink } from './todo';
 import type { ImportBlock, ImportConvention } from './manuscript-import';
+import type { Cut } from './prose-split';
 import type { ListedModel, Model, ProviderId, ProviderStatus } from './models';
 import type { Command, DockedPanes } from './shortcuts';
 import type { PendingProposal, ProposedValue } from './proposal';
@@ -79,6 +80,11 @@ export type UnitReloaded = {
   value: UnitValue;
   /** Set when it changed because the Author accepted or undid a Proposal, here. */
   byProposal?: true;
+  /**
+   * Set when splitting a Scene here, or undoing that, wrote it: an editor
+   * shows it, as what it sent before is in it.
+   */
+  bySplit?: true;
 };
 
 /**
@@ -264,6 +270,16 @@ export interface ProjectApi {
     chapterId: string,
     index: number,
   ): Promise<Changed>;
+  /**
+   * Splits a placed Scene at a cut made in its Prose: the text after it
+   * becomes a new Scene right after, or first in the next Chapter, which is
+   * created if there is none. Undo joins it back.
+   */
+  splitScene(
+    sceneId: string,
+    cut: Cut,
+    toNextChapter: boolean,
+  ): Promise<Created>;
   /** Moves a Scene, placed or Unplaced, to Trash. */
   trashScene(sceneId: string): Promise<Changed>;
   /** Moves a Chapter and its Scenes to Trash; never the last Chapter. */
@@ -629,8 +645,16 @@ export interface ShellApi {
    * menu's check items. Kept in memory only.
    */
   showDocked(docked: DockedPanes): void;
-  /** Says whether this window's Prose has focus, which enables the Format menu. */
-  showProseFocus(focused: boolean): void;
+  /**
+   * Says whether this window's Prose has focus, which enables the Format
+   * menu, and whether its Scene can be split, which enables the Splits.
+   */
+  showProseFocus(focused: boolean, splittable: boolean): void;
+  /**
+   * Opens the Prose's right-click menu where the pointer is; what is chosen
+   * comes back to this window by `onCommand`.
+   */
+  showProseMenu(splittable: boolean): void;
   /**
    * Puts this window in zen mode, full screen and ticked in the View menu, or
    * takes it out, back to the full screen it had before. Kept in memory only.
@@ -840,6 +864,7 @@ export const projectMethods = {
   renameScene: 'invoke',
   moveChapter: 'invoke',
   moveScene: 'invoke',
+  splitScene: 'invoke',
   trashScene: 'invoke',
   trashChapter: 'invoke',
   listEntries: 'invoke',
@@ -921,6 +946,7 @@ export const shellMethods = {
   onCommand: 'event',
   showDocked: 'send',
   showProseFocus: 'send',
+  showProseMenu: 'send',
   setZen: 'send',
   exportChoice: 'invoke',
   exportManuscript: 'invoke',

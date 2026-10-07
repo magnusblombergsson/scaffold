@@ -904,6 +904,12 @@ span.overview-title {
   font-variant-numeric: tabular-nums;
 }
 
+/* At the right, as that there is nothing to split. */
+.status-notice {
+  margin-left: auto;
+  color: var(--fg);
+}
+
 .counts-place {
   position: absolute;
   top: 0;

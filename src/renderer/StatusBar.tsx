@@ -82,15 +82,18 @@ export function useSceneCounts(manuscript: Manuscript): {
  * Along the bottom of the window: the save state on the left, and centred
  * under the Prose the counts of what is open, or selected, against its Word
  * target if it has one; hovering them shows the Manuscript's. Clicking them
- * sets the Word target of what is shown, a selection's aside.
+ * sets the Word target of what is shown, a selection's aside. Any `notice`
+ * goes on the right.
  */
 export function StatusBar({
   saveStatus,
+  notice,
   shown,
   manuscript,
   onSetWordTarget,
 }: {
   saveStatus: { statuses: SaveStatuses; confirmed: boolean };
+  notice?: string;
   shown: ShownCounts;
   manuscript: Counts;
   /** Gives a Scene, a Chapter or, with `project`, the Manuscript a Word target, or none. */
@@ -175,6 +178,9 @@ export function StatusBar({
           </div>
         )}
       </div>
+      <span className="status-notice" role="status">
+        {notice}
+      </span>
     </footer>
   );
 }
