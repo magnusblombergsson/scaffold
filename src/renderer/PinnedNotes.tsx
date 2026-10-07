@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { PinnedNote } from '../shared/api';
 import type { EntrySummary, EntryValue } from '../shared/project-types';
 import { useEntryImage } from './EntryImage';
+import { ViewableImage } from './ImageView';
 import { PeekCard } from './PeekCard';
 import { entryTitle } from './StoryBible';
 import { onEntryWritten } from './entry-written';
@@ -121,7 +122,8 @@ function Note({
         className="pinned-note-header"
         title="Drag to move"
         onPointerDown={(event) => {
-          if ((event.target as HTMLElement).closest('button')) return;
+          const target = event.target as HTMLElement;
+          if (target.closest('button, .viewable-image')) return;
           if (event.button !== 0) return;
           event.currentTarget.setPointerCapture(event.pointerId);
           grip.current = {
@@ -150,7 +152,12 @@ function Note({
         </span>
         {/* Its name is beside it: the thumbnail adds nothing to read aloud. */}
         {note.folded && foldedImage && image && (
-          <img className="pinned-note-thumbnail" src={image} alt="" />
+          <ViewableImage
+            className="pinned-note-thumbnail"
+            src={image}
+            alt=""
+            caption={title}
+          />
         )}
         <h2 className="pinned-note-title">{title}</h2>
         <button
