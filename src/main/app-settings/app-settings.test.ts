@@ -409,6 +409,8 @@ describe('a bad or newer settings file', () => {
             pinnedNotes: [
               { entryId: 'e1', x: 10, y: 20, folded: true },
               { entryId: 'e2', x: 'left', y: 20, folded: false },
+              { entryId: 'e4', x: 1, y: 2, folded: false, image: true },
+              { entryId: 'e5', x: 3, y: 4, folded: false, image: 'yes' },
               { entryId: 'e1', x: 30, y: 40, folded: false },
               { x: 1, y: 2, folded: false },
               'e3',
@@ -438,7 +440,12 @@ describe('a bad or newer settings file', () => {
       outlineNotesOpen: false,
       overviewOpen: true,
       // One note per Entry: the first one kept.
-      pinnedNotes: [{ entryId: 'e1', x: 10, y: 20, folded: true }],
+      pinnedNotes: [
+        { entryId: 'e1', x: 10, y: 20, folded: true },
+        // Shown as its image; a bad image mode is text.
+        { entryId: 'e4', x: 1, y: 2, folded: false, image: true },
+        { entryId: 'e5', x: 3, y: 4, folded: false },
+      ],
     });
     expect(settings.project('d')).toEqual({});
   });

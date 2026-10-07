@@ -6,10 +6,14 @@ const MARGIN = 8;
 export type Point = { x: number; y: number };
 export type Size = { width: number; height: number };
 
-/** A note moved, folded, raised to the top or unpinned. */
+/**
+ * A note moved, folded, switched to its Entry's image or text, raised to the
+ * top or unpinned.
+ */
 export type NoteChange =
   | { type: 'move'; at: Point }
   | { type: 'fold'; folded: boolean }
+  | { type: 'show'; image: boolean }
   | { type: 'raise' }
   | { type: 'unpin' };
 
@@ -24,6 +28,8 @@ export function applyChange(
       return changeNote(notes, entryId, change.at);
     case 'fold':
       return changeNote(notes, entryId, { folded: change.folded });
+    case 'show':
+      return changeNote(notes, entryId, { image: change.image });
     case 'raise':
       return raise(notes, entryId);
     case 'unpin':
@@ -45,7 +51,7 @@ export function togglePin(
     : [...notes, { entryId, ...at, folded: false }];
 }
 
-/** Moves or folds the Entry's note. */
+/** Moves, folds or switches the Entry's note. */
 export function changeNote(
   notes: PinnedNote[],
   entryId: string,
@@ -73,6 +79,22 @@ export function withoutTrashed(
 ): PinnedNote[] {
   const kept = notes.filter((note) => entryIds.includes(note.entryId));
   return kept.length === notes.length ? notes : kept;
+}
+
+/**
+ * The notes with those showing an image their Entry no longer has back to
+ * text, given the ids of the Entries with an image. The same notes if none
+ * changes.
+ */
+export function textWithoutImage(
+  notes: PinnedNote[],
+  entryIdsWithImage: readonly string[],
+): PinnedNote[] {
+  const shown = (note: PinnedNote) =>
+    !note.image || entryIdsWithImage.includes(note.entryId);
+  return notes.every(shown)
+    ? notes
+    : notes.map((note) => (shown(note) ? note : { ...note, image: false }));
 }
 
 /**

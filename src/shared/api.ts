@@ -410,13 +410,15 @@ export type PanelWidths = {
 
 /**
  * A Pinned note: the Entry it shows, where its top left corner was left in
- * the window in CSS pixels, and whether it is folded to its title.
+ * the window in CSS pixels, whether it is folded to its title, and whether it
+ * shows the Entry's image rather than its text (text when not said).
  */
 export type PinnedNote = {
   entryId: string;
   x: number;
   y: number;
   folded: boolean;
+  image?: boolean;
 };
 
 /**

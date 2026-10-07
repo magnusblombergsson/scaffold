@@ -62,7 +62,12 @@ import { ProjectSettingsDialog } from './ProjectSettingsDialog';
 import { ProposalTargetContext } from './ProposalCard';
 import { ProposalPeek, type TargetPeek } from './ProposalPeek';
 import { PinnedNotes } from './PinnedNotes';
-import { applyChange, togglePin, withoutTrashed } from './pinned-notes';
+import {
+  applyChange,
+  textWithoutImage,
+  togglePin,
+  withoutTrashed,
+} from './pinned-notes';
 import { revealedEdge, type ChromeEdge } from './zen';
 import { cycleWritingWidth } from './view-settings';
 import {
@@ -593,12 +598,15 @@ function ProjectView({
     if (save) window.shell.saveView({ pinnedNotes: next });
   }, []);
   useEffect(() => {
-    // A trashed Entry's note goes.
+    // A trashed Entry's note goes; one whose Entry lost its image is text.
     if (!entriesLoaded.current) return;
     changePinnedNotes(
-      withoutTrashed(
-        notesNow.current,
-        entries.map((entry) => entry.id),
+      textWithoutImage(
+        withoutTrashed(
+          notesNow.current,
+          entries.map((entry) => entry.id),
+        ),
+        entries.filter((entry) => entry.image).map((entry) => entry.id),
       ),
     );
   }, [entries, changePinnedNotes]);
