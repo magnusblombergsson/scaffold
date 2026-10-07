@@ -82,7 +82,7 @@ import { StartScreen } from './StartScreen';
 import { StatusBar, useSceneCounts } from './StatusBar';
 import { entryTitle, StoryBible } from './StoryBible';
 import { TagsDialog } from './TagsDialog';
-import { TodoList } from './TodoList';
+import { TodoList, type TodoDraft } from './TodoList';
 import { trashTitle, TrashView } from './TrashView';
 import { Toast } from './Toast';
 import { forgetUnitEditors } from './unit-editors';
@@ -388,6 +388,14 @@ function ProjectView({
     showEntry(id);
   }
 
+  /** Opens a Todo's Scene, Chapter or Entry in Writing, from a room. */
+  function openInWriting(link: TodoLink) {
+    if (link.kind === 'entry') return openEntryInWriting(link.id);
+    switchMode('writing');
+    setTab('manuscript');
+    select(link);
+  }
+
   /**
    * The Entry or Outline a Proposal's title went to in Writing, by its id,
    * and the field there to go to.
@@ -487,6 +495,9 @@ function ProjectView({
         ?.focus();
     }
     setDocked({ ...docked, [pane]: !docked[pane] });
+  }
+  function dockLeftPane() {
+    setDocked((now) => ({ ...now, left: true }));
   }
   /** Docks the left pane back, open at `at`, from its edge tab. */
   function dockLeftPaneAt(at: Tab) {
@@ -589,6 +600,12 @@ function ProjectView({
   useEffect(() => {
     if (tab !== 'trash') setTrashReveal(undefined);
   }, [tab]);
+  /** Shows a Trash item in Writing's Trash tab, as a Todo's link to it does. */
+  function openTrashItem(id: string) {
+    setTab('trash');
+    dockLeftPane();
+    setTrashReveal({ id, count: ++trashReveals.current });
+  }
 
   const [todos, setTodos] = useState<Todo[]>([]);
   useEffect(() => {
@@ -602,6 +619,27 @@ function ProjectView({
       : openEntry
         ? { kind: 'entry', id: openEntry.id }
         : null;
+  /** Whether Writing's Todos tab shows only the open unit's. In memory for the window. */
+  const [onlyOpenTodos, setOnlyOpenTodos] = useState(false);
+  /** The Todo the Author started from elsewhere, while the Todos tab is open. */
+  const [todoDraft, setTodoDraft] = useState<TodoDraft>();
+  const todoDrafts = useRef(0);
+  useEffect(() => {
+    if (tab !== 'todos') setTodoDraft(undefined);
+  }, [tab]);
+  /**
+   * Starts a Todo in Writing's Todos tab, docking the left pane if
+   * collapsed: New Todo, focused, linked to `link`, holding `text` if given.
+   */
+  function startTodo(link: TodoLink | null, text?: string) {
+    setTab('todos');
+    dockLeftPane();
+    setTodoDraft({
+      link,
+      ...(text !== undefined && { text }),
+      count: ++todoDrafts.current,
+    });
+  }
 
   const [conflicts, setConflicts] = useState<Conflict[]>([]);
   /** The unit whose Conflict the centre shows, instead of the selection. */
@@ -816,6 +854,15 @@ function ProjectView({
       togglePane(command.pane);
       return true;
     }
+    if (command.type === 'newTodo') {
+      if (readOnly) return false;
+      if (mode !== 'writing') {
+        if (command.byKey) return false;
+        switchMode('writing');
+      }
+      startTodo(prelink);
+      return true;
+    }
     if (
       command.type !== 'newScene' &&
       command.type !== 'newChapter' &&
@@ -987,6 +1034,19 @@ function ProjectView({
                   onAddProvider={onAddProvider}
                   onOpenEntry={openEntryInWriting}
                   onChange={change}
+                  todos={
+                    <TodoList
+                      todos={todos}
+                      names={{ manuscript, entries, trash }}
+                      prelink={null}
+                      onOpen={openInWriting}
+                      onOpenTrash={(id) => {
+                        switchMode('writing');
+                        openTrashItem(id);
+                      }}
+                      onError={onError}
+                    />
+                  }
                 />
               </div>
             )}
@@ -1117,6 +1177,7 @@ function ProjectView({
                         void setStatus(unitId, statusId)
                       }
                       onEditTags={setTagging}
+                      onAddTodo={(link) => startTodo(link)}
                     />
                   ) : tab === 'bible' ? (
                     <StoryBible
@@ -1136,17 +1197,18 @@ function ProjectView({
                         setHighlight(on);
                         window.shell.setHighlightMentions(on);
                       }}
+                      onAddTodo={(id) => startTodo({ kind: 'entry', id })}
                     />
                   ) : tab === 'todos' ? (
                     <TodoList
                       todos={todos}
                       names={{ manuscript, entries, trash }}
                       prelink={prelink}
+                      draft={todoDraft}
+                      onlyOpen={onlyOpenTodos}
+                      onOnlyOpen={setOnlyOpenTodos}
                       onOpen={select}
-                      onOpenTrash={(id) => {
-                        setTab('trash');
-                        setTrashReveal({ id, count: ++trashReveals.current });
-                      }}
+                      onOpenTrash={openTrashItem}
                       onError={onError}
                     />
                   ) : tab === 'conflicts' ? (
@@ -1229,6 +1291,7 @@ function ProjectView({
                     reveal={revealIn(PROJECT_OUTLINE)}
                     onOpenScene={(id) => select({ kind: 'scene', id })}
                     onOpenChapter={(id) => select({ kind: 'chapter', id })}
+                    onAddTodo={startTodo}
                   />
                 </main>
               ) : selected?.kind === 'entry' ? (
@@ -1279,6 +1342,7 @@ function ProjectView({
                     language={language}
                     reveal={revealIn(openChapter.id)}
                     onOpenScene={(id) => select({ kind: 'scene', id })}
+                    onAddTodo={startTodo}
                   />
                 </main>
               ) : !open ? (
@@ -1365,6 +1429,7 @@ function ProjectView({
                   names={{ manuscript, entries }}
                   show={showProposal}
                   onQuote={showQuote}
+                  onAddTodo={(text, link) => startTodo(link, text)}
                   onChange={change}
                 />
               </ProposalTargetContext.Provider>

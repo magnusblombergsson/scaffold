@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { EntrySummary, Manuscript, TrashItem } from './project-types';
-import { linkView } from './todo';
+import { linkedTo, linkView, type Todo } from './todo';
 
 const manuscript: Manuscript = {
   chapters: [
@@ -86,5 +86,24 @@ describe('a Todo’s link', () => {
     // An id is only ever looked for as the kind it was linked as.
     expect(linkView({ kind: 'entry', id: 's1' }, names)).toBeNull();
     expect(linkView({ kind: 'chapter', id: 's9' }, names)).toBeNull();
+  });
+});
+
+describe('linkedTo', () => {
+  const todos: Todo[] = [
+    { id: 'a', text: 'A', done: false, link: { kind: 'scene', id: 's1' } },
+    { id: 'b', text: 'B', done: true, link: { kind: 'scene', id: 's1' } },
+    { id: 'c', text: 'C', done: false, link: { kind: 'chapter', id: 's1' } },
+    { id: 'd', text: 'D', done: false },
+  ];
+
+  it('keeps the Todos linked to the unit, done or not', () => {
+    expect(
+      linkedTo(todos, { kind: 'scene', id: 's1' }).map((t) => t.id),
+    ).toEqual(['a', 'b']);
+  });
+
+  it('keeps none without a unit', () => {
+    expect(linkedTo(todos, null)).toEqual([]);
   });
 });

@@ -135,6 +135,7 @@ describe('menuTemplate', () => {
       'New Chapter',
       'New Chapter Above',
       'New Entry',
+      'New Todo',
     ]);
     expect(item(insert, 'New Chapter Above').accelerator).toBe(
       'CmdOrCtrl+Shift+Alt+Enter',
@@ -151,10 +152,13 @@ describe('menuTemplate', () => {
     click(item(insert, 'New Scene Above'));
     click(item(insert, 'New Chapter'), true);
     click(item(menu(insert, 'New Entry'), 'Place'));
+    expect(item(insert, 'New Todo').accelerator).toBe('CmdOrCtrl+T');
+    click(item(insert, 'New Todo'), true);
     expect(sent).toEqual([
       { type: 'newScene', above: true },
       { type: 'newChapter', above: false, byKey: true },
       { type: 'newEntry', entryType: 'place' },
+      { type: 'newTodo', byKey: true },
     ]);
   });
 

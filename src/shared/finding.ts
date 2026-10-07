@@ -1,4 +1,6 @@
+import type { ConversationMessage } from './conversation';
 import type { Manuscript } from './project-types';
+import type { TodoLink } from './todo';
 
 // Reviews and their Findings (MVP spec §6). A Finding is a point of a Review,
 // pointing at the Author's own Prose. Findings live only in the reply they
@@ -47,6 +49,26 @@ export function reviewText(
     ...manuscript.unplaced,
   ].find((s) => s.id === sceneId);
   return scene ? `Review Scene “${scene.title}”` : null;
+}
+
+/**
+ * The Scene or Chapter the reply at `index` reviewed, as the Author's
+ * message before it asked: the Scene in focus, or its Chapter. Null for a
+ * reply to a question, or once the Chapter is no longer in the Manuscript.
+ */
+export function reviewedUnit(
+  messages: ConversationMessage[],
+  index: number,
+  manuscript: Manuscript,
+): TodoLink | null {
+  const asked = messages.slice(0, index).findLast((m) => m.role === 'author');
+  const sceneId = asked?.focus[0];
+  if (!asked?.command || !sceneId) return null;
+  if (asked.command === 'review-scene') return { kind: 'scene', id: sceneId };
+  const chapter = manuscript.chapters.find((c) =>
+    c.scenes.some((s) => s.id === sceneId),
+  );
+  return chapter ? { kind: 'chapter', id: chapter.id } : null;
 }
 
 /**

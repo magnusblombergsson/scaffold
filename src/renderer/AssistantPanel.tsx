@@ -1,6 +1,7 @@
 import { useContext, useState } from 'react';
 import { MODE_LABELS, type Mode } from '../shared/conversation';
 import { reviewText, type ReviewCommand } from '../shared/finding';
+import type { TodoLink } from '../shared/todo';
 import { SHORTCUTS, withShortcut } from '../shared/shortcuts';
 import { anyAdded, NoProviderState, useProviders } from './Providers';
 import {
@@ -33,6 +34,7 @@ export function AssistantPanel({
   names,
   show,
   onQuote,
+  onAddTodo,
   onChange,
 }: {
   /** Whether the panel is shown, its Mode the window's. */
@@ -49,6 +51,8 @@ export function AssistantPanel({
   show: ShowProposal | null;
   /** Opens a Scene with a Finding's quote of its Prose selected. */
   onQuote(sceneId: string, quote: string): void;
+  /** Starts a Todo from a Finding: its text, linked to the unit reviewed. */
+  onAddTodo(text: string, link: TodoLink | null): void;
   onChange: OnChange;
 }) {
   const providers = useProviders();
@@ -83,6 +87,7 @@ export function AssistantPanel({
             show={show}
             onOpenSettings={onAddProvider}
             onQuote={onQuote}
+            onAddTodo={onAddTodo}
             onChange={onChange}
           />
         ) : (
@@ -107,6 +112,7 @@ function Conversations({
   show,
   onOpenSettings,
   onQuote,
+  onAddTodo,
   onChange,
 }: {
   active: boolean;
@@ -115,6 +121,7 @@ function Conversations({
   show: ShowProposal | null;
   onOpenSettings(): void;
   onQuote(sceneId: string, quote: string): void;
+  onAddTodo(text: string, link: TodoLink | null): void;
   onChange: OnChange;
 }) {
   const readOnly = useContext(ReadOnlyContext);
@@ -215,6 +222,7 @@ function Conversations({
         }
         onOpenSettings={onOpenSettings}
         onQuote={onQuote}
+        onAddTodo={onAddTodo}
       />
       {error && (
         <p className="assistant-error" role="alert">

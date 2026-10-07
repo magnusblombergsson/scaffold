@@ -192,6 +192,12 @@ export function menuTemplate(
             ...sending({ type: 'newEntry', entryType }),
           })),
         },
+        {
+          label: 'New Todo',
+          enabled: writable,
+          ...windowKey(SHORTCUTS.newTodo),
+          ...sending({ type: 'newTodo' }),
+        },
       ],
     },
     // On macOS Settings… is in the app menu.

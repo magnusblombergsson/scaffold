@@ -20,11 +20,13 @@ import {
 } from '../shared/conversation';
 import {
   FINDING_LABELS,
+  reviewedUnit,
   reviewText,
   type Finding,
   type ReviewCommand,
 } from '../shared/finding';
 import { loggedModel, type Model } from '../shared/models';
+import type { TodoLink } from '../shared/todo';
 import type {
   EntrySummary,
   Manuscript,
@@ -498,6 +500,7 @@ export function MessageLog({
   empty,
   onOpenSettings,
   onQuote,
+  onAddTodo,
 }: {
   conversation: ConversationState;
   names: Names;
@@ -505,6 +508,8 @@ export function MessageLog({
   empty?: string;
   onOpenSettings(): void;
   onQuote?(sceneId: string, quote: string): void;
+  /** Starts a Todo from a Finding: its text, linked to the unit reviewed. */
+  onAddTodo?(text: string, link: TodoLink | null): void;
 }) {
   const readOnly = useContext(ReadOnlyContext);
   const providers = useProviders();
@@ -538,6 +543,14 @@ export function MessageLog({
             conversationId={current.id}
             shown={shown}
             onQuote={onQuote}
+            onAddTodo={
+              onAddTodo &&
+              ((text) =>
+                onAddTodo(
+                  text,
+                  reviewedUnit(current.messages, i, names.manuscript),
+                ))
+            }
           />
         </Fragment>
       ))}
@@ -864,6 +877,7 @@ function Message({
   conversationId,
   shown,
   onQuote,
+  onAddTodo,
 }: {
   message: Pick<ConversationMessage, 'role' | 'text'> &
     Partial<ConversationMessage>;
@@ -873,6 +887,8 @@ function Message({
   /** The Proposal the Author came to see, if any. */
   shown?: string | null;
   onQuote?(sceneId: string, quote: string): void;
+  /** Starts a Todo of a Finding's text, linked to the unit reviewed. */
+  onAddTodo?(text: string): void;
 }) {
   const { role, text, model, provider, interrupted, unreadable } = message;
   const { cutShort, saw, findings, proposals } = message;
@@ -898,6 +914,7 @@ function Message({
               finding={finding}
               manuscript={names.manuscript}
               onQuote={onQuote}
+              onAddTodo={onAddTodo}
             />
           ))}
         </ol>
@@ -943,17 +960,21 @@ function Message({
 
 /**
  * One Finding of a Review: its type, comment, quote and question. The quote
- * opens its Scene with it selected, while the Scene is there to open.
+ * opens its Scene with it selected, while the Scene is there to open. Add as
+ * Todo starts a Todo of its comment.
  */
 function FindingItem({
   finding: { type, comment, quote, sceneId, question },
   manuscript,
   onQuote,
+  onAddTodo,
 }: {
   finding: Finding;
   manuscript: Manuscript;
   onQuote?(sceneId: string, quote: string): void;
+  onAddTodo?(text: string): void;
 }) {
+  const readOnly = useContext(ReadOnlyContext);
   const scene = sceneId ? sceneOf(sceneId, manuscript) : undefined;
   return (
     <li className={`finding finding-${type}`}>
@@ -975,6 +996,15 @@ function FindingItem({
         <p className="finding-question">
           <strong>{question}</strong>
         </p>
+      )}
+      {onAddTodo && (
+        <button
+          className="finding-todo"
+          disabled={readOnly}
+          onClick={() => onAddTodo(comment)}
+        >
+          Add as Todo
+        </button>
       )}
     </li>
   );

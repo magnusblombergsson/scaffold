@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useContext, useState, type ReactNode } from 'react';
 import {
   PROJECT_OUTLINE,
   type Manuscript,
@@ -6,7 +6,10 @@ import {
   type ManuscriptScene,
   type ProseLanguage,
 } from '../shared/project-types';
+import type { TodoLink } from '../shared/todo';
+import { addTodoItem, Menu } from './Binder';
 import { OutlineNotes } from './OutlineNotes';
+import { ReadOnlyContext } from './read-only';
 import type { Reveal } from './reveal';
 import { UNPLACED } from './overview';
 
@@ -20,11 +23,14 @@ export function ChapterCorkboard({
   language,
   reveal,
   onOpenScene,
+  onAddTodo,
 }: {
   chapter: ManuscriptChapter;
   language: ProseLanguage;
   reveal?: Reveal;
   onOpenScene(id: string): void;
+  /** Starts a Todo linked to a card's unit, from its menu. */
+  onAddTodo(link: TodoLink): void;
 }) {
   return (
     <div className="corkboard">
@@ -42,6 +48,7 @@ export function ChapterCorkboard({
           scenes={chapter.scenes}
           language={language}
           onOpenScene={onOpenScene}
+          onAddTodo={onAddTodo}
         />
       </div>
     </div>
@@ -60,12 +67,15 @@ export function ProjectCorkboard({
   reveal,
   onOpenScene,
   onOpenChapter,
+  onAddTodo,
 }: {
   manuscript: Manuscript;
   language: ProseLanguage;
   reveal?: Reveal;
   onOpenScene(id: string): void;
   onOpenChapter(id: string): void;
+  /** Starts a Todo linked to a card's unit, from its menu. */
+  onAddTodo(link: TodoLink): void;
 }) {
   const [shown, setShown] = useState<ReadonlySet<string>>(() => new Set());
   const lanes = [
@@ -116,12 +126,14 @@ export function ProjectCorkboard({
           onToggle={() => toggle(chapter.id)}
           language={language}
           onOpenScene={onOpenScene}
+          onAddTodo={onAddTodo}
         >
           <article className="card own" aria-label={chapter.title}>
             <CardTitle
               title={chapter.title}
               number={i + 1}
               onOpen={() => onOpenChapter(chapter.id)}
+              onAddTodo={() => onAddTodo({ kind: 'chapter', id: chapter.id })}
             />
             <OutlineNotes unitId={chapter.id} language={language} withNotes />
           </article>
@@ -135,6 +147,7 @@ export function ProjectCorkboard({
           onToggle={() => toggle(UNPLACED)}
           language={language}
           onOpenScene={onOpenScene}
+          onAddTodo={onAddTodo}
         >
           <div className="card own unplaced">
             <span className="card-title">Unplaced Scenes</span>
@@ -156,6 +169,7 @@ function Lane({
   onToggle,
   language,
   onOpenScene,
+  onAddTodo,
   children,
 }: {
   title: string;
@@ -164,6 +178,7 @@ function Lane({
   onToggle(): void;
   language: ProseLanguage;
   onOpenScene(id: string): void;
+  onAddTodo(link: TodoLink): void;
   children: ReactNode;
 }) {
   return (
@@ -186,6 +201,7 @@ function Lane({
           scenes={scenes}
           language={language}
           onOpenScene={onOpenScene}
+          onAddTodo={onAddTodo}
         />
       )}
     </section>
@@ -197,10 +213,12 @@ function SceneCards({
   scenes,
   language,
   onOpenScene,
+  onAddTodo,
 }: {
   scenes: ManuscriptScene[];
   language: ProseLanguage;
   onOpenScene(id: string): void;
+  onAddTodo(link: TodoLink): void;
 }) {
   if (scenes.length === 0) {
     return <p className="corkboard-empty">No Scenes yet.</p>;
@@ -212,6 +230,7 @@ function SceneCards({
       number={i + 1}
       language={language}
       onOpen={() => onOpenScene(scene.id)}
+      onAddTodo={() => onAddTodo({ kind: 'scene', id: scene.id })}
     />
   ));
 }
@@ -221,15 +240,22 @@ function SceneCard({
   number,
   language,
   onOpen,
+  onAddTodo,
 }: {
   scene: ManuscriptScene;
   number: number;
   language: ProseLanguage;
   onOpen(): void;
+  onAddTodo(): void;
 }) {
   return (
     <article className="card" aria-label={scene.title}>
-      <CardTitle title={scene.title} number={number} onOpen={onOpen} />
+      <CardTitle
+        title={scene.title}
+        number={number}
+        onOpen={onOpen}
+        onAddTodo={onAddTodo}
+      />
       {scene.missing ? (
         <p className="corkboard-empty">Missing, possibly not synced yet.</p>
       ) : (
@@ -239,18 +265,30 @@ function SceneCard({
   );
 }
 
-/** A card's number and title; the title opens the unit. */
+/**
+ * A card's number, title and ⋯ menu, which a right-click on it opens too;
+ * the title opens the unit.
+ */
 function CardTitle({
   title,
   number,
   onOpen,
+  onAddTodo,
 }: {
   title: string;
   number: number;
   onOpen(): void;
+  onAddTodo(): void;
 }) {
+  const readOnly = useContext(ReadOnlyContext);
+  const [menuOpen, setMenuOpen] = useState(false);
   return (
-    <header>
+    <header
+      onContextMenu={(event) => {
+        event.preventDefault();
+        setMenuOpen(true);
+      }}
+    >
       <span className="card-number">{number}</span>
       <button
         className="card-title"
@@ -259,6 +297,12 @@ function CardTitle({
       >
         {title}
       </button>
+      <Menu
+        label={`Card actions: ${title}`}
+        open={menuOpen}
+        onOpenChange={setMenuOpen}
+        items={[addTodoItem(readOnly, onAddTodo)]}
+      />
     </header>
   );
 }
