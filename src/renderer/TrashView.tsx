@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import { ENTRY_TYPE_LABELS, type TrashItem } from '../shared/project-types';
 import { MODE_LABELS } from '../shared/conversation';
 import { versionLabel } from './conflict-labels';
@@ -8,21 +9,42 @@ import { versionLabel } from './conflict-labels';
  */
 export function TrashView({
   items,
+  reveal,
   onRestore,
   onEmpty,
 }: {
   items: TrashItem[];
+  /**
+   * The item to go to, as a Todo's link to a unit in Trash asks: it is
+   * marked, scrolled to and its Restore focused; `count` asks again.
+   */
+  reveal?: { id: string; count: number };
   onRestore(item: TrashItem): void;
   onEmpty(): void;
 }) {
+  const list = useRef<HTMLOListElement>(null);
+  useEffect(() => {
+    if (!reveal) return;
+    const row = list.current?.querySelector<HTMLElement>(
+      `[data-id="${CSS.escape(reveal.id)}"]`,
+    );
+    row?.scrollIntoView({ block: 'nearest' });
+    row?.querySelector('button')?.focus();
+  }, [reveal]);
+
   if (items.length === 0) {
     return <p className="trash-empty">Trash is empty</p>;
   }
   return (
     <section className="trash" aria-label="Trash">
-      <ol>
+      <ol ref={list}>
         {items.map((item) => (
-          <li key={item.id} className="trash-item">
+          <li
+            key={item.id}
+            className="trash-item"
+            data-id={item.id}
+            aria-current={reveal?.id === item.id || undefined}
+          >
             <span className="trash-title">
               {trashTitle(item)}
               <span className="trash-detail">{detail(item)}</span>

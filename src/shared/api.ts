@@ -12,6 +12,7 @@ import type {
 import type { ExportUnticked } from './export-choice';
 import type { ReviewCommand } from './finding';
 import type { Status } from './status';
+import type { Todo, TodoChange, TodoLink } from './todo';
 import type { ImportBlock, ImportConvention } from './manuscript-import';
 import type { ListedModel, Model, ProviderId, ProviderStatus } from './models';
 import type { Command } from './shortcuts';
@@ -156,6 +157,9 @@ export type UnitDetailsChanged = {
 /** The Project's Status list changed on another computer: `statuses` is it now. */
 export type StatusesChanged = { type: 'statusesChanged'; statuses: Status[] };
 
+/** The Todos changed, here or on another computer: `todos` is the list now. */
+export type TodosChanged = { type: 'todosChanged'; todos: Todo[] };
+
 /** A newer app upgraded the Project; `host` is the computer it did so on, when known. */
 export type Upgrade = { host?: string };
 
@@ -184,6 +188,7 @@ export type ProjectEvent =
   | StructureChanged
   | UnitDetailsChanged
   | StatusesChanged
+  | TodosChanged
   | ConflictsChanged
   | EntriesChanged
   | EntryImageChanged
@@ -301,6 +306,21 @@ export interface ProjectApi {
    * `unitDetailsChanged`.
    */
   setStatus(unitId: string, statusId: string | null): Promise<void>;
+  /** The Todos: those not done, then the done, each in list order. */
+  listTodos(): Promise<Todo[]>;
+  /**
+   * Adds a Todo on top, as one line, linked to a Scene, Chapter or Entry or
+   * to nothing. Each change to the Todos follows as a `todosChanged`.
+   */
+  addTodo(text: string, link: TodoLink | null): Promise<void>;
+  /** Sets a Todo's text, tick or link; null drops its link. */
+  changeTodo(id: string, change: TodoChange): Promise<void>;
+  /** Moves a Todo to `index` among the others that are done as it is, or not. */
+  moveTodo(id: string, index: number): Promise<void>;
+  /** Deletes a Todo; another computer's later edit to it brings it back. */
+  deleteTodo(id: string): Promise<void>;
+  /** Deletes every Todo that is done. */
+  clearDoneTodos(): Promise<void>;
 }
 
 /**
@@ -717,6 +737,12 @@ export const projectMethods = {
   setLanguage: 'invoke',
   setFoldedNoteImage: 'invoke',
   setStatus: 'invoke',
+  listTodos: 'invoke',
+  addTodo: 'invoke',
+  changeTodo: 'invoke',
+  moveTodo: 'invoke',
+  deleteTodo: 'invoke',
+  clearDoneTodos: 'invoke',
 } as const satisfies MethodTable<ProjectApi>;
 
 export const assistantMethods = {

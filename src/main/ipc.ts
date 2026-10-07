@@ -76,6 +76,12 @@ const projectHandlers: Handlers<
   setLanguage: ({ store, sender }, language) =>
     setLanguage(sender, store, language),
   setStatus: ({ store }, unitId, statusId) => store.setStatus(unitId, statusId),
+  listTodos: async ({ store }) => store.listTodos(),
+  addTodo: ({ store }, text, link) => store.addTodo(text, link),
+  changeTodo: ({ store }, id, change) => store.changeTodo(id, change),
+  moveTodo: ({ store }, id, index) => store.moveTodo(id, index),
+  deleteTodo: ({ store }, id) => store.deleteTodo(id),
+  clearDoneTodos: ({ store }) => store.clearDoneTodos(),
   setFoldedNoteImage: ({ store, sender }, on) =>
     saveProjectSetting(
       sender,

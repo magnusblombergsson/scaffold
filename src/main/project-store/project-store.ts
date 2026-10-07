@@ -92,6 +92,12 @@ import type {
   UnusedSummary,
 } from '../../shared/conversation';
 import type { Model } from '../../shared/models';
+import {
+  isTodoLink,
+  type Todo,
+  type TodoChange,
+  type TodoLink,
+} from '../../shared/todo';
 import type { Clock } from './clock';
 import {
   acceptedEvent,
@@ -116,6 +122,7 @@ import {
   mergeDetails,
   type Version,
 } from './unit-details';
+import { TODOS, Todos } from './todos';
 import { formatUnitFile, parseUnitFile, type UnitFile } from './unit-file';
 
 export const FORMAT = 1;
@@ -321,6 +328,7 @@ export async function openProject(
   await store.findConflicts();
   await store.forkConversationCopies();
   await store.readStatuses();
+  await store.readTodos();
   return store;
 }
 
@@ -485,6 +493,7 @@ async function sweepTempFiles(projectPath: string, fs: FileSystem) {
     IMAGES,
     SESSIONS,
     CONVERSATIONS,
+    TODOS,
   ].map((d) => path.join(projectPath, d));
   for (const dir of [projectPath, ...dirs]) {
     for (const name of await fs.readdir(dir)) {
@@ -1071,6 +1080,8 @@ export class ProjectStore {
   private readonly unitStatuses = new Map<string, string>();
   /** The Outline files as their Status was last read or written, by unit id. */
   private readonly outlineFingerprints = new Map<string, Fingerprint>();
+  /** The Todos in `todos/`, as last read or written. */
+  private readonly todos: Todos;
   /** What versions of `project.json` that met as the Project opened lost, until told. */
   private dropped: Dropped[];
   /**
@@ -1109,6 +1120,7 @@ export class ProjectStore {
     this.files = units.files;
     this.entries = units.entries;
     this.trash = units.trash;
+    this.todos = todosOf(path, deps);
     this.host = hostOf(deps);
     this.sessions = sessions;
     const {
@@ -1258,6 +1270,7 @@ export class ProjectStore {
             manuscript: this.manuscript(),
           });
         }
+        if (await this.todos.read()) this.emitTodos();
       } catch (error) {
         console.error(`Can't check ${this.path} for changes:`, error);
       }
@@ -1880,6 +1893,71 @@ export class ProjectStore {
     if (typeof status === 'string') this.unitStatuses.set(id, status);
     else this.unitStatuses.delete(id);
     return this.unitStatuses.get(id) !== before;
+  }
+
+  /** The Todos: those not done, then the done, each in list order. */
+  listTodos(): Todo[] {
+    return this.todos.list();
+  }
+
+  /**
+   * Reads the Todos as the Project opens, merging their copies, and sweeps
+   * the markers of those deleted longer ago than a delete is kept.
+   */
+  async readTodos(): Promise<void> {
+    await this.todos.read();
+    await this.todos.sweep();
+  }
+
+  /** Adds a Todo on top of the list, as one line; there must be some text. */
+  addTodo(text: string, link: TodoLink | null): Promise<void> {
+    return this.changeTodos(() =>
+      this.todos.add(todoText(text), link && todoLink(link)),
+    );
+  }
+
+  /** Sets a Todo's text, tick or link; null drops its link. */
+  changeTodo(id: string, change: TodoChange): Promise<void> {
+    return this.changeTodos(() =>
+      this.todos.change(id, {
+        ...(change.text !== undefined && { text: todoText(change.text) }),
+        ...(change.done !== undefined && { done: change.done === true }),
+        ...(change.link !== undefined && {
+          link: change.link && todoLink(change.link),
+        }),
+      }),
+    );
+  }
+
+  /** Moves a Todo to `index` among the others that are done as it is, or not. */
+  moveTodo(id: string, index: number): Promise<void> {
+    return this.changeTodos(() => this.todos.move(id, index));
+  }
+
+  /** Deletes a Todo; its file stays a while as a marker (ADR 0008). */
+  deleteTodo(id: string): Promise<void> {
+    return this.changeTodos(() => this.todos.delete(id));
+  }
+
+  /** Deletes every Todo that is done. */
+  clearDoneTodos(): Promise<void> {
+    return this.changeTodos(() => this.todos.clearDone());
+  }
+
+  /**
+   * Changes the Todos, past the format gate, then tells the window. Todos
+   * aren't in the tree, so another computer's tree is no reason to wait.
+   */
+  private changeTodos(change: () => Promise<void>): Promise<void> {
+    return this.enqueueStructure(async () => {
+      await this.passFormatGate();
+      await change();
+      this.emitTodos();
+    });
+  }
+
+  private emitTodos(): void {
+    this.emit({ type: 'todosChanged', todos: this.todos.list() });
   }
 
   tree(): ProjectTree {
@@ -2605,7 +2683,20 @@ export class ProjectStore {
           await this.deps.fs.unlink(file);
         }
       }
+      // A Todo linked to what was in Trash stays, as plain text.
+      const emptied = new Set(
+        [...this.trash.values()].flatMap((item) =>
+          item.kind === 'chapter'
+            ? [item.id, ...item.scenes.map((scene) => scene.id)]
+            : [item.id],
+        ),
+      );
       this.trash.clear();
+      const dropped = await this.todos.dropLinks(
+        ({ id }) =>
+          emptied.has(id) && !this.isLive(id) && !this.entries.has(id),
+      );
+      if (dropped) this.emitTodos();
     });
   }
 
@@ -3996,6 +4087,25 @@ ${text}`);
   private emit(event: ProjectEvent): void {
     for (const listener of this.listeners) listener(structuredClone(event));
   }
+}
+
+function todosOf(projectPath: string, deps: StoreDeps): Todos {
+  return new Todos(path.join(projectPath, TODOS), deps.fs, deps.clock);
+}
+
+/** A Todo's text as one line; there must be some. */
+function todoText(text: string): string {
+  const line = text.replace(/\s+/g, ' ').trim();
+  if (!line) throw new Error('A Todo needs some text');
+  return line;
+}
+
+/** Only a Scene, Chapter or Entry, by its id. */
+function todoLink(link: TodoLink): TodoLink {
+  if (!isTodoLink(link)) {
+    throw new Error('A Todo links only to a Scene, Chapter or Entry');
+  }
+  return { kind: link.kind, id: link.id };
 }
 
 /** `<stem><ext>`, or with `-2`, `-3`… added, whichever isn't taken in `dir`. */
