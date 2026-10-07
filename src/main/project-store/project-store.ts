@@ -82,7 +82,14 @@ import {
   STATUS_COLOURS,
   type Status,
 } from '../../shared/status';
-import { readTags, spelledTags, tagVocabulary } from '../../shared/tags';
+import {
+  readTags,
+  spelledTags,
+  tagKey,
+  tagUses,
+  tagVocabulary,
+  type TagUse,
+} from '../../shared/tags';
 import type {
   Compaction,
   Conversation,
@@ -1849,6 +1856,14 @@ export class ProjectStore {
   }
 
   /**
+   * The Tags in use, as `tags`, each with how many Chapters, Scenes and
+   * Entries have it, those in Trash too.
+   */
+  tagUses(): TagUse[] {
+    return tagUses(this.tagLists());
+  }
+
+  /**
    * The Tags of each Chapter and Scene, but `except`, in the tree's order
    * first, then those Unplaced or in Trash; not those of an Outline whose
    * unit is gone. Then those of each Entry, those in Trash too.
@@ -1907,6 +1922,117 @@ export class ProjectStore {
     });
   }
 
+  /**
+   * Renames `tag` to `to` on every Chapter, Scene and Entry that has it,
+   * those in Trash too. Onto another Tag in use, ignoring case, it takes
+   * that one's spelling, merging the two. There is no undo.
+   */
+  renameTag(tag: string, to: string): Promise<void> {
+    const [spelling] = spelledTags([to], []);
+    if (spelling === undefined || to.includes(',')) {
+      return Promise.reject(new Error(`“${to}” can't be a Tag`));
+    }
+    const key = tagKey(tag);
+    // Known before any unit changes, as the Tags in use do as they do.
+    const renamed =
+      tagKey(spelling) === key
+        ? spelling
+        : (spelledTags([spelling], this.tags())[0] ?? spelling);
+    return this.retag(tag, (tags) =>
+      spelledTags(
+        tags.map((t) => (tagKey(t) === key ? renamed : t)),
+        [],
+      ),
+    );
+  }
+
+  /**
+   * Takes `tag` off every Chapter, Scene and Entry that has it, those in
+   * Trash too. There is no undo.
+   */
+  deleteTag(tag: string): Promise<void> {
+    const key = tagKey(tag);
+    return this.retag(tag, (tags) => tags.filter((t) => tagKey(t) !== key));
+  }
+
+  /**
+   * Changes the Tags of every Chapter, Scene and Entry that has `tag`,
+   * ignoring case, those in Trash too, as `change` does, saving each as
+   * changed now. Units another computer tagged are read first.
+   */
+  private retag(
+    tag: string,
+    change: (tags: string[]) => string[],
+  ): Promise<void> {
+    const key = tagKey(tag);
+    const has = ({ tags }: { tags?: string[] }) =>
+      tags?.some((t) => tagKey(t) === key) ?? false;
+    return this.enqueueWrite(async () => {
+      // Refused at once, not midway.
+      this.refuseIfUpgraded();
+      let changed = await this.readUnitDetails();
+      // Taken first, as each is saved, the units change.
+      const outlines = [...this.unitDetails]
+        .filter(
+          ([id, details]) =>
+            id !== PROJECT_OUTLINE &&
+            this.outlineOrphaned(id) !== 'gone' &&
+            has(details),
+        )
+        .map(([id, { tags }]) => ({ id, tags: change(tags!) }));
+      const entries = [...this.entries.values()].filter(has);
+      const trashed = [...this.trash.values()].filter(
+        (item): item is TrashedEntry => item.kind === 'entry' && has(item),
+      );
+      try {
+        for (const { id, tags } of outlines) {
+          await this.saveDetail(
+            outlineRef(id),
+            TAGS,
+            tags.length > 0 ? tags : undefined,
+          );
+          changed = true;
+        }
+      } finally {
+        // Those retagged show, whether or not the rest could be.
+        if (changed) {
+          this.emit({
+            type: 'unitDetailsChanged',
+            manuscript: this.manuscript(),
+          });
+        }
+      }
+      for (const entry of entries) await this.retagEntry(entry.id, change);
+      for (const item of trashed) await this.retagTrashedEntry(item, change);
+    });
+  }
+
+  /**
+   * Changes the Tags of an Entry in Trash as `change` does, in its Trash
+   * copy as on disk, to be restored with.
+   */
+  private async retagTrashedEntry(
+    item: TrashedEntry,
+    change: (tags: string[]) => string[],
+  ): Promise<void> {
+    const file = entryTrashPath(this.path, item.id);
+    const { frontmatter, body } = parseUnitFile(
+      await this.deps.fs.readFile(file),
+    );
+    const tags = change(readTags(frontmatter[TAGS]));
+    const { [TAGS]: _, ...rest } = frontmatter;
+    await safeWrite(
+      this.deps.fs,
+      this.deps.clock,
+      file,
+      formatUnitFile({
+        frontmatter: tags.length > 0 ? { ...rest, [TAGS]: tags } : rest,
+        body,
+      }),
+    );
+    this.trash.set(item.id, withTags(item, tags));
+  }
+
   /** Whether `id` is an Entry's, one in Trash too. */
   private isEntry(id: string): boolean {
     return this.entries.has(id) || this.trash.get(id)?.kind === 'entry';
@@ -1922,16 +2048,27 @@ export class ProjectStore {
   ): Promise<void> {
     this.refuseUnavailable(entryRef(entryId));
     const spelled = spelledTags(tags, tagVocabulary(this.tagLists(entryId)));
+    await this.retagEntry(entryId, () => spelled);
+  }
+
+  /**
+   * Changes an Entry's Tags as `change` does, from those it has as now
+   * read, so what another computer gave it is kept.
+   */
+  private async retagEntry(
+    entryId: string,
+    change: (tags: string[]) => string[],
+  ): Promise<void> {
+    const before = (await this.read(entryRef(entryId))).tags ?? [];
+    const tags = change(before);
     // Already so: nothing to save, nor to sync.
-    if (isDeepStrictEqual(spelled, this.entries.get(entryId)?.tags ?? [])) {
-      return;
-    }
+    if (isDeepStrictEqual(tags, before)) return;
     // A write takes the Entry's Tags from here.
     this.setEntries(() => {
       const entry = this.entries.get(entryId);
-      if (entry) this.entries.set(entryId, withTags(entry, spelled));
+      if (entry) this.entries.set(entryId, withTags(entry, tags));
     });
-    await this.changeEntry(entryId, (value) => withTags(value, spelled));
+    await this.changeEntry(entryId, (value) => withTags(value, tags));
   }
 
   /** Adds `status` to the end of the Status list. */

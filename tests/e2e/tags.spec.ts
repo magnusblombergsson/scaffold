@@ -1,7 +1,13 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { addAnthropicKey, answerDialogs, launch, useTempDir } from './app';
+import {
+  addAnthropicKey,
+  answerDialogs,
+  chooseMenu,
+  launch,
+  useTempDir,
+} from './app';
 import { useFakeAnthropic } from './fake-anthropic';
 
 const tempDir = useTempDir();
@@ -145,3 +151,76 @@ async function sceneId(projectPath: string): Promise<string> {
   );
   return manifest.tree.chapters[0].scenes[0].id;
 }
+
+test('the Author renames, merges and deletes Tags in Project Settings, on every unit that has them', async () => {
+  const projectPath = path.join(tempDir(), 'My Novel');
+  const app = await launch(tempDir());
+  await answerDialogs(app, projectPath);
+  const page = await app.firstWindow();
+  await page.getByRole('button', { name: 'New Project…' }).click();
+  await expect(page.getByLabel('Prose')).toBeFocused();
+  await openTags(page, 'Scene actions: Scene 1');
+  await page.keyboard.type('Mara, war, flash,');
+  await page.keyboard.press('Escape');
+  await openTags(page, 'Chapter actions: Chapter 1');
+  await page.keyboard.type('war,');
+  await page.keyboard.press('Escape');
+
+  await chooseMenu(app, ['Tools', 'Project Settings…']);
+  const dialog = page.getByRole('dialog', {
+    name: 'Project Settings: My Novel',
+  });
+  const tags = dialog.getByRole('region', { name: 'Tags' });
+  const listed = () =>
+    tags
+      .getByRole('listitem')
+      .evaluateAll((items) =>
+        items.map(
+          (item) =>
+            `${item.querySelector('input')!.value} ${item.querySelector('.tag-uses')!.textContent}`,
+        ),
+      );
+  await expect.poll(listed).toEqual(['flash 1', 'Mara 1', 'war 2']);
+  const outlines = async () => {
+    const dir = path.join(projectPath, 'outlines');
+    const texts = await Promise.all(
+      (await readdir(dir)).map((name) =>
+        readFile(path.join(dir, name), 'utf8'),
+      ),
+    );
+    return texts.join('\n');
+  };
+
+  // A rename rewrites the units; onto a Tag in use, it merges them.
+  await tags.getByLabel('Name of the Tag Mara').fill('Mara Lind');
+  await page.keyboard.press('Enter');
+  await expect.poll(listed).toEqual(['flash 1', 'Mara Lind 1', 'war 2']);
+  await tags.getByLabel('Name of the Tag war').fill('mara lind');
+  await page.keyboard.press('Enter');
+  await expect.poll(listed).toEqual(['flash 1', 'Mara Lind 2']);
+  await expect.poll(outlines).not.toContain('war');
+
+  // A delete asks first, with the count.
+  await tags.getByRole('button', { name: 'Delete the Tag flash' }).click();
+  const deleting = tags.getByRole('group', { name: 'Delete the Tag flash' });
+  await expect(deleting).toContainText('1 Scene, Chapter or Entry has flash');
+  await deleting.getByRole('button', { name: 'Delete' }).click();
+  await expect(deleting).toBeHidden();
+  await expect.poll(listed).toEqual(['Mara Lind 2']);
+  await expect.poll(outlines).not.toContain('flash');
+  await dialog.getByRole('button', { name: 'Close' }).click();
+
+  // Upgraded elsewhere, the section shows, disabled.
+  const manifest = path.join(projectPath, 'project.json');
+  await writeFile(
+    manifest,
+    (await readFile(manifest, 'utf8')).replace('"format": 1', '"format": 2'),
+  );
+  await expect(page.getByRole('alert')).toBeVisible();
+  await chooseMenu(app, ['Tools', 'Project Settings…']);
+  await expect(tags.getByLabel('Name of the Tag Mara Lind')).toBeDisabled();
+  await expect(
+    tags.getByRole('button', { name: 'Delete the Tag Mara Lind' }),
+  ).toBeDisabled();
+  await app.close();
+});

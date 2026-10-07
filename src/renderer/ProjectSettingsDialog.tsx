@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { PROSE_LANGUAGES, type ProseLanguage } from '../shared/project-types';
 import type { Status } from '../shared/status';
 import { StatusSettings } from './StatusSettings';
+import { TagSettings } from './TagSettings';
 
 /**
  * Tools ▸ Project Settings…: the Project settings, saved with the Project.
@@ -104,6 +105,7 @@ export function ProjectSettingsDialog({
         </label>
       </section>
       <StatusSettings statuses={statuses} readOnly={readOnly} />
+      <TagSettings readOnly={readOnly} />
       <div className="settings-close">
         <button onClick={() => dialogRef.current?.close()}>Close</button>
       </div>
