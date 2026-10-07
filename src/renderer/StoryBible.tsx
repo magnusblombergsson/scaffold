@@ -1,5 +1,6 @@
 import { useContext, useState } from 'react';
 import type { Changed } from '../shared/api';
+import { filterOn, matchesFilter } from '../shared/filter';
 import {
   ENTRY_TYPE_LABELS,
   ENTRY_TYPES,
@@ -9,6 +10,7 @@ import {
 import { SHORTCUTS, withShortcut } from '../shared/shortcuts';
 import { addTodoItem, ConflictMarker, Menu } from './Binder';
 import { EntryThumbnail } from './EntryImage';
+import { FilterControl, useFilter } from './Filter';
 import { ImagePromptDialog } from './ImagePromptDialog';
 import { TagChips } from './TagsDialog';
 import type { Row } from './binder-keys';
@@ -32,8 +34,9 @@ export function entryTitle(entry: { name: string }): string {
 }
 
 /**
- * The Story Bible tab: the Entries, grouped by type, and whether their names
- * are highlighted where the Prose, Outlines and Notes mention them.
+ * The Story Bible tab: the Entries, grouped by type, narrowed by a Filter,
+ * and whether their names are highlighted where the Prose, Outlines and
+ * Notes mention them.
  */
 export function StoryBible({
   entries,
@@ -68,9 +71,11 @@ export function StoryBible({
   onAddTodo(entryId: string): void;
 }) {
   const readOnly = useContext(ReadOnlyContext);
+  const { filter, setFilter, inUse } = useFilter('writing-bible');
+  const shown = entries.filter((e) => matchesFilter(filter, e));
   // The Entries in the order they show, grouped by type.
   const rows = ENTRY_TYPES.flatMap((type) =>
-    entries
+    shown
       .filter((e) => e.type === type)
       .map((e): Row => ({ kind: 'entry', id: e.id })),
   );
@@ -112,11 +117,25 @@ export function StoryBible({
         />
         Highlight Entry names
       </label>
-      {entries.length === 0 && (
+      {entries.length > 0 && (
+        <FilterControl
+          filter={filter}
+          onChange={setFilter}
+          inUse={inUse}
+          shown={shown.length}
+          total={entries.length}
+        />
+      )}
+      {entries.length === 0 ? (
         <p className="story-bible-empty">No Entries yet</p>
+      ) : (
+        shown.length === 0 &&
+        filterOn(filter) && (
+          <p className="story-bible-empty">No Entries match the Filter</p>
+        )
       )}
       {ENTRY_TYPES.map((type) => {
-        const group = entries.filter((e) => e.type === type);
+        const group = shown.filter((e) => e.type === type);
         if (group.length === 0) return null;
         return (
           <section

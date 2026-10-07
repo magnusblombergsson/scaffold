@@ -29,6 +29,7 @@ import {
 } from '../shared/api';
 import type { Handlers } from '../shared/bridge';
 import { TICK_ALL, type ExportUnticked } from '../shared/export-choice';
+import type { Filter } from '../shared/filter';
 import { splitManuscript } from '../shared/manuscript-import';
 import { isProviderId, type Model } from '../shared/models';
 import type { ProseLanguage } from '../shared/project-types';
@@ -553,6 +554,14 @@ const shellHandlers: Handlers<ShellApi, typeof shellMethods, WindowContext> = {
       });
     }
   },
+  filter: ({ sender }, place) => {
+    const store = stores.get(sender.id);
+    return store ? settings.filter(store.id, place) : {};
+  },
+  setFilter: ({ sender }, place, filter) => {
+    const store = stores.get(sender.id);
+    if (store) settings.setFilter(store.id, place, filter);
+  },
   highlightMentions: () => settings.highlightMentions(),
   setHighlightMentions: (_ctx, on) => {
     settings.setHighlightMentions(on);
@@ -563,6 +572,21 @@ const shellHandlers: Handlers<ShellApi, typeof shellMethods, WindowContext> = {
   viewSettings: () => settings.viewSettings(),
   setViewSettings: (_ctx, change) => setViewSettings(change),
 };
+
+/**
+ * Changes the Filters of the Project in `sender` as `change` does, as when
+ * a Tag is renamed or deleted, and tells the window.
+ */
+export function changeFilters(
+  sender: WebContents,
+  projectId: string,
+  change: (filter: Filter) => Filter,
+): void {
+  const changed = settings.changeFilters(projectId, change);
+  if (Object.keys(changed).length > 0) {
+    emit(sender, 'shell', 'onFilter', changed);
+  }
+}
 
 /**
  * Changes how every window looks: the theme through Chromium, which every
