@@ -663,6 +663,24 @@ describe('a Proposal to replace an Outline', () => {
     await store.close();
   });
 
+  it('accepted or undone, keeps its unit’s Tags, which no Proposal targets', async () => {
+    const { store, sceneId, conversationId } = await withReply();
+    await store.setTags(sceneId, ['Mara']);
+    await store.appendProposal(conversationId, outline(sceneId));
+
+    await store.acceptProposal(conversationId, 'p1');
+    await store.undoProposal(conversationId, 'p1');
+
+    const scene = store.manuscript().chapters[0].scenes[0];
+    expect(scene.tags).toEqual(['Mara']);
+    const file = await readFile(
+      path.join(projectPath, 'outlines', `${sceneId}.md`),
+      'utf8',
+    );
+    expect(file).toContain('- Mara');
+    await store.close();
+  });
+
   it('shows one whose Scene is in Trash as orphaned, which can only be rejected', async () => {
     const { store, chapterId, sceneId, conversationId } = await withReply();
     await store.createScene(chapterId, 1);

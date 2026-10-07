@@ -58,6 +58,8 @@ type Props = {
   statuses: Status[];
   /** Gives a Chapter or Scene a Status, or none with null. */
   onSetStatus(unitId: string, statusId: string | null): void;
+  /** Opens Tags… on a Chapter or Scene. */
+  onEditTags(unitId: string): void;
 };
 
 const SCENE = 'application/x-scaffold-scene';
@@ -75,6 +77,7 @@ export function Binder({
   onUndo,
   statuses,
   onSetStatus,
+  onEditTags,
 }: Props) {
   const project = window.project;
   const readOnly = useContext(ReadOnlyContext);
@@ -226,6 +229,14 @@ export function Binder({
     };
   }
 
+  function tagsItem(node: { id: string }): MenuItem {
+    return {
+      label: 'Tags…',
+      disabled: readOnly,
+      run: () => onEditTags(node.id),
+    };
+  }
+
   function sceneMenu(
     scene: ManuscriptScene,
     chapter: ManuscriptChapter | null,
@@ -241,7 +252,9 @@ export function Binder({
       disabled: scene.missing,
       run: () => trash(scene, 'scene'),
     };
-    if (!chapter) return [statusItem(scene), ...moves, toTrash];
+    if (!chapter) {
+      return [statusItem(scene), tagsItem(scene), ...moves, toTrash];
+    }
     const index = chapter.scenes.indexOf(scene);
     return [
       {
@@ -272,6 +285,7 @@ export function Binder({
       ...moveItems({ kind: 'scene', id: scene.id, chapterId: chapter.id }),
       ...moves,
       statusItem(scene),
+      tagsItem(scene),
       toTrash,
     ];
   }
@@ -315,6 +329,7 @@ export function Binder({
       },
       ...moveItems({ kind: 'chapter', id: chapter.id }),
       statusItem(chapter),
+      tagsItem(chapter),
       {
         label: 'Move to Trash',
         // The Manuscript keeps at least one Chapter, and a Missing Scene has

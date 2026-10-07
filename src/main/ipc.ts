@@ -96,6 +96,8 @@ const projectHandlers: Handlers<
       `The Statuses of ${store.displayName}`,
       () => store.deleteStatus(statusId, moveTo),
     ),
+  tags: async ({ store }) => store.tags(),
+  setTags: ({ store }, unitId, tags) => store.setTags(unitId, tags),
   listTodos: async ({ store }) => store.listTodos(),
   addTodo: ({ store }, text, link) => store.addTodo(text, link),
   changeTodo: ({ store }, id, change) => store.changeTodo(id, change),
