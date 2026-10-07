@@ -111,6 +111,10 @@ _Avoid_: Goal, quota, target (that is what a Proposal changes)
 A narrowing of one list or view to the units matching chosen Statuses, Tags or Entry types; it changes only what the Author sees, never what the Assistant sees.
 _Avoid_: Search
 
+**Unit details**:
+What the Author sets on a Scene, Chapter, Entry or the Manuscript with a click rather than by writing: its Status, Tags, Word target and image. When computers disagree on them, they merge one by one on their own, the later change of each winning; they never make a Conflict.
+_Avoid_: Metadata, properties, attributes, header keys
+
 **Todo**:
 One line on the Project's list of things the Author still means to do, ticked off when done, optionally linked to one Scene, Chapter or Entry. The Author's own bookkeeping: the Assistant never sees or proposes Todos, though the Author may turn a Finding into one. Never exported.
 _Avoid_: Task, checklist item, reminder
@@ -128,7 +132,7 @@ Making a new Project from a Word or Markdown manuscript, the mirror of an Export
 _Avoid_: Open (when meaning a manuscript file), convert
 
 **Conflict**:
-Two or more versions of one Scene, Outline, Notes or Entry, saved on different computers or at the same moment, kept side by side until the Author chooses one or merges them; the others go to Trash. Only text makes a Conflict (Prose, an Outline's or Notes' text, an Entry's fields): Status, Tags, Word targets, images and Todos merge on their own. A diverged Conversation is not a Conflict: it becomes a second Conversation.
+Two or more versions of one Scene, Outline, Notes or Entry, saved on different computers or at the same moment, kept side by side until the Author chooses one or merges them; the others go to Trash. Only text makes a Conflict (Prose, an Outline's or Notes' text, an Entry's fields): Unit details and Todos merge on their own. A diverged Conversation is not a Conflict: it becomes a second Conversation.
 _Avoid_: Conflicted copy, sync error, merge conflict
 
 **Project setting**:
