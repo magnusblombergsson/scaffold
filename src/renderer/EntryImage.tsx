@@ -1,7 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import type { EntrySummary } from '../shared/project-types';
 import { ImagePromptDialog } from './ImagePromptDialog';
-import { ViewableImage } from './ImageView';
+import { useImageUrl, ViewableImage } from './ImageView';
 import { entryTitle } from './StoryBible';
 
 /**
@@ -9,25 +9,11 @@ import { entryTitle } from './StoryBible';
  * when the Entry's image changes, even under the same file name.
  */
 export function useEntryImage({ id, image }: EntrySummary): string | null {
-  const [url, setUrl] = useState<string | null>(null);
-  useEffect(() => {
-    setUrl(null);
-    if (!image) return;
-    let current = true;
-    const load = () =>
-      void window.project.entryImage(id).then((loaded) => {
-        if (current) setUrl(loaded);
-      });
-    load();
-    const unsubscribe = window.project.subscribe((event) => {
-      if (event.type === 'entryImageChanged' && event.id === id) load();
-    });
-    return () => {
-      current = false;
-      unsubscribe();
-    };
-  }, [id, image]);
-  return image ? url : null;
+  return useImageUrl(
+    image,
+    () => window.project.entryImage(id),
+    (event) => event.type === 'entryImageChanged' && event.id === id,
+  );
 }
 
 /**
