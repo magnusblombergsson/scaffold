@@ -1,7 +1,13 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { addAnthropicKey, answerDialogs, launch, useTempDir } from './app';
+import {
+  addAnthropicKey,
+  answerDialogs,
+  chooseMenu,
+  launch,
+  useTempDir,
+} from './app';
 import { useFakeAnthropic } from './fake-anthropic';
 
 const tempDir = useTempDir();
@@ -137,6 +143,71 @@ test('the Author is interviewed about a focus they pick and change, and sees the
     0,
   );
   await expect(assistant).toContainText('from the Interview room');
+  await app.close();
+});
+
+test('with a Tag in focus, the Author sees and the Assistant gets the Entries and Outlines with it, but no Prose', async () => {
+  const projectPath = path.join(tempDir(), 'My Novel');
+  const app = await launch(tempDir(), { anthropicUrl: anthropic.url });
+  await answerDialogs(app, projectPath);
+  const page = await app.firstWindow();
+  await page.getByRole('button', { name: 'New Project…' }).click();
+  await page.getByLabel('Prose').pressSequentially('Anna packed in the rain.');
+  await page.getByLabel('Outline', { exact: true }).click();
+  await page.keyboard.type('- She leaves at dawn');
+  await page.getByRole('button', { name: 'Scene actions: Scene 1' }).click();
+  await page.getByRole('menuitem', { name: 'Tags…' }).click();
+  await page.keyboard.type('Mara,');
+  await page.keyboard.press('Escape');
+  await addAnthropicKey(page);
+  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await page.getByRole('button', { name: 'New Entry' }).click();
+  await page.getByRole('menuitem', { name: 'Character', exact: true }).click();
+  await fill(page, 'Name', 'Anna');
+  await fill(page, 'Description', 'Leaves the island.');
+  const header = page.locator('.entry-header');
+  await header.getByLabel('Add a Tag').click();
+  await page.keyboard.type('mara');
+  await page.keyboard.press('Enter');
+  await page.keyboard.press('ControlOrMeta+s');
+  await expect(page.locator('.save-status.confirmed')).toBeVisible();
+
+  await switchTo(page, 'Interview');
+  const room = page.getByRole('main', { name: 'Interview' });
+  const inFocus = page.getByRole('complementary', { name: 'In focus' });
+  const focus = room.getByRole('combobox', { name: 'Focus' });
+  await focus.selectOption({ label: 'Tag: Mara' });
+  await expect(inFocus.locator('.entry-card')).toContainText('Anna');
+  await expect(
+    inFocus.getByRole('region', { name: 'Scene “Scene 1”' }),
+  ).toContainText('- She leaves at dawn');
+  await expect(inFocus).not.toContainText('Anna packed in the rain.');
+
+  anthropic.calls.push({ reply: ['What does Mara want?'] });
+  await room.getByRole('button', { name: 'Ask me' }).click();
+  await expect(room.getByRole('article', { name: 'Assistant' })).toHaveCount(1);
+  const sent = JSON.stringify(anthropic.sent[0].system);
+  expect(sent).toContain('tagged “Mara”');
+  expect(sent).toContain('Leaves the island.');
+  expect(sent).toContain('Outline of Scene “Scene 1”');
+  expect(sent).not.toContain('Anna packed in the rain.');
+  await expect(room.getByRole('note')).toHaveText('Focus: Tag: Mara');
+
+  // Renamed away, the Tag stays the focus, shown as one nothing has now.
+  await chooseMenu(app, ['Tools', 'Project Settings…']);
+  const dialog = page.getByRole('dialog', {
+    name: 'Project Settings: My Novel',
+  });
+  await dialog
+    .getByRole('region', { name: 'Tags' })
+    .getByLabel('Name of the Tag Mara')
+    .fill('Mara Lind');
+  await page.keyboard.press('Enter');
+  await dialog.getByRole('button', { name: 'Close' }).click();
+  await expect(focus.locator('option:checked')).toHaveText(
+    'Tag: Mara (nothing has it now)',
+  );
+  await expect(focus.locator('option')).toContainText(['Tag: Mara Lind']);
   await app.close();
 });
 

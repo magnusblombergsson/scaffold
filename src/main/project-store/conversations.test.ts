@@ -297,6 +297,18 @@ ${JSON.stringify({ type: 'message', role: 'assistant', text: 'Odd.', focus: [], 
     ]);
   });
 
+  it('keeps a Tag focus as the Tag was spelled', async () => {
+    const { store } = await newProject();
+    const { id } = await store.startConversation('interview', 'Mara');
+
+    await store.setInterviewFocus(id, { kind: 'tag', tag: 'the War' });
+
+    expect((await store.readConversation(id)).focus).toEqual({
+      kind: 'tag',
+      tag: 'the War',
+    });
+  });
+
   it('sets a focus only in an Interview, and skips a focus it can’t read', async () => {
     const { projectPath, store } = await newProject();
     const writing = await store.startConversation('writing', 'Why Anna?');

@@ -1,5 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { readTags, spelledTags, tagVocabulary, typedTags } from './tags';
+import {
+  hasTag,
+  readTags,
+  spelledTags,
+  tagged,
+  tagSpelling,
+  tagVocabulary,
+  typedTags,
+} from './tags';
 
 describe('readTags', () => {
   it('reads a list of Tags, trimmed, the first spelling of each kept', () => {
@@ -59,5 +67,48 @@ describe('typedTags', () => {
 
   it('ends none without a comma', () => {
     expect(typedTags('Mar')).toEqual({ tags: [], rest: 'Mar' });
+  });
+});
+
+describe('hasTag', () => {
+  it('matches a Tag ignoring case, and none on no Tags', () => {
+    expect(hasTag(['Mara', 'war'], 'MARA')).toBe(true);
+    expect(hasTag(['Mara'], 'war')).toBe(false);
+    expect(hasTag(undefined, 'Mara')).toBe(false);
+  });
+});
+
+describe('tagSpelling', () => {
+  it('spells a Tag as the first of `lists` to have it, or not at all', () => {
+    expect(tagSpelling('mara', [['war'], ['Mara'], ['MARA']])).toBe('Mara');
+    expect(tagSpelling('gone', [['war']])).toBeUndefined();
+  });
+});
+
+describe('tagged', () => {
+  it('lists the Chapters and Scenes with a Tag, by name, in Manuscript order, Unplaced last', () => {
+    const units = tagged(
+      {
+        chapters: [
+          {
+            id: 'c1',
+            title: 'Arrival',
+            tags: ['mara'],
+            scenes: [
+              { id: 's1', title: 'Harbour', tags: ['Mara'] },
+              { id: 's2', title: 'Letter' },
+            ],
+          },
+        ],
+        unplaced: [{ id: 's3', title: 'Loose', tags: ['MARA', 'war'] }],
+      },
+      'Mara',
+    );
+
+    expect(units.map(({ unit, name }) => [unit.id, name])).toEqual([
+      ['c1', 'Chapter “Arrival”'],
+      ['s1', 'Scene “Harbour”'],
+      ['s3', 'Scene “Loose”'],
+    ]);
   });
 });

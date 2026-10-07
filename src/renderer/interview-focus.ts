@@ -9,10 +9,11 @@ import {
   type EntrySummary,
   type EntryType,
 } from '../shared/project-types';
+import { tagSpelling, tagVocabulary } from '../shared/tags';
 import type { Names } from './Conversation';
 
 // An Interview's focus as the Author picks it and reads it: one Entry, one
-// Entry type, a Chapter or Scene, or open.
+// Entry type, a Chapter or Scene, a Tag, or open.
 
 function typeLabel(type: EntryType): string {
   return type === 'other'
@@ -24,11 +25,29 @@ function entryName(entry: EntrySummary): string {
   return entry.name.trim() || 'Untitled';
 }
 
+/**
+ * The Tags on the Project's Chapters, Scenes and Entries, each once in its
+ * first spelling, sorted.
+ */
+export function tagsInUse({ manuscript, entries }: Names): string[] {
+  return tagVocabulary([
+    ...manuscript.chapters.flatMap((c) => [
+      c.tags ?? [],
+      ...c.scenes.map((s) => s.tags ?? []),
+    ]),
+    ...manuscript.unplaced.map((s) => s.tags ?? []),
+    ...entries.map((e) => e.tags ?? []),
+  ]);
+}
+
+/** `tag` as the Project spells it now, ignoring case; undefined if nothing has it. */
+function spelling(tag: string, names: Names): string | undefined {
+  return tagSpelling(tag, [tagsInUse(names)]);
+}
+
 /** A focus as the Project names it now; one no longer there by its kind. */
-export function focusLabel(
-  focus: InterviewFocus,
-  { manuscript, entries }: Names,
-): string {
+export function focusLabel(focus: InterviewFocus, names: Names): string {
+  const { manuscript, entries } = names;
   switch (focus.kind) {
     case 'open':
       return 'Open';
@@ -51,16 +70,25 @@ export function focusLabel(
       ].find((s) => s.id === focus.id);
       return scene ? `Scene “${scene.title}”` : 'A Scene no longer there';
     }
+    case 'tag': {
+      const tag = spelling(focus.tag, names);
+      return tag ? `Tag: ${tag}` : `Tag: ${focus.tag} (nothing has it now)`;
+    }
   }
 }
 
-/** A focus as the value of an option in the picker. */
-export function valueOf(focus: InterviewFocus): string {
+/**
+ * A focus as the value of an option in the picker; a Tag by its spelling in
+ * `names`, if given and something has it.
+ */
+export function valueOf(focus: InterviewFocus, names?: Names): string {
   switch (focus.kind) {
     case 'open':
       return 'open';
     case 'entry-type':
       return `entry-type:${focus.type}`;
+    case 'tag':
+      return `tag:${(names && spelling(focus.tag, names)) ?? focus.tag}`;
     default:
       return `${focus.kind}:${focus.id}`;
   }
@@ -73,7 +101,11 @@ export function focusOfValue(value: string): InterviewFocus {
   const kind = split < 0 ? value : value.slice(0, split);
   const rest = value.slice(split + 1);
   const focus =
-    kind === 'entry-type' ? { kind, type: rest } : { kind, id: rest };
+    kind === 'entry-type'
+      ? { kind, type: rest }
+      : kind === 'tag'
+        ? { kind, tag: rest }
+        : { kind, id: rest };
   return isInterviewFocus(focus) ? focus : OPEN_FOCUS;
 }
 
@@ -81,7 +113,8 @@ export type FocusOption = { value: string; label: string };
 
 /**
  * What the picker offers, in groups: open; each Entry type; each Entry; each
- * Chapter with its Scenes indented, then the Unplaced Scenes.
+ * Tag in use; each Chapter with its Scenes indented, then the Unplaced
+ * Scenes.
  */
 export function focusOptions(names: Names): {
   label: string;
@@ -101,6 +134,10 @@ export function focusOptions(names: Names): {
     {
       label: 'Entries',
       options: entries.map((e) => option({ kind: 'entry', id: e.id })),
+    },
+    {
+      label: 'Tags',
+      options: tagsInUse(names).map((tag) => option({ kind: 'tag', tag })),
     },
     {
       label: 'Manuscript',

@@ -541,6 +541,80 @@ describe('Interview focus', () => {
   });
 });
 
+describe('Interview Tag focus', () => {
+  const ask = (
+    view: Awaited<ReturnType<typeof fixture>>['view'],
+    tag: string,
+  ) =>
+    buildContext(view, {
+      mode: 'interview',
+      focus: { kind: 'tag', tag },
+      messages: [message('author', 'Go on.')],
+    });
+
+  it('sends the Entries with the Tag, matched ignoring case, but never one seen never', async () => {
+    const { store, view, entries } = await fixture();
+    await store.setTags(entries.anna, ['Mara']);
+    await store.setTags(entries.kista, ['mara', 'sea']);
+    await store.setTags(entries.pact, ['Mara']);
+    await store.setTags(entries.master, ['sea']);
+
+    const context = await ask(view, 'MARA');
+
+    expect(context.saw.entries).toEqual(
+      expect.arrayContaining([entries.anna, entries.kista]),
+    );
+    expect(context.saw.entries).not.toContain(entries.master);
+    expect(context.saw.entries).not.toContain(entries.pact);
+    expect(sent(context)).not.toContain('The Pact');
+  });
+
+  it('adds the Outlines of the Chapters and Scenes with the Tag, and never their Prose', async () => {
+    const { store, view, chapters, scenes } = await fixture();
+    await store.setTags(chapters.storm, ['Mara']);
+    await store.setTags(scenes.harbour, ['mara']);
+
+    const context = await ask(view, 'Mara');
+
+    expect(context.saw.units).toEqual([
+      { kind: 'outline', id: scenes.harbour },
+      { kind: 'outline', id: chapters.storm },
+    ]);
+    const text = sent(context);
+    expect(text).toContain('## Outline of Chapter “Storm”\n- The storm breaks');
+    expect(text).toContain('## Outline of Scene “Harbour”\n- She waits');
+    expect(text).not.toContain('Annie waited on the quay.');
+    expect(text).not.toContain('Nothing was left of the boat.');
+    expect(text).not.toContain('Cold morning.');
+  });
+
+  it('tells the Assistant the Tag, and to ask about what is missing among what has it', async () => {
+    const { store, view, entries } = await fixture();
+    await store.setTags(entries.anna, ['Mara']);
+
+    const context = await ask(view, 'mara');
+
+    const text = context.system.find((b) =>
+      b.text.startsWith('The Interview’s focus'),
+    )?.text;
+    expect(text).toContain('tagged “Mara”');
+    expect(text).toMatch(/missing/);
+  });
+
+  it('names a Tag nothing has any more as gone, nor an Entry seen never', async () => {
+    const { store, view, entries } = await fixture();
+    await store.setTags(entries.pact, ['Mara']);
+
+    const context = await ask(view, 'Mara');
+
+    const text = context.system.find((b) =>
+      b.text.startsWith('The Interview’s focus'),
+    )?.text;
+    expect(text).toMatch(/no longer/);
+    expect(context.saw.units).toEqual([]);
+  });
+});
+
 describe('order and caching', () => {
   it('sends prompt, Story Bible, skeleton and Prose in focus, then the earlier messages and the new one, with breakpoints after the skeleton and the earlier messages', async () => {
     const { view, scenes } = await fixture();
@@ -831,6 +905,7 @@ function everyRequest({
     { kind: 'entry-type', type: 'character' },
     { kind: 'chapter', id: chapters.arrival },
     { kind: 'scene', id: scenes.wreck },
+    { kind: 'tag', tag: 'Mara' },
   ];
   const commands: Command[] = ['question', 'review-scene', 'review-chapter'];
   return [

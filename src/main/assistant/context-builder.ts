@@ -11,6 +11,7 @@ import { findingBlock, type ReviewCommand } from '../../shared/finding';
 import { roleText } from '../../shared/entry';
 import { mentionMatcher } from '../../shared/mentions';
 import { statusOf } from '../../shared/status';
+import { hasTag, tagged, tagSpelling } from '../../shared/tags';
 import { proposalBlock, type ProposalView } from '../../shared/proposal';
 import {
   ENTRY_TYPE_LABELS,
@@ -167,8 +168,8 @@ function summaryBlock(text: string, covered: ConversationMessage[]): string {
 /**
  * The Entries the Assistant may see, as one block: those seen always, those
  * seen when mentioned whose name or an alias is in `texts`, and those an
- * Interview is about. A mention in another Entry doesn't count, and an Entry
- * seen never is never sent.
+ * Interview is about, by Entry, type or Tag. A mention in another Entry
+ * doesn't count, and an Entry seen never is never sent.
  */
 async function storyBible(
   view: AssistantView,
@@ -181,7 +182,8 @@ async function storyBible(
   ).mentioned(texts);
   const inFocus = (e: EntrySummary) =>
     (interview?.kind === 'entry' && interview.id === e.id) ||
-    (interview?.kind === 'entry-type' && interview.type === e.type);
+    (interview?.kind === 'entry-type' && interview.type === e.type) ||
+    (interview?.kind === 'tag' && hasTag(e.tags, interview.tag));
   const seen = summaries.filter(
     (e) =>
       e.visibility === 'always' ||
@@ -369,6 +371,12 @@ async function inFocus(
     const { focus } = request;
     if (focus.kind === 'scene') await scene(focus.id, false);
     if (focus.kind === 'chapter') await chapter(focus.id, false);
+    // A Tag adds the Outlines of what has it, never its Prose.
+    if (focus.kind === 'tag') {
+      for (const { unit, name } of tagged(manuscript, focus.tag)) {
+        await add({ kind: 'outline', id: unit.id }, `Outline of ${name}`);
+      }
+    }
   } else if (request.mode === 'writing') {
     const { command, sceneId } = request;
     if (command === 'review-chapter') {
@@ -424,6 +432,20 @@ function interviewFocusText(
     }
     case 'entry-type':
       return `${heading} every ${ENTRY_TYPE_LABELS[focus.type]} in the Story Bible, and any the story names that has no Entry yet. Ask about what they lack.`;
+    case 'tag': {
+      // An Entry the Assistant never sees doesn't count as having it.
+      const spelling = tagSpelling(focus.tag, [
+        ...tagged(manuscript, focus.tag).map(({ unit }) => unit.tags ?? []),
+        ...view
+          .listEntries()
+          .filter((e) => e.visibility !== 'never')
+          .map((e) => e.tags ?? []),
+      ]);
+      if (!spelling) {
+        return `${heading} the Tag “${focus.tag}”, which is no longer on anything in the Project. Tell the Author, and suggest a new focus.`;
+      }
+      return `${heading} the Entries, Chapters and Scenes tagged “${spelling}”. Ask about what is missing among them.`;
+    }
     case 'chapter': {
       const chapter = where.chapters.get(focus.id);
       if (!chapter) return `${heading} a Chapter ${gone}`;
@@ -438,8 +460,11 @@ function interviewFocusText(
 }
 
 function focusBlock(units: UnitInFocus[]): string {
+  const prose = units.some(({ unit }) => unit.kind === 'scene');
   return [
-    'In focus: the Author’s own Prose, with the Outlines and Notes that go with it. Quote it; never rewrite it.',
+    prose
+      ? 'In focus: the Author’s own Prose, with the Outlines and Notes that go with it. Quote it; never rewrite it.'
+      : 'In focus: the Author’s own Outlines. Quote them; never rewrite them.',
     ...units.map(
       ({ heading, text }) => `## ${heading}\n${text.trim() || '(Empty.)'}`,
     ),
