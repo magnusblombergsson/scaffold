@@ -5,7 +5,7 @@ import {
   DEFAULT_VIEW_SETTINGS,
   type ViewSettings,
 } from '../shared/view-settings';
-import { menuTemplate, type MenuState } from './menu';
+import { menuTemplate, proseMenuTemplate, type MenuState } from './menu';
 
 const noProject: MenuState = {
   mac: false,
@@ -17,12 +17,23 @@ const noProject: MenuState = {
 const docked = { left: true, assistant: true };
 const writable: MenuState = {
   ...noProject,
-  project: { readOnly: false, docked, zen: false, proseFocused: false },
+  project: {
+    readOnly: false,
+    docked,
+    zen: false,
+    proseFocused: false,
+    splittable: false,
+  },
 };
 /** A writable Project, typing in its Prose. */
 const inProse: MenuState = {
   ...writable,
   project: { ...writable.project!, proseFocused: true },
+};
+/** As `inProse`, the Prose of a Scene that can be split. */
+const inSplittable: MenuState = {
+  ...inProse,
+  project: { ...inProse.project!, splittable: true },
 };
 
 function build(state: MenuState) {
@@ -123,6 +134,7 @@ describe('menuTemplate', () => {
         docked: { left: false, assistant: true },
         zen: false,
         proseFocused: false,
+        splittable: false,
       },
     });
     const view = menu(template, 'View');
@@ -155,7 +167,13 @@ describe('menuTemplate', () => {
   it('enters and leaves zen mode from View, a check item before the panes, with its key taken by the window', () => {
     const { template, sent } = build({
       ...writable,
-      project: { readOnly: true, docked, zen: true, proseFocused: false },
+      project: {
+        readOnly: true,
+        docked,
+        zen: true,
+        proseFocused: false,
+        splittable: false,
+      },
     });
     const view = menu(template, 'View');
     const zen = item(view, 'Zen Mode');
@@ -281,6 +299,8 @@ describe('menuTemplate', () => {
     expect(labels(insert)).toEqual([
       'New Scene',
       'New Scene Above',
+      'Split Scene',
+      'Split to Next Chapter',
       'New Chapter',
       'New Chapter Above',
       'New Entry',
@@ -309,6 +329,45 @@ describe('menuTemplate', () => {
       { type: 'newEntry', entryType: 'place' },
       { type: 'newTodo', byKey: true },
     ]);
+  });
+
+  it('splits the Scene from Insert, with keys the window takes', () => {
+    const { template, sent } = build(inSplittable);
+    const insert = menu(template, 'Insert');
+    const split = item(insert, 'Split Scene');
+    const toNext = item(insert, 'Split to Next Chapter');
+    expect(split).toMatchObject({
+      accelerator: 'CmdOrCtrl+K',
+      registerAccelerator: false,
+      enabled: true,
+    });
+    expect(toNext).toMatchObject({
+      accelerator: 'CmdOrCtrl+Shift+K',
+      registerAccelerator: false,
+      enabled: true,
+    });
+    click(split);
+    click(toNext, true);
+    expect(sent).toEqual([
+      { type: 'splitScene', toNextChapter: false },
+      { type: 'splitScene', toNextChapter: true, byKey: true },
+    ]);
+  });
+
+  it('splits nothing unless the Prose of a Scene that can be split has focus', () => {
+    for (const state of [
+      noProject,
+      writable,
+      inProse,
+      {
+        ...inSplittable,
+        project: { ...inSplittable.project!, readOnly: true },
+      },
+    ]) {
+      const insert = menu(build(state).template, 'Insert');
+      expect(item(insert, 'Split Scene').enabled).toBe(false);
+      expect(item(insert, 'Split to Next Chapter').enabled).toBe(false);
+    }
   });
 
   it('leaves the create chords to the window, so they work in an editor', () => {
@@ -427,7 +486,13 @@ describe('menuTemplate', () => {
   it('keeps Project Settings open to a read-only Project, to see its values', () => {
     const { template } = build({
       ...writable,
-      project: { readOnly: true, docked, zen: false, proseFocused: false },
+      project: {
+        readOnly: true,
+        docked,
+        zen: false,
+        proseFocused: false,
+        splittable: false,
+      },
     });
     expect(item(menu(template, 'Tools'), 'Project Settings…').enabled).toBe(
       true,
@@ -442,5 +507,29 @@ describe('menuTemplate', () => {
     expect(shortcuts.enabled).not.toBe(false);
     click(shortcuts, true);
     expect(sent).toEqual([{ type: 'shortcuts', byKey: true }]);
+  });
+});
+
+describe('proseMenuTemplate', () => {
+  it('splits the Scene, or to the next Chapter, showing the keys', () => {
+    const sent: Command[] = [];
+    const items = proseMenuTemplate(true, (command) => sent.push(command));
+    expect(labels(items)).toEqual(['Split Scene', 'Split to Next Chapter']);
+    expect(items.map((entry) => entry.accelerator)).toEqual([
+      'CmdOrCtrl+K',
+      'CmdOrCtrl+Shift+K',
+    ]);
+    for (const entry of items) expect(entry.enabled).toBe(true);
+    click(item(items, 'Split Scene'));
+    click(item(items, 'Split to Next Chapter'));
+    expect(sent).toEqual([
+      { type: 'splitScene', toNextChapter: false },
+      { type: 'splitScene', toNextChapter: true },
+    ]);
+  });
+
+  it('can split nothing in a Scene that can not be split', () => {
+    const items = proseMenuTemplate(false, () => {});
+    for (const entry of items) expect(entry.enabled).toBe(false);
   });
 });

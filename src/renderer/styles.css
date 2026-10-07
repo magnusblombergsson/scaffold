@@ -903,6 +903,13 @@ span.overview-title {
   font-variant-numeric: tabular-nums;
 }
 
+/* Between the save state and the counts, as that there is nothing to split. */
+.status-notice {
+  flex: 1;
+  text-align: center;
+  color: var(--fg);
+}
+
 .counts {
   cursor: default;
 }

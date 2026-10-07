@@ -44,6 +44,11 @@ export type Command = (
   | { type: 'newChapter'; above: boolean }
   /** An Entry of `entryType`, or without one, the menu of types to pick from. */
   | { type: 'newEntry'; entryType?: EntryType }
+  /**
+   * Splits the Scene whose Prose has focus at the cursor: the text after it
+   * becomes a new Scene right after, or first in the next Chapter.
+   */
+  | { type: 'splitScene'; toNextChapter: boolean }
   /** Focuses the Todos tab's New Todo field, docking the left pane if collapsed. */
   | { type: 'newTodo' }
   /** Collapses the pane, or docks it back at the tab it last showed. */
@@ -75,6 +80,8 @@ export const SHORTCUTS = {
   newChapterAbove: 'CmdOrCtrl+Shift+Alt+Enter',
   newEntry: 'CmdOrCtrl+E',
   newTodo: 'CmdOrCtrl+T',
+  splitScene: 'CmdOrCtrl+K',
+  splitToNextChapter: 'CmdOrCtrl+Shift+K',
   shortcuts: 'CmdOrCtrl+/',
   zen: 'CmdOrCtrl+Shift+F',
   leftPane: 'CmdOrCtrl+Shift+M',
@@ -100,6 +107,7 @@ const SHIFT_LETTERS: Record<string, Command> = {
   m: { type: 'togglePane', pane: 'left' },
   a: { type: 'togglePane', pane: 'assistant' },
   w: { type: 'cycleWritingWidth' },
+  k: { type: 'splitScene', toNextChapter: true },
 };
 
 /** The digit after Ctrl that switches to each Mode, as in `SHORTCUTS`. */
@@ -119,8 +127,8 @@ type KeyPress = {
 
 /**
  * The command a key press in a window asks for, if any: the create chords,
- * Ctrl+E, Ctrl+T, Ctrl+1/2/3, zen, the pane keys and the width key, which
- * apply where a Project is shown, and Ctrl+/.
+ * Ctrl+E, Ctrl+T, the split keys, Ctrl+1/2/3, zen, the pane keys and the
+ * width key, which apply where a Project is shown, and Ctrl+/.
  * Ctrl is ⌘ on macOS. The menus take the others.
  */
 export function commandForKey(press: KeyPress, mac: boolean): Command | null {
@@ -139,6 +147,9 @@ export function commandForKey(press: KeyPress, mac: boolean): Command | null {
   if (shift) return SHIFT_LETTERS[key.toLowerCase()] ?? null;
   if (key.toLowerCase() === 'e') return { type: 'newEntry' };
   if (key.toLowerCase() === 't') return { type: 'newTodo' };
+  if (key.toLowerCase() === 'k') {
+    return { type: 'splitScene', toNextChapter: false };
+  }
   const mode = MODE_DIGITS[key];
   return mode ? { type: 'mode', mode } : null;
 }
@@ -197,6 +208,16 @@ export const CHEAT_SHEET: {
       {
         keys: [SHORTCUTS.newTodo],
         action: 'New Todo, linked to the open Scene, Chapter or Entry',
+      },
+      {
+        keys: [SHORTCUTS.splitScene],
+        action:
+          'Split the Scene at the cursor: the text after it becomes a new Scene',
+      },
+      {
+        keys: [SHORTCUTS.splitToNextChapter],
+        action:
+          'Split the Scene, the text after the cursor to the next Chapter',
       },
     ],
   },

@@ -64,13 +64,19 @@ export function alignmentNamed(name: unknown): Alignment | undefined {
 const MARKER_START = /^(\s*)(>|\{\.)/;
 
 export function docToMarkdown(doc: JSONContent): string {
-  return writeProse(
-    (doc.content ?? []).map((paragraph) => ({
-      spans: spansOf(paragraph),
-      quote: paragraph.attrs?.blockQuote === true,
-      align: alignmentNamed(paragraph.attrs?.textAlign),
-    })),
-  );
+  return writeProse(docToProse(doc));
+}
+
+/**
+ * The editor's paragraphs, one for each, empty ones too: each one's spans
+ * hold its text as the editor does.
+ */
+export function docToProse(doc: JSONContent): Paragraph[] {
+  return (doc.content ?? []).map((paragraph) => ({
+    spans: spansOf(paragraph),
+    quote: paragraph.attrs?.blockQuote === true,
+    align: alignmentNamed(paragraph.attrs?.textAlign),
+  }));
 }
 
 export function markdownToDoc(markdown: string): JSONContent {

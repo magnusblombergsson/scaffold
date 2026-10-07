@@ -1,7 +1,13 @@
 import { Editor, type Extensions, type JSONContent } from '@tiptap/core';
 import type { Node } from '@tiptap/pm/model';
 import { EditorContent } from '@tiptap/react';
-import { useContext, useEffect, useRef, useState } from 'react';
+import {
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type MouseEvent as ReactMouseEvent,
+} from 'react';
 import {
   unitKey as keyOf,
   unitText,
@@ -54,6 +60,8 @@ type Props = {
    */
   onSelection?(text: string): void;
   className?: string;
+  /** A right-click on it, which opens its own menu if it has one. */
+  onContextMenu?(event: ReactMouseEvent): void;
 };
 
 /**
@@ -82,6 +90,7 @@ export function UnitEditor({
   onText,
   onSelection,
   className,
+  onContextMenu,
 }: Props) {
   const [{ editor, created }] = useState(() => {
     let created = false;
@@ -153,7 +162,8 @@ export function UnitEditor({
         if (event.type !== 'unitReloaded' || keyOf(event.ref) !== reloadKey) {
           return;
         }
-        if (!autosave.pending() && sending.current === 0) {
+        // A split here wrote it after what was sent, which is in it.
+        if (!autosave.pending() && (sending.current === 0 || event.bySplit)) {
           reloadUnitEditor(editor, toDoc(textOf(event.value)));
           void window.project.reloadTaken(event.ref);
           return;
@@ -217,5 +227,11 @@ export function UnitEditor({
     editor.commands.focus(focusAt ?? (created ? 'end' : null));
   }, [editor, created, autofocus, focusAt, select]);
 
-  return <EditorContent editor={editor} className={className} />;
+  return (
+    <EditorContent
+      editor={editor}
+      className={className}
+      onContextMenu={onContextMenu}
+    />
+  );
 }

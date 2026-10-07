@@ -53,6 +53,8 @@ const projectHandlers: Handlers<
   renameChapter: ({ store }, chapterId, title) =>
     store.renameChapter(chapterId, title),
   renameScene: ({ store }, sceneId, title) => store.renameScene(sceneId, title),
+  splitScene: ({ store }, sceneId, cut, toNextChapter) =>
+    store.splitScene(sceneId, cut, toNextChapter),
   moveChapter: ({ store }, chapterId, index) =>
     store.moveChapter(chapterId, index),
   moveScene: ({ store }, sceneId, chapterId, index) =>

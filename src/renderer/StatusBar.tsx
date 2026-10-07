@@ -68,22 +68,27 @@ export function useSceneCounts(manuscript: Manuscript): {
 }
 
 /**
- * Along the bottom of the window: the save state on the left, and on the
- * right the counts of what is open, or selected; hovering them shows the
- * Manuscript's.
+ * Along the bottom of the window: the save state on the left, then any
+ * `notice`, and on the right the counts of what is open, or selected;
+ * hovering them shows the Manuscript's.
  */
 export function StatusBar({
   saveStatus,
+  notice,
   shown,
   manuscript,
 }: {
   saveStatus: { statuses: SaveStatuses; confirmed: boolean };
+  notice?: string;
   shown: ShownCounts;
   manuscript: Counts;
 }) {
   return (
     <footer className="status-bar">
       <SaveIndicator {...saveStatus} />
+      <span className="status-notice" role="status">
+        {notice}
+      </span>
       <span
         className="counts"
         title={`Manuscript: ${formatCounts(manuscript)}`}
