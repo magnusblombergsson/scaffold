@@ -4,17 +4,22 @@ import {
   pickedManuscript,
   sceneTicked,
   TICK_ALL,
+  tickMatching,
   toggleChapter,
   toggleScene,
   type ExportUnticked,
   type Tick,
 } from '../shared/export-choice';
+import { filterManuscript, filterOn, type Filter } from '../shared/filter';
 import type { Manuscript } from '../shared/project-types';
+import { FilterControl, useFilter } from './Filter';
+import { useStatuses } from './StatusAndTags';
 
 /**
  * File › Export Manuscript…: which Scenes and Chapters go in, each Chapter
- * with its Scenes ticked under it, before the save dialog. What the Author
- * leaves unticked is remembered for the Project on this computer.
+ * with its Scenes ticked under it, before the save dialog. Tick matching…
+ * ticks only what a Filter matches, for the Author to adjust by hand. What
+ * they leave unticked is remembered for the Project on this computer.
  */
 export function ExportManuscriptDialog({
   manuscript,
@@ -26,6 +31,9 @@ export function ExportManuscriptDialog({
   const dialogRef = useRef<HTMLDialogElement>(null);
   /** Null until main says what was left unticked last time. */
   const [unticked, setUnticked] = useState<ExportUnticked | null>(null);
+  const { filter, setFilter, inUse } = useFilter('export-manuscript');
+  const statuses = useStatuses();
+  const matched = filterManuscript(filter, manuscript, statuses);
   useEffect(() => {
     dialogRef.current?.showModal();
     void window.shell.exportChoice().then(setUnticked);
@@ -33,6 +41,12 @@ export function ExportManuscriptDialog({
 
   const nothingTicked =
     !unticked || pickedManuscript(manuscript, unticked).chapters.length === 0;
+
+  /** Ticks only what `next` matches; clearing it leaves the ticks as they are. */
+  function tickBy(next: Filter) {
+    setFilter(next);
+    if (filterOn(next)) setUnticked(tickMatching(manuscript, next, statuses));
+  }
 
   function exportTicked() {
     if (!unticked) return;
@@ -54,6 +68,17 @@ export function ExportManuscriptDialog({
         Tick the Scenes and Chapters to export. The file type you save as sets
         Word or Markdown.
       </p>
+      {unticked && (
+        <FilterControl
+          filter={filter}
+          onChange={tickBy}
+          inUse={inUse}
+          shown={matched.matching}
+          total={matched.total}
+          by="statuses"
+          label="Tick matching…"
+        />
+      )}
       {unticked && (
         <ul className="export-tree" aria-label="Scenes and Chapters">
           {manuscript.chapters.map((chapter) => (

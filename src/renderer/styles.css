@@ -2764,6 +2764,10 @@ header.entry-header {
   font-weight: 600;
 }
 
+.export .filter {
+  padding: 0 0 0.5rem;
+}
+
 /* Tick All stands apart from the buttons that close the dialog. */
 .export-tick-all {
   margin-right: auto;
@@ -3696,6 +3700,11 @@ button.finding-quote:hover {
 
 .reference-skeleton section section .reference-outline {
   margin-left: 0.75rem;
+}
+
+/* A Chapter shown by a Filter only for its matching Scenes: its heading, dimmed. */
+.reference-skeleton section[data-dimmed] > :is(h3, .tag-list) {
+  opacity: 0.5;
 }
 
 .reference-outline {

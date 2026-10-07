@@ -1,4 +1,6 @@
+import { filterManuscript, type Filter } from './filter';
 import type { Manuscript, ManuscriptChapter } from './project-types';
+import type { Status } from './status';
 
 // Which Scenes and Chapters a Manuscript Export holds, as the Author ticks
 // them. Only what they left unticked is kept, so a unit created since the
@@ -9,6 +11,33 @@ export type ExportUnticked = { chapters: string[]; scenes: string[] };
 
 /** Everything ticked. */
 export const TICK_ALL: ExportUnticked = { chapters: [], scenes: [] };
+
+/**
+ * Only what `filter` matches ticked, as the Outline skeleton would show it:
+ * a matching Chapter with all its Scenes, otherwise just its matching Scenes.
+ */
+export function tickMatching(
+  manuscript: Manuscript,
+  filter: Filter,
+  statuses: readonly Status[],
+): ExportUnticked {
+  const shown = filterManuscript(filter, manuscript, statuses).chapters;
+  const ticked = new Set(
+    shown.flatMap(({ chapter, scenes }) => [
+      chapter.id,
+      ...scenes.map((s) => s.id),
+    ]),
+  );
+  return {
+    chapters: manuscript.chapters
+      .filter((c) => !ticked.has(c.id))
+      .map((c) => c.id),
+    scenes: manuscript.chapters
+      .flatMap((c) => c.scenes)
+      .filter((s) => !ticked.has(s.id))
+      .map((s) => s.id),
+  };
+}
 
 /** A Chapter's box: half-ticked when only some of its Scenes are ticked. */
 export type Tick = 'ticked' | 'half' | 'unticked';

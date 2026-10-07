@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { PanelWidths } from '../shared/api';
-import { filterOn, matchesFilter } from '../shared/filter';
+import { filterManuscript, filterOn, matchesFilter } from '../shared/filter';
 import {
   PROJECT_OUTLINE,
   type EntryValue,
@@ -23,7 +23,7 @@ import { ModelPicker } from './ModelPicker';
 import { PanelResizer, type PaneSize } from './PanelResizer';
 import { RoomList } from './RoomList';
 import { TagChips } from './TagsDialog';
-import { UnitStatusDot } from './StatusAndTags';
+import { UnitStatusDot, useStatuses } from './StatusAndTags';
 
 /**
  * The Brainstorm room: its Conversations on the left, the one open in the
@@ -259,7 +259,8 @@ function BibleReference({
 /**
  * The Outline of the whole story, then each Chapter and Scene in Manuscript
  * order with its Outline, as the Assistant is sent it, its Status dot and
- * Tags shown, not edited.
+ * Tags shown, not edited. A Filter narrows it to the matching Chapters
+ * whole, and the matching Scenes of others under their dimmed headings.
  */
 function OutlineSkeleton({
   manuscript,
@@ -268,6 +269,12 @@ function OutlineSkeleton({
   manuscript: Manuscript;
   changes: number;
 }) {
+  const { filter, setFilter, inUse } = useFilter('outline-skeleton');
+  const statuses = useStatuses();
+  const shown = useMemo(
+    () => filterManuscript(filter, manuscript, statuses),
+    [filter, manuscript, statuses],
+  );
   const [outlines, setOutlines] = useState<Map<string, string> | null>(null);
   useEffect(() => {
     let current = true;
@@ -316,15 +323,34 @@ function OutlineSkeleton({
   );
   return (
     <div className="reference-skeleton">
+      {shown.total > 0 && (
+        <FilterControl
+          filter={filter}
+          onChange={setFilter}
+          inUse={inUse}
+          shown={shown.matching}
+          total={shown.total}
+          by="statuses"
+        />
+      )}
       <section aria-label="The story">
         <h3>The story</h3>
         {outline(PROJECT_OUTLINE)}
       </section>
-      {manuscript.chapters.map((chapter) => (
-        <section key={chapter.id} aria-label={chapter.title}>
+      {shown.chapters.length === 0 && filterOn(filter) && (
+        <p className="reference-empty">
+          No Chapters or Scenes match the Filter.
+        </p>
+      )}
+      {shown.chapters.map(({ chapter, dimmed, scenes }) => (
+        <section
+          key={chapter.id}
+          aria-label={chapter.title}
+          data-dimmed={dimmed || undefined}
+        >
           {heading('h3', chapter)}
-          {outline(chapter.id)}
-          {chapter.scenes.map((scene) => (
+          {!dimmed && outline(chapter.id)}
+          {scenes.map((scene) => (
             <section key={scene.id} aria-label={scene.title}>
               {heading('h4', scene)}
               {outline(scene.id)}
