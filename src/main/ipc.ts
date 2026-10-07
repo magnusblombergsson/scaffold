@@ -96,6 +96,12 @@ const projectHandlers: Handlers<
       `The Statuses of ${store.displayName}`,
       () => store.deleteStatus(statusId, moveTo),
     ),
+  listTodos: async ({ store }) => store.listTodos(),
+  addTodo: ({ store }, text, link) => store.addTodo(text, link),
+  changeTodo: ({ store }, id, change) => store.changeTodo(id, change),
+  moveTodo: ({ store }, id, index) => store.moveTodo(id, index),
+  deleteTodo: ({ store }, id) => store.deleteTodo(id),
+  clearDoneTodos: ({ store }) => store.clearDoneTodos(),
   setFoldedNoteImage: ({ store, sender }, on) =>
     saveProjectSetting(
       sender,

@@ -819,6 +819,32 @@ describe('Entry images', () => {
   });
 });
 
+describe('Todos', () => {
+  it('never reach the context, in any Mode and focus', async () => {
+    const project = await fixture();
+    const { store, scenes, chapters, entries } = project;
+    await store.addTodo('TODO-SENTINEL scene', {
+      kind: 'scene',
+      id: scenes.harbour,
+    });
+    await store.addTodo('TODO-SENTINEL chapter', {
+      kind: 'chapter',
+      id: chapters.storm,
+    });
+    await store.addTodo('TODO-SENTINEL entry', {
+      kind: 'entry',
+      id: entries.anna,
+    });
+    await store.addTodo('TODO-SENTINEL unlinked', null);
+
+    for (const request of everyRequest(project)) {
+      const text = sent(await buildContext(project.view, request));
+      expect(text).toContain('Her sister.');
+      expect(text).not.toContain('TODO-SENTINEL');
+    }
+  });
+});
+
 describe('Role note and Appearance', () => {
   it('reach the context with the Entry, in every Mode and focus', async () => {
     const project = await fixture();

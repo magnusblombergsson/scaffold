@@ -36,6 +36,7 @@ import {
   withShortcut,
   type Command,
 } from '../shared/shortcuts';
+import type { Todo, TodoLink } from '../shared/todo';
 import { capitalized, unitName } from '../shared/unit-name';
 import { AssistantPanel } from './AssistantPanel';
 import { Binder, type Selection } from './Binder';
@@ -77,6 +78,7 @@ import { ShortcutsDialog } from './ShortcutsDialog';
 import { StartScreen } from './StartScreen';
 import { StatusBar, useSceneCounts } from './StatusBar';
 import { entryTitle, StoryBible } from './StoryBible';
+import { TodoList } from './TodoList';
 import { trashTitle, TrashView } from './TrashView';
 import { Toast } from './Toast';
 import { forgetUnitEditors } from './unit-editors';
@@ -548,6 +550,28 @@ function ProjectView({
   useEffect(() => {
     void refreshTrash();
   }, [refreshTrash]);
+  /** The Trash item a Todo's link went to; `count` goes to it again. */
+  const [trashReveal, setTrashReveal] = useState<{
+    id: string;
+    count: number;
+  }>();
+  const trashReveals = useRef(0);
+  useEffect(() => {
+    if (tab !== 'trash') setTrashReveal(undefined);
+  }, [tab]);
+
+  const [todos, setTodos] = useState<Todo[]>([]);
+  useEffect(() => {
+    void window.project.listTodos().then(setTodos);
+  }, []);
+  /** What a new Todo is linked to unless the Author unlinks it: the unit open in Writing. */
+  const prelink: TodoLink | null = open
+    ? { kind: 'scene', id: open.scene.id }
+    : openChapter
+      ? { kind: 'chapter', id: openChapter.id }
+      : openEntry
+        ? { kind: 'entry', id: openEntry.id }
+        : null;
 
   const [conflicts, setConflicts] = useState<Conflict[]>([]);
   /** The unit whose Conflict the centre shows, instead of the selection. */
@@ -559,6 +583,7 @@ function ProjectView({
   const tabs: Tab[] = [
     'manuscript',
     'bible',
+    'todos',
     ...(conflicts.length > 0 || tab === 'conflicts'
       ? (['conflicts'] as const)
       : []),
@@ -616,6 +641,8 @@ function ProjectView({
           setManuscript(event.manuscript);
         } else if (event.type === 'statusesChanged') {
           setStatuses(event.statuses);
+        } else if (event.type === 'todosChanged') {
+          setTodos(event.todos);
         } else if (event.type === 'readOnly') {
           // Main still takes edits for a moment: these are the last.
           flushPendingEdits();
@@ -956,6 +983,15 @@ function ProjectView({
                   >
                     Story Bible
                   </button>
+                  <button
+                    role="tab"
+                    aria-selected={tab === 'todos'}
+                    tabIndex={tab === 'todos' ? 0 : -1}
+                    id="todos-tab"
+                    onClick={() => setTab('todos')}
+                  >
+                    Todos
+                  </button>
                   {tabs.includes('conflicts') && (
                     <button
                       role="tab"
@@ -1015,6 +1051,18 @@ function ProjectView({
                         window.shell.setHighlightMentions(on);
                       }}
                     />
+                  ) : tab === 'todos' ? (
+                    <TodoList
+                      todos={todos}
+                      names={{ manuscript, entries, trash }}
+                      prelink={prelink}
+                      onOpen={select}
+                      onOpenTrash={(id) => {
+                        setTab('trash');
+                        setTrashReveal({ id, count: ++trashReveals.current });
+                      }}
+                      onError={onError}
+                    />
                   ) : tab === 'conflicts' ? (
                     <ConflictList
                       conflicts={conflicts}
@@ -1029,6 +1077,7 @@ function ProjectView({
                   ) : (
                     <TrashView
                       items={trash}
+                      reveal={trashReveal}
                       onRestore={(item) =>
                         change(
                           () => window.project.restore(item.id),
@@ -1334,7 +1383,7 @@ function ProjectView({
 }
 
 /** The left pane's tabs in Writing. */
-type Tab = 'manuscript' | 'bible' | 'conflicts' | 'trash';
+type Tab = 'manuscript' | 'bible' | 'todos' | 'conflicts' | 'trash';
 
 /** The tab ← / →, Home or End switches to from `tab`, round the ends; null for other keys. */
 function tabAfter(key: string, tab: Tab, tabs: Tab[]): Tab | null {

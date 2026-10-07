@@ -84,6 +84,7 @@ button.primary,
 .binder-add,
 .room-new,
 .trash-empty-button,
+.todo-clear,
 .entry-card-open,
 .proposal-undo,
 .story-bible-new .menu-button {
@@ -101,6 +102,7 @@ button:not([class], [role]):hover:not(:disabled),
 .binder-add:hover:not(:disabled),
 .room-new:hover:not(:disabled),
 .trash-empty-button:hover:not(:disabled),
+.todo-clear:hover:not(:disabled),
 .entry-card-open:hover:not(:disabled),
 .proposal-undo:hover:not(:disabled),
 .story-bible-new .menu-button:hover:not(:disabled) {
@@ -959,6 +961,8 @@ span.overview-title {
 
 .tabs {
   display: flex;
+  /* Tabs that don't fit a narrow pane go on to a second line. */
+  flex-wrap: wrap;
   border-bottom: 1px solid var(--line);
 }
 
@@ -967,7 +971,7 @@ span.overview-title {
   border: none;
   color: inherit;
   font: inherit;
-  padding: 0.5rem 0.75rem;
+  padding: 0.5rem 0.6rem;
   border-bottom: 2px solid transparent;
 }
 
@@ -1279,6 +1283,161 @@ h2.binder-title > button:hover::after {
 
 .trash-empty-button {
   margin: 0.75rem 0.5rem 0;
+}
+
+.trash-item[aria-current='true'] {
+  background: var(--sheet);
+}
+
+.todos {
+  padding: 0.5rem 0;
+}
+
+.new-todo {
+  padding: 0 0.5rem 0.5rem;
+}
+
+.new-todo input {
+  box-sizing: border-box;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  background: var(--sheet);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 0.3rem 0.5rem;
+}
+
+.new-todo-link {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin-top: 0.25rem;
+  color: var(--muted);
+  font-size: 0.85em;
+}
+
+.new-todo-unlink,
+.todo-delete {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font: inherit;
+  padding: 0 0.25rem;
+  cursor: pointer;
+}
+
+.new-todo-unlink:hover:not(:disabled),
+.todo-delete:hover {
+  color: var(--fg);
+}
+
+.todo-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.todo {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.35rem;
+  padding: 0.2rem 0.5rem;
+}
+
+.todo:hover {
+  background: var(--hover);
+}
+
+.todo input[type='checkbox'] {
+  margin: 0.3rem 0 0;
+  accent-color: var(--accent);
+}
+
+.todo-body {
+  flex: 1;
+  min-width: 0;
+}
+
+.todo-text {
+  box-sizing: border-box;
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  padding: 0.1rem 0.25rem;
+}
+
+.todo-text:focus {
+  background: var(--sheet);
+  border-color: var(--line);
+  outline: none;
+}
+
+.todo-done .todo-text {
+  color: var(--muted);
+  text-decoration: line-through;
+}
+
+.todo-link {
+  display: block;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  background: none;
+  border: none;
+  font: inherit;
+  font-size: 0.85em;
+  color: var(--accent);
+  padding: 0 0.25rem;
+  text-align: left;
+  cursor: pointer;
+}
+
+.todo-link:hover {
+  text-decoration: underline;
+}
+
+.todo-link.in-trash {
+  color: var(--muted);
+}
+
+.todo-grip {
+  color: var(--muted);
+  cursor: grab;
+  padding-top: 0.15rem;
+  user-select: none;
+}
+
+.todo-delete {
+  visibility: hidden;
+}
+
+.todo:hover .todo-delete,
+.todo:focus-within .todo-delete {
+  visibility: visible;
+}
+
+.todos-empty {
+  color: var(--muted);
+  padding: 0 0.5rem;
+}
+
+.todo-done {
+  margin-top: 0.75rem;
+}
+
+.todo-done summary {
+  color: var(--muted);
+  padding: 0.25rem 0.5rem;
+  cursor: pointer;
+}
+
+.todo-clear {
+  margin: 0.5rem 0.5rem 0;
 }
 
 .toasts {

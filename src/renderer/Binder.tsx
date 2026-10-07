@@ -531,7 +531,8 @@ export function ConflictMarker({ shown }: { shown: boolean }) {
   return shown ? <span className="binder-conflict"> Conflict</span> : null;
 }
 
-function inLowerHalf(event: DragEvent<HTMLElement>): boolean {
+/** Whether a drag is over the lower half of the row it is over. */
+export function inLowerHalf(event: DragEvent<HTMLElement>): boolean {
   const box = event.currentTarget.getBoundingClientRect();
   return event.clientY > box.top + box.height / 2;
 }
