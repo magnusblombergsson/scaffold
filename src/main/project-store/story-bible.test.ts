@@ -654,7 +654,7 @@ describe('Entry images', () => {
       path.join(projectPath, 'bible', `${id}.md`),
       'utf8',
     );
-    return /^image: (.*)$/m.exec(text)?.[1];
+    return parseUnitFile(text).frontmatter.image;
   }
 
   it('stores an imported image as images/<id>.<extension>, named in frontmatter, and replaces and removes it', async () => {
@@ -699,7 +699,7 @@ describe('Entry images', () => {
     ['the original', (removed: string, older: string) => [older, removed]],
   ])(
     'stays removed when an older version still naming it is synced in as %s',
-    async (_, arrange) => {
+    async (_, placed) => {
       const projectPath = path.join(dir, 'My Novel');
       const at = (now: number) => ({
         fs: nodeFileSystem,
@@ -718,7 +718,7 @@ describe('Entry images', () => {
       await removing.close();
       const removed = await readFile(file, 'utf8');
 
-      const [original, copy] = arrange(removed, older);
+      const [original, copy] = placed(removed, older);
       await writeFile(file, original);
       await writeFile(path.join(projectPath, 'bible', `${id}-OTHER.md`), copy);
       const reopened = await openProject(projectPath, at(3000));

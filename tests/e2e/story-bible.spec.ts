@@ -392,7 +392,7 @@ test('the Author adds an image to an Entry, scaled and shown in the list and the
   const [entryFile] = await readdir(path.join(projectPath, 'bible'));
   const id = path.basename(entryFile, '.md');
   const images = path.join(projectPath, 'images');
-  const frontmatter = async () =>
+  const header = async () =>
     parseUnitFile(
       await readFile(path.join(projectPath, 'bible', entryFile), 'utf8'),
     ).frontmatter;
@@ -406,12 +406,12 @@ test('the Author adds an image to an Entry, scaled and shown in the list and the
   ).toBe(1024);
   await expect(storyBible(page).locator('img.entry-thumbnail')).toBeVisible();
   expect(await readdir(images)).toEqual([`${id}.jpg`]);
-  expect(await frontmatter()).toMatchObject({ image: `${id}.jpg` });
+  expect(await header()).toMatchObject({ image: `${id}.jpg` });
 
   await answerOpen(await imageFile('logo.png', 300, 200, 0));
   await page.getByRole('button', { name: 'Replace image…' }).click();
   await expect.poll(() => readdir(images)).toEqual([`${id}.png`]);
-  expect(await frontmatter()).toMatchObject({ image: `${id}.png` });
+  expect(await header()).toMatchObject({ image: `${id}.png` });
   await expect
     .poll(() => shown.evaluate((img: HTMLImageElement) => img.naturalWidth))
     .toBe(300);
@@ -421,8 +421,8 @@ test('the Author adds an image to an Entry, scaled and shown in the list and the
   await expect(storyBible(page).locator('img.entry-thumbnail')).toHaveCount(0);
   expect(await readdir(images)).toEqual([]);
   // Removed, but its save time stays, so an older copy can't bring it back.
-  const header = await frontmatter();
-  expect(header).not.toHaveProperty('image');
-  expect(header).toHaveProperty('keysSavedAt.image');
+  const removed = await header();
+  expect(removed).not.toHaveProperty('image');
+  expect(removed).toHaveProperty('keysSavedAt.image');
   await app.close();
 });
