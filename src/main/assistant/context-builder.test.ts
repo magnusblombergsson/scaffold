@@ -714,6 +714,38 @@ describe('order and caching', () => {
     expect(sent(context)).not.toContain('polished');
   });
 
+  it('gives each Chapter and Scene its Tags in the skeleton, after its Status', async () => {
+    const { store, chapters, scenes } = await fixture();
+    await store.setTags(chapters.arrival, ['Mara', 'the war']);
+    await store.setStatus(scenes.harbour, 'drafted');
+    await store.setTags(scenes.harbour, ['flashback']);
+
+    const context = await buildContext(store.assistantView(), {
+      mode: 'brainstorm',
+      messages: [message('author', 'Hm.')],
+    });
+
+    const skeleton = context.system[2].text;
+    expect(skeleton).toContain(
+      `## Chapter “Arrival”
+Id: ${chapters.arrival}
+Tags: Mara, the war
+- She arrives`,
+    );
+    expect(skeleton).toContain(
+      `### Scene “Harbour”
+Id: ${scenes.harbour}
+Status: Drafted
+Tags: flashback
+- She waits`,
+    );
+    expect(skeleton).toContain(
+      `### Scene “Letter”
+Id: ${scenes.letter}
+- The letter`,
+    );
+  });
+
   it('on a first message, puts the second breakpoint on the last block before it', async () => {
     const { view, scenes } = await fixture();
 

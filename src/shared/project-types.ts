@@ -198,16 +198,22 @@ export type Manuscript = {
 };
 /**
  * `status`: the id of its Status, as its Outline file holds it, which may
- * not be in the Project's Status list.
+ * not be in the Project's Status list. `tags`: its Tags, by spelling; none
+ * when it has none.
  */
 export type ManuscriptChapter = {
   id: string;
   title: string;
   scenes: ManuscriptScene[];
   status?: string;
+  tags?: string[];
 };
 /** `missing`: in the tree, but its file isn't there (possibly not synced yet). */
-export type ManuscriptScene = SceneNode & { missing?: true; status?: string };
+export type ManuscriptScene = SceneNode & {
+  missing?: true;
+  status?: string;
+  tags?: string[];
+};
 
 /**
  * A deleted Scene or Chapter, or a version of a unit set aside when its

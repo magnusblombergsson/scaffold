@@ -331,6 +331,17 @@ export interface ProjectApi {
    * which main has told the Author.
    */
   deleteStatus(statusId: string, moveTo: string | null): Promise<boolean>;
+  /**
+   * The Tags in use on Chapters and Scenes, those in Trash too, each once
+   * in its first spelling, sorted.
+   */
+  tags(): Promise<string[]>;
+  /**
+   * Gives a Scene or Chapter `tags`, each spelt as the Tag in use on another
+   * unit, ignoring case, if there is one; there is no undo. The Manuscript
+   * showing them follows as a `unitDetailsChanged`.
+   */
+  setTags(unitId: string, tags: string[]): Promise<void>;
   /** The Todos: those not done, then the done, each in list order. */
   listTodos(): Promise<Todo[]>;
   /**
@@ -765,6 +776,8 @@ export const projectMethods = {
   editStatus: 'invoke',
   statusUses: 'invoke',
   deleteStatus: 'invoke',
+  tags: 'invoke',
+  setTags: 'invoke',
   listTodos: 'invoke',
   addTodo: 'invoke',
   changeTodo: 'invoke',

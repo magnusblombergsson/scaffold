@@ -266,7 +266,7 @@ function entryText(entry: EntryValue): string {
 /**
  * Every Outline in Manuscript order, the Project's first, under the titles
  * of its Chapters and Scenes, with the Status of each that has one in the
- * list; no Prose. `texts` holds the Outlines.
+ * list, and its Tags; no Prose. `texts` holds the Outlines.
  */
 async function outlineSkeleton(
   view: AssistantView,
@@ -288,11 +288,12 @@ async function outlineSkeleton(
       heading,
       `Id: ${node.id}`,
       ...(status ? [`Status: ${status.name}`] : []),
+      ...(node.tags ? [`Tags: ${node.tags.join(', ')}`] : []),
       await outline(node.id),
     ].join('\n');
   }
   const parts = [
-    'The Outline skeleton: the Outline of the whole story, then each Chapter and Scene in Manuscript order with its Outline, each under its Id and, if the Author gave it one, its Status. It holds no Prose.',
+    'The Outline skeleton: the Outline of the whole story, then each Chapter and Scene in Manuscript order with its Outline, each under its Id and, if the Author gave them, its Status and Tags. It holds no Prose.',
     `## The story\nId: ${PROJECT_OUTLINE}\n${await outline(PROJECT_OUTLINE)}`,
   ];
   for (const chapter of manuscript.chapters) {

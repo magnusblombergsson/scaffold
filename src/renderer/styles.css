@@ -2537,6 +2537,49 @@ header.entry-header {
   width: min(36rem, 90vw);
 }
 
+/* A unit's Tags: chips, then a box to type more in. */
+.tag-input {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.tag-chips {
+  display: contents;
+  list-style: none;
+}
+
+.tag-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.15rem;
+  padding: 0.05rem 0.5rem;
+  border: 1px solid var(--pill-line);
+  border-radius: 999px;
+  background: var(--accent-tint);
+  font-size: 0.9rem;
+}
+
+.tag-remove {
+  padding: 0 0.15rem;
+  border: none;
+  background: none;
+  color: var(--muted);
+  line-height: 1;
+  cursor: pointer;
+}
+
+.tag-remove:hover,
+.tag-remove:focus-visible {
+  color: var(--fg);
+}
+
+.tag-input input {
+  flex: 1 1 8rem;
+  min-width: 8rem;
+}
+
 /* The prompt is a slip of paper on the dialog's sheet, to copy from. */
 .image-prompt-result {
   margin-top: 0.75rem;

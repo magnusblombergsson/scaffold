@@ -78,6 +78,7 @@ import { ShortcutsDialog } from './ShortcutsDialog';
 import { StartScreen } from './StartScreen';
 import { StatusBar, useSceneCounts } from './StatusBar';
 import { entryTitle, StoryBible } from './StoryBible';
+import { TagsDialog } from './TagsDialog';
 import { TodoList } from './TodoList';
 import { trashTitle, TrashView } from './TrashView';
 import { Toast } from './Toast';
@@ -601,6 +602,11 @@ function ProjectView({
   const [statuses, setStatuses] = useState(project.statuses);
   const [projectSettingsOpen, setProjectSettingsOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
+  /** The Chapter or Scene whose Tags… is open, by id. */
+  const [tagging, setTagging] = useState<string | null>(null);
+  /** It, as the Manuscript has it now; gone if it is no longer there. */
+  const taggingUnit =
+    tagging === null ? undefined : unitOf(tagging, manuscript);
 
   /** The latest unit another computer changed; `count` starts its toast's time over. */
   const [reloaded, setReloaded] = useState<{ ref: UnitRef; count: number }>();
@@ -661,6 +667,16 @@ function ProjectView({
       onError(null);
     } catch (error) {
       onError(`Can't set the Status: ${(error as CallFailure).message}`);
+    }
+  }
+
+  /** Gives a Chapter or Scene Tags; the Manuscript showing them follows from main. */
+  async function setTags(unitId: string, tags: string[]) {
+    try {
+      await window.project.setTags(unitId, tags);
+      onError(null);
+    } catch (error) {
+      onError(`Can't save the Tags: ${(error as CallFailure).message}`);
     }
   }
 
@@ -1031,6 +1047,7 @@ function ProjectView({
                       onSetStatus={(unitId, statusId) =>
                         void setStatus(unitId, statusId)
                       }
+                      onEditTags={setTagging}
                     />
                   ) : tab === 'bible' ? (
                     <StoryBible
@@ -1342,6 +1359,14 @@ function ProjectView({
             onOpen={showEntry}
           />
         )}
+        {taggingUnit && (
+          <TagsDialog
+            unitName={`${taggingUnit.kind === 'chapter' ? 'Chapter' : 'Scene'} “${taggingUnit.node.title}”`}
+            tags={taggingUnit.node.tags ?? NO_TAGS}
+            onChange={(tags) => setTags(taggingUnit.node.id, tags)}
+            onClose={() => setTagging(null)}
+          />
+        )}
         {exportOpen && (
           <ExportManuscriptDialog
             manuscript={manuscript}
@@ -1404,6 +1429,23 @@ function allScenes(
     ),
     ...manuscript.unplaced.map((scene) => ({ chapter: null, scene })),
   ];
+}
+
+/** No Tags, the same each time. */
+const NO_TAGS: string[] = [];
+
+/** The Chapter or Scene of `id` in `manuscript`, if it is there. */
+function unitOf(
+  id: string,
+  manuscript: Manuscript,
+):
+  | { kind: 'chapter'; node: ManuscriptChapter }
+  | { kind: 'scene'; node: ManuscriptScene }
+  | undefined {
+  const chapter = manuscript.chapters.find((c) => c.id === id);
+  if (chapter) return { kind: 'chapter', node: chapter };
+  const found = allScenes(manuscript).find(({ scene }) => scene.id === id);
+  return found && { kind: 'scene', node: found.scene };
 }
 
 /** What to open once a unit's Conflict is resolved: the unit it belongs to. */
