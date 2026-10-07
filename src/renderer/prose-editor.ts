@@ -1,4 +1,10 @@
-import { Extension, textInputRule, type Extensions } from '@tiptap/core';
+import {
+  Extension,
+  textInputRule,
+  type CommandProps,
+  type Editor,
+  type Extensions,
+} from '@tiptap/core';
 import Bold from '@tiptap/extension-bold';
 import Document from '@tiptap/extension-document';
 import Italic from '@tiptap/extension-italic';
@@ -6,8 +12,13 @@ import Paragraph from '@tiptap/extension-paragraph';
 import Text from '@tiptap/extension-text';
 import { UndoRedo } from '@tiptap/extensions';
 import type { Node as PMNode } from '@tiptap/pm/model';
-import { Plugin } from '@tiptap/pm/state';
+import { Plugin, type EditorState } from '@tiptap/pm/state';
 import type { ProseLanguage } from '../shared/project-types';
+import {
+  ALIGN_NAME,
+  alignmentNamed,
+  type Alignment,
+} from '../shared/prose-markdown';
 import { MAC } from './platform';
 
 declare module '@tiptap/core' {
@@ -18,14 +29,19 @@ declare module '@tiptap/core' {
        * all already are.
        */
       toggleBlockQuote: () => ReturnType;
+      /**
+       * Aligns every paragraph the selection touches as `align`, or left
+       * when all already are, or when it is null.
+       */
+      alignParagraphs: (align: Alignment | null) => ReturnType;
     };
   }
 }
 
 /**
  * The editor's schema is exactly what restricted Markdown can hold:
- * paragraphs, quoted or not, italic and bold. Anything else typed or pasted
- * is reduced to it.
+ * paragraphs, quoted or not and aligned, italic and bold. Anything else typed
+ * or pasted is reduced to it.
  */
 export function proseExtensions(language: ProseLanguage): Extensions {
   return [
@@ -42,11 +58,20 @@ export function proseExtensions(language: ProseLanguage): Extensions {
 /** Elements that hold paragraphs of their own, rather than text. */
 const BLOCKS = 'p, div, h1, h2, h3, h4, h5, h6, ul, ol, li, pre, blockquote';
 
+/** Ctrl+Shift (Cmd+Shift on macOS) with each letter, and what it does. */
+const PARAGRAPH_KEYS: Record<string, (editor: Editor) => boolean> = {
+  b: (editor) => editor.commands.toggleBlockQuote(),
+  l: (editor) => editor.commands.alignParagraphs(null),
+  e: (editor) => editor.commands.alignParagraphs('centre'),
+  r: (editor) => editor.commands.alignParagraphs('right'),
+};
+
 /**
  * A paragraph, which is a block quote or not (ADR 0007): quoted paragraphs
- * in a row read as one passage. A new paragraph started within a quote is
- * quoted too. A pasted line break starts a new paragraph instead of becoming
- * a space.
+ * in a row read as one passage. It is aligned left, centre or right, as
+ * TipTap's TextAlign holds it in `textAlign`. A new paragraph started within
+ * a quote is quoted too, and keeps the alignment. A pasted line break starts
+ * a new paragraph instead of becoming a space.
  */
 const ProseParagraph = Paragraph.extend({
   addAttributes() {
@@ -59,6 +84,18 @@ const ProseParagraph = Paragraph.extend({
           element.classList.contains('block-quote'),
         renderHTML: ({ blockQuote }) =>
           blockQuote ? { class: 'block-quote' } : {},
+      },
+      textAlign: {
+        default: null,
+        // Left, justified and the rest are left.
+        parseHTML: (element) => {
+          const align = alignmentNamed(
+            element.style.textAlign || element.getAttribute('align'),
+          );
+          return align ? ALIGN_NAME[align] : null;
+        },
+        renderHTML: ({ textAlign }) =>
+          textAlign ? { style: `text-align: ${textAlign}` } : {},
       },
     };
   },
@@ -76,29 +113,50 @@ const ProseParagraph = Paragraph.extend({
   },
 
   addCommands() {
+    /** The paragraphs the selection touches. */
+    const touched = (state: EditorState) => {
+      const paragraphs: { node: PMNode; pos: number }[] = [];
+      for (const { $from, $to } of state.selection.ranges) {
+        state.doc.nodesBetween($from.pos, $to.pos, (node, pos) => {
+          if (node.type === this.type) paragraphs.push({ node, pos });
+          return !node.isTextblock;
+        });
+      }
+      return paragraphs;
+    };
+    /**
+     * Sets `attribute` on the paragraphs the selection touches, to what
+     * `valueFor` makes of them all.
+     */
+    const setOnTouched = (
+      { state, tr, dispatch }: CommandProps,
+      attribute: 'blockQuote' | 'textAlign',
+      valueFor: (paragraphs: PMNode[]) => unknown,
+    ) => {
+      const paragraphs = touched(state);
+      if (paragraphs.length === 0) return false;
+      const to = valueFor(paragraphs.map(({ node }) => node));
+      if (dispatch) {
+        for (const { node, pos } of paragraphs) {
+          tr.setNodeMarkup(pos, undefined, { ...node.attrs, [attribute]: to });
+        }
+      }
+      return true;
+    };
     return {
-      toggleBlockQuote:
-        () =>
-        ({ state, tr, dispatch }) => {
-          const paragraphs: { node: PMNode; pos: number }[] = [];
-          for (const { $from, $to } of state.selection.ranges) {
-            state.doc.nodesBetween($from.pos, $to.pos, (node, pos) => {
-              if (node.type === this.type) paragraphs.push({ node, pos });
-              return !node.isTextblock;
-            });
-          }
-          if (paragraphs.length === 0) return false;
-          const quote = !paragraphs.every(({ node }) => node.attrs.blockQuote);
-          if (dispatch) {
-            for (const { node, pos } of paragraphs) {
-              tr.setNodeMarkup(pos, undefined, {
-                ...node.attrs,
-                blockQuote: quote,
-              });
-            }
-          }
-          return true;
-        },
+      toggleBlockQuote: () => (props) =>
+        setOnTouched(
+          props,
+          'blockQuote',
+          (all) => !all.every((node) => node.attrs.blockQuote),
+        ),
+      alignParagraphs: (align) => (props) =>
+        setOnTouched(props, 'textAlign', (all) => {
+          const textAlign = align && ALIGN_NAME[align];
+          return all.every((node) => node.attrs.textAlign === textAlign)
+            ? null
+            : textAlign;
+        }),
     };
   },
 
@@ -109,19 +167,20 @@ const ProseParagraph = Paragraph.extend({
         props: {
           transformPastedHTML: quotedLines,
           // Ctrl+Shift+B reads as Ctrl+B with a capital B, which would be
-          // bold, so it is taken before the keymaps.
+          // bold, so the paragraph keys are taken before the keymaps.
           handleKeyDown: (_view, event) => {
+            const command = PARAGRAPH_KEYS[event.key.toLowerCase()];
             if (
-              (MAC ? event.metaKey : event.ctrlKey) &&
-              !(MAC ? event.ctrlKey : event.metaKey) &&
-              event.shiftKey &&
-              !event.altKey &&
-              event.key.toLowerCase() === 'b'
+              !command ||
+              !(MAC ? event.metaKey : event.ctrlKey) ||
+              (MAC ? event.ctrlKey : event.metaKey) ||
+              !event.shiftKey ||
+              event.altKey
             ) {
-              editor.commands.toggleBlockQuote();
-              return true;
+              return false;
             }
-            return false;
+            command(editor);
+            return true;
           },
         },
       }),

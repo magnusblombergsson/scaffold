@@ -171,3 +171,54 @@ test('the Author block quotes paragraphs with Ctrl+Shift+B and formats from the 
     '**She read:**\n\n> **Come home.**\n\n**Now.**',
   );
 });
+
+test('the Author aligns paragraphs with Ctrl+Shift+E, R and L, Ctrl+Shift+R included in a packaged build, and from the Format menu', async () => {
+  const projectPath = path.join(tempDir(), 'My Novel');
+  const app = await launch(tempDir());
+  await answerDialogs(app, projectPath);
+  const page = await app.firstWindow();
+  await page.getByRole('button', { name: 'New Project…' }).click();
+  const prose = page.getByLabel('Prose');
+  await expect(prose).toBeFocused();
+
+  // A packaged build has no Reload to take Ctrl+Shift+R.
+  expect(
+    await app.evaluate(({ Menu }) =>
+      Menu.getApplicationMenu()!
+        .items.flatMap((item) => item.submenu?.items ?? [])
+        .map((item) => item.role)
+        .filter((role) => role && /reload|devtools/i.test(role)),
+    ),
+  ).toEqual([]);
+
+  await page.keyboard.type('The End');
+  await page.keyboard.press('ControlOrMeta+Shift+E');
+  const centred = prose.locator('p[style*="text-align: center"]');
+  const right = prose.locator('p[style*="text-align: right"]');
+  await expect(centred).toHaveText(['The End']);
+  await page.keyboard.press('ControlOrMeta+Shift+R');
+  await expect(right).toHaveText(['The End']);
+  await expect(centred).toHaveCount(0);
+  // The current alignment again returns it to left.
+  await page.keyboard.press('ControlOrMeta+Shift+R');
+  await expect(right).toHaveCount(0);
+  await page.keyboard.press('ControlOrMeta+Shift+E');
+  await page.keyboard.press('ControlOrMeta+Shift+L');
+  await expect(centred).toHaveCount(0);
+
+  await page.keyboard.press('Enter');
+  await page.keyboard.type('Signed.');
+  await expect
+    .poll(() => menuEnabled(app, ['Format', 'Align Right']))
+    .toBe(true);
+  await chooseMenu(app, ['Format', 'Align Right'], page);
+  await expect(right).toHaveText(['Signed.']);
+  await page.keyboard.press('ControlOrMeta+a');
+  await chooseMenu(app, ['Format', 'Align Centre'], page);
+  await expect(centred).toHaveText(['The End', 'Signed.']);
+  await app.close();
+
+  expect(await sceneMarkdown(projectPath)).toBe(
+    '{.centre} The End\n\n{.centre} Signed.',
+  );
+});
