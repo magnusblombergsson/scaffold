@@ -128,7 +128,7 @@ Making a new Project from a Word or Markdown manuscript, the mirror of an Export
 _Avoid_: Open (when meaning a manuscript file), convert
 
 **Conflict**:
-Two or more versions of one Scene, Outline, Notes or Entry, saved on different computers or at the same moment, kept side by side until the Author chooses one or merges them; the others go to Trash. A diverged Conversation is not a Conflict: it becomes a second Conversation.
+Two or more versions of one Scene, Outline, Notes or Entry, saved on different computers or at the same moment, kept side by side until the Author chooses one or merges them; the others go to Trash. Only text makes a Conflict (Prose, an Outline's or Notes' text, an Entry's fields): Status, Tags, Word targets, images and Todos merge on their own. A diverged Conversation is not a Conflict: it becomes a second Conversation.
 _Avoid_: Conflicted copy, sync error, merge conflict
 
 **Project setting**:
