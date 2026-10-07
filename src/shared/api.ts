@@ -337,6 +337,12 @@ export interface ProjectApi {
    */
   setStatus(unitId: string, statusId: string | null): Promise<void>;
   /**
+   * Gives a Scene, a Chapter or, with `project`, the Manuscript a Word
+   * target of `words`, or none with null; there is no undo. The Manuscript
+   * showing it follows as a `unitDetailsChanged`.
+   */
+  setWordTarget(unitId: string, words: number | null): Promise<void>;
+  /**
    * Adds, renames, recolours or moves a Status in the list, as now saved;
    * a Status leaves it only by `deleteStatus`. The list follows as a
    * `statusesChanged`. False when it can't be saved, which main has told
@@ -857,6 +863,7 @@ export const projectMethods = {
   setLanguage: 'invoke',
   setFoldedNoteImage: 'invoke',
   setStatus: 'invoke',
+  setWordTarget: 'invoke',
   editStatus: 'invoke',
   statusUses: 'invoke',
   deleteStatus: 'invoke',

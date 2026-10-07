@@ -891,11 +891,12 @@ span.overview-title {
   padding: 0 1rem;
 }
 
-/* Along the bottom, on the desk like the header: the save state, then the counts. */
+/* Along the bottom, on the desk like the header: the save state, and the
+   counts centred under the Prose, or the bar without it. */
 .status-bar {
+  position: relative;
   display: flex;
   align-items: center;
-  justify-content: space-between;
   gap: 1rem;
   padding: 0 1rem 0.35rem;
   color: var(--muted);
@@ -903,8 +904,98 @@ span.overview-title {
   font-variant-numeric: tabular-nums;
 }
 
+.counts-place {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  translate: -50% 0;
+  display: flex;
+  align-items: center;
+  padding-top: inherit;
+  padding-bottom: inherit;
+  white-space: nowrap;
+}
+
+.counts-and-line {
+  position: relative;
+}
+
 .counts {
   cursor: default;
+}
+
+button.counts {
+  background: none;
+  border: none;
+  border-radius: 4px;
+  padding: 0 0.25rem;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+
+button.counts:hover {
+  color: var(--fg);
+}
+
+/* A Word target reached, or gone over: quietly, no alarm. */
+.counts.reached,
+button.counts.reached:hover {
+  color: var(--accent);
+}
+
+/* A thin line under the counts, filling toward the Word target. */
+.word-target-line {
+  position: absolute;
+  left: 0.25rem;
+  right: 0.25rem;
+  bottom: -2px;
+  height: 2px;
+  border-radius: 1px;
+  background: var(--line);
+  overflow: hidden;
+}
+
+.word-target-line > span {
+  display: block;
+  height: 100%;
+  background: currentColor;
+  opacity: 0.6;
+}
+
+.counts-and-line:has(.reached) .word-target-line > span {
+  background: var(--accent);
+  opacity: 1;
+}
+
+/* Setting the Word target of what is shown, just above its counts. */
+.word-target-popover {
+  position: absolute;
+  bottom: calc(100% + 0.25rem);
+  left: 50%;
+  translate: -50% 0;
+  z-index: 50;
+  padding: 0.75rem 1rem;
+  background: var(--sheet);
+  color: var(--fg);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--float-shadow);
+}
+
+.word-target-form {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.word-target-form input {
+  width: 7rem;
+}
+
+.word-target-invalid {
+  color: var(--danger);
 }
 
 .counts-scope {

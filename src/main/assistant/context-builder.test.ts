@@ -980,6 +980,22 @@ describe('Entry images', () => {
   });
 });
 
+describe('Word targets', () => {
+  it('never reach the context, in any Mode and focus', async () => {
+    const project = await fixture();
+    const { store, scenes, chapters } = project;
+    await store.setWordTarget(scenes.harbour, 73519);
+    await store.setWordTarget(chapters.storm, 73519);
+    await store.setWordTarget('project', 73519);
+
+    for (const request of everyRequest(project)) {
+      const text = sent(await buildContext(project.view, request));
+      expect(text).toContain('Her sister.');
+      expect(text).not.toMatch(/73,?519|target/i);
+    }
+  });
+});
+
 describe('Todos', () => {
   it('never reach the context, in any Mode and focus', async () => {
     const project = await fixture();
