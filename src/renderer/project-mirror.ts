@@ -134,7 +134,7 @@ export class ProjectMirror {
   }
 
   /** Reads the Trash again, as it changes with the structure, Entries and Conversations. */
-  refreshTrash = async (): Promise<void> => {
+  private refreshTrash = async (): Promise<void> => {
     this.set({ trash: await this.api.listTrash() });
   };
 
@@ -207,12 +207,16 @@ export class ProjectMirror {
       this.emit({ type: 'error', message: null });
       return true;
     } catch (error) {
-      this.emit({
-        type: 'error',
-        message: `Can't ${what}: ${(error as CallFailure).message}`,
-      });
+      this.fail(what, error);
       return false;
     }
+  }
+
+  private fail(what: string, error: unknown): void {
+    this.emit({
+      type: 'error',
+      message: `Can't ${what}: ${(error as CallFailure).message}`,
+    });
   }
 
   /** Gives a Chapter or Scene a Status; the Manuscript showing it follows from main. */
@@ -241,13 +245,19 @@ export class ProjectMirror {
   async change<R extends Changed>(
     operation: () => Promise<R | null>,
   ): Promise<R | undefined> {
-    let result: R | null = null;
-    await this.attempt('make that change', async () => {
-      result = await operation();
-    });
-    if (result) this.set({ manuscript: (result as R).manuscript });
-    await this.refreshTrash();
-    return result ?? undefined;
+    try {
+      const result = await operation();
+      // The Author cancelled: nothing changed, so nothing is reported.
+      if (!result) return undefined;
+      this.set({ manuscript: result.manuscript });
+      this.emit({ type: 'error', message: null });
+      await this.refreshTrash();
+      return result;
+    } catch (error) {
+      this.fail('make that change', error);
+      await this.refreshTrash();
+      return undefined;
+    }
   }
 
   /** Undoes a structure change by its step. */
@@ -269,7 +279,10 @@ export class ProjectMirror {
 
   /** Empties the Trash if the Author agrees; whether it did. */
   async emptyTrash(): Promise<boolean> {
-    const emptied = await this.api.emptyTrash();
+    let emptied = false;
+    await this.attempt('empty the Trash', async () => {
+      emptied = await this.api.emptyTrash();
+    });
     if (emptied) await this.refreshTrash();
     return emptied;
   }

@@ -403,7 +403,7 @@ describe('ProjectMirror', () => {
       expect(await mirror.change(async () => null)).toBeUndefined();
 
       expect(mirror.getSnapshot().manuscript).toBe(before);
-      expect(events).toEqual([{ type: 'error', message: null }]);
+      expect(events).toEqual([]);
     });
 
     it('change reports a failure once, and keeps the Manuscript', async () => {
