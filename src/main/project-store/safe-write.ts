@@ -81,3 +81,16 @@ export async function setAside(
   await fs.rename(file, aside);
   console.error(`Unreadable ${path.basename(file)} set aside as ${aside}`);
 }
+
+/** `<stem><ext>`, or with `-2`, `-3`… added, whichever isn't taken in `dir`. */
+export async function freeName(
+  fs: FileSystem,
+  dir: string,
+  stem: string,
+  ext: string,
+): Promise<string> {
+  for (let n = 1; ; n++) {
+    const name = `${stem}${n === 1 ? '' : `-${n}`}${ext}`;
+    if (!(await fs.exists(path.join(dir, name)))) return name;
+  }
+}
