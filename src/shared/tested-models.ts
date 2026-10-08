@@ -19,33 +19,33 @@ export const TESTED_MODELS: readonly TestedModel[] = [
   {
     provider: 'anthropic',
     id: 'claude-sonnet-5-5',
-    sheet: 'docs/evals/never-prose/2026-10-06-anthropic-claude-sonnet-5-5.md',
-    prompts: 'b9afe5a4301b',
+    sheet: 'docs/evals/never-prose/2026-10-08-anthropic-claude-sonnet-5-5.md',
+    prompts: '8f2badd7ea96',
   },
   {
     provider: 'anthropic',
     id: 'claude-haiku-4-5',
-    sheet: 'docs/evals/never-prose/2026-10-06-anthropic-claude-haiku-4-5.md',
-    prompts: 'b9afe5a4301b',
+    sheet: 'docs/evals/never-prose/2026-10-08-anthropic-claude-haiku-4-5.md',
+    prompts: '8f2badd7ea96',
   },
   {
     provider: 'openrouter',
     id: 'anthropic/claude-sonnet-5.5',
     sheet:
-      'docs/evals/never-prose/2026-10-06-openrouter-anthropic-claude-sonnet-5.5.md',
-    prompts: 'b9afe5a4301b',
+      'docs/evals/never-prose/2026-10-08-openrouter-anthropic-claude-sonnet-5.5.md',
+    prompts: '8f2badd7ea96',
   },
   {
     provider: 'openrouter',
     id: 'openai/gpt-5.6-sol',
-    sheet: 'docs/evals/never-prose/2026-10-06-openrouter-openai-gpt-5.6-sol.md',
-    prompts: 'b9afe5a4301b',
+    sheet: 'docs/evals/never-prose/2026-10-08-openrouter-openai-gpt-5.6-sol.md',
+    prompts: '8f2badd7ea96',
   },
   {
     provider: 'openrouter',
     id: 'openai/gpt-6-sol',
-    sheet: 'docs/evals/never-prose/2026-10-06-openrouter-openai-gpt-6-sol.md',
-    prompts: 'b9afe5a4301b',
+    sheet: 'docs/evals/never-prose/2026-10-08-openrouter-openai-gpt-6-sol.md',
+    prompts: '8f2badd7ea96',
   },
 ];
 
