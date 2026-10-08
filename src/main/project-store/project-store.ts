@@ -1,14 +1,12 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
 import {
-  DEFAULT_VISIBILITY,
   ENTRY_TYPES,
   PROJECT_OUTLINE,
   proseLanguage,
   unitKey,
-  VISIBILITIES,
   type ChapterNode,
   type DetailRef,
   type EntryImage,
@@ -21,10 +19,8 @@ import {
   type Manuscript,
   type ManuscriptScene,
   type NotesRef,
-  type NotesValue,
   type OutlineRef,
   type OutlineValue,
-  type PrivateValue,
   type ProjectTree,
   type ProseLanguage,
   type SceneNode,
@@ -125,28 +121,24 @@ import {
   type LoggedConversation,
   type LoggedProposal,
 } from './conversation-log';
-import { entryFieldsFrontmatter, readEntryFields } from './entry-fields-file';
 import {
   sameFingerprint,
   type FileSystem,
   type Fingerprint,
 } from './file-system';
 import { FormatUpgraded, GatedFileSystem } from './gated-file-system';
-import { renameWithRetry, safeWrite, writeFailureReason } from './safe-write';
+import { freeName, renameWithRetry, safeWrite } from './safe-write';
 import {
   changeDetails,
   formatWithDetails,
-  KEYS_SAVED_AT,
   mergeDetails,
   type Version,
 } from './unit-details';
 import {
   carriedOnSplit,
-  DETAILS,
   filesMovingWithTrash,
   forAssistant,
   IMAGE_FILE,
-  imageFile,
   parseDetails,
   validateDetail,
   type DetailKey,
@@ -156,14 +148,30 @@ import { TODOS, Todos } from './todos';
 import { tagChanges, type VocabularyChange } from './vocabulary';
 export type { VocabularyChange } from './vocabulary';
 import { formatUnitFile, parseUnitFile, type UnitFile } from './unit-file';
+import { baseOf, UnitWriter, type Loaded, type Pending } from './unit-writer';
+import {
+  entryFile,
+  entryValue,
+  FORMAT,
+  frontmatterOf,
+  hashOf,
+  sameText,
+  sceneFile,
+  TAGS,
+  unitFile,
+  UNIT_DIRS,
+  unitPath,
+  unitValue,
+  withEntryDetails,
+  withImage,
+  withTags,
+  type UnknownKeys,
+} from './unit-codec';
 
-export const FORMAT = 1;
+export { FORMAT };
 const MANIFEST = 'project.json';
 /** How long edits are still saved once a newer app has upgraded the Project, for the window to hand its over. */
 const HANDOVER_MS = 2000;
-
-/** Keys of a file, or of a Chapter's or Scene's place in the tree, that this app doesn't know. */
-type UnknownKeys = Record<string, unknown>;
 
 /** `host` names this computer in its session marker; the OS's name by default. */
 export type StoreDeps = { fs: FileSystem; clock: Clock; host?: string };
@@ -844,45 +852,6 @@ function entrySummary({
   );
 }
 
-/** `value` with `image` as its image, or none. */
-function withImage<T extends { image?: string }>(value: T, image?: string): T {
-  const rest = withoutImage(value);
-  return image ? { ...rest, image } : rest;
-}
-
-/** `value` with `tags` as its Tags; none without any. */
-function withTags<T extends { tags?: string[] }>(
-  value: T,
-  tags?: readonly string[],
-): T {
-  const { tags: _, ...rest } = value;
-  return (tags && tags.length > 0 ? { ...rest, tags: [...tags] } : rest) as T;
-}
-
-/** An Entry's unit details (ADR 0008): its image and its Tags. */
-type EntryDetails = { image?: string; tags?: string[] };
-
-/**
- * An Entry's `value` with the unit details of `held`, as the store has
- * them: only setImage, removeImage and setTags change those.
- */
-function withEntryDetails<T extends EntryDetails>(
-  value: T,
-  held: EntryDetails | undefined,
-): T {
-  return withTags(withImage(value, held?.image), held?.tags);
-}
-
-/** An Entry's `value` without its unit details: its text alone. */
-function withoutEntryDetails<T extends EntryDetails>(value: T): T {
-  return withEntryDetails(value, undefined);
-}
-
-function withoutImage<T extends { image?: string }>(value: T): T {
-  const { image: _, ...rest } = value;
-  return rest as T;
-}
-
 /** `manuscript` as the Assistant sees it: no unit of it has a detail that is hidden. */
 function manuscriptForAssistant(manuscript: Manuscript): Manuscript {
   return {
@@ -1075,32 +1044,6 @@ function sessionsAtOpen(
   return { notice, own };
 }
 
-type Pending = { ref: UnitRef; value: UnitValue };
-
-/** A unit as this store last read or wrote it, to tell when another computer changes it. */
-type Loaded = {
-  ref: UnitRef;
-  /** Null when it had no file. */
-  fingerprint: Fingerprint | null;
-  /** Of the file's text; null when it had no file. */
-  hash: string | null;
-  value: UnitValue;
-  /** Whether this computer wrote the file, rather than read it. */
-  savedHere?: true;
-  /**
-   * When it was reloaded from another computer's file: the version it
-   * replaced. A write is taken as made on that one until an editor takes the
-   * reload, or a read sees it; one an editor kept its own edits over stays so.
-   */
-  reload?: { before: Loaded; taken: boolean; kept: boolean };
-};
-
-/** The version of a unit that a write accepted now was made on. */
-function baseOf(loaded: Loaded): Loaded {
-  const { reload } = loaded;
-  return reload && (reload.kept || !reload.taken) ? reload.before : loaded;
-}
-
 /** The `versionId` of the version at a unit's own path. */
 const ORIGINAL = 'original';
 
@@ -1122,24 +1065,10 @@ type ConflictEntry = {
   copies: ConflictCopy[];
 };
 
-/** How long a unit that failed to save waits before the next try, by failures in a row. */
-const RETRY_BACKOFF_MS = [1000, 2000, 5000, 10_000, 30_000];
-
 /** The latest structure operation, and how to revert it. */
 type Step = { step: number; undo: () => Promise<void> };
 
 export class ProjectStore {
-  /** Values accepted from the renderer but not yet on disk, per unit. */
-  private readonly unsaved = new Map<string, Pending>();
-  /** The running write loop per unit, so writes to one unit never overlap. */
-  private readonly writing = new Map<string, Promise<void>>();
-  /** The save status last reported per unit; none means saved. */
-  private readonly status = new Map<string, UnitSaveStatus>();
-  /** Failed tries in a row per unit; the next try waits longer after each. */
-  private readonly failures = new Map<string, number>();
-  /** The one retry per failed unit that may still run, by a token unique to it. */
-  private readonly retries = new Map<string, number>();
-  private retryTokens = 0;
   private readonly listeners = new Set<(event: ProjectEvent) => void>();
   private readonly vocabularyListeners = new Set<
     (change: VocabularyChange) => void
@@ -1158,8 +1087,8 @@ export class ProjectStore {
   private latest: Step | null = null;
   private steps = 0;
 
-  /** The units read or written since the Project opened, by key. */
-  private readonly loaded = new Map<string, Loaded>();
+  /** The unit writer saves the units accepted by `write`. */
+  private readonly unitWriter: UnitWriter;
   /** `project.json` as last read or written; null until then. */
   private manifestFingerprint: Fingerprint | null = null;
   /** Whether a check for changes on disk is waiting for a burst of events to end. */
@@ -1222,6 +1151,20 @@ export class ProjectStore {
       unguarded: [SESSIONS],
     });
     this.deps = { ...deps, fs: this.gated };
+    this.unitWriter = new UnitWriter({
+      path,
+      fs: this.gated,
+      clock: deps.clock,
+      handover: (work) => this.gated.handover(work),
+      emit: (event) => this.emit(event),
+      isResolving: (key) => this.resolving.has(key),
+      afterWrites: async (key, setAside) => {
+        // Its versions, or when its own file was saved, changed.
+        if (setAside || this.conflicts.has(key) || this.mergeLater.has(key)) {
+          await this.refreshConflicts(key);
+        }
+      },
+    });
     this.dropped = opened.dropped;
     this.unrecognised = opened.unrecognised;
     this.files = units.files;
@@ -1459,7 +1402,7 @@ export class ProjectStore {
     this.trash.clear();
     for (const [id, item] of units.trash) this.trash.set(id, item);
     // An Entry's value accepted here and not yet saved is newer.
-    for (const { ref, value } of this.unsaved.values()) {
+    for (const { ref, value } of this.unitWriter.pendingValues()) {
       if (ref.kind === 'entry') {
         // Its image and Tags are as on disk: nothing else changes them here.
         units.entries.set(
@@ -1488,12 +1431,12 @@ export class ProjectStore {
   }
 
   private async checkUnits(): Promise<void> {
-    for (const [key, known] of this.loaded) {
-      if (this.isDirty(key)) continue;
+    for (const [key, known] of this.unitWriter.knownUnits()) {
+      if (this.unitWriter.isDirty(key)) continue;
       try {
         this.refuseUnavailable(known.ref);
       } catch {
-        this.loaded.delete(key);
+        this.unitWriter.forget(key);
         continue;
       }
       const file = unitPath(this.path, known.ref);
@@ -1505,8 +1448,8 @@ export class ProjectStore {
       const text = await this.deps.fs.readFile(file);
       const value = unitValue(known.ref, parseUnitFile(text));
       // Written to since: what to keep is decided when it is saved.
-      if (this.isDirty(key)) continue;
-      this.loaded.set(key, {
+      if (this.unitWriter.isDirty(key)) continue;
+      this.unitWriter.setKnown(key, {
         ref: known.ref,
         fingerprint,
         hash: hashOf(text),
@@ -1536,7 +1479,7 @@ export class ProjectStore {
     this.upgraded = upgraded;
     this.gated.markUpgraded();
     this.latest = null;
-    for (const key of this.unsaved.keys()) this.startWriting(key);
+    this.unitWriter.saveAll();
     const host = await this.upgradedOn();
     if (host) upgraded.host = host;
     this.emit({ type: 'readOnly', ...upgraded });
@@ -1660,7 +1603,10 @@ export class ProjectStore {
         console.error(`Can't merge the copies of ${key}:`, error);
         return copies;
       });
-    if (this.unsaved.has(key) || (key !== holding && this.writing.has(key))) {
+    if (
+      this.unitWriter.pending(key) ||
+      (key !== holding && this.unitWriter.isWriting(key))
+    ) {
       // Its drain looks again once its writes are done.
       this.mergeLater.add(key);
       return merge(false);
@@ -1668,24 +1614,7 @@ export class ProjectStore {
     this.mergeLater.delete(key);
     const merging = merge(true);
     if (key === holding) return merging;
-    return this.holdingWrites(key, merging);
-  }
-
-  /** Resolves as `work` does; the unit's writes wait for it, then go on. */
-  private async holdingWrites<T>(key: string, work: Promise<T>): Promise<T> {
-    this.writing.set(
-      key,
-      work.then(
-        () => {},
-        () => {},
-      ),
-    );
-    try {
-      return await work;
-    } finally {
-      this.writing.delete(key);
-      if (this.unsaved.has(key)) this.startWriting(key);
-    }
+    return this.unitWriter.holdingWrites(key, merging);
   }
 
   /**
@@ -1746,7 +1675,7 @@ export class ProjectStore {
   ): Promise<ConflictEntry['original']> {
     const fingerprint = await this.deps.fs.stat(unitPath(this.path, ref));
     if (!fingerprint) return null;
-    const loaded = this.loaded.get(key);
+    const loaded = this.unitWriter.known(key);
     const here =
       loaded?.savedHere && sameFingerprint(loaded.fingerprint, fingerprint);
     return { savedAt: fingerprint.mtimeMs, ...(here && { host: this.host }) };
@@ -1809,10 +1738,6 @@ export class ProjectStore {
     } catch {
       return false;
     }
-  }
-
-  private isDirty(key: string): boolean {
-    return this.unsaved.has(key) || this.writing.has(key);
   }
 
   get displayName(): string {
@@ -2281,7 +2206,7 @@ export class ProjectStore {
     value: unknown,
   ): Promise<void> {
     const held = unitKey(ref);
-    while (this.writing.has(held)) await this.writing.get(held);
+    await this.unitWriter.settled(held);
     const saving = (async () => {
       const file = unitPath(this.path, ref);
       await this.deps.fs.mkdir(path.dirname(file));
@@ -2299,7 +2224,7 @@ export class ProjectStore {
       await safeWrite(this.deps.fs, this.deps.clock, file, written);
       const saved = await this.deps.fs.stat(file);
       // What an editor has is this version still: only a detail changed.
-      const loaded = this.loaded.get(held);
+      const loaded = this.unitWriter.known(held);
       if (
         loaded &&
         !loaded.reload &&
@@ -2318,7 +2243,7 @@ export class ProjectStore {
       if (ref.kind === 'outline') this.noteDetails(ref.id, saved, after);
       else this.noteEntryDetails(ref.id, after);
     })();
-    await this.holdingWrites(held, saving);
+    await this.unitWriter.holdingWrites(held, saving);
   }
 
   /**
@@ -2631,7 +2556,7 @@ export class ProjectStore {
     const after = change(structuredClone(before));
     await this.write(ref, after);
     const key = unitKey(ref);
-    while (this.writing.has(key)) await this.writing.get(key);
+    await this.unitWriter.settled(key);
     return { before, after };
   }
 
@@ -2642,12 +2567,12 @@ export class ProjectStore {
     this.closing.add(entryId);
     try {
       // Its latest value, once every write accepted for it has run.
-      while (this.writing.has(key)) await this.writing.get(key);
+      await this.unitWriter.settled(key);
       const file = parseUnitFile(
         await this.deps.fs.readFile(unitPath(this.path, ref)),
       );
       const latest =
-        (this.unsaved.get(key)?.value as EntryValue | undefined) ??
+        (this.unitWriter.pending(key)?.value as EntryValue | undefined) ??
         entryValue(entryId, file);
       const info: TrashedEntryInfo = { at: this.deps.clock.now() };
       const { frontmatter: own, body } = parseUnitFile(
@@ -2662,7 +2587,7 @@ export class ProjectStore {
       );
       this.trash.set(entryId, trashedEntry(latest, info));
       // Its description is in Trash now.
-      this.settle(key);
+      this.unitWriter.settle(key);
       this.setEntries(() => this.entries.delete(entryId));
       await this.deps.fs.unlink(unitPath(this.path, ref));
       // Last: a crash before leaves it in images/, where restoring finds it.
@@ -3109,7 +3034,7 @@ export class ProjectStore {
     const key = unitKey(ref);
     // The Author's text not yet saved is one of the versions. What is
     // written from now on is newer than `kept`: it waits, then goes over it.
-    const superseded = this.unsaved.get(key);
+    const superseded = this.unitWriter.pending(key);
     this.resolving.add(key);
     return this.enqueueStructure(async () => {
       try {
@@ -3119,20 +3044,17 @@ export class ProjectStore {
         await this.findConflicts();
         const entry = this.conflicts.get(key);
         if (!entry) throw new Error(`${key} is in no Conflict`);
-        while (this.writing.has(key)) await this.writing.get(key);
-        const pending = this.unsaved.get(key);
+        await this.unitWriter.settled(key);
+        const pending = this.unitWriter.pending(key);
         const taken = pending && pending === superseded ? pending : undefined;
         const loaded = await this.keepVersion(entry, kept, taken);
-        if (taken) this.settle(key);
-        else this.failures.delete(key);
-        this.loaded.set(key, loaded);
+        if (taken) this.unitWriter.settle(key);
+        else this.unitWriter.clearFailures(key);
+        this.unitWriter.setKnown(key, loaded);
       } finally {
         this.resolving.delete(key);
       }
-      if (this.unsaved.has(key)) {
-        this.report({ type: 'unitSaveStatus', ref, state: 'saving' });
-        this.startWriting(key);
-      }
+      this.unitWriter.resumeAfterResolving(ref);
       await this.findConflicts();
     });
   }
@@ -3168,7 +3090,7 @@ export class ProjectStore {
       ({ frontmatter } = parseUnitFile(text));
       versions.push({ header: frontmatter, savedAt: onDisk.mtimeMs });
       if (differs(text, pending ? [pending.value] : [])) {
-        const known = this.loaded.get(unitKey(ref));
+        const known = this.unitWriter.known(unitKey(ref));
         const unchanged =
           original && sameFingerprint(onDisk, known?.fingerprint ?? null);
         await this.writeTrashedVersion(ref, text, {
@@ -3188,7 +3110,9 @@ export class ProjectStore {
     }
     if (pending) {
       // The details it didn't change are the file's, saved when it was.
-      const saved = parseUnitFile(this.fileToSave(pending, frontmatter));
+      const saved = parseUnitFile(
+        this.unitWriter.fileToSave(pending, frontmatter),
+      );
       versions.push({
         header: saved.frontmatter,
         savedAt: onDisk?.mtimeMs ?? this.deps.clock.now(),
@@ -3391,8 +3315,8 @@ export class ProjectStore {
   /** Deletes a unit's file for good, once the writes accepted for it have run. */
   private async deleteUnitFile(ref: UnitRef): Promise<void> {
     const key = unitKey(ref);
-    while (this.writing.has(key)) await this.writing.get(key);
-    this.settle(key);
+    await this.unitWriter.settled(key);
+    this.unitWriter.settle(key);
     const file = unitPath(this.path, ref);
     if (await this.deps.fs.exists(file)) await this.deps.fs.unlink(file);
     if (ref.kind === 'outline') this.noteDetails(ref.id, null, {});
@@ -3514,7 +3438,7 @@ export class ProjectStore {
       for (const id of ids) {
         this.files.delete(id);
         // Its Prose is in Trash now.
-        this.settle(unitKey(sceneRef(id)));
+        this.unitWriter.settle(unitKey(sceneRef(id)));
       }
       for (const id of ids) {
         await this.deps.fs.unlink(scenePath(this.path, id));
@@ -3527,11 +3451,11 @@ export class ProjectStore {
   /** A Scene's file, with its latest Prose once every write accepted for it has run. */
   private async settledScene(id: string): Promise<UnitFile> {
     const key = unitKey(sceneRef(id));
-    while (this.writing.has(key)) await this.writing.get(key);
+    await this.unitWriter.settled(key);
     const file = parseUnitFile(
       await this.deps.fs.readFile(scenePath(this.path, id)),
     );
-    const pending = this.unsaved.get(key);
+    const pending = this.unitWriter.pending(key);
     if (pending) file.body = (pending.value as SceneValue).markdown;
     return file;
   }
@@ -3790,33 +3714,7 @@ export class ProjectStore {
   /** Reads a unit; a value accepted by `write` is seen before it is on disk. */
   async read<R extends UnitRef>(ref: R): Promise<ValueOf<R>> {
     this.refuseUnavailable(ref);
-    const pending = this.unsaved.get(unitKey(ref));
-    if (pending) return structuredClone(pending.value) as ValueOf<R>;
-    const file = unitPath(this.path, ref);
-    // Taken first: a change while reading then shows on the next check.
-    const fingerprint = await this.deps.fs.stat(file);
-    // An Outline, Notes or private notes has no file until the Author first
-    // writes it.
-    const text =
-      ref.kind === 'scene' || ref.kind === 'entry' || fingerprint
-        ? await this.deps.fs.readFile(file)
-        : '';
-    const value = unitValue(ref, parseUnitFile(text));
-    const key = unitKey(ref);
-    const known = this.loaded.get(key);
-    if (this.isDirty(key)) return value as ValueOf<R>;
-    if (known?.reload && sameFingerprint(fingerprint, known.fingerprint)) {
-      // What is written from now on is made on what was read.
-      known.reload.taken = true;
-    } else {
-      this.loaded.set(key, {
-        ref,
-        fingerprint,
-        hash: fingerprint && hashOf(text),
-        value: structuredClone(value),
-      });
-    }
-    return value as ValueOf<R>;
+    return (await this.unitWriter.read(ref)) as ValueOf<R>;
   }
 
   /**
@@ -3830,7 +3728,6 @@ export class ProjectStore {
     // Not a write: the edit is only held, and saved by the handover.
     if (this.editsRefused) this.refuseIfUpgraded();
     this.refuseUnavailable(ref);
-    const key = unitKey(ref);
     if (ref.kind === 'entry') {
       // Only setImage, removeImage and setTags change its image and Tags.
       value = withEntryDetails(
@@ -3838,18 +3735,14 @@ export class ProjectStore {
         this.entries.get(ref.id),
       ) as ValueOf<R>;
     }
-    this.unsaved.set(key, { ref, value: structuredClone(value) });
-    if (ref.kind === 'entry') {
-      const entry = entrySummary({ ...(value as EntryValue), id: ref.id });
-      this.setEntries(() => this.entries.set(ref.id, entry));
-      // Its Proposals may be stale, or applied, now.
-      this.emit({ type: 'proposalsChanged' });
-    }
-    // A failed unit stays failed until it is saved, and its next try waits
-    // for the backoff, which picks up this value.
-    if (this.failures.has(key)) return;
-    this.report({ type: 'unitSaveStatus', ref, state: 'saving' });
-    this.startWriting(key);
+    this.unitWriter.write(ref, value, () => {
+      if (ref.kind === 'entry') {
+        const entry = entrySummary({ ...(value as EntryValue), id: ref.id });
+        this.setEntries(() => this.entries.set(ref.id, entry));
+        // Its Proposals may be stale, or applied, now.
+        this.emit({ type: 'proposalsChanged' });
+      }
+    });
   }
 
   /**
@@ -3859,8 +3752,7 @@ export class ProjectStore {
    * over, as for a write that crossed the reload on its way.
    */
   reloadTaken(ref: UnitRef): void {
-    const reload = this.loaded.get(unitKey(ref))?.reload;
-    if (reload) reload.taken = true;
+    this.unitWriter.reloadTaken(ref);
   }
 
   /**
@@ -3869,8 +3761,7 @@ export class ProjectStore {
    * version is set aside as a conflict copy, whatever another editor took.
    */
   keepEditsOverReload(ref: UnitRef): void {
-    const reload = this.loaded.get(unitKey(ref))?.reload;
-    if (reload) reload.kept = true;
+    this.unitWriter.keepEditsOverReload(ref);
   }
 
   /**
@@ -4276,7 +4167,7 @@ ${text}`);
 
   /** Refuses to go on while a unit written for a Proposal, now `value`, isn't saved. */
   private refuseUnsaved(ref: EntryRef | OutlineRef, value: UnitValue): void {
-    if (this.unsaved.has(unitKey(ref))) {
+    if (this.unitWriter.pending(unitKey(ref))) {
       const name =
         ref.kind === 'entry'
           ? (value as EntryValue).name
@@ -4533,19 +4424,16 @@ ${text}`);
    * A unit waiting to try again after a failure tries at once.
    */
   async flush(): Promise<void> {
-    for (const key of this.failures.keys()) this.startWriting(key);
-    while (this.writing.size > 0) {
-      await Promise.all(this.writing.values());
-    }
+    await this.unitWriter.flush();
   }
 
   hasUnsaved(): boolean {
-    return this.unsaved.size > 0;
+    return this.unitWriter.hasUnsaved();
   }
 
   /** The status of each unit that isn't saved; a failed one is still being retried. */
   saveStatuses(): UnitSaveStatus[] {
-    return [...this.status.values()].map((status) => structuredClone(status));
+    return this.unitWriter.saveStatuses();
   }
 
   /** Calls `listener` with each event; returns an unsubscribe function. */
@@ -4587,155 +4475,6 @@ ${text}`);
     }
   }
 
-  private startWriting(key: string): void {
-    if (this.writing.has(key) || this.resolving.has(key)) return;
-    this.writing.set(
-      key,
-      this.drain(key).finally(() => {
-        this.writing.delete(key);
-        const failures = this.failures.get(key);
-        if (failures !== undefined) void this.retryLater(key, failures);
-        else this.retries.delete(key);
-      }),
-    );
-  }
-
-  private async drain(key: string): Promise<void> {
-    /** Whether a version from disk went beside the unit's file. */
-    let setAside = false;
-    try {
-      await this.drainWrites(key, () => {
-        setAside = true;
-      });
-    } finally {
-      // Its versions, or when its own file was saved, changed.
-      if (setAside || this.conflicts.has(key) || this.mergeLater.has(key)) {
-        await this.refreshConflicts(key);
-      }
-    }
-  }
-
-  private async drainWrites(
-    key: string,
-    onSetAside: () => void,
-  ): Promise<void> {
-    for (;;) {
-      const pending = this.unsaved.get(key);
-      // A unit being resolved takes its next write once that is done.
-      if (!pending || this.resolving.has(key)) return;
-      try {
-        // Once upgraded, edits are still saved, in this app's format.
-        await this.gated.handover(async () => {
-          const file = unitPath(this.path, pending.ref);
-          if (pending.ref.kind !== 'scene') {
-            await this.deps.fs.mkdir(path.dirname(file));
-          }
-          const onDisk = await this.checkBeforeSave(pending, file);
-          if (onDisk.setAside) onSetAside();
-          const text = this.fileToSave(pending, onDisk.frontmatter);
-          await safeWrite(this.deps.fs, this.deps.clock, file, text);
-          this.loaded.set(key, {
-            ref: pending.ref,
-            fingerprint: await this.deps.fs.stat(file),
-            hash: hashOf(text),
-            value: pending.value,
-            savedHere: true,
-          });
-        });
-      } catch (error) {
-        // The unit stays unsaved in memory, and is tried again later.
-        console.error(`Can't save ${key}:`, error);
-        const failures = (this.failures.get(key) ?? 0) + 1;
-        this.failures.set(key, failures);
-        this.report({
-          type: 'unitSaveStatus',
-          ref: pending.ref,
-          state: 'failed',
-          reason: writeFailureReason(error),
-        });
-        return;
-      }
-      this.failures.delete(key);
-      const done = this.unsaved.get(key) === pending;
-      if (done) this.unsaved.delete(key);
-      this.report({
-        type: 'unitSaveStatus',
-        ref: pending.ref,
-        state: done ? 'saved' : 'saving',
-      });
-    }
-  }
-
-  /**
-   * The pre-save check: a file whose time, size or content changed on disk
-   * since this store read or wrote it, as when another computer saved it, is never overwritten. Its
-   * version goes beside it as a conflict copy, and the Author's text here
-   * then goes to the unit's own file, with nothing to interrupt them. The
-   * same text rewritten is no change. Resolves with whether it set a version
-   * aside, and the frontmatter on disk, for the save to keep the keys this
-   * app doesn't know.
-   */
-  private async checkBeforeSave(
-    { ref, value }: Pending,
-    file: string,
-  ): Promise<{ setAside: boolean; frontmatter: UnknownKeys }> {
-    const fingerprint = await this.deps.fs.stat(file);
-    if (!fingerprint) return { setAside: false, frontmatter: {} };
-    const text = await this.deps.fs.readFile(file);
-    const onDisk = parseUnitFile(text);
-    const unchanged = { setAside: false, frontmatter: onDisk.frontmatter };
-    const loaded = this.loaded.get(unitKey(ref));
-    const known = loaded && baseOf(loaded);
-    if (
-      !known ||
-      (sameFingerprint(fingerprint, known.fingerprint) &&
-        hashOf(text) === known.hash)
-    ) {
-      return unchanged;
-    }
-    // Only text makes a Conflict: details merge as the file is saved.
-    const theirs = unitValue(ref, onDisk);
-    if (sameText(ref, theirs, known.value) || sameText(ref, theirs, value)) {
-      return unchanged;
-    }
-    const dir = path.dirname(file);
-    const name = await freeName(this.deps.fs, dir, `${ref.id}-conflict`, '.md');
-    await safeWrite(
-      this.deps.fs,
-      this.deps.clock,
-      path.join(dir, name),
-      // The copy is matched to its unit by the id inside it.
-      onDisk.frontmatter.id === ref.id
-        ? text
-        : formatUnitFile({
-            ...onDisk,
-            frontmatter: { ...onDisk.frontmatter, id: ref.id },
-          }),
-    );
-    return { setAside: true, frontmatter: onDisk.frontmatter };
-  }
-
-  /**
-   * The file a pending value is saved as over `onDisk`, the header on disk:
-   * its text from the value, and its details as on disk, but for those the
-   * value changed from the version it was made on, saved now (ADR 0008).
-   */
-  private fileToSave({ ref, value }: Pending, onDisk: UnknownKeys): string {
-    const known = this.loaded.get(unitKey(ref));
-    const mine = parseUnitFile(unitFile(ref, value, onDisk));
-    const before = known
-      ? parseUnitFile(unitFile(ref, baseOf(known).value, onDisk)).frontmatter
-      : onDisk;
-    const details = changeDetails(
-      ref.kind,
-      onDisk,
-      before,
-      mine.frontmatter,
-      this.deps.clock.now(),
-    );
-    return formatWithDetails(ref.kind, mine, details);
-  }
-
   /**
    * Finds the units in Conflict again; failing to only leaves the list as it
    * was. `holding` is the unit whose writes the caller holds, if any.
@@ -4746,39 +4485,6 @@ ${text}`);
     } catch (error) {
       console.error(`Can't look for Conflicts in ${this.path}:`, error);
     }
-  }
-
-  /**
-   * Tries a failed unit again after its backoff. A retry scheduled since, or
-   * a save, makes this one stale.
-   */
-  private async retryLater(key: string, failures: number): Promise<void> {
-    const token = ++this.retryTokens;
-    this.retries.set(key, token);
-    const index = Math.min(failures, RETRY_BACKOFF_MS.length) - 1;
-    await this.deps.clock.sleep(RETRY_BACKOFF_MS[index]);
-    if (this.retries.get(key) === token) this.startWriting(key);
-  }
-
-  /** Drops a unit's unsaved value once it is kept elsewhere or deleted. */
-  private settle(key: string): void {
-    this.loaded.delete(key);
-    this.unsaved.delete(key);
-    this.failures.delete(key);
-    this.retries.delete(key);
-    const status = this.status.get(key);
-    if (status) {
-      this.report({ type: 'unitSaveStatus', ref: status.ref, state: 'saved' });
-    }
-  }
-
-  /** Tells the listeners when a unit's save status changes. */
-  private report(status: UnitSaveStatus): void {
-    const key = unitKey(status.ref);
-    if (sameStatus(this.status.get(key), status)) return;
-    if (status.state === 'saved') this.status.delete(key);
-    else this.status.set(key, status);
-    this.emit(status);
   }
 
   private emit(event: ProjectEvent): void {
@@ -4809,23 +4515,6 @@ function todoLink(link: TodoLink): TodoLink {
     throw new Error('A Todo links only to a Scene, Chapter or Entry');
   }
   return { kind: link.kind, id: link.id };
-}
-
-/** `<stem><ext>`, or with `-2`, `-3`… added, whichever isn't taken in `dir`. */
-async function freeName(
-  fs: FileSystem,
-  dir: string,
-  stem: string,
-  ext: string,
-): Promise<string> {
-  for (let n = 1; ; n++) {
-    const name = `${stem}${n === 1 ? '' : `-${n}`}${ext}`;
-    if (!(await fs.exists(path.join(dir, name)))) return name;
-  }
-}
-
-function hashOf(text: string): string {
-  return createHash('sha256').update(text).digest('hex');
 }
 
 /** Logs a file left alone, once while the Project is open. */
@@ -4867,18 +4556,6 @@ function hostOfCopy(name: string, hosts: string[]): { host?: string } {
 function replaceAll<T>(set: Set<T>, items: Set<T>): void {
   set.clear();
   for (const item of items) set.add(item);
-}
-
-/** Whether `status` says nothing new; no status is saved. */
-function sameStatus(
-  was: UnitSaveStatus | undefined,
-  status: UnitSaveStatus,
-): boolean {
-  if (!was) return status.state === 'saved';
-  if (was.state === 'failed' && status.state === 'failed') {
-    return was.reason === status.reason;
-  }
-  return was.state === status.state;
 }
 
 function sceneIds(tree: ProjectTree): string[] {
@@ -4925,18 +4602,6 @@ function notesRef(id: string): NotesRef {
 
 function scenePath(projectPath: string, id: string): string {
   return path.join(projectPath, 'scenes', `${id}.md`);
-}
-
-const UNIT_DIRS = {
-  scene: 'scenes',
-  outline: 'outlines',
-  notes: 'notes',
-  entry: 'bible',
-  private: 'private',
-};
-
-function unitPath(projectPath: string, ref: UnitRef): string {
-  return path.join(projectPath, UNIT_DIRS[ref.kind], `${ref.id}.md`);
 }
 
 /** Where Entry, Scene and Chapter images are, each named by its unit's `image`. */
@@ -5019,23 +4684,6 @@ function isChapterFile(name: string): boolean {
   return CHAPTER_FILE.test(name);
 }
 
-/**
- * A unit's frontmatter as this app writes it: its id and this app's format,
- * then the keys of `previous`, the frontmatter it had, that this app doesn't
- * know, so that a newer app's are never lost (the tolerant reader).
- */
-function frontmatterOf(id: string, previous: UnknownKeys = {}): UnknownKeys {
-  const { id: _id, format: _format, ...unknown } = previous;
-  return { id, format: FORMAT, ...unknown };
-}
-
-function sceneFile(value: SceneValue, previous?: UnknownKeys): string {
-  return formatUnitFile({
-    frontmatter: frontmatterOf(value.id, previous),
-    body: value.markdown,
-  });
-}
-
 /** Where the Status of `statusId` is in `statuses`; refused if it isn't. */
 function indexOfStatus(statuses: readonly Status[], statusId: string): number {
   const index = statuses.findIndex((s) => s.id === statusId);
@@ -5053,138 +4701,6 @@ function checkedStatus({ id, name, colour }: Status): Status {
   }
   if (!STATUS_COLOURS.includes(colour)) throw new Error(`No colour ${colour}`);
   return { id, name: name.trim(), colour };
-}
-
-/** The header key of an Entry's Tags, by spelling, in its Entry file; see the details catalogue. */
-const TAGS = 'tags';
-
-/**
- * An Outline's metadata is the rest of its frontmatter, so it already holds
- * what this app doesn't know; any other unit's is kept from `previous`.
- */
-function unitFile(
-  ref: UnitRef,
-  value: UnitValue,
-  previous?: UnknownKeys,
-): string {
-  if (ref.kind === 'scene') return sceneFile(value as SceneValue, previous);
-  if (ref.kind === 'entry') return entryFile(value as EntryValue, previous);
-  const { id, body } = value as OutlineValue | NotesValue | PrivateValue;
-  const kept = ref.kind === 'outline' ? (value as OutlineValue).meta : previous;
-  return formatUnitFile({ frontmatter: frontmatterOf(id, kept), body });
-}
-
-/**
- * `bible/<id>.md`: the Entry's fields in frontmatter, its description as the
- * body. A type or visibility this app doesn't know, as a newer app may
- * write, reads as its default and is kept while the value is still that
- * default (the tolerant reader); so are type-specific fields this app
- * doesn't know.
- */
-function entryFile(value: EntryValue, previous: UnknownKeys = {}): string {
-  const {
-    type: previousType,
-    name: _name,
-    aliases: _aliases,
-    visibility: previousVisibility,
-    image: previousImage,
-    [TAGS]: _tags,
-    ...unknown
-  } = previous;
-  const { id, name, aliases, description } = value;
-  // One this app can't show is kept, unless an image replaces it.
-  const image =
-    value.image ??
-    (imageFile(value.id, previousImage) ? undefined : previousImage);
-  const keepsType =
-    value.type === 'other' && !ENTRY_TYPES.includes(previousType as EntryType);
-  const type = keepsType ? (previousType ?? value.type) : value.type;
-  const visibility =
-    value.visibility === DEFAULT_VISIBILITY &&
-    !VISIBILITIES.includes(previousVisibility as Visibility)
-      ? (previousVisibility ?? value.visibility)
-      : value.visibility;
-  const { id: _, format, ...rest } = frontmatterOf(id, unknown);
-  const fields = entryFieldsFrontmatter(
-    value.type,
-    value.fields,
-    keepsType ? value.type : previousType,
-    rest,
-  );
-  return formatUnitFile({
-    frontmatter: {
-      id,
-      format,
-      type,
-      name,
-      aliases,
-      visibility,
-      ...(image !== undefined && { image }),
-      ...(value.tags && value.tags.length > 0 && { [TAGS]: value.tags }),
-      ...fields,
-    },
-    body: description,
-  });
-}
-
-function unitValue(ref: UnitRef, file: UnitFile): UnitValue {
-  const { frontmatter, body } = file;
-  if (ref.kind === 'scene') return { id: ref.id, markdown: body };
-  if (ref.kind === 'entry') return entryValue(ref.id, file);
-  if (ref.kind === 'notes' || ref.kind === 'private') {
-    return { id: ref.id, body };
-  }
-  const {
-    id: _id,
-    format: _format,
-    [KEYS_SAVED_AT]: _savedAt,
-    ...rest
-  } = frontmatter;
-  // A detail isn't in the Outline's metadata: a write keeps it as on disk.
-  const meta = Object.fromEntries(
-    Object.entries(rest).filter(([key]) => !DETAILS.some((d) => d.key === key)),
-  );
-  return { id: ref.id, body, meta };
-}
-
-/** Whether two values of a unit hold the same text, whatever their details (ADR 0008). */
-function sameText(ref: UnitRef, a: UnitValue, b: UnitValue): boolean {
-  return isDeepStrictEqual(textOf(ref, a), textOf(ref, b));
-}
-
-function textOf(ref: UnitRef, value: UnitValue): unknown {
-  if (ref.kind === 'outline') {
-    const { meta: _, ...text } = value as OutlineValue;
-    return text;
-  }
-  return ref.kind === 'entry'
-    ? withoutEntryDetails(value as EntryValue)
-    : value;
-}
-
-/** An Entry from its file; a field that is missing or not understood reads as its default. */
-function entryValue(id: string, { frontmatter, body }: UnitFile): EntryValue {
-  const { type, name, aliases, visibility } = frontmatter;
-  const image = imageFile(id, frontmatter.image);
-  const tags = readTags(frontmatter[TAGS]);
-  const entryType = ENTRY_TYPES.includes(type as EntryType)
-    ? (type as EntryType)
-    : 'other';
-  return {
-    id,
-    type: entryType,
-    name: typeof name === 'string' ? name : '',
-    aliases: Array.isArray(aliases)
-      ? aliases.filter((alias) => typeof alias === 'string')
-      : [],
-    visibility: VISIBILITIES.includes(visibility as Visibility)
-      ? (visibility as Visibility)
-      : DEFAULT_VISIBILITY,
-    description: body,
-    fields: readEntryFields(entryType, frontmatter),
-    ...(image && { image }),
-    ...(tags.length > 0 && { tags }),
-  };
 }
 
 /** What the Proposal allows, or its refusal, thrown for the Author. */
