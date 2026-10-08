@@ -1,5 +1,5 @@
 import path from 'node:path';
-import type { Trashed } from './project-store';
+import type { Trashed } from './trash';
 import { randomUUID } from 'node:crypto';
 import {
   PROJECT_OUTLINE,
