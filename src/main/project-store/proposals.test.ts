@@ -38,17 +38,17 @@ async function proposed() {
   const anna = await store.read(entryRef(annaId));
   await store.write(entryRef(annaId), { ...anna, description: 'Her sister.' });
   await store.flush();
-  const { id: conversationId } = await store.startConversation(
+  const { id: conversationId } = await store.conversations.startConversation(
     'writing',
     'Anna',
   );
-  await store.appendMessage(conversationId, {
+  await store.conversations.appendMessage(conversationId, {
     role: 'author',
     text: 'She is older.',
     focus: [],
     at: 1_000,
   });
-  await store.appendMessage(conversationId, {
+  await store.conversations.appendMessage(conversationId, {
     role: 'assistant',
     text: 'Then the Story Bible should say so.',
     focus: [],
@@ -62,7 +62,7 @@ async function proposed() {
     base: 'Her sister.',
     proposed: 'Her sister.\nOlder by two years.',
   };
-  await store.appendProposal(conversationId, proposal);
+  await store.conversations.appendProposal(conversationId, proposal);
   return { store, clock, annaId, conversationId, proposal };
 }
 
@@ -78,7 +78,8 @@ async function logLines(conversationId: string) {
 }
 
 async function cardOf(store: ProjectStore, conversationId: string) {
-  const { messages } = await store.readConversation(conversationId);
+  const { messages } =
+    await store.conversations.readConversation(conversationId);
   return messages[1].proposals?.[0];
 }
 
@@ -120,7 +121,7 @@ describe('Proposals in a Conversation', () => {
     const { store, annaId, conversationId } = await proposed();
     const events = eventsOf(store);
 
-    await store.acceptProposal(conversationId, 'p1');
+    await store.conversations.acceptProposal(conversationId, 'p1');
 
     expect((await store.read(entryRef(annaId))).description).toBe(
       'Her sister.\nOlder by two years.',
@@ -158,7 +159,7 @@ describe('Proposals in a Conversation', () => {
   it('accepts an edited value, noting it was edited', async () => {
     const { store, annaId, conversationId } = await proposed();
 
-    await store.acceptProposal(conversationId, 'p1', {
+    await store.conversations.acceptProposal(conversationId, 'p1', {
       edited: 'Her older sister.',
     });
 
@@ -174,7 +175,7 @@ describe('Proposals in a Conversation', () => {
   it('rejecting logs it and leaves the Entry alone', async () => {
     const { store, annaId, conversationId } = await proposed();
 
-    await store.rejectProposal(conversationId, 'p1');
+    await store.conversations.rejectProposal(conversationId, 'p1');
 
     expect((await logLines(conversationId)).at(-1)).toEqual({
       type: 'proposal.rejected',
@@ -191,14 +192,14 @@ describe('Proposals in a Conversation', () => {
 
   it('decides a Proposal only once', async () => {
     const { store, conversationId } = await proposed();
-    await store.rejectProposal(conversationId, 'p1');
+    await store.conversations.rejectProposal(conversationId, 'p1');
 
-    await expect(store.acceptProposal(conversationId, 'p1')).rejects.toThrow(
-      /already/,
-    );
-    await expect(store.rejectProposal(conversationId, 'p1')).rejects.toThrow(
-      /already/,
-    );
+    await expect(
+      store.conversations.acceptProposal(conversationId, 'p1'),
+    ).rejects.toThrow(/already/);
+    await expect(
+      store.conversations.rejectProposal(conversationId, 'p1'),
+    ).rejects.toThrow(/already/);
   });
 
   it('shows a Proposal whose field changed since as stale, and accepting anyway replaces the current value', async () => {
@@ -212,7 +213,9 @@ describe('Proposals in a Conversation', () => {
       stale: true,
     });
 
-    await store.acceptProposal(conversationId, 'p1', { anyway: true });
+    await store.conversations.acceptProposal(conversationId, 'p1', {
+      anyway: true,
+    });
     expect((await logLines(conversationId)).at(-1)).toMatchObject({
       fields: {
         description: {
@@ -242,10 +245,10 @@ describe('Proposals in a Conversation', () => {
       name: 'Anna',
       state: { kind: 'pending', orphaned: 'trashed' },
     });
-    await expect(store.acceptProposal(conversationId, 'p1')).rejects.toThrow(
-      /Trash/,
-    );
-    await store.rejectProposal(conversationId, 'p1');
+    await expect(
+      store.conversations.acceptProposal(conversationId, 'p1'),
+    ).rejects.toThrow(/Trash/);
+    await store.conversations.rejectProposal(conversationId, 'p1');
     expect((await cardOf(store, conversationId))?.state).toEqual({
       kind: 'rejected',
     });
@@ -253,7 +256,7 @@ describe('Proposals in a Conversation', () => {
 
   it('shows a Proposal for a field the Entry no longer has as orphaned', async () => {
     const { store, annaId, conversationId } = await proposed();
-    await store.appendProposal(conversationId, {
+    await store.conversations.appendProposal(conversationId, {
       kind: 'field',
       id: 'p2',
       entryId: annaId,
@@ -263,11 +266,14 @@ describe('Proposals in a Conversation', () => {
     });
     await store.setEntryType(annaId, 'place');
 
-    const { messages } = await store.readConversation(conversationId);
+    const { messages } =
+      await store.conversations.readConversation(conversationId);
     expect(messages[1].proposals?.[1].state).toMatchObject({
       orphaned: 'field',
     });
-    await expect(store.acceptProposal(conversationId, 'p2')).rejects.toThrow();
+    await expect(
+      store.conversations.acceptProposal(conversationId, 'p2'),
+    ).rejects.toThrow();
   });
 
   it('counts a pending Proposal whose value the Entry already holds as applied, as after a crash before the accept was logged', async () => {
@@ -331,10 +337,10 @@ describe('Proposals in a Conversation', () => {
     );
 
     await expect(
-      store.acceptProposal(conversationId, 'p1'),
+      store.conversations.acceptProposal(conversationId, 'p1'),
     ).rejects.toMatchObject({ reason: 'read-only' });
     await expect(
-      store.rejectProposal(conversationId, 'p1'),
+      store.conversations.rejectProposal(conversationId, 'p1'),
     ).rejects.toMatchObject({ reason: 'read-only' });
     expect((await store.read(entryRef(annaId))).description).toBe(
       'Her sister.',
@@ -360,9 +366,12 @@ describe('Proposals in a Conversation', () => {
         })}\n`,
     );
 
-    const { messages } = await store.readConversation(conversationId);
+    const { messages } =
+      await store.conversations.readConversation(conversationId);
     expect(messages[1].proposals?.map((p) => p.id)).toEqual(['p1']);
-    await expect(store.acceptProposal(conversationId, 'p3')).rejects.toThrow();
+    await expect(
+      store.conversations.acceptProposal(conversationId, 'p3'),
+    ).rejects.toThrow();
   });
 });
 
@@ -381,12 +390,12 @@ async function withReply() {
     { id: sceneId, body: '- She waits.', meta: { pov: 'Anna' } },
   );
   await store.flush();
-  const { id: conversationId } = await store.startConversation(
+  const { id: conversationId } = await store.conversations.startConversation(
     'brainstorm',
     'Ideas',
   );
   for (const role of ['author', 'assistant'] as const) {
-    await store.appendMessage(conversationId, {
+    await store.conversations.appendMessage(conversationId, {
       role,
       text: 'Hm.',
       focus: [],
@@ -424,7 +433,7 @@ describe('a Proposal to create an Entry', () => {
   it('is logged with no base, and shown pending', async () => {
     const { store, conversationId } = await withReply();
 
-    await store.appendProposal(conversationId, mira);
+    await store.conversations.appendProposal(conversationId, mira);
 
     expect((await logLines(conversationId)).at(-1)).toEqual({
       type: 'proposal.proposed',
@@ -447,10 +456,10 @@ describe('a Proposal to create an Entry', () => {
 
   it('accepting creates the Entry, then logs what it wrote', async () => {
     const { store, conversationId } = await withReply();
-    await store.appendProposal(conversationId, mira);
+    await store.conversations.appendProposal(conversationId, mira);
     const events = eventsOf(store);
 
-    await store.acceptProposal(conversationId, 'p1');
+    await store.conversations.acceptProposal(conversationId, 'p1');
 
     expect(store.listEntries()).toEqual([
       expect.objectContaining({ id: MIRA, type: 'character', name: 'Mira' }),
@@ -483,9 +492,9 @@ describe('a Proposal to create an Entry', () => {
 
   it('accepts it as the Author edited it, with the description on one line', async () => {
     const { store, conversationId } = await withReply();
-    await store.appendProposal(conversationId, mira);
+    await store.conversations.appendProposal(conversationId, mira);
 
-    await store.acceptProposal(conversationId, 'p1', {
+    await store.conversations.acceptProposal(conversationId, 'p1', {
       edited: {
         type: 'place',
         name: ' Mira’s house ',
@@ -503,16 +512,16 @@ describe('a Proposal to create an Entry', () => {
       edited: true,
     });
     await expect(
-      store.acceptProposal(conversationId, 'p1'),
+      store.conversations.acceptProposal(conversationId, 'p1'),
     ).rejects.toMatchObject({ reason: 'decided' });
     await store.close();
   });
 
   it('rejecting creates nothing', async () => {
     const { store, conversationId } = await withReply();
-    await store.appendProposal(conversationId, mira);
+    await store.conversations.appendProposal(conversationId, mira);
 
-    await store.rejectProposal(conversationId, 'p1');
+    await store.conversations.rejectProposal(conversationId, 'p1');
 
     expect(store.listEntries()).toEqual([]);
     expect((await cardOf(store, conversationId))?.state).toEqual({
@@ -523,8 +532,8 @@ describe('a Proposal to create an Entry', () => {
 
   it('counts as applied when its Entry exists, as after a crash before the accept was logged', async () => {
     const { store, conversationId } = await withReply();
-    await store.appendProposal(conversationId, mira);
-    await store.acceptProposal(conversationId, 'p1');
+    await store.conversations.appendProposal(conversationId, mira);
+    await store.conversations.acceptProposal(conversationId, 'p1');
     await store.close();
     await dropLastEvent(conversationId);
 
@@ -547,9 +556,9 @@ describe('a Proposal to create an Entry', () => {
 
   it('is not pending on any Entry', async () => {
     const { store, conversationId } = await withReply();
-    await store.appendProposal(conversationId, mira);
+    await store.conversations.appendProposal(conversationId, mira);
 
-    expect(await store.pendingProposals(MIRA)).toEqual([]);
+    expect(await store.conversations.pendingProposals(MIRA)).toEqual([]);
     await store.close();
   });
 });
@@ -568,7 +577,7 @@ describe('a Proposal to replace an Outline', () => {
   it('is logged with the whole Outline body as base and proposed, and shown pending', async () => {
     const { store, sceneId, conversationId } = await withReply();
 
-    await store.appendProposal(conversationId, outline(sceneId));
+    await store.conversations.appendProposal(conversationId, outline(sceneId));
 
     expect((await logLines(conversationId)).at(-1)).toEqual({
       type: 'proposal.proposed',
@@ -593,17 +602,18 @@ describe('a Proposal to replace an Outline', () => {
   it('names a Chapter’s Outline and the story’s', async () => {
     const { store, chapterId, conversationId } = await withReply();
     await store.renameChapter(chapterId, 'Arrival');
-    await store.appendProposal(conversationId, {
+    await store.conversations.appendProposal(conversationId, {
       ...outline(chapterId),
       base: '',
     });
-    await store.appendProposal(conversationId, {
+    await store.conversations.appendProposal(conversationId, {
       ...outline('project'),
       id: 'p2',
       base: '',
     });
 
-    const { messages } = await store.readConversation(conversationId);
+    const { messages } =
+      await store.conversations.readConversation(conversationId);
     expect(messages[1].proposals?.map((p) => p.name)).toEqual([
       'Chapter “Arrival”',
       'The story',
@@ -613,10 +623,10 @@ describe('a Proposal to replace an Outline', () => {
 
   it('accepting writes the Outline first, keeping its metadata, then logs what it replaced and wrote', async () => {
     const { store, sceneId, conversationId } = await withReply();
-    await store.appendProposal(conversationId, outline(sceneId));
+    await store.conversations.appendProposal(conversationId, outline(sceneId));
     const events = eventsOf(store);
 
-    await store.acceptProposal(conversationId, 'p1');
+    await store.conversations.acceptProposal(conversationId, 'p1');
 
     expect(await store.read({ kind: 'outline', id: sceneId })).toEqual({
       id: sceneId,
@@ -648,10 +658,10 @@ describe('a Proposal to replace an Outline', () => {
   it('accepted or undone, keeps its unit’s Status, which no Proposal targets', async () => {
     const { store, sceneId, conversationId } = await withReply();
     await store.setStatus(sceneId, 'drafted');
-    await store.appendProposal(conversationId, outline(sceneId));
+    await store.conversations.appendProposal(conversationId, outline(sceneId));
 
-    await store.acceptProposal(conversationId, 'p1');
-    await store.undoProposal(conversationId, 'p1');
+    await store.conversations.acceptProposal(conversationId, 'p1');
+    await store.conversations.undoProposal(conversationId, 'p1');
 
     const scene = store.manuscript().chapters[0].scenes[0];
     expect(scene.status).toBe('drafted');
@@ -666,10 +676,10 @@ describe('a Proposal to replace an Outline', () => {
   it('accepted or undone, keeps its unit’s Tags, which no Proposal targets', async () => {
     const { store, sceneId, conversationId } = await withReply();
     await store.setTags(sceneId, ['Mara']);
-    await store.appendProposal(conversationId, outline(sceneId));
+    await store.conversations.appendProposal(conversationId, outline(sceneId));
 
-    await store.acceptProposal(conversationId, 'p1');
-    await store.undoProposal(conversationId, 'p1');
+    await store.conversations.acceptProposal(conversationId, 'p1');
+    await store.conversations.undoProposal(conversationId, 'p1');
 
     const scene = store.manuscript().chapters[0].scenes[0];
     expect(scene.tags).toEqual(['Mara']);
@@ -684,7 +694,7 @@ describe('a Proposal to replace an Outline', () => {
   it('shows one whose Scene is in Trash as orphaned, which can only be rejected', async () => {
     const { store, chapterId, sceneId, conversationId } = await withReply();
     await store.createScene(chapterId, 1);
-    await store.appendProposal(conversationId, outline(sceneId));
+    await store.conversations.appendProposal(conversationId, outline(sceneId));
     await store.trashScene(sceneId);
 
     expect(await cardOf(store, conversationId)).toMatchObject({
@@ -692,9 +702,9 @@ describe('a Proposal to replace an Outline', () => {
       state: { kind: 'pending', orphaned: 'trashed' },
     });
     await expect(
-      store.acceptProposal(conversationId, 'p1'),
+      store.conversations.acceptProposal(conversationId, 'p1'),
     ).rejects.toMatchObject({ reason: 'orphaned' });
-    await store.rejectProposal(conversationId, 'p1');
+    await store.conversations.rejectProposal(conversationId, 'p1');
     expect((await cardOf(store, conversationId))?.state).toEqual({
       kind: 'rejected',
     });
@@ -703,8 +713,8 @@ describe('a Proposal to replace an Outline', () => {
 
   it('counts as applied when the Outline holds its body, as after a crash before the accept was logged', async () => {
     const { store, sceneId, conversationId } = await withReply();
-    await store.appendProposal(conversationId, outline(sceneId));
-    await store.acceptProposal(conversationId, 'p1');
+    await store.conversations.appendProposal(conversationId, outline(sceneId));
+    await store.conversations.acceptProposal(conversationId, 'p1');
     await store.close();
     await dropLastEvent(conversationId);
 
@@ -745,7 +755,8 @@ describe('a Proposal to replace an Outline', () => {
       );
     }
 
-    const { messages } = await store.readConversation(conversationId);
+    const { messages } =
+      await store.conversations.readConversation(conversationId);
     expect(messages[1].proposals).toBeUndefined();
     await store.close();
   });
@@ -755,7 +766,7 @@ describe('the Author appending a replacing Proposal', () => {
   /** Anna, with another pending Proposal, `p2`, to replace her description. */
   async function replacing() {
     const setup = await proposed();
-    await setup.store.appendProposal(setup.conversationId, {
+    await setup.store.conversations.appendProposal(setup.conversationId, {
       kind: 'field',
       id: 'p2',
       entryId: setup.annaId,
@@ -771,14 +782,17 @@ describe('the Author appending a replacing Proposal', () => {
     conversationId: string,
     id: string,
   ) {
-    const { messages } = await store.readConversation(conversationId);
+    const { messages } =
+      await store.conversations.readConversation(conversationId);
     return messages[1].proposals?.find((p) => p.id === id);
   }
 
   it('puts the proposed text on a new line after the description, logging what it replaced and wrote', async () => {
     const { store, annaId, conversationId } = await replacing();
 
-    await store.acceptProposal(conversationId, 'p2', { append: true });
+    await store.conversations.acceptProposal(conversationId, 'p2', {
+      append: true,
+    });
 
     expect((await store.read(entryRef(annaId))).description).toBe(
       'Her sister.\nOlder by two years.',
@@ -803,14 +817,18 @@ describe('the Author appending a replacing Proposal', () => {
 
   it('can be undone, back to the value before, until the field changes', async () => {
     const { store, annaId, conversationId } = await replacing();
-    await store.acceptProposal(conversationId, 'p2', { append: true });
+    await store.conversations.acceptProposal(conversationId, 'p2', {
+      append: true,
+    });
 
-    await store.undoProposal(conversationId, 'p2');
+    await store.conversations.undoProposal(conversationId, 'p2');
     expect((await store.read(entryRef(annaId))).description).toBe(
       'Her sister.',
     );
 
-    await store.acceptProposal(conversationId, 'p2', { append: true });
+    await store.conversations.acceptProposal(conversationId, 'p2', {
+      append: true,
+    });
     const anna = await store.read(entryRef(annaId));
     await store.write(entryRef(annaId), { ...anna, description: 'Twin.' });
     await store.flush();
@@ -819,7 +837,7 @@ describe('the Author appending a replacing Proposal', () => {
       undoBlocked: 'Description has changed since it was accepted.',
     });
     await expect(
-      store.undoProposal(conversationId, 'p2'),
+      store.conversations.undoProposal(conversationId, 'p2'),
     ).rejects.toMatchObject({ reason: 'changed' });
   });
 });
@@ -828,7 +846,7 @@ describe('an Append or an Add from the Assistant', () => {
   /** Anna, with `p2`, appending to her description, beside `p1` replacing it. */
   async function appending() {
     const setup = await proposed();
-    await setup.store.appendProposal(setup.conversationId, {
+    await setup.store.conversations.appendProposal(setup.conversationId, {
       kind: 'field',
       id: 'p2',
       entryId: setup.annaId,
@@ -844,7 +862,8 @@ describe('an Append or an Add from the Assistant', () => {
     conversationId: string,
     id: string,
   ) {
-    const { messages } = await store.readConversation(conversationId);
+    const { messages } =
+      await store.conversations.readConversation(conversationId);
     return messages[1].proposals?.find((p) => p.id === id);
   }
 
@@ -884,7 +903,7 @@ describe('an Append or an Add from the Assistant', () => {
 
   it('never goes stale, and accepting lands it on the value now, logging what it replaced and wrote', async () => {
     const { store, annaId, conversationId } = await appending();
-    await store.acceptProposal(conversationId, 'p1');
+    await store.conversations.acceptProposal(conversationId, 'p1');
     await setDescription(store, annaId, 'Twin.');
     expect((await cardById(store, conversationId, 'p2'))?.state).toEqual({
       kind: 'pending',
@@ -892,7 +911,7 @@ describe('an Append or an Add from the Assistant', () => {
       stale: false,
     });
 
-    await store.acceptProposal(conversationId, 'p2');
+    await store.conversations.acceptProposal(conversationId, 'p2');
 
     expect((await store.read(entryRef(annaId))).description).toBe(
       'Twin.\nKind.',
@@ -912,7 +931,7 @@ describe('an Append or an Add from the Assistant', () => {
 
   it('adds one item to a list as it is now, logged as the item alone', async () => {
     const { store, annaId, conversationId } = await proposed();
-    await store.appendProposal(conversationId, {
+    await store.conversations.appendProposal(conversationId, {
       kind: 'field',
       id: 'p-add',
       entryId: annaId,
@@ -929,7 +948,7 @@ describe('an Append or an Add from the Assistant', () => {
     await store.write(entryRef(annaId), { ...anna, aliases: ['Annie'] });
     await store.flush();
 
-    await store.acceptProposal(conversationId, 'p-add');
+    await store.conversations.acceptProposal(conversationId, 'p-add');
 
     expect((await store.read(entryRef(annaId))).aliases).toEqual([
       'Annie',
@@ -940,7 +959,7 @@ describe('an Append or an Add from the Assistant', () => {
 
   it('appends to an Outline as it is now, on a new line', async () => {
     const { store, sceneId, conversationId } = await withReply();
-    await store.appendProposal(conversationId, {
+    await store.conversations.appendProposal(conversationId, {
       kind: 'outline',
       id: 'p1',
       outlineId: sceneId,
@@ -966,7 +985,7 @@ describe('an Append or an Add from the Assistant', () => {
       stale: false,
     });
 
-    await store.acceptProposal(conversationId, 'p1');
+    await store.conversations.acceptProposal(conversationId, 'p1');
 
     expect(await store.read({ kind: 'outline', id: sceneId })).toEqual({
       id: sceneId,
@@ -978,9 +997,9 @@ describe('an Append or an Add from the Assistant', () => {
 
   it('can be undone, back to the value before, until the field changes', async () => {
     const { store, annaId, conversationId } = await appending();
-    await store.acceptProposal(conversationId, 'p2');
+    await store.conversations.acceptProposal(conversationId, 'p2');
 
-    await store.undoProposal(conversationId, 'p2');
+    await store.conversations.undoProposal(conversationId, 'p2');
     expect((await store.read(entryRef(annaId))).description).toBe(
       'Her sister.',
     );
@@ -990,21 +1009,21 @@ describe('an Append or an Add from the Assistant', () => {
       stale: false,
     });
 
-    await store.acceptProposal(conversationId, 'p2');
+    await store.conversations.acceptProposal(conversationId, 'p2');
     await setDescription(store, annaId, 'Twin.');
     expect((await cardById(store, conversationId, 'p2'))?.state).toMatchObject({
       kind: 'accepted',
       undoBlocked: 'Description has changed since it was accepted.',
     });
     await expect(
-      store.undoProposal(conversationId, 'p2'),
+      store.conversations.undoProposal(conversationId, 'p2'),
     ).rejects.toMatchObject({ reason: 'changed' });
     await store.close();
   });
 
   it('counts as applied when its target ends with it, as after a crash before the accept was logged', async () => {
     const { store, annaId, conversationId } = await appending();
-    await store.acceptProposal(conversationId, 'p2');
+    await store.conversations.acceptProposal(conversationId, 'p2');
     await store.close();
     await dropLastEvent(conversationId);
 
@@ -1030,10 +1049,12 @@ describe('an Append or an Add from the Assistant', () => {
   it('is pending on its Entry, and rejecting leaves the Entry alone', async () => {
     const { store, annaId, conversationId } = await appending();
     expect(
-      (await store.pendingProposals(annaId)).map((p) => p.proposal.id),
+      (await store.conversations.pendingProposals(annaId)).map(
+        (p) => p.proposal.id,
+      ),
     ).toEqual(['p1', 'p2']);
 
-    await store.rejectProposal(conversationId, 'p2');
+    await store.conversations.rejectProposal(conversationId, 'p2');
 
     expect((await cardById(store, conversationId, 'p2'))?.state).toEqual({
       kind: 'rejected',
@@ -1108,7 +1129,8 @@ describe('an Append or an Add from the Assistant', () => {
         ),
     );
 
-    const { messages } = await store.readConversation(conversationId);
+    const { messages } =
+      await store.conversations.readConversation(conversationId);
     expect(messages[1].proposals?.map((p) => p.id)).toEqual(['p1']);
     await store.close();
   });
@@ -1117,10 +1139,10 @@ describe('an Append or an Add from the Assistant', () => {
 describe('undoing an accepted Proposal', () => {
   it('writes back the value it replaced, then logs the undo; the Proposal is pending again', async () => {
     const { store, annaId, conversationId } = await proposed();
-    await store.acceptProposal(conversationId, 'p1');
+    await store.conversations.acceptProposal(conversationId, 'p1');
     const events = eventsOf(store);
 
-    await store.undoProposal(conversationId, 'p1');
+    await store.conversations.undoProposal(conversationId, 'p1');
 
     expect((await store.read(entryRef(annaId))).description).toBe(
       'Her sister.',
@@ -1138,7 +1160,7 @@ describe('undoing an accepted Proposal', () => {
       current: 'Her sister.',
       stale: false,
     });
-    expect(await store.pendingProposals(annaId)).toHaveLength(1);
+    expect(await store.conversations.pendingProposals(annaId)).toHaveLength(1);
     expect(events).toContainEqual({
       type: 'unitReloaded',
       ref: entryRef(annaId),
@@ -1161,14 +1183,14 @@ describe('undoing an accepted Proposal', () => {
       { field: 'appearance', base: '', proposed: 'Tall, grey-eyed.' },
     ] as const) {
       const id = `p-${proposal.field}`;
-      await store.appendProposal(conversationId, {
+      await store.conversations.appendProposal(conversationId, {
         kind: 'field',
         id,
         entryId: annaId,
         ...proposal,
       });
 
-      await store.acceptProposal(conversationId, id);
+      await store.conversations.acceptProposal(conversationId, id);
       expect((await store.read(entryRef(annaId))).fields[proposal.field]).toBe(
         proposal.proposed,
       );
@@ -1177,7 +1199,7 @@ describe('undoing an accepted Proposal', () => {
         `${proposal.field}: ${proposal.proposed}\n`,
       );
 
-      await store.undoProposal(conversationId, id);
+      await store.conversations.undoProposal(conversationId, id);
       expect((await store.read(entryRef(annaId))).fields[proposal.field]).toBe(
         proposal.base,
       );
@@ -1187,7 +1209,7 @@ describe('undoing an accepted Proposal', () => {
 
   it('can be undone in a later session, and accepted again', async () => {
     const { store, annaId, conversationId } = await proposed();
-    await store.acceptProposal(conversationId, 'p1');
+    await store.conversations.acceptProposal(conversationId, 'p1');
     await store.close();
     const reopened = await openProject(projectPath, {
       fs: nodeFileSystem,
@@ -1212,9 +1234,11 @@ describe('undoing an accepted Proposal', () => {
     const anna = await store.read(entryRef(annaId));
     await store.write(entryRef(annaId), { ...anna, description: 'Twin.' });
     await store.flush();
-    await store.acceptProposal(conversationId, 'p1', { anyway: true });
+    await store.conversations.acceptProposal(conversationId, 'p1', {
+      anyway: true,
+    });
 
-    await store.undoProposal(conversationId, 'p1');
+    await store.conversations.undoProposal(conversationId, 'p1');
 
     expect((await store.read(entryRef(annaId))).description).toBe('Twin.');
     expect((await cardOf(store, conversationId))?.state).toEqual({
@@ -1226,7 +1250,7 @@ describe('undoing an accepted Proposal', () => {
 
   it('is not offered while the Entry is in Trash', async () => {
     const { store, annaId, conversationId } = await proposed();
-    await store.acceptProposal(conversationId, 'p1');
+    await store.conversations.acceptProposal(conversationId, 'p1');
     await store.trashEntry(annaId);
 
     expect((await cardOf(store, conversationId))?.state).toEqual({
@@ -1235,14 +1259,14 @@ describe('undoing an accepted Proposal', () => {
       undoBlocked: 'Anna is in Trash.',
     });
     await expect(
-      store.undoProposal(conversationId, 'p1'),
+      store.conversations.undoProposal(conversationId, 'p1'),
     ).rejects.toMatchObject({ reason: 'changed' });
   });
 
   it('counts as undone when the Entry holds what the accept replaced, as after a crash before the undo was logged', async () => {
     const { store, annaId, conversationId } = await proposed();
-    await store.acceptProposal(conversationId, 'p1');
-    await store.undoProposal(conversationId, 'p1');
+    await store.conversations.acceptProposal(conversationId, 'p1');
+    await store.conversations.undoProposal(conversationId, 'p1');
     await store.close();
     await dropLastEvent(conversationId);
 
@@ -1265,7 +1289,7 @@ describe('undoing an accepted Proposal', () => {
 
   it('refuses once a newer app has upgraded the Project', async () => {
     const { store, annaId, conversationId } = await proposed();
-    await store.acceptProposal(conversationId, 'p1');
+    await store.conversations.acceptProposal(conversationId, 'p1');
     const manifest = path.join(projectPath, 'project.json');
     await writeFile(
       manifest,
@@ -1276,7 +1300,7 @@ describe('undoing an accepted Proposal', () => {
     );
 
     await expect(
-      store.undoProposal(conversationId, 'p1'),
+      store.conversations.undoProposal(conversationId, 'p1'),
     ).rejects.toMatchObject({ reason: 'read-only' });
     expect((await store.read(entryRef(annaId))).description).toBe(
       'Her sister.\nOlder by two years.',
@@ -1294,10 +1318,13 @@ describe('undoing an accepted Proposal', () => {
 
     it('writes back the body it replaced, keeping its metadata', async () => {
       const { store, sceneId, conversationId } = await withReply();
-      await store.appendProposal(conversationId, outline(sceneId));
-      await store.acceptProposal(conversationId, 'p1');
+      await store.conversations.appendProposal(
+        conversationId,
+        outline(sceneId),
+      );
+      await store.conversations.acceptProposal(conversationId, 'p1');
 
-      await store.undoProposal(conversationId, 'p1');
+      await store.conversations.undoProposal(conversationId, 'p1');
 
       expect(await store.read({ kind: 'outline', id: sceneId })).toEqual({
         id: sceneId,
@@ -1328,10 +1355,10 @@ describe('undoing an accepted Proposal', () => {
 
     it('moves the untouched Entry to Trash; the Proposal is pending again', async () => {
       const { store, conversationId } = await withReply();
-      await store.appendProposal(conversationId, mira);
-      await store.acceptProposal(conversationId, 'p1');
+      await store.conversations.appendProposal(conversationId, mira);
+      await store.conversations.acceptProposal(conversationId, 'p1');
 
-      await store.undoProposal(conversationId, 'p1');
+      await store.conversations.undoProposal(conversationId, 'p1');
 
       expect(store.listEntries()).toEqual([]);
       expect(store.listTrash()).toEqual([
@@ -1352,11 +1379,11 @@ describe('undoing an accepted Proposal', () => {
 
     it('can be accepted again, as edited, once undone', async () => {
       const { store, conversationId } = await withReply();
-      await store.appendProposal(conversationId, mira);
-      await store.acceptProposal(conversationId, 'p1');
-      await store.undoProposal(conversationId, 'p1');
+      await store.conversations.appendProposal(conversationId, mira);
+      await store.conversations.acceptProposal(conversationId, 'p1');
+      await store.conversations.undoProposal(conversationId, 'p1');
 
-      await store.acceptProposal(conversationId, 'p1', {
+      await store.conversations.acceptProposal(conversationId, 'p1', {
         edited: { type: 'character', name: 'Mirja', description: '' },
       });
 
@@ -1373,8 +1400,8 @@ describe('undoing an accepted Proposal', () => {
 
     it('is not offered once the Entry has private notes', async () => {
       const { store, conversationId } = await withReply();
-      await store.appendProposal(conversationId, mira);
-      await store.acceptProposal(conversationId, 'p1');
+      await store.conversations.appendProposal(conversationId, mira);
+      await store.conversations.acceptProposal(conversationId, 'p1');
       await store.write(
         { kind: 'private', id: MIRA },
         { id: MIRA, body: 'Based on my cousin.' },
@@ -1389,8 +1416,8 @@ describe('undoing an accepted Proposal', () => {
 
     it('is not offered while the Entry, changed since, is in Trash', async () => {
       const { store, conversationId } = await withReply();
-      await store.appendProposal(conversationId, mira);
-      await store.acceptProposal(conversationId, 'p1');
+      await store.conversations.appendProposal(conversationId, mira);
+      await store.conversations.acceptProposal(conversationId, 'p1');
       const entry = await store.read(entryRef(MIRA));
       await store.write(entryRef(MIRA), { ...entry, aliases: ['Mi'] });
       await store.flush();
@@ -1406,9 +1433,9 @@ describe('undoing an accepted Proposal', () => {
 
     it('counts as undone when the untouched Entry is in Trash, as after a crash before the undo was logged', async () => {
       const { store, conversationId } = await withReply();
-      await store.appendProposal(conversationId, mira);
-      await store.acceptProposal(conversationId, 'p1');
-      await store.undoProposal(conversationId, 'p1');
+      await store.conversations.appendProposal(conversationId, mira);
+      await store.conversations.acceptProposal(conversationId, 'p1');
+      await store.conversations.undoProposal(conversationId, 'p1');
       await store.close();
       await dropLastEvent(conversationId);
 
@@ -1430,9 +1457,9 @@ describe('undoing an accepted Proposal', () => {
 
     it('can only be rejected once undone, when its Entry was changed in Trash since', async () => {
       const { store, conversationId } = await withReply();
-      await store.appendProposal(conversationId, mira);
-      await store.acceptProposal(conversationId, 'p1');
-      await store.undoProposal(conversationId, 'p1');
+      await store.conversations.appendProposal(conversationId, mira);
+      await store.conversations.acceptProposal(conversationId, 'p1');
+      await store.conversations.undoProposal(conversationId, 'p1');
       // Restored, changed, and moved to Trash again.
       await store.restore(MIRA);
       const entry = await store.read(entryRef(MIRA));
@@ -1445,7 +1472,7 @@ describe('undoing an accepted Proposal', () => {
         orphaned: 'trashed',
       });
       await expect(
-        store.acceptProposal(conversationId, 'p1'),
+        store.conversations.acceptProposal(conversationId, 'p1'),
       ).rejects.toMatchObject({ reason: 'orphaned' });
       expect(store.listTrash()).toEqual([
         expect.objectContaining({ kind: 'entry', id: MIRA }),
@@ -1484,7 +1511,7 @@ describe('a crash while accepting a Proposal', () => {
       {
         async make() {
           const { store, sceneId, conversationId } = await withReply();
-          await store.appendProposal(conversationId, {
+          await store.conversations.appendProposal(conversationId, {
             kind: 'outline',
             id: 'p1',
             outlineId: sceneId,
@@ -1505,7 +1532,7 @@ describe('a crash while accepting a Proposal', () => {
       {
         async make() {
           const { store, conversationId } = await withReply();
-          await store.appendProposal(conversationId, {
+          await store.conversations.appendProposal(conversationId, {
             kind: 'new-entry',
             id: 'p1',
             entryId: MIRA,
@@ -1562,7 +1589,7 @@ describe('a crash while accepting a Proposal', () => {
           clock: heldClock(1_000),
         });
         await expect(
-          store.acceptProposal(conversationId, 'p1'),
+          store.conversations.acceptProposal(conversationId, 'p1'),
         ).rejects.toThrow();
 
         const result = await stateOf(at);
