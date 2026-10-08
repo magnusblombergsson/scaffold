@@ -5,6 +5,7 @@ import {
   DEFAULT_VISIBILITY,
   ENTRY_TYPES,
   VISIBILITIES,
+  type EntrySummary,
   type EntryType,
   type EntryValue,
   type NotesValue,
@@ -243,4 +244,30 @@ export function entryValue(
 
 export function hashOf(text: string): string {
   return createHash('sha256').update(text).digest('hex');
+}
+
+export function copyPath(
+  projectPath: string,
+  ref: UnitRef,
+  copy: { name: string },
+): string {
+  return path.join(projectPath, UNIT_DIRS[ref.kind], copy.name);
+}
+
+export function entrySummary({
+  id,
+  type,
+  name,
+  aliases,
+  visibility,
+  image,
+  tags,
+}: EntryValue): EntrySummary {
+  return withTags(
+    withImage<EntrySummary>(
+      { id, type, name, aliases: [...aliases], visibility },
+      image,
+    ),
+    tags,
+  );
 }

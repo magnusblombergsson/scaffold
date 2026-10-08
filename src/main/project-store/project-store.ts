@@ -23,7 +23,6 @@ import {
   type ProjectTree,
   type ProseLanguage,
   type SceneNode,
-  type SceneRef,
   type SceneValue,
   type TrashItem,
   type UnitRef,
@@ -52,7 +51,6 @@ import {
 } from '../../shared/entry';
 import { type PendingProposal, type Proposal } from '../../shared/proposal';
 import { joinProse, type Cut } from '../../shared/prose-split';
-import { unitName } from '../../shared/unit-name';
 import {
   DEFAULT_STATUSES,
   readStatusList,
@@ -61,7 +59,6 @@ import {
 } from '../../shared/status';
 import {
   hasTag,
-  readTags,
   spelledTags,
   tagKey,
   tagUses,
@@ -93,7 +90,14 @@ import {
   type Fingerprint,
 } from './file-system';
 import { FormatUpgraded, GatedFileSystem } from './gated-file-system';
-import { freeName, renameWithRetry, safeWrite } from './safe-write';
+import { freeName, safeWrite } from './safe-write';
+import {
+  markerHosts,
+  readSessionMarkers,
+  Sessions,
+  SESSIONS,
+  type SessionMarker,
+} from './sessions';
 import {
   changeDetails,
   formatWithDetails,
@@ -102,7 +106,6 @@ import {
 } from './unit-details';
 import {
   carriedOnSplit,
-  filesMovingWithTrash,
   forAssistant,
   IMAGE_FILE,
   parseDetails,
@@ -113,29 +116,55 @@ import {
 import { TODOS, Todos } from './todos';
 import { tagChanges, type VocabularyChange } from './vocabulary';
 export type { VocabularyChange } from './vocabulary';
-import { formatUnitFile, parseUnitFile, type UnitFile } from './unit-file';
+import { parseUnitFile, type UnitFile } from './unit-file';
 import { Conversations } from './conversations';
+import {
+  Trash,
+  trashedChapter,
+  trashedEntry,
+  trashedScene,
+  trashedVersion,
+  UNPLACED_TITLE,
+  type ChapterFile,
+  type Trashed,
+  type TrashedChapter,
+  type TrashedConversation,
+  type TrashedEntry,
+  type TrashedEntryInfo,
+  type TrashedScene,
+  type TrashedSceneInfo,
+  type TrashedVersion,
+  type TrashedVersionInfo,
+} from './trash';
+import { findChapter, sceneIds, tryFindScene } from './tree';
 import { ProjectError } from './project-error';
 import {
+  CHAPTER_FILE,
+  chapterTrashPath,
   CONVERSATION_FILE,
   CONVERSATIONS,
   conversationPath,
   conversationTrashPath,
+  ENTRY_TRASH_FILE,
   entryRef,
-  entryTrashPath,
   hostOfCopy,
-  hostStem,
   ID,
   ID_FILE,
+  IMAGES,
+  imagePath,
   logOnce,
   outlineRef,
+  scenePath,
+  sceneRef,
   trashDir,
-  UUID,
+  VERSION_FILE,
 } from './layout';
 export { ProjectError };
 import { baseOf, UnitWriter, type Loaded, type Pending } from './unit-writer';
 import {
+  copyPath,
   entryFile,
+  entrySummary,
   entryValue,
   FORMAT,
   frontmatterOf,
@@ -266,7 +295,7 @@ export async function createProject(
       entries: new Map(),
       trash: new Map(),
     },
-    { notice: { alsoOpen: [] }, own: null },
+    new Map(),
   );
 }
 
@@ -311,13 +340,8 @@ export async function openProject(
   const units = await scanUnits(projectPath, manifest.tree, deps.fs, {
     repair: true,
   });
-  const sessions = sessionsAtOpen(
-    await readSessionMarkers(projectPath, deps.fs),
-    hostOf(deps),
-    deps.clock.now(),
-    (sceneId) => units.files.has(sceneId),
-  );
-  const store = new ProjectStore(projectPath, manifest, deps, units, sessions, {
+  const markers = await readSessionMarkers(projectPath, deps.fs);
+  const store = new ProjectStore(projectPath, manifest, deps, units, markers, {
     dropped: resolved.dropped,
     unrecognised,
   });
@@ -503,108 +527,6 @@ async function sweepTempFiles(projectPath: string, fs: FileSystem) {
   }
 }
 
-const VERSION_FILE = new RegExp(`^(${UUID})\\.version\\.md$`);
-const CHAPTER_FILE = new RegExp(`^(${UUID})\\.json$`);
-const ENTRY_TRASH_FILE = new RegExp(`^(${UUID})\\.entry\\.md$`);
-
-const UNPLACED_TITLE = 'Untitled Scene';
-
-/** A Scene in Trash. `chapter` and `index` say where it was, if placed. */
-type TrashedScene = {
-  kind: 'scene';
-  id: string;
-  title: string;
-  trashedAt: number;
-  chapter?: { id: string; title: string };
-  index?: number;
-  /** The keys of its place in the tree that this app doesn't know. */
-  node?: UnknownKeys;
-};
-
-/** A Chapter in Trash, with the Scenes deleted along with it. */
-type TrashedChapter = {
-  kind: 'chapter';
-  id: string;
-  title: string;
-  trashedAt: number;
-  index: number;
-  scenes: SceneNode[];
-  /** The keys of its place in the tree that this app doesn't know. */
-  node: UnknownKeys;
-};
-
-/** A version of a unit set aside when its Conflict was resolved; `id` is its own. */
-type TrashedVersion = {
-  kind: 'version';
-  id: string;
-  ref: UnitRef;
-  trashedAt: number;
-  host?: string;
-  savedAt: number;
-};
-
-/** An Entry in Trash; its private notes stay in `private/` until Trash is emptied. */
-type TrashedEntry = {
-  kind: 'entry';
-  id: string;
-  name: string;
-  type: EntryType;
-  trashedAt: number;
-  /** Its Tags, still in use while it is in Trash. */
-  tags?: string[];
-};
-
-/** A Conversation in Trash: its whole log, at `trash/<id>.jsonl`. */
-type TrashedConversation = {
-  kind: 'conversation';
-  id: string;
-  title: string;
-  mode: Mode;
-  trashedAt: number;
-};
-
-export type Trashed =
-  | TrashedScene
-  | TrashedChapter
-  | TrashedVersion
-  | TrashedEntry
-  | TrashedConversation;
-
-/** What `trash/<id>.entry.md` records beside the Entry's own frontmatter and description. */
-type TrashedEntryInfo = { at: number };
-
-/**
- * What `trash/<id>.version.md` records beside the version's own frontmatter
- * and body: which unit it is a version of, and from which computer and when.
- */
-type TrashedVersionInfo = Omit<TrashedVersion, 'kind' | 'id' | 'trashedAt'> & {
-  at: number;
-};
-
-/**
- * What `trash/<id>.md` records beside the Prose. `withChapter` marks a Scene
- * deleted with its Chapter, which `trash/<chapter id>.json` lists. `node`
- * holds the keys of its place in the tree that this app doesn't know.
- */
-type TrashedSceneInfo = {
-  at: number;
-  title: string;
-  chapter?: { id: string; title: string };
-  index?: number;
-  withChapter?: true;
-  node?: UnknownKeys;
-};
-
-/** Beside these, the keys of the Chapter's place in the tree that this app doesn't know. */
-type ChapterFile = {
-  id: string;
-  format: number;
-  title: string;
-  index: number;
-  trashedAt: number;
-  scenes: SceneNode[];
-};
-
 type Units = {
   /** Ids of the Scenes whose file is in `scenes/`. */
   files: Set<string>;
@@ -777,24 +699,6 @@ async function scanEntries(
   return entries;
 }
 
-function entrySummary({
-  id,
-  type,
-  name,
-  aliases,
-  visibility,
-  image,
-  tags,
-}: EntryValue): EntrySummary {
-  return withTags(
-    withImage<EntrySummary>(
-      { id, type, name, aliases: [...aliases], visibility },
-      image,
-    ),
-    tags,
-  );
-}
-
 /** `manuscript` as the Assistant sees it: no unit of it has a detail that is hidden. */
 function manuscriptForAssistant(manuscript: Manuscript): Manuscript {
   return {
@@ -807,55 +711,6 @@ function manuscriptForAssistant(manuscript: Manuscript): Manuscript {
   };
 }
 
-function trashedEntry(value: EntryValue, info: TrashedEntryInfo): TrashedEntry {
-  return {
-    kind: 'entry',
-    id: value.id,
-    name: value.name,
-    type: value.type,
-    trashedAt: info.at,
-    ...(value.tags && { tags: [...value.tags] }),
-  };
-}
-
-function trashedScene(id: string, info: TrashedSceneInfo): TrashedScene {
-  return {
-    kind: 'scene',
-    id,
-    title: info.title,
-    trashedAt: info.at,
-    ...(info.chapter && { chapter: info.chapter, index: info.index }),
-    ...(info.node && { node: info.node }),
-  };
-}
-
-function trashedVersion(id: string, info: TrashedVersionInfo): TrashedVersion {
-  return {
-    kind: 'version',
-    id,
-    ref: { kind: info.ref.kind, id: info.ref.id } as UnitRef,
-    trashedAt: info.at,
-    ...(info.host && { host: info.host }),
-    savedAt: info.savedAt,
-  };
-}
-
-function trashedChapter(file: ChapterFile): TrashedChapter {
-  const { id, format: _, title, index, trashedAt, scenes, ...node } = file;
-  return { kind: 'chapter', id, title, trashedAt, index, scenes, node };
-}
-
-/** The keys of a Chapter's or Scene's place in the tree that this app doesn't know. */
-function unknownKeys(node: ChapterNode | SceneNode): UnknownKeys | undefined {
-  const {
-    id: _,
-    title: _t,
-    scenes: _s,
-    ...unknown
-  } = node as Partial<ChapterNode>;
-  return Object.keys(unknown).length > 0 ? unknown : undefined;
-}
-
 async function readJson<T>(fs: FileSystem, file: string): Promise<T | null> {
   try {
     return JSON.parse(await fs.readFile(file)) as T;
@@ -864,122 +719,11 @@ async function readJson<T>(fs: FileSystem, file: string): Promise<T | null> {
   }
 }
 
-const SESSIONS = '.sessions';
-const MINUTE_MS = 60_000;
-const HEARTBEAT_MS = 5 * MINUTE_MS;
-/** A marker whose heartbeat is older than this was left by a computer that stopped. */
-const STALE_MS = 15 * MINUTE_MS;
 /** How long a burst of watcher events gathers before the files are checked. */
 const COALESCE_MS = 250;
 
-/**
- * `.sessions/<HOST>.json`: when this computer last had the Project open, and
- * how it left it. Only a warning to other computers, never a lock. The
- * heartbeat goes on while the Project is open; `activeAt` is when the Author
- * last moved in it, so a computer merely left open doesn't seem worked on.
- */
-type SessionMarker = ProjectView & {
-  host: string;
-  /** The format of the app that wrote it; markers before it have none. */
-  format?: number;
-  heartbeat: number;
-  activeAt?: number;
-  open: boolean;
-};
-
-/** When the Author last worked on a marker's computer; old markers have only a heartbeat. */
-function activeAt(marker: SessionMarker): number {
-  return typeof marker.activeAt === 'number'
-    ? marker.activeAt
-    : marker.heartbeat;
-}
-
-type Sessions = {
-  notice: SessionNotice;
-  /** This computer's own marker, as the Project opened. */
-  own: SessionMarker | null;
-};
-
 function hostOf(deps: StoreDeps): string {
   return deps.host ?? hostname();
-}
-
-/** A marker's file name: the host, with what a file name can't hold replaced. */
-function markerName(host: string): string {
-  return `${hostStem(host)}.json`;
-}
-
-/** Every marker that can be read, by file name; one that can't is skipped. */
-async function readSessionMarkers(
-  projectPath: string,
-  fs: FileSystem,
-): Promise<Map<string, SessionMarker>> {
-  const markers = new Map<string, SessionMarker>();
-  const dir = path.join(projectPath, SESSIONS);
-  for (const name of await fs.readdir(dir)) {
-    if (!name.endsWith('.json')) continue;
-    const marker = await readJson<Partial<SessionMarker>>(
-      fs,
-      path.join(dir, name),
-    );
-    if (
-      typeof marker?.host === 'string' &&
-      typeof marker.heartbeat === 'number' &&
-      typeof marker.open === 'boolean'
-    ) {
-      markers.set(name, marker as SessionMarker);
-    }
-  }
-  return markers;
-}
-
-/** The computers whose session markers are in the Project. */
-async function markerHosts(
-  projectPath: string,
-  fs: FileSystem,
-): Promise<string[]> {
-  const markers = await readSessionMarkers(projectPath, fs);
-  return [...markers.values()].map((marker) => marker.host);
-}
-
-/**
- * Which other computers have the Project open, by a heartbeat that isn't
- * stale, and where the Author left off on the computer they worked on last,
- * if that isn't this one and the Scene is still here.
- */
-function sessionsAtOpen(
-  markers: Map<string, SessionMarker>,
-  host: string,
-  now: number,
-  hasScene: (sceneId: string) => boolean,
-): Sessions {
-  const own = markers.get(markerName(host)) ?? null;
-  const others = [...markers]
-    .filter(([name]) => name !== markerName(host))
-    .map(([, marker]) => marker)
-    .sort((a, b) => activeAt(b) - activeAt(a));
-  const notice: SessionNotice = {
-    alsoOpen: others
-      .filter((m) => m.open && now - m.heartbeat < STALE_MS)
-      .map((m) => ({
-        host: m.host,
-        minutesAgo: Math.max(0, Math.floor((now - m.heartbeat) / MINUTE_MS)),
-      })),
-  };
-  const last = others[0];
-  if (
-    last &&
-    activeAt(last) > (own ? activeAt(own) : -Infinity) &&
-    typeof last.lastSceneId === 'string' &&
-    hasScene(last.lastSceneId)
-  ) {
-    notice.continueAt = {
-      host: last.host,
-      sceneId: last.lastSceneId,
-      ...(typeof last.cursor === 'number' && { cursor: last.cursor }),
-    };
-  }
-  return { notice, own };
 }
 
 /** The `versionId` of the version at a unit's own path. */
@@ -1014,7 +758,8 @@ export class ProjectStore {
   private readonly files: Set<string>;
   /** The Entries in the Story Bible, with the values accepted for them by `write`. */
   private readonly entries: Map<string, EntrySummary>;
-  private readonly trash: Map<string, Trashed>;
+  /** What was deleted and is kept until Trash is emptied; the methods below delegate to it. */
+  private readonly trash: Trash;
   /** Scenes and Entries on their way to Trash, which take no more writes. */
   private readonly closing = new Set<string>();
   /** The structure operation running last; the next one waits for it. */
@@ -1059,20 +804,15 @@ export class ProjectStore {
 
   private readonly host: string;
   private readonly sessions: Sessions;
-  /** How the Author leaves the Project, for this computer's session marker. */
-  private view: ProjectView;
-  /** Ends the session: stops the heartbeat and the watcher. */
-  private endSession: (() => Promise<void>) | null = null;
-  private markerWrites: Promise<void> = Promise.resolve();
-  /** When the Author last opened or moved in the Project here. */
-  private activeAt = 0;
+  /** Stops watching the folder, while the session lasts. */
+  private stopWatching: (() => Promise<void>) | null = null;
 
   constructor(
     readonly path: string,
     private manifest: Manifest,
     deps: StoreDeps,
     units: Units,
-    sessions: Sessions,
+    markers: Map<string, SessionMarker>,
     opened: { dropped: Dropped[]; unrecognised: Set<string> } = {
       dropped: [],
       unrecognised: new Set(),
@@ -1106,39 +846,74 @@ export class ProjectStore {
     this.unrecognised = opened.unrecognised;
     this.files = units.files;
     this.entries = units.entries;
-    this.trash = units.trash;
     this.todos = todosOf(path, this.deps);
     this.host = hostOf(this.deps);
+    this.trash = new Trash(
+      {
+        path,
+        fs: this.deps.fs,
+        clock: deps.clock,
+        emit: (event) => this.emit(event),
+        files: this.files,
+        entries: this.entries,
+        setEntries: (change) => this.setEntries(change),
+        listEntries: () => this.listEntries(),
+        closing: this.closing,
+        unitWriter: this.unitWriter,
+        tree: () => this.tree(),
+        saveTree: (tree) => this.writeManifest({ ...this.manifest, tree }),
+        manuscript: () => this.manuscript(),
+        unitDetails: (id) => this.unitDetails.get(id),
+        refuseUnavailable: (ref) => this.refuseUnavailable(ref),
+        refuseMissing: (ref) => this.refuseMissing(ref),
+        closeScenes: (ids, toTrash) => this.closeScenes(ids, toTrash),
+        conversations: () => this.conversations,
+        isLive: (id) => this.isLive(id),
+        sceneOrChapterRef: (id) => this.sceneOrChapterRef(id),
+        deleteOutlineAndNotes: (id) => this.deleteOutlineAndNotes(id),
+        deleteUnitFile: (ref) => this.deleteUnitFile(ref),
+        dropTodoLinks: async (gone) => {
+          if (await this.todos.dropLinks(({ id }) => gone(id))) {
+            this.emitTodos();
+          }
+        },
+        findConflicts: () => this.findConflicts(),
+      },
+      units.trash,
+    );
     this.conversations = new Conversations({
       path,
       fs: this.deps.fs,
       clock: deps.clock,
       emit: (event) => this.emit(event),
       host: this.host,
-      markerHosts: () => markerHosts(path, this.deps.fs),
+      markerHosts: () => this.sessions.hosts(),
       unrecognised: this.unrecognised,
       entries: this.entries,
-      trash: this.trash,
+      trash: this.trash.items,
       outlineOrphaned: (id) => this.outlineOrphaned(id),
       manuscript: () => this.manuscript(),
       read: (ref) => this.read(ref),
       changeUnit: (ref, change) => this.changeUnit(ref, change),
       pendingUnit: (key) => this.unitWriter.pending(key),
       addEntry: (value) => this.addEntry(value),
-      moveEntryToTrash: (id) => this.moveEntryToTrash(id),
+      moveEntryToTrash: async (id) => {
+        await this.trash.move('entry', id);
+      },
       enqueueWrite: (operation) => this.enqueueWrite(operation),
       passFormatGate: () => this.passFormatGate(),
     });
-    this.sessions = sessions;
-    const {
-      host: _,
-      format: _f,
-      heartbeat: _h,
-      activeAt: _a,
-      open: _o,
-      ...view
-    } = sessions.own ?? {};
-    this.view = view;
+    this.sessions = new Sessions(
+      {
+        path,
+        fs: this.deps.fs,
+        clock: deps.clock,
+        host: this.host,
+        format: FORMAT,
+      },
+      markers,
+      (sceneId) => this.files.has(sceneId),
+    );
   }
 
   /**
@@ -1153,7 +928,7 @@ export class ProjectStore {
 
   /** What the session markers said when the Project opened. */
   sessionNotice(): SessionNotice {
-    return structuredClone(this.sessions.notice);
+    return this.sessions.notice();
   }
 
   /**
@@ -1161,25 +936,18 @@ export class ProjectStore {
    * minutes, and watches the folder for changes that a sync client brings.
    */
   async startSession(): Promise<void> {
-    if (this.endSession) return;
-    this.activeAt = this.deps.clock.now();
-    const stopBeating = this.deps.clock.every(HEARTBEAT_MS, () => {
-      void this.writeMarker(true);
-    });
-    let stopWatching = async () => {};
-    this.endSession = async () => {
-      stopBeating();
-      await stopWatching();
-    };
+    if (this.sessions.active) return;
+    this.sessions.begin();
     try {
-      stopWatching = await this.deps.fs.watch(this.path, () =>
-        this.changeSeen(),
-      );
+      const stop = await this.deps.fs.watch(this.path, () => this.changeSeen());
+      // Closed meanwhile: nothing will stop it later.
+      if (this.sessions.active) this.stopWatching = async () => stop();
+      else await stop();
     } catch (error) {
       // Changes are still found on the next open.
       console.error(`Can't watch ${this.path}:`, error);
     }
-    await this.writeMarker(true);
+    await this.sessions.mark();
     // What arrived between opening and watching.
     void this.checkForChanges();
   }
@@ -1189,19 +957,7 @@ export class ProjectStore {
    * once. The Overview pane's state stays on this computer, out of the marker.
    */
   updateSession(change: ProjectView): void {
-    const view = { ...change };
-    delete view.overviewOpen;
-    delete view.pinnedNotes;
-    if (view.panelWidths) {
-      view.panelWidths = { ...view.panelWidths };
-      delete view.panelWidths.overview;
-    }
-    const sceneChanged =
-      view.lastSceneId !== undefined &&
-      view.lastSceneId !== this.view.lastSceneId;
-    this.view = { ...this.view, ...view };
-    this.activeAt = this.deps.clock.now();
-    if (sceneChanged && this.endSession) void this.writeMarker(true);
+    this.sessions.update(change);
   }
 
   /** Whether a sync client keeps any of the Project's files online-only. */
@@ -1217,40 +973,13 @@ export class ProjectStore {
     }
   }
 
-  /** Writes this computer's marker; it is advisory, so failing to is only logged. */
-  private writeMarker(open: boolean): Promise<void> {
-    const marker: SessionMarker = {
-      ...this.view,
-      host: this.host,
-      format: FORMAT,
-      heartbeat: this.deps.clock.now(),
-      activeAt: this.activeAt,
-      open,
-    };
-    const dir = path.join(this.path, SESSIONS);
-    this.markerWrites = this.markerWrites.then(async () => {
-      try {
-        await this.deps.fs.mkdir(dir);
-        await safeWrite(
-          this.deps.fs,
-          this.deps.clock,
-          path.join(dir, markerName(this.host)),
-          `${JSON.stringify(marker, null, 2)}\n`,
-        );
-      } catch (error) {
-        console.error("Can't write the session marker:", error);
-      }
-    });
-    return this.markerWrites;
-  }
-
   /** A watcher event: checks the files once the burst it belongs to is over. */
   private changeSeen(): void {
-    if (this.checkScheduled || !this.endSession) return;
+    if (this.checkScheduled || !this.sessions.active) return;
     this.checkScheduled = true;
     void this.deps.clock.sleep(COALESCE_MS).then(() => {
       this.checkScheduled = false;
-      if (this.endSession) return this.checkForChanges();
+      if (this.sessions.active) return this.checkForChanges();
     });
   }
 
@@ -1356,8 +1085,7 @@ export class ProjectStore {
       }
     }
     replaceAll(this.files, units.files);
-    this.trash.clear();
-    for (const [id, item] of units.trash) this.trash.set(id, item);
+    this.trash.replace(units.trash);
     // An Entry's value accepted here and not yet saved is newer.
     for (const { ref, value } of this.unitWriter.pendingValues()) {
       if (ref.kind === 'entry') {
@@ -1447,19 +1175,7 @@ export class ProjectStore {
 
   /** The computer whose session marker says a newer app had the Project open, lately first. */
   private async upgradedOn(): Promise<string | undefined> {
-    try {
-      const markers = await readSessionMarkers(this.path, this.deps.fs);
-      return [...markers.values()]
-        .filter(
-          (m) =>
-            m.host !== this.host &&
-            typeof m.format === 'number' &&
-            m.format > FORMAT,
-        )
-        .sort((a, b) => b.heartbeat - a.heartbeat)[0]?.host;
-    } catch {
-      return undefined;
-    }
+    return this.sessions.upgradedOn();
   }
 
   /** Set once a newer app has upgraded the Project, after which nothing more is written. */
@@ -1499,7 +1215,7 @@ export class ProjectStore {
     // Read only to label a copy: most checks find none.
     let hosts: string[] | undefined;
     const knownHosts = async () =>
-      (hosts ??= [this.host, ...(await markerHosts(this.path, this.deps.fs))]);
+      (hosts ??= [this.host, ...(await this.sessions.hosts())]);
     const found = new Map<string, ConflictEntry>();
     for (const kind of Object.keys(UNIT_DIRS) as UnitRef['kind'][]) {
       const dir = path.join(this.path, UNIT_DIRS[kind]);
@@ -1885,10 +1601,7 @@ export class ProjectStore {
       ...chapters.flatMap((c) => [c.id, ...c.scenes.map((s) => s.id)]),
       ...this.unitDetails.keys(),
     ]);
-    const entries = [
-      ...this.entries.values(),
-      ...[...this.trash.values()].filter((item) => item.kind === 'entry'),
-    ];
+    const entries = [...this.entries.values(), ...this.trash.entries()];
     return new Map<string, string[]>([
       ...[...ids]
         .filter((id) => id !== except && this.outlineOrphaned(id) !== 'gone')
@@ -1974,9 +1687,7 @@ export class ProjectStore {
         )
         .map(([id, { tags }]) => ({ id, tags: change(tags!) }));
       const entries = [...this.entries.values()].filter(has);
-      const trashed = [...this.trash.values()].filter(
-        (item): item is TrashedEntry => item.kind === 'entry' && has(item),
-      );
+      const trashed = this.trash.entries().filter(has);
       try {
         for (const { id, tags } of outlines) {
           await this.saveDetail(
@@ -1996,39 +1707,13 @@ export class ProjectStore {
         }
       }
       for (const entry of entries) await this.retagEntry(entry.id, change);
-      for (const item of trashed) await this.retagTrashedEntry(item, change);
+      for (const item of trashed) await this.trash.retagEntry(item, change);
     });
-  }
-
-  /**
-   * Changes the Tags of an Entry in Trash as `change` does, in its Trash
-   * copy as on disk, to be restored with.
-   */
-  private async retagTrashedEntry(
-    item: TrashedEntry,
-    change: (tags: string[]) => string[],
-  ): Promise<void> {
-    const file = entryTrashPath(this.path, item.id);
-    const { frontmatter, body } = parseUnitFile(
-      await this.deps.fs.readFile(file),
-    );
-    const tags = change(readTags(frontmatter[TAGS]));
-    const { [TAGS]: _, ...rest } = frontmatter;
-    await safeWrite(
-      this.deps.fs,
-      this.deps.clock,
-      file,
-      formatUnitFile({
-        frontmatter: tags.length > 0 ? { ...rest, [TAGS]: tags } : rest,
-        body,
-      }),
-    );
-    this.trash.set(item.id, withTags(item, tags));
   }
 
   /** Whether `id` is an Entry's, one in Trash too. */
   private isEntry(id: string): boolean {
-    return this.entries.has(id) || this.trash.get(id)?.kind === 'entry';
+    return this.entries.has(id) || this.trash.kindOf(id) === 'entry';
   }
 
   /**
@@ -2369,47 +2054,7 @@ export class ProjectStore {
 
   /** Latest first. */
   listTrash(): TrashItem[] {
-    const manuscript = this.manuscript();
-    const entries = this.listEntries();
-    return [...this.trash.values()]
-      .sort((a, b) => b.trashedAt - a.trashedAt)
-      .map(
-        (item): TrashItem =>
-          item.kind === 'conversation'
-            ? { ...item }
-            : item.kind === 'version'
-              ? {
-                  kind: 'version',
-                  id: item.id,
-                  title: unitName(item.ref, manuscript, entries),
-                  trashedAt: item.trashedAt,
-                  ...(item.host && { host: item.host }),
-                  savedAt: item.savedAt,
-                }
-              : item.kind === 'entry'
-                ? {
-                    kind: 'entry',
-                    id: item.id,
-                    title: item.name,
-                    trashedAt: item.trashedAt,
-                    type: item.type,
-                  }
-                : item.kind === 'chapter'
-                  ? {
-                      kind: 'chapter',
-                      id: item.id,
-                      title: item.title,
-                      trashedAt: item.trashedAt,
-                      scenes: item.scenes.map((s) => ({ ...s })),
-                    }
-                  : {
-                      kind: 'scene',
-                      id: item.id,
-                      title: item.title,
-                      trashedAt: item.trashedAt,
-                      ...(item.chapter && { chapterTitle: item.chapter.title }),
-                    },
-      );
+    return this.trash.list();
   }
 
   /** The Entries in the Story Bible, by type in the order of `ENTRY_TYPES`, then by name. */
@@ -2431,7 +2076,9 @@ export class ProjectStore {
     const changed = await this.step(async () => {
       await this.addEntry(value);
       // It may have a description by the time the Author undoes it.
-      return () => this.moveEntryToTrash(id);
+      return async () => {
+        await this.trash.move('entry', id);
+      };
     });
     return { id, ...changed };
   }
@@ -2451,8 +2098,7 @@ export class ProjectStore {
   /** Moves an Entry to Trash; its private notes stay where they are until Trash is emptied. */
   trashEntry(entryId: string): Promise<Changed> {
     return this.step(async () => {
-      await this.moveEntryToTrash(entryId);
-      return () => this.restoreFromTrash(entryId);
+      return this.trash.move('entry', entryId);
     });
   }
 
@@ -2515,94 +2161,6 @@ export class ProjectStore {
     const key = unitKey(ref);
     await this.unitWriter.settled(key);
     return { before, after };
-  }
-
-  private async moveEntryToTrash(entryId: string): Promise<void> {
-    const ref = entryRef(entryId);
-    this.refuseUnavailable(ref);
-    const key = unitKey(ref);
-    this.closing.add(entryId);
-    try {
-      // Its latest value, once every write accepted for it has run.
-      await this.unitWriter.settled(key);
-      const file = parseUnitFile(
-        await this.deps.fs.readFile(unitPath(this.path, ref)),
-      );
-      const latest =
-        (this.unitWriter.pending(key)?.value as EntryValue | undefined) ??
-        entryValue(entryId, file);
-      const info: TrashedEntryInfo = { at: this.deps.clock.now() };
-      const { frontmatter: own, body } = parseUnitFile(
-        entryFile(latest, file.frontmatter),
-      );
-      await this.deps.fs.mkdir(trashDir(this.path));
-      await safeWrite(
-        this.deps.fs,
-        this.deps.clock,
-        entryTrashPath(this.path, entryId),
-        formatUnitFile({ frontmatter: { ...own, trashedEntry: info }, body }),
-      );
-      this.trash.set(entryId, trashedEntry(latest, info));
-      // Its description is in Trash now.
-      this.unitWriter.settle(key);
-      this.setEntries(() => this.entries.delete(entryId));
-      await this.deps.fs.unlink(unitPath(this.path, ref));
-      // Last: a crash before leaves it in images/, where restoring finds it.
-      for (const name of filesMovingWithTrash(latest)) {
-        await this.moveFile(
-          imagePath(this.path, name),
-          path.join(trashDir(this.path), name),
-        );
-      }
-    } finally {
-      this.closing.delete(entryId);
-    }
-  }
-
-  /** Puts an Entry back in the Story Bible: its file first, then its Trash copy goes. */
-  private async restoreEntry(item: TrashedEntry): Promise<void> {
-    if (this.entries.has(item.id)) {
-      throw new ProjectError(
-        'in-story-bible',
-        `${item.name} is already in the Story Bible`,
-      );
-    }
-    const trashed = entryTrashPath(this.path, item.id);
-    const { frontmatter, body } = parseUnitFile(
-      await this.deps.fs.readFile(trashed),
-    );
-    const { trashedEntry: _, ...own } = frontmatter;
-    const file = { frontmatter: own, body };
-    // First: a crash after leaves it in images/, where restoring finds it.
-    for (const name of filesMovingWithTrash(
-      parseDetails('entry', item.id, own),
-    )) {
-      await this.moveFile(
-        path.join(trashDir(this.path), name),
-        imagePath(this.path, name),
-      );
-    }
-    await this.deps.fs.mkdir(path.join(this.path, UNIT_DIRS.entry));
-    await safeWrite(
-      this.deps.fs,
-      this.deps.clock,
-      unitPath(this.path, entryRef(item.id)),
-      formatUnitFile(file),
-    );
-    this.trash.delete(item.id);
-    const entry = entrySummary(entryValue(item.id, file));
-    this.setEntries(() => this.entries.set(item.id, entry));
-    await this.deps.fs.unlink(trashed);
-  }
-
-  /**
-   * Moves a file, if it is there; an image may not have synced yet. One
-   * already at `to` is replaced.
-   */
-  private async moveFile(from: string, to: string): Promise<void> {
-    if (!(await this.deps.fs.exists(from))) return;
-    await this.deps.fs.mkdir(path.dirname(to));
-    await renameWithRetry(this.deps.fs, this.deps.clock, from, to);
   }
 
   /**
@@ -2684,21 +2242,6 @@ export class ProjectStore {
     this.emit({ type: 'imageChanged', ref });
   }
 
-  /** Moves the files the Chapters and Scenes of `ids` have in Trash's keeping, to Trash or back. */
-  private async moveUnitImages(
-    ids: readonly string[],
-    to: 'trash' | 'images',
-  ): Promise<void> {
-    for (const id of ids) {
-      for (const name of filesMovingWithTrash(this.unitDetails.get(id))) {
-        const inTrash = path.join(trashDir(this.path), name);
-        const inImages = imagePath(this.path, name);
-        if (to === 'trash') await this.moveFile(inImages, inTrash);
-        else await this.moveFile(inTrash, inImages);
-      }
-    }
-  }
-
   /** Changes the Entries, and says so if that changes the list. */
   private setEntries(change: () => void): void {
     const before = JSON.stringify(this.listEntries());
@@ -2732,7 +2275,9 @@ export class ProjectStore {
         this.files.add(id);
       });
       // It may have Prose by the time the Author undoes it.
-      return () => this.moveSceneToTrash(id);
+      return async () => {
+        await this.trash.move('scene', id);
+      };
     });
     return { id, ...changed };
   }
@@ -2943,16 +2488,14 @@ export class ProjectStore {
   /** Moves a Scene, placed or Unplaced, to Trash with its Prose. */
   trashScene(sceneId: string): Promise<Changed> {
     return this.step(async () => {
-      await this.moveSceneToTrash(sceneId);
-      return () => this.restoreFromTrash(sceneId);
+      return this.trash.move('scene', sceneId);
     });
   }
 
   /** Moves a Chapter and its Scenes to Trash. The last Chapter stays. */
   trashChapter(chapterId: string): Promise<Changed> {
     return this.step(async () => {
-      await this.moveChapterToTrash(chapterId);
-      return () => this.restoreFromTrash(chapterId);
+      return this.trash.move('chapter', chapterId);
     });
   }
 
@@ -2963,23 +2506,7 @@ export class ProjectStore {
    * Scenes.
    */
   restore(id: string): Promise<Changed> {
-    return this.step(async () => {
-      const item = this.trash.get(id);
-      if (item?.kind === 'version') {
-        const name = await this.restoreVersion(item);
-        return () => this.trashCopy(item.ref, name, item.host);
-      }
-      const kind = item?.kind;
-      await this.restoreFromTrash(id);
-      return () =>
-        kind === 'chapter'
-          ? this.moveChapterToTrash(id)
-          : kind === 'entry'
-            ? this.moveEntryToTrash(id)
-            : kind === 'conversation'
-              ? this.conversations.moveToTrash(id)
-              : this.moveSceneToTrash(id);
-    });
+    return this.step(() => this.trash.restore(id));
   }
 
   /**
@@ -3034,7 +2561,7 @@ export class ProjectStore {
       return [kept, ...from].every((v) => !sameText(ref, value, v));
     };
     if (pending && !sameText(ref, pending.value, kept)) {
-      await this.writeTrashedVersion(ref, unitFile(ref, pending.value), {
+      await this.trash.writeVersion(ref, unitFile(ref, pending.value), {
         host: this.host,
         savedAt: this.deps.clock.now(),
       });
@@ -3050,7 +2577,7 @@ export class ProjectStore {
         const known = this.unitWriter.known(unitKey(ref));
         const unchanged =
           original && sameFingerprint(onDisk, known?.fingerprint ?? null);
-        await this.writeTrashedVersion(ref, text, {
+        await this.trash.writeVersion(ref, text, {
           ...(unchanged && original.host && { host: original.host }),
           savedAt: onDisk.mtimeMs,
         });
@@ -3091,89 +2618,11 @@ export class ProjectStore {
 
     for (const [i, copy] of copies.entries()) {
       if (differs(copyTexts[i])) {
-        await this.writeTrashedVersion(ref, copyTexts[i], copy);
+        await this.trash.writeVersion(ref, copyTexts[i], copy);
       }
       await this.deps.fs.unlink(copyPath(this.path, ref, copy));
     }
     return loaded;
-  }
-
-  /** Writes a version of a unit to Trash, as `trash/<id>.version.md`. */
-  private async writeTrashedVersion(
-    ref: UnitRef,
-    text: string,
-    from: { host?: string; savedAt: number },
-  ): Promise<void> {
-    const id = randomUUID();
-    const info: TrashedVersionInfo = {
-      at: this.deps.clock.now(),
-      ref: { kind: ref.kind, id: ref.id },
-      ...(from.host && { host: from.host }),
-      savedAt: from.savedAt,
-    };
-    const { frontmatter, body } = parseUnitFile(text);
-    await this.deps.fs.mkdir(trashDir(this.path));
-    await safeWrite(
-      this.deps.fs,
-      this.deps.clock,
-      versionTrashPath(this.path, id),
-      formatUnitFile({
-        frontmatter: { ...frontmatter, trashedVersion: info },
-        body,
-      }),
-    );
-    this.trash.set(id, trashedVersion(id, info));
-  }
-
-  /**
-   * Puts a version back beside its unit's file, named after the computer it
-   * came from when known, so that it is in Conflict again; never beside a
-   * unit that is Missing or in Trash. Resolves with its file name.
-   */
-  private async restoreVersion(item: TrashedVersion): Promise<string> {
-    // Beside a unit that isn't here, it would be in no Conflict.
-    this.refuseUnavailable(item.ref);
-    const trashed = versionTrashPath(this.path, item.id);
-    const { frontmatter, body } = parseUnitFile(
-      await this.deps.fs.readFile(trashed),
-    );
-    const { trashedVersion: _, ...own } = frontmatter;
-    const dir = path.dirname(unitPath(this.path, item.ref));
-    const label = item.host ? hostStem(item.host) : 'version';
-    const name = await freeName(
-      this.deps.fs,
-      dir,
-      `${item.ref.id}-${label}`,
-      '.md',
-    );
-    await this.deps.fs.mkdir(dir);
-    await safeWrite(
-      this.deps.fs,
-      this.deps.clock,
-      path.join(dir, name),
-      formatUnitFile({ frontmatter: own, body }),
-    );
-    this.trash.delete(item.id);
-    await this.deps.fs.unlink(trashed);
-    await this.findConflicts();
-    return name;
-  }
-
-  /** Moves a version beside a unit's file to Trash. */
-  private async trashCopy(
-    ref: UnitRef,
-    name: string,
-    host: string | undefined,
-  ): Promise<void> {
-    const file = copyPath(this.path, ref, { name });
-    const fingerprint = await this.deps.fs.stat(file);
-    if (!fingerprint) return;
-    await this.writeTrashedVersion(ref, await this.deps.fs.readFile(file), {
-      host,
-      savedAt: fingerprint.mtimeMs,
-    });
-    await this.deps.fs.unlink(file);
-    await this.findConflicts();
   }
 
   /** Reverts `step` if it is still the latest structure operation. */
@@ -3196,60 +2645,7 @@ export class ProjectStore {
   emptyTrash(): Promise<void> {
     return this.enqueueWrite(async () => {
       this.latest = null;
-      const dir = trashDir(this.path);
-      // Chapter records first: a crash then leaves their Scenes in Trash on
-      // their own, still restorable.
-      const names = (await this.deps.fs.readdir(dir)).sort(
-        (a, b) => Number(isChapterFile(b)) - Number(isChapterFile(a)),
-      );
-      // Outlines and Notes stay in place while their unit is in Trash, and go
-      // first: a crash then leaves the unit restorable, without them.
-      for (const name of names) {
-        const id = (ID_FILE.exec(name) ?? CHAPTER_FILE.exec(name))?.[1];
-        if (id && !this.isLive(id)) await this.deleteOutlineAndNotes(id);
-        // So do an Entry's private notes.
-        const entryId = ENTRY_TRASH_FILE.exec(name)?.[1];
-        if (entryId && !this.entries.has(entryId)) {
-          await this.deleteUnitFile({ kind: 'private', id: entryId });
-        }
-      }
-      for (const name of names) {
-        const file = path.join(dir, name);
-        // The image of an Entry back in the Story Bible, as when an MVP app
-        // restored it, goes back to images/; so does a Scene's or Chapter's
-        // back in the Manuscript.
-        const owner = IMAGE_FILE.exec(name)?.[1];
-        if (
-          owner &&
-          (filesMovingWithTrash(this.entries.get(owner)).includes(name) ||
-            (this.isLive(owner) &&
-              filesMovingWithTrash(this.unitDetails.get(owner)).includes(name)))
-        ) {
-          await this.moveFile(file, imagePath(this.path, name));
-          this.emit({
-            type: 'imageChanged',
-            ref: this.entries.has(owner)
-              ? { kind: 'entry', id: owner }
-              : this.sceneOrChapterRef(owner),
-          });
-        } else {
-          await this.deps.fs.unlink(file);
-        }
-      }
-      // A Todo linked to what was in Trash stays, as plain text.
-      const emptied = new Set(
-        [...this.trash.values()].flatMap((item) =>
-          item.kind === 'chapter'
-            ? [item.id, ...item.scenes.map((scene) => scene.id)]
-            : [item.id],
-        ),
-      );
-      this.trash.clear();
-      const dropped = await this.todos.dropLinks(
-        ({ id }) =>
-          emptied.has(id) && !this.isLive(id) && !this.entries.has(id),
-      );
-      if (dropped) this.emitTodos();
+      await this.trash.empty();
     });
   }
 
@@ -3266,7 +2662,7 @@ export class ProjectStore {
   /** Whether an Outline's Chapter or Scene is in Trash or gone; the Project Outline never is. */
   private outlineOrphaned(id: string): 'trashed' | 'gone' | null {
     if (id === PROJECT_OUTLINE || this.isLive(id)) return null;
-    return this.inTrash(id) ? 'trashed' : 'gone';
+    return this.trash.has(id) ? 'trashed' : 'gone';
   }
 
   private async deleteOutlineAndNotes(id: string): Promise<void> {
@@ -3299,88 +2695,6 @@ export class ProjectStore {
       this.latest = { step, undo };
       return { manuscript: this.manuscript(), step };
     });
-  }
-
-  private async moveSceneToTrash(sceneId: string): Promise<void> {
-    const tree = this.tree();
-    const found = tryFindScene(tree, sceneId);
-    if (!this.files.has(sceneId)) {
-      if (found) this.refuseMissing(sceneRef(sceneId));
-      throw new Error(`No Scene ${sceneId}`);
-    }
-    if (this.trash.has(sceneId)) {
-      // Another version of it is in Trash, such as one deleted on another
-      // computer while this one was written to. Both are kept.
-      throw new ProjectError(
-        'in-trash',
-        'Another version of this Scene is in Trash; restore or empty it first',
-      );
-    }
-    await this.closeScenes([sceneId], async (prose) => {
-      const info: TrashedSceneInfo = {
-        at: this.deps.clock.now(),
-        title: found?.scene.title ?? UNPLACED_TITLE,
-      };
-      if (found) {
-        info.chapter = { id: found.chapter.id, title: found.chapter.title };
-        info.index = found.chapter.scenes.indexOf(found.scene);
-        const node = unknownKeys(found.scene);
-        if (node) info.node = node;
-        found.chapter.scenes.splice(info.index, 1);
-      }
-      await this.writeTrashedScene(sceneId, prose.get(sceneId)!, info);
-      if (found) await this.writeManifest({ ...this.manifest, tree });
-      this.trash.set(sceneId, trashedScene(sceneId, info));
-    });
-    // Last: a crash before leaves it in images/, where restoring finds it.
-    await this.moveUnitImages([sceneId], 'trash');
-  }
-
-  private async moveChapterToTrash(chapterId: string): Promise<void> {
-    const tree = this.tree();
-    const chapter = findChapter(tree, chapterId);
-    if (tree.chapters.length === 1) {
-      throw new ProjectError(
-        'last-chapter',
-        "The last Chapter can't be deleted",
-      );
-    }
-    for (const scene of chapter.scenes) this.refuseMissing(sceneRef(scene.id));
-    const ids = chapter.scenes.map((s) => s.id);
-    await this.closeScenes(ids, async (prose) => {
-      const at = this.deps.clock.now();
-      const index = tree.chapters.indexOf(chapter);
-      for (const [i, scene] of chapter.scenes.entries()) {
-        await this.writeTrashedScene(scene.id, prose.get(scene.id)!, {
-          at,
-          title: scene.title,
-          chapter: { id: chapter.id, title: chapter.title },
-          index: i,
-          withChapter: true,
-        });
-      }
-      const record: ChapterFile = {
-        ...unknownKeys(chapter),
-        id: chapter.id,
-        format: FORMAT,
-        title: chapter.title,
-        index,
-        trashedAt: at,
-        scenes: chapter.scenes,
-      };
-      await this.deps.fs.mkdir(trashDir(this.path));
-      await safeWrite(
-        this.deps.fs,
-        this.deps.clock,
-        chapterTrashPath(this.path, chapter.id),
-        `${JSON.stringify(record, null, 2)}\n`,
-      );
-      tree.chapters.splice(index, 1);
-      await this.writeManifest({ ...this.manifest, tree });
-      this.trash.set(chapter.id, trashedChapter(record));
-    });
-    // Its Scenes' images go with its own.
-    await this.moveUnitImages([chapterId, ...ids], 'trash');
   }
 
   /**
@@ -3421,116 +2735,6 @@ export class ProjectStore {
     const pending = this.unitWriter.pending(key);
     if (pending) file.body = (pending.value as SceneValue).markdown;
     return file;
-  }
-
-  private async writeTrashedScene(
-    id: string,
-    { frontmatter, body }: UnitFile,
-    trashed: TrashedSceneInfo,
-  ): Promise<void> {
-    await this.deps.fs.mkdir(trashDir(this.path));
-    await safeWrite(
-      this.deps.fs,
-      this.deps.clock,
-      sceneTrashPath(this.path, id),
-      formatUnitFile({
-        frontmatter: { ...frontmatterOf(id, frontmatter), trashed },
-        body,
-      }),
-    );
-  }
-
-  private async restoreFromTrash(id: string): Promise<void> {
-    const item = this.trash.get(id);
-    if (!item) throw new Error(`Nothing in Trash has id ${id}`);
-    if (item.kind === 'version') {
-      await this.restoreVersion(item);
-      return;
-    }
-    if (item.kind === 'entry') {
-      await this.restoreEntry(item);
-      return;
-    }
-    if (item.kind === 'conversation') {
-      await this.conversations.restore(id);
-      return;
-    }
-    const tree = this.tree();
-    const placed = new Set(sceneIds(tree));
-    const live = (sceneId: string) =>
-      placed.has(sceneId) || this.files.has(sceneId);
-    if (
-      item.kind === 'chapter'
-        ? tree.chapters.some((c) => c.id === id)
-        : live(id)
-    ) {
-      throw new ProjectError(
-        'in-manuscript',
-        `${item.title} is already in the Manuscript`,
-      );
-    }
-
-    // Images first: a crash after leaves them in images/, where restoring
-    // finds them.
-    await this.moveUnitImages(
-      item.kind === 'chapter' ? [id, ...item.scenes.map((s) => s.id)] : [id],
-      'images',
-    );
-    // Scene files first, the tree next, the Trash copies last.
-    const restored: string[] = [];
-    const restoreFile = async (sceneId: string) => {
-      const file = sceneTrashPath(this.path, sceneId);
-      if (!(await this.deps.fs.exists(file))) return;
-      const { frontmatter, body } = parseUnitFile(
-        await this.deps.fs.readFile(file),
-      );
-      const { trashed: _, ...previous } = frontmatter;
-      await safeWrite(
-        this.deps.fs,
-        this.deps.clock,
-        scenePath(this.path, sceneId),
-        sceneFile({ id: sceneId, markdown: body }, previous),
-      );
-      restored.push(sceneId);
-    };
-
-    if (item.kind === 'chapter') {
-      const scenes = item.scenes.filter((s) => !live(s.id));
-      for (const scene of scenes) await restoreFile(scene.id);
-      tree.chapters.splice(Math.min(item.index, tree.chapters.length), 0, {
-        ...item.node,
-        id,
-        title: item.title,
-        scenes,
-      });
-      await this.writeManifest({ ...this.manifest, tree });
-    } else {
-      await restoreFile(id);
-      if (item.chapter) {
-        const chapter =
-          tree.chapters.find((c) => c.id === item.chapter?.id) ??
-          tree.chapters[tree.chapters.length - 1];
-        const index =
-          chapter.id === item.chapter.id
-            ? Math.min(item.index ?? Infinity, chapter.scenes.length)
-            : chapter.scenes.length;
-        chapter.scenes.splice(index, 0, {
-          ...item.node,
-          id,
-          title: item.title,
-        });
-        await this.writeManifest({ ...this.manifest, tree });
-      }
-    }
-    for (const sceneId of restored) this.files.add(sceneId);
-    this.trash.delete(id);
-
-    for (const sceneId of restored) {
-      await this.deps.fs.unlink(sceneTrashPath(this.path, sceneId));
-    }
-    if (item.kind === 'chapter') {
-      await this.deps.fs.unlink(chapterTrashPath(this.path, id));
-    }
   }
 
   /**
@@ -3623,7 +2827,7 @@ export class ProjectStore {
   private refuseUnavailable(ref: UnitRef): void {
     if (ref.kind === 'entry' || ref.kind === 'private') {
       if (this.entries.has(ref.id) && !this.closing.has(ref.id)) return;
-      if (this.entries.has(ref.id) || this.trash.has(ref.id)) {
+      if (this.entries.has(ref.id) || this.trash.kindOf(ref.id) !== undefined) {
         throw new ProjectError('trashed', `Entry ${ref.id} is in Trash`);
       }
       throw new Error(`No Entry ${ref.id}`);
@@ -3637,19 +2841,10 @@ export class ProjectStore {
     }
     if (ref.kind === 'outline' && ref.id === PROJECT_OUTLINE) return;
     if (this.isLive(ref.id)) return;
-    if (this.inTrash(ref.id)) {
+    if (this.trash.has(ref.id)) {
       throw new ProjectError('trashed', `${ref.id} is in Trash`);
     }
     throw new Error(`No Chapter or Scene ${ref.id}`);
-  }
-
-  /** Whether a Chapter or Scene is in Trash, on its own or with its Chapter. */
-  private inTrash(id: string): boolean {
-    return [...this.trash.values()].some(
-      (item) =>
-        item.id === id ||
-        (item.kind === 'chapter' && item.scenes.some((s) => s.id === id)),
-    );
   }
 
   /** A narrower handle for building the Assistant's context; it has no private notes. */
@@ -3871,10 +3066,7 @@ export class ProjectStore {
    * step that `undo` reverts. Single messages can't be deleted.
    */
   trashConversation(id: string): Promise<Changed> {
-    return this.step(async () => {
-      await this.conversations.moveToTrash(id);
-      return () => this.conversations.restore(id);
-    });
+    return this.step(() => this.trash.move('conversation', id));
   }
 
   /**
@@ -3925,11 +3117,11 @@ export class ProjectStore {
         `${this.displayName} can't close: some changes aren't saved yet`,
       );
     }
-    if (this.endSession) {
-      const end = this.endSession;
-      this.endSession = null;
-      await end();
-      await this.writeMarker(false);
+    if (this.sessions.active) {
+      this.sessions.stop();
+      await this.stopWatching?.();
+      this.stopWatching = null;
+      await this.sessions.leave();
     }
   }
 
@@ -3994,27 +3186,6 @@ function replaceAll<T>(set: Set<T>, items: Set<T>): void {
   for (const item of items) set.add(item);
 }
 
-function sceneIds(tree: ProjectTree): string[] {
-  return tree.chapters.flatMap((chapter) => chapter.scenes.map((s) => s.id));
-}
-
-function findChapter(tree: ProjectTree, chapterId: string): ChapterNode {
-  const chapter = tree.chapters.find((c) => c.id === chapterId);
-  if (!chapter) throw new Error(`No Chapter ${chapterId}`);
-  return chapter;
-}
-
-function tryFindScene(
-  tree: ProjectTree,
-  sceneId: string,
-): { chapter: ChapterNode; scene: SceneNode } | null {
-  for (const chapter of tree.chapters) {
-    const scene = chapter.scenes.find((s) => s.id === sceneId);
-    if (scene) return { chapter, scene };
-  }
-  return null;
-}
-
 function findScene(
   tree: ProjectTree,
   sceneId: string,
@@ -4024,31 +3195,8 @@ function findScene(
   return found;
 }
 
-function sceneRef(id: string): SceneRef {
-  return { kind: 'scene', id };
-}
-
 function notesRef(id: string): NotesRef {
   return { kind: 'notes', id };
-}
-
-function scenePath(projectPath: string, id: string): string {
-  return path.join(projectPath, 'scenes', `${id}.md`);
-}
-
-/** Where Entry, Scene and Chapter images are, each named by its unit's `image`. */
-const IMAGES = 'images';
-
-function imagePath(projectPath: string, name: string): string {
-  return path.join(projectPath, IMAGES, name);
-}
-
-function copyPath(
-  projectPath: string,
-  ref: UnitRef,
-  copy: { name: string },
-): string {
-  return path.join(projectPath, UNIT_DIRS[ref.kind], copy.name);
 }
 
 /** Whether `name` is a unit's own file in its kind's directory, not a copy. */
@@ -4061,22 +3209,6 @@ function isOwnFile(kind: UnitRef['kind'], name: string): boolean {
 
 function isProjectOutline(ref: UnitRef): boolean {
   return ref.kind === 'outline' && ref.id === PROJECT_OUTLINE;
-}
-
-function sceneTrashPath(projectPath: string, id: string): string {
-  return path.join(trashDir(projectPath), `${id}.md`);
-}
-
-function versionTrashPath(projectPath: string, id: string): string {
-  return path.join(trashDir(projectPath), `${id}.version.md`);
-}
-
-function chapterTrashPath(projectPath: string, id: string): string {
-  return path.join(trashDir(projectPath), `${id}.json`);
-}
-
-function isChapterFile(name: string): boolean {
-  return CHAPTER_FILE.test(name);
 }
 
 /** Where the Status of `statusId` is in `statuses`; refused if it isn't. */
