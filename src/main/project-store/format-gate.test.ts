@@ -1,4 +1,11 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import {
+  mkdir,
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  writeFile,
+} from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -6,6 +13,7 @@ import type { ProjectEvent } from '../../shared/api';
 import { heldClock, instantClock, type Clock } from './clock';
 import { faultyFileSystem } from './faulty-file-system';
 import { nodeFileSystem, type FileSystem } from './file-system';
+import { FormatUpgraded } from './gated-file-system';
 import {
   createProject,
   FORMAT,
@@ -466,6 +474,33 @@ describe('a Project upgraded while it is open here', () => {
     expect(await nodeFileSystem.exists(copy)).toBe(true);
   });
 
+  it('refuses a Todo change, a Tag rename on a trashed Entry and a detail change, changing no file', async () => {
+    const { sceneId } = await newProject();
+    const store = await open();
+    await store.addTodo('Call Anna', null);
+    const trashed = await store.createEntry('place', 'Harbour');
+    await store.setTags(trashed.id, ['Mara']);
+    await store.trashEntry(trashed.id);
+    await store.flush();
+    await upgradeElsewhere();
+    const before = await filesOf(projectPath);
+
+    await expect(store.addTodo('Later', null)).rejects.toBeInstanceOf(
+      FormatUpgraded,
+    );
+    await expect(store.renameTag('Mara', 'Anna')).rejects.toBeInstanceOf(
+      FormatUpgraded,
+    );
+    await expect(store.setStatus(sceneId, null)).rejects.toBeInstanceOf(
+      FormatUpgraded,
+    );
+    await expect(store.setTags(sceneId, ['x'])).rejects.toBeInstanceOf(
+      FormatUpgraded,
+    );
+
+    expect(await filesOf(projectPath)).toEqual(before);
+  });
+
   it('checks project.json by a stat, reading it only when it changed', async () => {
     const { sceneId } = await newProject();
     const reads: string[] = [];
@@ -486,3 +521,16 @@ describe('a Project upgraded while it is open here', () => {
     expect(reads).not.toContain('project.json');
   });
 });
+
+/** Every file under `dir` and what it holds, by path. */
+async function filesOf(dir: string): Promise<Record<string, string>> {
+  const files: Record<string, string> = {};
+  for (const entry of await readdir(dir, { withFileTypes: true })) {
+    const file = path.join(entry.parentPath, entry.name);
+    if (entry.isDirectory()) Object.assign(files, await filesOf(file));
+    // A session marker is advisory, and is not gated.
+    else if (!file.includes('.sessions'))
+      files[file] = await readFile(file, 'utf8');
+  }
+  return files;
+}

@@ -21,6 +21,13 @@ const WATCHER_BACKENDS: Partial<Record<NodeJS.Platform, BackendType>> = {
 /** What tells a file's version on disk from another: never its file ID. */
 export type Fingerprint = { mtimeMs: number; size: number };
 
+export function sameFingerprint(
+  a: Fingerprint | null,
+  b: Fingerprint | null,
+): boolean {
+  return a?.mtimeMs === b?.mtimeMs && a?.size === b?.size;
+}
+
 // The port through which ProjectStore touches the disk. Tests wrap it to
 // inject faults.
 export interface FileSystem {

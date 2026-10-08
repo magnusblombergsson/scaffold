@@ -125,7 +125,12 @@ import {
   type LoggedProposal,
 } from './conversation-log';
 import { entryFieldsFrontmatter, readEntryFields } from './entry-fields-file';
-import type { FileSystem, Fingerprint } from './file-system';
+import {
+  sameFingerprint,
+  type FileSystem,
+  type Fingerprint,
+} from './file-system';
+import { FormatUpgraded, GatedFileSystem } from './gated-file-system';
 import { renameWithRetry, safeWrite, writeFailureReason } from './safe-write';
 import {
   changeDetails,
@@ -257,21 +262,31 @@ export async function createProject(
       })),
     },
   };
-  await fs.mkdir(path.join(projectPath, 'scenes'));
+  // A new folder has no newer app to find: the gate only claims project.json.
+  const gated = new GatedFileSystem(fs, {
+    root: projectPath,
+    format: FORMAT,
+    copiesFormat: async () => FORMAT,
+    onUpgraded: async () => {},
+    refusal: () => `${path.basename(projectPath)} was upgraded.`,
+  });
+  await gated.mkdir(path.join(projectPath, 'scenes'));
   // Unit files first, the manifest last.
   for (const scene of scenes) {
     await safeWrite(
-      fs,
+      gated,
       clock,
       scenePath(projectPath, scene.id),
       sceneFile(scene),
     );
   }
-  await safeWrite(
-    fs,
-    clock,
-    path.join(projectPath, MANIFEST),
-    `${JSON.stringify(manifest, null, 2)}\n`,
+  await gated.claim(() =>
+    safeWrite(
+      gated,
+      clock,
+      path.join(projectPath, MANIFEST),
+      `${JSON.stringify(manifest, null, 2)}\n`,
+    ),
   );
   return new ProjectStore(
     projectPath,
@@ -409,6 +424,7 @@ async function resolveManifestCopies(
   original: Manifest,
   { fs, clock }: StoreDeps,
   unrecognised: Set<string>,
+  claim: <T>(write: () => Promise<T>) => Promise<T> = (write) => write(),
 ): Promise<{ manifest: Manifest; dropped: Dropped[] }> {
   const manifestPath = path.join(projectPath, MANIFEST);
   const names = (await fs.readdir(projectPath))
@@ -448,11 +464,13 @@ async function resolveManifestCopies(
       await fs.readFile(copyWins ? manifestPath : file),
     );
     if (copyWins) {
-      await safeWrite(
-        fs,
-        clock,
-        manifestPath,
-        `${JSON.stringify(winner, null, 2)}\n`,
+      await claim(() =>
+        safeWrite(
+          fs,
+          clock,
+          manifestPath,
+          `${JSON.stringify(winner, null, 2)}\n`,
+        ),
       );
     }
     await fs.unlink(file);
@@ -1140,8 +1158,9 @@ export class ProjectStore {
   private upgraded: Upgrade | null = null;
   /** Set a short while after the upgrade was seen, once the window has handed over its edits. */
   private editsRefused = false;
-  /** `project.json` as the format gate last read it. */
-  private gateFingerprint: Fingerprint | null = null;
+  /** The Project folder's disk, which refuses writes once a newer app has upgraded the Project. */
+  private readonly gated: GatedFileSystem;
+  private readonly deps: StoreDeps;
 
   private readonly host: string;
   private readonly sessions: Sessions;
@@ -1156,7 +1175,7 @@ export class ProjectStore {
   constructor(
     readonly path: string,
     private manifest: Manifest,
-    private readonly deps: StoreDeps,
+    deps: StoreDeps,
     units: Units,
     sessions: Sessions,
     opened: { dropped: Dropped[]; unrecognised: Set<string> } = {
@@ -1164,13 +1183,23 @@ export class ProjectStore {
       unrecognised: new Set(),
     },
   ) {
+    this.gated = new GatedFileSystem(deps.fs, {
+      root: path,
+      format: FORMAT,
+      copiesFormat: () => newestFormat(path, this.manifest, deps.fs),
+      onUpgraded: () => this.goReadOnly(),
+      refusal: () => this.upgradedMessage(),
+      // Advisory, and how the other computer learns this one has closed.
+      unguarded: [SESSIONS],
+    });
+    this.deps = { ...deps, fs: this.gated };
     this.dropped = opened.dropped;
     this.unrecognised = opened.unrecognised;
     this.files = units.files;
     this.entries = units.entries;
     this.trash = units.trash;
-    this.todos = todosOf(path, deps);
-    this.host = hostOf(deps);
+    this.todos = todosOf(path, this.deps);
+    this.host = hostOf(this.deps);
     this.sessions = sessions;
     const {
       host: _,
@@ -1353,6 +1382,7 @@ export class ProjectStore {
       manifest,
       this.deps,
       this.unrecognised,
+      (write) => this.gated.claim(write),
     );
     if (resolved.manifest !== manifest) {
       manifest = resolved.manifest;
@@ -1457,32 +1487,6 @@ export class ProjectStore {
   }
 
   /**
-   * The format gate, checked before every write: once `project.json`, or a
-   * copy of it beside it, says a newer app has upgraded the Project, this one
-   * goes read-only. `project.json` is read only when its time or size changed
-   * since, and one that can't be read now, as while it is still arriving, is
-   * read again before the next write. Copies are rare: their names are
-   * listed each time.
-   */
-  private async checkFormat(): Promise<void> {
-    if (this.upgraded) return;
-    const file = path.join(this.path, MANIFEST);
-    const fingerprint = await this.deps.fs.stat(file);
-    if (fingerprint && !sameFingerprint(fingerprint, this.gateFingerprint)) {
-      const read = await readJson<Partial<Manifest>>(this.deps.fs, file);
-      if (read) {
-        this.gateFingerprint = fingerprint;
-        if (typeof read.format === 'number' && read.format > FORMAT) {
-          return this.goReadOnly();
-        }
-      }
-    }
-    if ((await newestFormat(this.path, this.manifest, this.deps.fs)) > FORMAT) {
-      return this.goReadOnly();
-    }
-  }
-
-  /**
    * Stops writing to a Project a newer app upgraded. Structure operations
    * are refused at once. Edits are saved, in this app's format, for a short
    * while longer: those pending here, and those the window hands over as it
@@ -1493,6 +1497,7 @@ export class ProjectStore {
     if (this.upgraded) return;
     const upgraded: Upgrade = {};
     this.upgraded = upgraded;
+    this.gated.markUpgraded();
     this.latest = null;
     for (const key of this.unsaved.keys()) this.startWriting(key);
     const host = await this.upgradedOn();
@@ -1525,19 +1530,23 @@ export class ProjectStore {
     return this.upgraded && { ...this.upgraded };
   }
 
-  /** Passes the format gate, or refuses once the Project was upgraded. */
+  /**
+   * Looks for an upgrade, then refuses if the Project was upgraded. Every
+   * write is refused by the gated disk; this is for what must refuse before
+   * it does other work.
+   */
   private async passFormatGate(): Promise<void> {
-    await this.checkFormat();
+    await this.gated.check();
     this.refuseIfUpgraded();
   }
 
-  /** Refuses once the Project was upgraded, without checking the gate again. */
+  /** Refuses once the Project was upgraded, without looking again. */
   private refuseIfUpgraded(): void {
-    if (!this.upgraded) return;
-    throw new ProjectError(
-      'read-only',
-      upgradedMessage(this.displayName, this.upgraded.host),
-    );
+    if (this.upgraded) throw new FormatUpgraded(this.upgradedMessage());
+  }
+
+  private upgradedMessage(): string {
+    return upgradedMessage(this.displayName, this.upgraded?.host);
   }
 
   /**
@@ -1992,8 +2001,6 @@ export class ProjectStore {
   ): Promise<void> {
     const has = ({ tags }: { tags?: string[] }) => hasTag(tags, tag);
     return this.enqueueWrite(async () => {
-      // Refused at once, not midway.
-      this.refuseIfUpgraded();
       let changed = await this.readUnitDetails();
       // Taken first, as each is saved, the units change.
       const outlines = [...this.unitDetails]
@@ -2172,8 +2179,6 @@ export class ProjectStore {
         throw new Error(`Can't move units to the Status being deleted`);
       }
       if (moveTo !== null) indexOfStatus(statuses, moveTo);
-      // Units are rewritten before the list: refused at once, not midway.
-      this.refuseIfUpgraded();
       // Including those another computer gave it, not yet read here.
       let changed = await this.readUnitDetails();
       try {
@@ -2355,12 +2360,11 @@ export class ProjectStore {
   }
 
   /**
-   * Changes the Todos, past the format gate, then tells the window. Todos
-   * aren't in the tree, so another computer's tree is no reason to wait.
+   * Changes the Todos, then tells the window. Todos aren't in the tree, so
+   * another computer's tree is no reason to wait.
    */
   private changeTodos(change: () => Promise<void>): Promise<void> {
     return this.enqueueStructure(async () => {
-      await this.passFormatGate();
       await change();
       this.emitTodos();
     });
@@ -3077,6 +3081,7 @@ export class ProjectStore {
     this.resolving.add(key);
     return this.enqueueStructure(async () => {
       try {
+        // Not a write: what it finds to say first must not hide the refusal.
         await this.passFormatGate();
         this.refuseUnavailable(ref);
         await this.findConflicts();
@@ -3635,41 +3640,44 @@ export class ProjectStore {
    */
   private enqueueWrite<T>(operation: () => Promise<T>): Promise<T> {
     return this.enqueueStructure(async () => {
-      await this.passFormatGate();
       const file = path.join(this.path, MANIFEST);
       const changed = async () =>
         !sameFingerprint(
           await this.deps.fs.stat(file),
           this.manifestFingerprint,
         );
-      if (await changed()) {
-        await this.checkStructure();
-        this.refuseIfUpgraded();
+      for (let pass = 0; ; pass++) {
+        // Not a write: the operation does other work, in memory, before its
+        // first. The second pass is after the check, which may find the
+        // upgrade.
+        await this.passFormatGate();
+        if (!(await changed())) break;
         // Still arriving, it can't be read: never written over meanwhile.
-        if (await changed()) {
+        if (pass === 1) {
           throw new ProjectError(
             'unreadable',
             `${this.displayName} is still arriving from another computer. Try again in a moment.`,
           );
         }
+        await this.checkStructure();
       }
       return operation();
     });
   }
 
   private async writeManifest(manifest: Manifest): Promise<void> {
-    // A newer app's project.json is never written over.
-    this.refuseIfUpgraded();
     const file = path.join(this.path, MANIFEST);
-    await safeWrite(
-      this.deps.fs,
-      this.deps.clock,
-      file,
-      `${JSON.stringify(manifest, null, 2)}\n`,
+    // A newer app's project.json is never written over: the claim refuses.
+    await this.gated.claim(() =>
+      safeWrite(
+        this.deps.fs,
+        this.deps.clock,
+        file,
+        `${JSON.stringify(manifest, null, 2)}\n`,
+      ),
     );
     this.manifest = manifest;
     this.manifestFingerprint = await this.deps.fs.stat(file);
-    this.gateFingerprint = this.manifestFingerprint;
   }
 
   private refuseMissing(ref: UnitRef): void {
@@ -3783,6 +3791,7 @@ export class ProjectStore {
    * A failure to save it is never thrown: it shows as a `unitSaveStatus`.
    */
   async write<R extends UnitRef>(ref: R, value: ValueOf<R>): Promise<void> {
+    // Not a write: the edit is only held, and saved by the handover.
     if (this.editsRefused) this.refuseIfUpgraded();
     this.refuseUnavailable(ref);
     const key = unitKey(ref);
@@ -3838,7 +3847,6 @@ export class ProjectStore {
     title: string,
     model?: Model,
   ): Promise<ConversationSummary> {
-    await this.passFormatGate();
     const summary = {
       id: randomUUID(),
       mode,
@@ -3859,7 +3867,6 @@ export class ProjectStore {
   /** Puts a Conversation on `model` from its next message on, logged as chosen. */
   chooseModel(id: string, model: Model): Promise<void> {
     return this.inLog(id, async () => {
-      await this.passFormatGate();
       await this.appendEvent(
         id,
         modelChosenEvent(model, this.deps.clock.now()),
@@ -3908,7 +3915,6 @@ export class ProjectStore {
     const trimmed = title.trim();
     return this.inLog(id, async () => {
       if (trimmed === '') throw new Error('A Conversation needs a title');
-      await this.passFormatGate();
       await this.appendEvent(id, {
         type: 'renamed',
         title: trimmed,
@@ -4091,7 +4097,6 @@ ${text}`);
   appendMessage(id: string, message: ConversationMessage): Promise<void> {
     const { proposals: _, ...logged } = message;
     return this.inLog(id, async () => {
-      await this.passFormatGate();
       await this.appendEvent(id, { type: 'message', ...logged });
     });
   }
@@ -4106,7 +4111,6 @@ ${text}`);
     model: Model,
   ): Promise<void> {
     return this.inLog(id, async () => {
-      await this.passFormatGate();
       await this.appendEvent(id, emptyReplyEvent(reply, model));
     });
   }
@@ -4117,7 +4121,6 @@ ${text}`);
    */
   appendUnusedSummary(id: string, unused: UnusedSummary): Promise<void> {
     return this.inLog(id, async () => {
-      await this.passFormatGate();
       await this.appendEvent(id, { type: 'summary.unused', ...unused });
     });
   }
@@ -4128,7 +4131,6 @@ ${text}`);
    */
   appendSummary(id: string, compaction: Compaction): Promise<void> {
     return this.inLog(id, async () => {
-      await this.passFormatGate();
       await this.appendEvent(id, { type: 'summary', ...compaction });
     });
   }
@@ -4136,7 +4138,6 @@ ${text}`);
   /** Sets an Interview's focus from now on, logged as an event; only an Interview has one. */
   setInterviewFocus(id: string, focus: InterviewFocus): Promise<void> {
     return this.inLog(id, async () => {
-      await this.passFormatGate();
       const { mode } = await this.readLogged(id);
       if (mode !== 'interview') {
         throw new Error('Only an Interview Conversation has a focus');
@@ -4152,7 +4153,6 @@ ${text}`);
   /** Appends a Proposal the Assistant made in the reply logged last. */
   appendProposal(id: string, proposal: Proposal): Promise<void> {
     return this.inLog(id, async () => {
-      await this.passFormatGate();
       await this.appendEvent(
         id,
         proposedEvent(proposal, this.deps.clock.now()),
@@ -4177,7 +4177,6 @@ ${text}`);
     { edited, anyway = false, append = false }: AcceptOptions = {},
   ): Promise<void> {
     return this.inLog(conversationId, async () => {
-      await this.passFormatGate();
       const proposal = await this.decidedProposal(conversationId, proposalId);
       const value = edited === undefined ? proposal.proposed : edited;
       const how = { anyway, append };
@@ -4256,7 +4255,6 @@ ${text}`);
   /** Rejects a pending Proposal, stale or orphaned too; its target is left alone. */
   rejectProposal(conversationId: string, proposalId: string): Promise<void> {
     return this.inLog(conversationId, async () => {
-      await this.passFormatGate();
       const proposal = await this.decidedProposal(conversationId, proposalId);
       granted(reject(proposal, await this.snapshot(proposal)));
       await this.appendEvent(conversationId, {
@@ -4278,7 +4276,6 @@ ${text}`);
    */
   undoProposal(conversationId: string, proposalId: string): Promise<void> {
     return this.inLog(conversationId, async () => {
-      await this.passFormatGate();
       const proposal = await this.decidedProposal(conversationId, proposalId);
       const reloaded =
         proposal.kind === 'new-entry'
@@ -4347,6 +4344,9 @@ ${text}`);
     conversationId: string,
     proposalId: string,
   ): Promise<DecidedProposal> {
+    // The target is written before the log, and by the edit path, which
+    // still saves for a while after an upgrade: refused here, not midway.
+    await this.passFormatGate();
     const { proposals } = await this.readLogged(conversationId);
     const logged = proposals.find((p) => p.id === proposalId);
     if (!logged) throw new Error(`No Proposal ${proposalId}`);
@@ -4576,21 +4576,22 @@ ${text}`);
       if (!pending || this.resolving.has(key)) return;
       try {
         // Once upgraded, edits are still saved, in this app's format.
-        await this.checkFormat();
-        const file = unitPath(this.path, pending.ref);
-        if (pending.ref.kind !== 'scene') {
-          await this.deps.fs.mkdir(path.dirname(file));
-        }
-        const onDisk = await this.checkBeforeSave(pending, file);
-        if (onDisk.setAside) onSetAside();
-        const text = this.fileToSave(pending, onDisk.frontmatter);
-        await safeWrite(this.deps.fs, this.deps.clock, file, text);
-        this.loaded.set(key, {
-          ref: pending.ref,
-          fingerprint: await this.deps.fs.stat(file),
-          hash: hashOf(text),
-          value: pending.value,
-          savedHere: true,
+        await this.gated.handover(async () => {
+          const file = unitPath(this.path, pending.ref);
+          if (pending.ref.kind !== 'scene') {
+            await this.deps.fs.mkdir(path.dirname(file));
+          }
+          const onDisk = await this.checkBeforeSave(pending, file);
+          if (onDisk.setAside) onSetAside();
+          const text = this.fileToSave(pending, onDisk.frontmatter);
+          await safeWrite(this.deps.fs, this.deps.clock, file, text);
+          this.loaded.set(key, {
+            ref: pending.ref,
+            fingerprint: await this.deps.fs.stat(file),
+            hash: hashOf(text),
+            value: pending.value,
+            savedHere: true,
+          });
         });
       } catch (error) {
         // The unit stays unsaved in memory, and is tried again later.
@@ -4805,13 +4806,6 @@ function hostOfCopy(name: string, hosts: string[]): { host?: string } {
       [h, hostStem(h)].some((form) => stem.endsWith(`-${form.toLowerCase()}`)),
     );
   return host ? { host } : {};
-}
-
-function sameFingerprint(
-  a: Fingerprint | null,
-  b: Fingerprint | null,
-): boolean {
-  return a?.mtimeMs === b?.mtimeMs && a?.size === b?.size;
 }
 
 /** Makes `set` hold just what `items` holds. */
