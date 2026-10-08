@@ -54,14 +54,14 @@ async function withProposals() {
   const anna = await store.read(entryRef(annaId));
   await store.write(entryRef(annaId), { ...anna, description: 'Her sister.' });
   await store.flush();
-  const { id } = await store.startConversation('writing', 'Anna');
-  await store.appendMessage(id, {
+  const { id } = await store.conversations.startConversation('writing', 'Anna');
+  await store.conversations.appendMessage(id, {
     role: 'author',
     text: 'She is older.',
     focus: [],
     at: 1_000,
   });
-  await store.appendMessage(id, {
+  await store.conversations.appendMessage(id, {
     role: 'assistant',
     text: 'Then the Story Bible should say so.',
     focus: [],
@@ -75,9 +75,13 @@ async function withProposals() {
     base: 'Her sister.',
     proposed: 'Her sister.\nOlder by two years.',
   };
-  await store.appendProposal(id, proposal);
-  await store.appendProposal(id, { ...proposal, id: 'p2', proposed: 'No.' });
-  await store.rejectProposal(id, 'p2');
+  await store.conversations.appendProposal(id, proposal);
+  await store.conversations.appendProposal(id, {
+    ...proposal,
+    id: 'p2',
+    proposed: 'No.',
+  });
+  await store.conversations.rejectProposal(id, 'p2');
   return { store, clock, annaId, id, proposal };
 }
 
@@ -95,7 +99,7 @@ describe('Renaming a Conversation', () => {
     const { store, id } = await withProposals();
     const events = eventsOf(store);
 
-    await store.renameConversation(id, '  Anna’s age ');
+    await store.conversations.renameConversation(id, '  Anna’s age ');
 
     const lines = await logLines(logPath(id));
     expect(lines[0]).toMatchObject({ id, title: 'Anna' });
@@ -104,8 +108,10 @@ describe('Renaming a Conversation', () => {
       title: 'Anna’s age',
       at: 1_000,
     });
-    expect((await store.readConversation(id)).title).toBe('Anna’s age');
-    expect(await store.listConversations()).toEqual([
+    expect((await store.conversations.readConversation(id)).title).toBe(
+      'Anna’s age',
+    );
+    expect(await store.conversations.listConversations()).toEqual([
       expect.objectContaining({ id, title: 'Anna’s age' }),
     ]);
     expect(events).toContainEqual({ type: 'conversationsChanged' });
@@ -114,8 +120,10 @@ describe('Renaming a Conversation', () => {
   it('refuses an empty title', async () => {
     const { store, id } = await withProposals();
 
-    await expect(store.renameConversation(id, '   ')).rejects.toThrow();
-    expect((await store.readConversation(id)).title).toBe('Anna');
+    await expect(
+      store.conversations.renameConversation(id, '   '),
+    ).rejects.toThrow();
+    expect((await store.conversations.readConversation(id)).title).toBe('Anna');
   });
 });
 
@@ -123,7 +131,7 @@ describe('Deleting a Conversation', () => {
   it('counts the Proposals it holds that are still pending', async () => {
     const { store, id } = await withProposals();
 
-    expect(await store.pendingProposalCount(id)).toBe(1);
+    expect(await store.conversations.pendingProposalCount(id)).toBe(1);
   });
 
   it('moves the whole log to Trash, where it is listed, and restores it', async () => {
@@ -134,7 +142,7 @@ describe('Deleting a Conversation', () => {
     await store.trashConversation(id);
 
     expect(await readdir(path.join(projectPath, 'conversations'))).toEqual([]);
-    expect(await store.listConversations()).toEqual([]);
+    expect(await store.conversations.listConversations()).toEqual([]);
     expect(store.listTrash()).toEqual([
       {
         kind: 'conversation',
@@ -146,19 +154,19 @@ describe('Deleting a Conversation', () => {
     ]);
     // Its pending Proposals went with it.
     const [annaId] = store.listEntries().map((e) => e.id);
-    expect(await store.pendingProposals(annaId)).toEqual([]);
+    expect(await store.conversations.pendingProposals(annaId)).toEqual([]);
     expect(events).toContainEqual({ type: 'conversationsChanged' });
     expect(events).toContainEqual({ type: 'proposalsChanged' });
 
     await store.restore(id);
 
     expect(store.listTrash()).toEqual([]);
-    expect(await store.listConversations()).toEqual([
+    expect(await store.conversations.listConversations()).toEqual([
       expect.objectContaining({ id, title: 'Anna' }),
     ]);
     // Nothing of the log was lost: it was only ever appended to.
     expect((await readFile(logPath(id), 'utf8')).startsWith(before)).toBe(true);
-    expect(await store.pendingProposals(annaId)).toHaveLength(1);
+    expect(await store.conversations.pendingProposals(annaId)).toHaveLength(1);
   });
 
   it('is a step that undo puts back', async () => {
@@ -168,7 +176,7 @@ describe('Deleting a Conversation', () => {
     await store.undo(step);
 
     expect(store.listTrash()).toEqual([]);
-    expect(await store.listConversations()).toHaveLength(1);
+    expect(await store.conversations.listConversations()).toHaveLength(1);
   });
 
   it('stays in Trash when the Project is opened again', async () => {
@@ -190,7 +198,12 @@ describe('Deleting a Conversation', () => {
     await store.trashConversation(id);
 
     await expect(
-      store.appendMessage(id, { role: 'author', text: 'Hi', focus: [], at: 1 }),
+      store.conversations.appendMessage(id, {
+        role: 'author',
+        text: 'Hi',
+        focus: [],
+        at: 1,
+      }),
     ).rejects.toThrow();
   });
 
@@ -280,7 +293,7 @@ describe('A Conversation log that forked on another computer', () => {
 
     await store.checkForChanges();
 
-    expect(await store.listConversations()).toHaveLength(2);
+    expect(await store.conversations.listConversations()).toHaveLength(2);
     expect(events).toContainEqual({ type: 'conversationsChanged' });
   });
 
@@ -299,7 +312,7 @@ describe('A Conversation log that forked on another computer', () => {
 
   it('a log renamed before it forked is titled "(from HOST)" all the same', async () => {
     const { store, id } = await withProposals();
-    await store.renameConversation(id, 'Anna’s age');
+    await store.conversations.renameConversation(id, 'Anna’s age');
     await forkOnBeta(id);
 
     const reopened = await reopen(store);

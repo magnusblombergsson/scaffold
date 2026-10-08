@@ -44,7 +44,10 @@ describe('Conversation logs', () => {
   it('starting a Conversation writes conversations/<id>.jsonl with its header', async () => {
     const { projectPath, store } = await newProject();
 
-    const started = await store.startConversation('writing', 'Why Anna?');
+    const started = await store.conversations.startConversation(
+      'writing',
+      'Why Anna?',
+    );
 
     expect(started).toEqual({
       id: expect.stringMatching(/^[0-9a-f-]{36}$/),
@@ -69,15 +72,18 @@ describe('Conversation logs', () => {
   it('appends each message as an event with its role and the Scenes in focus', async () => {
     const { projectPath, store } = await newProject();
     const sceneId = store.manuscript().chapters[0].scenes[0].id;
-    const { id } = await store.startConversation('writing', 'Why Anna?');
+    const { id } = await store.conversations.startConversation(
+      'writing',
+      'Why Anna?',
+    );
 
-    await store.appendMessage(id, {
+    await store.conversations.appendMessage(id, {
       role: 'author',
       text: 'Why does Anna leave?',
       focus: [sceneId],
       at: 2_000,
     });
-    await store.appendMessage(id, {
+    await store.conversations.appendMessage(id, {
       role: 'assistant',
       text: 'What does she fear staying for?',
       focus: [sceneId],
@@ -100,7 +106,7 @@ describe('Conversation logs', () => {
         at: 3_000,
       },
     ]);
-    expect(await store.readConversation(id)).toEqual({
+    expect(await store.conversations.readConversation(id)).toEqual({
       id,
       mode: 'writing',
       title: 'Why Anna?',
@@ -125,13 +131,16 @@ describe('Conversation logs', () => {
   it('logs what the Assistant saw by id, and leaves out a record of it that can’t be read', async () => {
     const { projectPath, store } = await newProject();
     const sceneId = store.manuscript().chapters[0].scenes[0].id;
-    const { id } = await store.startConversation('writing', 'Why Anna?');
+    const { id } = await store.conversations.startConversation(
+      'writing',
+      'Why Anna?',
+    );
     const saw = {
       entries: ['anna'],
       units: [{ kind: 'scene' as const, id: sceneId }],
       messages: 1,
     };
-    await store.appendMessage(id, {
+    await store.conversations.appendMessage(id, {
       role: 'assistant',
       text: 'Hm.',
       focus: [],
@@ -144,7 +153,7 @@ describe('Conversation logs', () => {
 `,
     );
 
-    const { messages } = await store.readConversation(id);
+    const { messages } = await store.conversations.readConversation(id);
 
     expect(messages[0].saw).toEqual(saw);
     expect(messages[1]).toEqual({
@@ -158,7 +167,10 @@ describe('Conversation logs', () => {
   it('logs a Review in the message that asked for it, and its Findings in the reply, and leaves out what can’t be read', async () => {
     const { projectPath, store } = await newProject();
     const sceneId = store.manuscript().chapters[0].scenes[0].id;
-    const { id } = await store.startConversation('writing', 'Review');
+    const { id } = await store.conversations.startConversation(
+      'writing',
+      'Review',
+    );
     const findings = [
       {
         type: 'voice' as const,
@@ -168,14 +180,14 @@ describe('Conversation logs', () => {
         question: 'Is she putting it on?',
       },
     ];
-    await store.appendMessage(id, {
+    await store.conversations.appendMessage(id, {
       role: 'author',
       text: 'Review Scene “Scene 1”',
       command: 'review-scene',
       focus: [sceneId],
       at: 2_000,
     });
-    await store.appendMessage(id, {
+    await store.conversations.appendMessage(id, {
       role: 'assistant',
       text: 'One thing.',
       focus: [sceneId],
@@ -189,7 +201,7 @@ ${JSON.stringify({ type: 'message', role: 'assistant', text: 'Odd.', focus: [], 
 `,
     );
 
-    const { messages } = await store.readConversation(id);
+    const { messages } = await store.conversations.readConversation(id);
 
     expect(messages[0].command).toBe('review-scene');
     expect(messages[1].findings).toEqual(findings);
@@ -209,9 +221,15 @@ ${JSON.stringify({ type: 'message', role: 'assistant', text: 'Odd.', focus: [], 
 
   it('lists Conversations by scanning conversations/, latest first, also after reopening', async () => {
     const { projectPath, store, clock } = await newProject();
-    const first = await store.startConversation('writing', 'First');
+    const first = await store.conversations.startConversation(
+      'writing',
+      'First',
+    );
     await clock.sleep(1_000);
-    const second = await store.startConversation('writing', 'Second');
+    const second = await store.conversations.startConversation(
+      'writing',
+      'Second',
+    );
     // Not a log: a temp file, and a file with a damaged header.
     const logs = path.join(projectPath, 'conversations');
     await writeFile(path.join(logs, `${first.id}.jsonl.abc.tmp`), '');
@@ -231,20 +249,23 @@ ${JSON.stringify({ type: 'message', role: 'assistant', text: 'Odd.', focus: [], 
 
   it('skips lines it cannot read and events it does not know, and keeps them', async () => {
     const { projectPath, store } = await newProject();
-    const { id } = await store.startConversation('writing', 'Why Anna?');
+    const { id } = await store.conversations.startConversation(
+      'writing',
+      'Why Anna?',
+    );
     const file = path.join(projectPath, 'conversations', `${id}.jsonl`);
     // From a newer app, then a line cut short by a crash.
     await appendFile(file, '{"type":"bookmark","text":"Earlier: Anna."}\n');
     await appendFile(file, '{"type":"message","role":"auth');
 
-    await store.appendMessage(id, {
+    await store.conversations.appendMessage(id, {
       role: 'author',
       text: 'Why does Anna leave?',
       focus: [],
       at: 2_000,
     });
 
-    expect((await store.readConversation(id)).messages).toEqual([
+    expect((await store.conversations.readConversation(id)).messages).toEqual([
       { role: 'author', text: 'Why does Anna leave?', focus: [], at: 2_000 },
     ]);
     const lines = (await readFile(file, 'utf8')).split('\n');
@@ -258,17 +279,26 @@ ${JSON.stringify({ type: 'message', role: 'assistant', text: 'Odd.', focus: [], 
   it('logs each change of an Interview’s focus as an event, between the messages it came between', async () => {
     const { projectPath, store, clock } = await newProject();
     const chapterId = store.manuscript().chapters[0].id;
-    const { id } = await store.startConversation('interview', 'Anna');
+    const { id } = await store.conversations.startConversation(
+      'interview',
+      'Anna',
+    );
 
-    await store.setInterviewFocus(id, { kind: 'entry-type', type: 'place' });
-    await store.appendMessage(id, {
+    await store.conversations.setInterviewFocus(id, {
+      kind: 'entry-type',
+      type: 'place',
+    });
+    await store.conversations.appendMessage(id, {
       role: 'author',
       text: 'Ask me.',
       focus: [],
       at: 2_000,
     });
     await clock.sleep(1_000);
-    await store.setInterviewFocus(id, { kind: 'chapter', id: chapterId });
+    await store.conversations.setInterviewFocus(id, {
+      kind: 'chapter',
+      id: chapterId,
+    });
 
     expect((await logLines(projectPath, id)).slice(1)).toEqual([
       {
@@ -283,13 +313,13 @@ ${JSON.stringify({ type: 'message', role: 'assistant', text: 'Odd.', focus: [], 
         at: 2_000,
       },
     ]);
-    const conversation = await store.readConversation(id);
+    const conversation = await store.conversations.readConversation(id);
     expect(conversation.focus).toEqual({ kind: 'chapter', id: chapterId });
     expect(conversation.focusChanges).toEqual([
       { focus: { kind: 'entry-type', type: 'place' }, at: 1_000, before: 0 },
       { focus: { kind: 'chapter', id: chapterId }, at: 2_000, before: 1 },
     ]);
-    expect(await store.listConversations()).toEqual([
+    expect(await store.conversations.listConversations()).toEqual([
       expect.objectContaining({
         id,
         focus: { kind: 'chapter', id: chapterId },
@@ -299,11 +329,17 @@ ${JSON.stringify({ type: 'message', role: 'assistant', text: 'Odd.', focus: [], 
 
   it('keeps a Tag focus as the Tag was spelled', async () => {
     const { store } = await newProject();
-    const { id } = await store.startConversation('interview', 'Mara');
+    const { id } = await store.conversations.startConversation(
+      'interview',
+      'Mara',
+    );
 
-    await store.setInterviewFocus(id, { kind: 'tag', tag: 'the War' });
+    await store.conversations.setInterviewFocus(id, {
+      kind: 'tag',
+      tag: 'the War',
+    });
 
-    expect((await store.readConversation(id)).focus).toEqual({
+    expect((await store.conversations.readConversation(id)).focus).toEqual({
       kind: 'tag',
       tag: 'the War',
     });
@@ -311,8 +347,14 @@ ${JSON.stringify({ type: 'message', role: 'assistant', text: 'Odd.', focus: [], 
 
   it('sets a focus only in an Interview, and skips a focus it can’t read', async () => {
     const { projectPath, store } = await newProject();
-    const writing = await store.startConversation('writing', 'Why Anna?');
-    const { id } = await store.startConversation('interview', 'Anna');
+    const writing = await store.conversations.startConversation(
+      'writing',
+      'Why Anna?',
+    );
+    const { id } = await store.conversations.startConversation(
+      'interview',
+      'Anna',
+    );
     await appendFile(
       path.join(projectPath, 'conversations', `${id}.jsonl`),
       `${JSON.stringify({ type: 'focusChanged', focus: { kind: 'entry-type', type: 'villain' }, at: 2_000 })}
@@ -320,24 +362,27 @@ ${JSON.stringify({ type: 'message', role: 'assistant', text: 'Odd.', focus: [], 
     );
 
     await expect(
-      store.setInterviewFocus(writing.id, { kind: 'open' }),
+      store.conversations.setInterviewFocus(writing.id, { kind: 'open' }),
     ).rejects.toThrow(/Interview/);
-    const conversation = await store.readConversation(id);
+    const conversation = await store.conversations.readConversation(id);
     expect(conversation).not.toHaveProperty('focus');
     expect(conversation).not.toHaveProperty('focusChanges');
   });
 
   it('appends a compaction summary as an event, keeping every message, and skips one that summarises more than came before it', async () => {
     const { projectPath, store } = await newProject();
-    const { id } = await store.startConversation('brainstorm', 'Anna');
+    const { id } = await store.conversations.startConversation(
+      'brainstorm',
+      'Anna',
+    );
     const message = (text: string, at: number) => ({
       role: 'author' as const,
       text,
       focus: [],
       at,
     });
-    await store.appendMessage(id, message('Anna leaves.', 2_000));
-    await store.appendMessage(id, message('Why?', 3_000));
+    await store.conversations.appendMessage(id, message('Anna leaves.', 2_000));
+    await store.conversations.appendMessage(id, message('Why?', 3_000));
     const usage = { input: 900, cached: 0, written: 0, output: 50 };
     const summary = {
       text: 'Anna leaves the island.',
@@ -347,7 +392,7 @@ ${JSON.stringify({ type: 'message', role: 'assistant', text: 'Odd.', focus: [], 
       usage,
     };
 
-    await store.appendSummary(id, summary);
+    await store.conversations.appendSummary(id, summary);
     await appendFile(
       path.join(projectPath, 'conversations', `${id}.jsonl`),
       `${JSON.stringify({ ...summary, type: 'summary', text: 'Too far.', covers: 3 })}\n`,
@@ -357,7 +402,7 @@ ${JSON.stringify({ type: 'message', role: 'assistant', text: 'Odd.', focus: [], 
       type: 'summary',
       ...summary,
     });
-    const conversation = await store.readConversation(id);
+    const conversation = await store.conversations.readConversation(id);
     expect(conversation.messages.map((m) => m.text)).toEqual([
       'Anna leaves.',
       'Why?',
@@ -369,7 +414,10 @@ ${JSON.stringify({ type: 'message', role: 'assistant', text: 'Odd.', focus: [], 
 describe('What a turn cost', () => {
   it('logs what the Provider said a reply cost on its message, and skips a cost it can’t read', async () => {
     const { projectPath, store } = await newProject();
-    const { id } = await store.startConversation('brainstorm', 'Anna');
+    const { id } = await store.conversations.startConversation(
+      'brainstorm',
+      'Anna',
+    );
     const usage = { input: 900, cached: 0, written: 0, output: 50 };
     const reply = {
       role: 'assistant' as const,
@@ -382,7 +430,7 @@ describe('What a turn cost', () => {
       cost: 0.0012,
     };
 
-    await store.appendMessage(id, reply);
+    await store.conversations.appendMessage(id, reply);
     await appendFile(
       path.join(projectPath, 'conversations', `${id}.jsonl`),
       `${JSON.stringify({ ...reply, type: 'message', at: 3_000, cost: 'a lot' })}
@@ -394,7 +442,7 @@ describe('What a turn cost', () => {
       ...reply,
     });
     const { cost: _, ...unpriced } = reply;
-    expect((await store.readConversation(id)).messages).toEqual([
+    expect((await store.conversations.readConversation(id)).messages).toEqual([
       reply,
       { ...unpriced, at: 3_000 },
     ]);
@@ -407,11 +455,17 @@ describe('The Model of a Conversation', () => {
 
   it('logs the Model a Conversation starts on, and each switch, as modelChosen; the latest is its Model', async () => {
     const { projectPath, store, clock } = await newProject();
-    const { id } = await store.startConversation('writing', 'Anna', OPUS);
-    expect((await store.readConversation(id)).model).toEqual(OPUS);
+    const { id } = await store.conversations.startConversation(
+      'writing',
+      'Anna',
+      OPUS,
+    );
+    expect((await store.conversations.readConversation(id)).model).toEqual(
+      OPUS,
+    );
 
     await clock.sleep(1_000);
-    await store.chooseModel(id, QWEN);
+    await store.conversations.chooseModel(id, QWEN);
 
     expect((await logLines(projectPath, id)).slice(1)).toEqual([
       {
@@ -427,12 +481,17 @@ describe('The Model of a Conversation', () => {
         at: 2_000,
       },
     ]);
-    expect((await store.readConversation(id)).model).toEqual(QWEN);
+    expect((await store.conversations.readConversation(id)).model).toEqual(
+      QWEN,
+    );
   });
 
   it('logs which Provider wrote a reply, and reads a reply logged without one as written by Anthropic', async () => {
     const { projectPath, store } = await newProject();
-    const { id } = await store.startConversation('brainstorm', 'Anna');
+    const { id } = await store.conversations.startConversation(
+      'brainstorm',
+      'Anna',
+    );
     const reply = {
       role: 'assistant' as const,
       text: 'Hm.',
@@ -442,7 +501,7 @@ describe('The Model of a Conversation', () => {
       provider: 'lmstudio' as const,
     };
 
-    await store.appendMessage(id, reply);
+    await store.conversations.appendMessage(id, reply);
     await appendFile(
       path.join(projectPath, 'conversations', `${id}.jsonl`),
       `${JSON.stringify({ ...reply, type: 'message', provider: 'elsewhere' })}\n`,
@@ -452,17 +511,22 @@ describe('The Model of a Conversation', () => {
       type: 'message',
       ...reply,
     });
-    const { messages } = await store.readConversation(id);
+    const { messages } = await store.conversations.readConversation(id);
     expect(messages[0]).toEqual(reply);
     expect(messages[1]).not.toHaveProperty('provider');
   });
 
   it('is, without a Model chosen, the one its latest reply was written by, if any', async () => {
     const { projectPath, store } = await newProject();
-    const { id } = await store.startConversation('brainstorm', 'Anna');
-    expect(await store.readConversation(id)).not.toHaveProperty('model');
+    const { id } = await store.conversations.startConversation(
+      'brainstorm',
+      'Anna',
+    );
+    expect(await store.conversations.readConversation(id)).not.toHaveProperty(
+      'model',
+    );
 
-    await store.appendMessage(id, {
+    await store.conversations.appendMessage(id, {
       role: 'assistant',
       text: 'Hm.',
       focus: [],
@@ -474,7 +538,7 @@ describe('The Model of a Conversation', () => {
       `${JSON.stringify({ type: 'modelChosen', provider: 'elsewhere', model: 'x', at: 3_000 })}\n`,
     );
 
-    expect((await store.readConversation(id)).model).toEqual({
+    expect((await store.conversations.readConversation(id)).model).toEqual({
       provider: 'anthropic',
       id: 'claude-haiku-4-5',
     });
@@ -482,26 +546,29 @@ describe('The Model of a Conversation', () => {
 
   it('keeps the Provider of an empty reply and of a summary, used or not', async () => {
     const { store } = await newProject();
-    const { id } = await store.startConversation('brainstorm', 'Anna');
-    await store.appendMessage(id, {
+    const { id } = await store.conversations.startConversation(
+      'brainstorm',
+      'Anna',
+    );
+    await store.conversations.appendMessage(id, {
       role: 'author',
       text: 'Why?',
       focus: [],
       at: 2_000,
     });
-    await store.appendEmptyReply(
+    await store.conversations.appendEmptyReply(
       id,
       { focus: [], at: 3_000, reason: 'length' },
       QWEN,
     );
-    await store.appendSummary(id, {
+    await store.conversations.appendSummary(id, {
       text: 'Anna asked why.',
       covers: 1,
       at: 4_000,
       model: 'qwen3-8b',
       provider: 'lmstudio',
     });
-    await store.appendUnusedSummary(id, {
+    await store.conversations.appendUnusedSummary(id, {
       at: 5_000,
       model: 'qwen3-8b',
       provider: 'lmstudio',
@@ -509,7 +576,7 @@ describe('The Model of a Conversation', () => {
       reason: 'cut-short',
     });
 
-    const conversation = await store.readConversation(id);
+    const conversation = await store.conversations.readConversation(id);
     expect(conversation.emptyReplies).toEqual([
       {
         focus: [],

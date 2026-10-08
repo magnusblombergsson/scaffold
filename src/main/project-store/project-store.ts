@@ -1024,8 +1024,8 @@ export class ProjectStore {
 
   /** The unit writer saves the units accepted by `write`. */
   private readonly unitWriter: UnitWriter;
-  /** The Conversations and their Proposals, over their logs. */
-  private readonly conversations: Conversations;
+  /** The Conversations and their Proposals, over their logs; the methods below delegate to it. */
+  readonly conversations: Conversations;
   /** `project.json` as last read or written; null until then. */
   private manifestFingerprint: Fingerprint | null = null;
   /** Whether a check for changes on disk is waiting for a burst of events to end. */
