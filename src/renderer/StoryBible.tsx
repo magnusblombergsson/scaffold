@@ -11,7 +11,7 @@ import {
 } from '../shared/project-types';
 import { SHORTCUTS, withShortcut } from '../shared/shortcuts';
 import { addTodoItem, ConflictMarker, Menu } from './Binder';
-import { EntryThumbnail } from './EntryImage';
+import { EntryThumbnail } from './UnitImage';
 import { FilterControl, useFilter } from './Filter';
 import { ImagePromptDialog } from './ImagePromptDialog';
 import { TagChips } from './TagsDialog';

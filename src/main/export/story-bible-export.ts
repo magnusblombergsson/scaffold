@@ -11,6 +11,7 @@ import {
   type EntryRef,
   type EntrySummary,
   type EntryValue,
+  type ImageRef,
   type PrivateRef,
   type ProseLanguage,
   type ValueOf,
@@ -39,7 +40,7 @@ export type StoryBibleSource = {
   language: ProseLanguage;
   listEntries(): EntrySummary[];
   read<R extends EntryRef | PrivateRef>(ref: R): Promise<ValueOf<R>>;
-  readEntryImage(id: string): Promise<EntryImage | null>;
+  readImage(ref: ImageRef): Promise<EntryImage | null>;
 };
 
 /** An image's width in Word: about a third of the page's text. */
@@ -90,7 +91,9 @@ export async function exportStoryBible(
           ? (await source.read({ kind: 'private', id })).body
           : '';
         const image =
-          withImages && value.image ? await source.readEntryImage(id) : null;
+          withImages && value.image
+            ? await source.readImage({ kind: 'entry', id })
+            : null;
         return [
           value,
           {

@@ -67,18 +67,11 @@ const projectHandlers: Handlers<
   setEntryVisibility: ({ store }, entryId, visibility) =>
     store.setEntryVisibility(entryId, visibility),
   setEntryType: ({ store }, entryId, type) => store.setEntryType(entryId, type),
-  chooseEntryImage: ({ store, sender }, entryId) =>
-    chooseImage(sender, (image) => store.setEntryImage(entryId, image)),
-  removeEntryImage: ({ store }, entryId) => store.removeEntryImage(entryId),
-  entryImage: async ({ store }, entryId) => {
-    const image = await store.readEntryImage(entryId);
-    return image && imageDataUrl(image);
-  },
-  chooseUnitImage: ({ store, sender }, unitId) =>
-    chooseImage(sender, (image) => store.setUnitImage(unitId, image)),
-  removeUnitImage: ({ store }, unitId) => store.removeUnitImage(unitId),
-  unitImage: async ({ store }, unitId) => {
-    const image = await store.readUnitImage(unitId);
+  chooseImage: ({ store, sender }, ref) =>
+    chooseImage(sender, (image) => store.setImage(ref, image)),
+  removeImage: ({ store }, ref) => store.removeImage(ref),
+  image: async ({ store }, ref) => {
+    const image = await store.readImage(ref);
     return image && imageDataUrl(image);
   },
   restore: ({ store }, id) => store.restore(id),

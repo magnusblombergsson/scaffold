@@ -90,7 +90,7 @@ it('an MVP app reads an Entry with a Role note and Appearance, and keeps both wh
 it('an MVP app keeps the image key when it rewrites an Entry, and never lists images/', async () => {
   const store = await createProject(projectPath, deps());
   const { id } = await store.createEntry('place', 'Harbour');
-  await store.setEntryImage(id, { data: JPEG, extension: 'jpg' });
+  await store.setImage({ kind: 'entry', id }, { data: JPEG, extension: 'jpg' });
   await store.close();
   const file = path.join(projectPath, 'bible', `${id}.md`);
   const written = await readFile(file, 'utf8');
@@ -112,7 +112,7 @@ it('an MVP app keeps the image key when it rewrites an Entry, and never lists im
   expect((await reopened.read({ kind: 'entry', id })).description).toBe(
     'Grey water.',
   );
-  expect(await reopened.readEntryImage(id)).toEqual({
+  expect(await reopened.readImage({ kind: 'entry', id })).toEqual({
     data: JPEG,
     extension: 'jpg',
   });
@@ -122,7 +122,7 @@ it('an MVP app keeps the image key when it rewrites an Entry, and never lists im
 it('ignores the image an MVP app left in images/ when it moved its Entry to Trash, with no cleanup', async () => {
   const store = await createProject(projectPath, deps());
   const { id } = await store.createEntry('place', 'Harbour');
-  await store.setEntryImage(id, { data: JPEG, extension: 'jpg' });
+  await store.setImage({ kind: 'entry', id }, { data: JPEG, extension: 'jpg' });
   await store.close();
   // The MVP's move to Trash: the Entry's file goes, its image stays.
   const file = path.join(projectPath, 'bible', `${id}.md`);

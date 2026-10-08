@@ -144,8 +144,8 @@ export type EntryValue = {
   description: string;
   fields: EntryFields;
   /**
-   * Its image's file in `images/`, if it has one. Only `setEntryImage` and
-   * `removeEntryImage` change it; a write keeps the image the Entry has.
+   * Its image's file in `images/`, if it has one. Only `setImage` and
+   * `removeImage` change it; a write keeps the image the Entry has.
    */
   image?: string;
   /**
@@ -195,6 +195,17 @@ export type EntrySummary = {
   /** Its Tags, by spelling; none when it has none. */
   tags?: string[];
 };
+
+/**
+ * What a unit detail is addressed by (ADR 0008): a Scene, a Chapter or an
+ * Entry by id, or the Manuscript, which is the Project Outline's.
+ */
+export type DetailRef =
+  | { kind: 'scene' | 'chapter' | 'entry'; id: string }
+  | { kind: 'manuscript' };
+
+/** What an image belongs to: any unit but the Manuscript. */
+export type ImageRef = Exclude<DetailRef, { kind: 'manuscript' }>;
 
 /** The extensions an Entry's, Scene's or Chapter's image is stored with. */
 export type ImageExtension = 'jpg' | 'png';
