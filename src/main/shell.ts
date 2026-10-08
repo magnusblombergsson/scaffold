@@ -44,15 +44,12 @@ import {
   type AppSettings,
   type WindowBounds,
 } from './app-settings/app-settings';
+import { runExport, type ExportJob } from './export/export-flow';
 import {
   conflictedScenes,
   exportConflictQuestion,
   exportManuscript,
   EXPORT_FORMATS,
-  exportTarget,
-  insideProjectMessage,
-  type ExportFormat,
-  type ExportQuestion,
 } from './export/manuscript-export';
 import {
   conflictedEntries,
@@ -80,7 +77,6 @@ import {
   projectLookup,
   type ProjectStore,
 } from './project-store/project-store';
-import { writeFailureReason } from './project-store/safe-write';
 import { menuTemplate, proseMenuTemplate, type MenuState } from './menu';
 import { menuWindow } from './menu-window';
 import { ProjectWindows } from './project-windows';
@@ -482,8 +478,9 @@ const shellHandlers: Handlers<ShellApi, typeof shellMethods, WindowContext> = {
   },
   exportManuscript: async (ctx, unticked) => {
     const store = projectWindows.of(ctx.sender);
-    settings.updateProject(store.id, { exportUnticked: unticked });
-    await exportFrom(windowOf(ctx), store, manuscriptExport(store, unticked));
+    await exportFrom(windowOf(ctx), manuscriptExport(store, unticked), () =>
+      settings.updateProject(store.id, { exportUnticked: unticked }),
+    );
   },
   storyBibleExportImages: (ctx) => {
     const store = projectWindows.find(ctx.sender);
@@ -491,10 +488,11 @@ const shellHandlers: Handlers<ShellApi, typeof shellMethods, WindowContext> = {
   },
   exportStoryBible: async (ctx, choice) => {
     const store = projectWindows.of(ctx.sender);
-    settings.updateProject(store.id, {
-      storyBibleExportImages: choice.images,
-    });
-    await exportFrom(windowOf(ctx), store, storyBibleExport(store, choice));
+    await exportFrom(windowOf(ctx), storyBibleExport(store, choice), () =>
+      settings.updateProject(store.id, {
+        storyBibleExportImages: choice.images,
+      }),
+    );
   },
   openRecent: (ctx, projectPath) => openPath(ctx, projectPath),
   locateProject: async (ctx, oldPath) => {
@@ -713,28 +711,14 @@ function updateMenu(): void {
   if (store) spellcheckIn(window.webContents, store.language);
 }
 
-/** The real path of `target`, or `target` when it can't be resolved. */
-function realOrSame(target: string): Promise<string> {
-  return realpath(target).catch(() => target);
-}
-
-/** What one Export asks and writes. */
-type ExportJob = {
-  /** The save dialog's title. */
-  title: string;
-  /** The file name offered, without its extension. */
-  name: string;
-  /** What the Author is asked first about what is in Conflict; null when nothing is. */
-  conflictQuestion(): ExportQuestion | null;
-  write(format: ExportFormat): Promise<Uint8Array>;
-};
-
 /** The ticked part of the Manuscript, as an Export. */
 function manuscriptExport(
   store: ProjectStore,
   unticked: ExportUnticked,
 ): ExportJob {
   return {
+    projectPath: store.path,
+    projectName: store.displayName,
     title: 'Export Manuscript',
     name: store.displayName,
     conflictQuestion: () => {
@@ -755,6 +739,8 @@ function storyBibleExport(
   choice: StoryBibleChoice,
 ): ExportJob {
   return {
+    projectPath: store.path,
+    projectName: store.displayName,
     title: 'Export Story Bible',
     name: `${store.displayName} Story Bible`,
     conflictQuestion: () => {
@@ -769,78 +755,65 @@ function storyBibleExport(
   };
 }
 
-/**
- * Writes an Export of the window's Project where the Author chooses, once
- * they have agreed to export the main version of what it holds in Conflict.
- */
-async function exportFrom(
+/** Runs an Export with Electron's dialogs, attached to the window, and the real file system. */
+function exportFrom(
   window: BrowserWindow,
-  store: ProjectStore,
   job: ExportJob,
+  rememberChoices: () => void,
 ): Promise<void> {
-  await requestRendererFlush(window.webContents);
-  const question = job.conflictQuestion();
-  if (question) {
-    const { response } = await dialog.showMessageBox(window, {
-      type: 'warning',
-      buttons: ['Export Anyway', 'Cancel'],
-      defaultId: 1,
-      cancelId: 1,
-      ...question,
-    });
-    if (response !== 0) return;
-  }
-  const { canceled, filePath } = await dialog.showSaveDialog(window, {
-    title: job.title,
-    buttonLabel: 'Export',
-    defaultPath: path.join(app.getPath('documents'), `${job.name}.docx`),
-    filters: [EXPORT_FORMATS.docx, EXPORT_FORMATS.markdown],
-    properties: ['createDirectory', 'showOverwriteConfirmation'],
+  return runExport(job, {
+    dialogs: {
+      askConflicts: async (question) => {
+        const { response } = await dialog.showMessageBox(window, {
+          type: 'warning',
+          buttons: ['Export Anyway', 'Cancel'],
+          defaultId: 1,
+          cancelId: 1,
+          ...question,
+        });
+        return response === 0;
+      },
+      chooseSaveTarget: async (title, name, formats) => {
+        const { canceled, filePath } = await dialog.showSaveDialog(window, {
+          title,
+          buttonLabel: 'Export',
+          defaultPath: path.join(app.getPath('documents'), `${name}.docx`),
+          filters: formats.map((format) => EXPORT_FORMATS[format]),
+          properties: ['createDirectory', 'showOverwriteConfirmation'],
+        });
+        return canceled || !filePath ? null : filePath;
+      },
+      confirmReplace: async (target) => {
+        const { response } = await dialog.showMessageBox(window, {
+          type: 'warning',
+          buttons: ['Replace', 'Cancel'],
+          defaultId: 1,
+          cancelId: 1,
+          message: `${path.basename(target)} already exists. Replace it?`,
+        });
+        return response === 0;
+      },
+      report: async ({ type, message, detail }) => {
+        await dialog.showMessageBox(window, {
+          type,
+          buttons: ['OK'],
+          message,
+          detail,
+        });
+      },
+    },
+    fs: {
+      realpath,
+      exists: (target) =>
+        access(target).then(
+          () => true,
+          () => false,
+        ),
+      writeFile: (target, data) => writeFile(target, data),
+    },
+    flush: () => requestRendererFlush(window.webContents),
+    rememberChoices,
   });
-  if (canceled || !filePath) return;
-  // Real paths, so that a link into the Project folder is seen as inside it.
-  const target = exportTarget(
-    path.join(
-      await realOrSame(path.dirname(filePath)),
-      path.basename(filePath),
-    ),
-    await realOrSame(store.path),
-  );
-  if (!target) {
-    await dialog.showMessageBox(window, {
-      type: 'warning',
-      buttons: ['OK'],
-      ...insideProjectMessage(store.displayName),
-    });
-    return;
-  }
-  // The dialog asked about replacing the file chosen, not one with `.docx` added.
-  if (path.basename(target.path) !== path.basename(filePath)) {
-    const exists = await access(target.path).then(
-      () => true,
-      () => false,
-    );
-    if (exists) {
-      const { response } = await dialog.showMessageBox(window, {
-        type: 'warning',
-        buttons: ['Replace', 'Cancel'],
-        defaultId: 1,
-        cancelId: 1,
-        message: `${path.basename(target.path)} already exists. Replace it?`,
-      });
-      if (response !== 0) return;
-    }
-  }
-  try {
-    await writeFile(target.path, await job.write(target.format));
-  } catch (error) {
-    await dialog.showMessageBox(window, {
-      type: 'error',
-      buttons: ['OK'],
-      message: `Can't export ${path.basename(target.path)}`,
-      detail: `Saving it failed: ${writeFailureReason(error)}.`,
-    });
-  }
 }
 
 /** The window that called; dialogs are attached to it. */
