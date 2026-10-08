@@ -92,6 +92,13 @@ import {
 import { FormatUpgraded, GatedFileSystem } from './gated-file-system';
 import { freeName, safeWrite } from './safe-write';
 import {
+  markerHosts,
+  readSessionMarkers,
+  Sessions,
+  SESSIONS,
+  type SessionMarker,
+} from './sessions';
+import {
   changeDetails,
   formatWithDetails,
   mergeDetails,
@@ -141,7 +148,6 @@ import {
   ENTRY_TRASH_FILE,
   entryRef,
   hostOfCopy,
-  hostStem,
   ID,
   ID_FILE,
   IMAGES,
@@ -289,7 +295,7 @@ export async function createProject(
       entries: new Map(),
       trash: new Map(),
     },
-    { notice: { alsoOpen: [] }, own: null },
+    new Map(),
   );
 }
 
@@ -334,13 +340,8 @@ export async function openProject(
   const units = await scanUnits(projectPath, manifest.tree, deps.fs, {
     repair: true,
   });
-  const sessions = sessionsAtOpen(
-    await readSessionMarkers(projectPath, deps.fs),
-    hostOf(deps),
-    deps.clock.now(),
-    (sceneId) => units.files.has(sceneId),
-  );
-  const store = new ProjectStore(projectPath, manifest, deps, units, sessions, {
+  const markers = await readSessionMarkers(projectPath, deps.fs);
+  const store = new ProjectStore(projectPath, manifest, deps, units, markers, {
     dropped: resolved.dropped,
     unrecognised,
   });
@@ -718,122 +719,11 @@ async function readJson<T>(fs: FileSystem, file: string): Promise<T | null> {
   }
 }
 
-const SESSIONS = '.sessions';
-const MINUTE_MS = 60_000;
-const HEARTBEAT_MS = 5 * MINUTE_MS;
-/** A marker whose heartbeat is older than this was left by a computer that stopped. */
-const STALE_MS = 15 * MINUTE_MS;
 /** How long a burst of watcher events gathers before the files are checked. */
 const COALESCE_MS = 250;
 
-/**
- * `.sessions/<HOST>.json`: when this computer last had the Project open, and
- * how it left it. Only a warning to other computers, never a lock. The
- * heartbeat goes on while the Project is open; `activeAt` is when the Author
- * last moved in it, so a computer merely left open doesn't seem worked on.
- */
-type SessionMarker = ProjectView & {
-  host: string;
-  /** The format of the app that wrote it; markers before it have none. */
-  format?: number;
-  heartbeat: number;
-  activeAt?: number;
-  open: boolean;
-};
-
-/** When the Author last worked on a marker's computer; old markers have only a heartbeat. */
-function activeAt(marker: SessionMarker): number {
-  return typeof marker.activeAt === 'number'
-    ? marker.activeAt
-    : marker.heartbeat;
-}
-
-type Sessions = {
-  notice: SessionNotice;
-  /** This computer's own marker, as the Project opened. */
-  own: SessionMarker | null;
-};
-
 function hostOf(deps: StoreDeps): string {
   return deps.host ?? hostname();
-}
-
-/** A marker's file name: the host, with what a file name can't hold replaced. */
-function markerName(host: string): string {
-  return `${hostStem(host)}.json`;
-}
-
-/** Every marker that can be read, by file name; one that can't is skipped. */
-async function readSessionMarkers(
-  projectPath: string,
-  fs: FileSystem,
-): Promise<Map<string, SessionMarker>> {
-  const markers = new Map<string, SessionMarker>();
-  const dir = path.join(projectPath, SESSIONS);
-  for (const name of await fs.readdir(dir)) {
-    if (!name.endsWith('.json')) continue;
-    const marker = await readJson<Partial<SessionMarker>>(
-      fs,
-      path.join(dir, name),
-    );
-    if (
-      typeof marker?.host === 'string' &&
-      typeof marker.heartbeat === 'number' &&
-      typeof marker.open === 'boolean'
-    ) {
-      markers.set(name, marker as SessionMarker);
-    }
-  }
-  return markers;
-}
-
-/** The computers whose session markers are in the Project. */
-async function markerHosts(
-  projectPath: string,
-  fs: FileSystem,
-): Promise<string[]> {
-  const markers = await readSessionMarkers(projectPath, fs);
-  return [...markers.values()].map((marker) => marker.host);
-}
-
-/**
- * Which other computers have the Project open, by a heartbeat that isn't
- * stale, and where the Author left off on the computer they worked on last,
- * if that isn't this one and the Scene is still here.
- */
-function sessionsAtOpen(
-  markers: Map<string, SessionMarker>,
-  host: string,
-  now: number,
-  hasScene: (sceneId: string) => boolean,
-): Sessions {
-  const own = markers.get(markerName(host)) ?? null;
-  const others = [...markers]
-    .filter(([name]) => name !== markerName(host))
-    .map(([, marker]) => marker)
-    .sort((a, b) => activeAt(b) - activeAt(a));
-  const notice: SessionNotice = {
-    alsoOpen: others
-      .filter((m) => m.open && now - m.heartbeat < STALE_MS)
-      .map((m) => ({
-        host: m.host,
-        minutesAgo: Math.max(0, Math.floor((now - m.heartbeat) / MINUTE_MS)),
-      })),
-  };
-  const last = others[0];
-  if (
-    last &&
-    activeAt(last) > (own ? activeAt(own) : -Infinity) &&
-    typeof last.lastSceneId === 'string' &&
-    hasScene(last.lastSceneId)
-  ) {
-    notice.continueAt = {
-      host: last.host,
-      sceneId: last.lastSceneId,
-      ...(typeof last.cursor === 'number' && { cursor: last.cursor }),
-    };
-  }
-  return { notice, own };
 }
 
 /** The `versionId` of the version at a unit's own path. */
@@ -914,20 +804,15 @@ export class ProjectStore {
 
   private readonly host: string;
   private readonly sessions: Sessions;
-  /** How the Author leaves the Project, for this computer's session marker. */
-  private view: ProjectView;
-  /** Ends the session: stops the heartbeat and the watcher. */
-  private endSession: (() => Promise<void>) | null = null;
-  private markerWrites: Promise<void> = Promise.resolve();
-  /** When the Author last opened or moved in the Project here. */
-  private activeAt = 0;
+  /** Stops watching the folder, while the session lasts. */
+  private stopWatching: (() => Promise<void>) | null = null;
 
   constructor(
     readonly path: string,
     private manifest: Manifest,
     deps: StoreDeps,
     units: Units,
-    sessions: Sessions,
+    markers: Map<string, SessionMarker>,
     opened: { dropped: Dropped[]; unrecognised: Set<string> } = {
       dropped: [],
       unrecognised: new Set(),
@@ -1002,7 +887,7 @@ export class ProjectStore {
       clock: deps.clock,
       emit: (event) => this.emit(event),
       host: this.host,
-      markerHosts: () => markerHosts(path, this.deps.fs),
+      markerHosts: () => this.sessions.hosts(),
       unrecognised: this.unrecognised,
       entries: this.entries,
       trash: this.trash.items,
@@ -1018,16 +903,17 @@ export class ProjectStore {
       enqueueWrite: (operation) => this.enqueueWrite(operation),
       passFormatGate: () => this.passFormatGate(),
     });
-    this.sessions = sessions;
-    const {
-      host: _,
-      format: _f,
-      heartbeat: _h,
-      activeAt: _a,
-      open: _o,
-      ...view
-    } = sessions.own ?? {};
-    this.view = view;
+    this.sessions = new Sessions(
+      {
+        path,
+        fs: this.deps.fs,
+        clock: deps.clock,
+        host: this.host,
+        format: FORMAT,
+      },
+      markers,
+      (sceneId) => this.files.has(sceneId),
+    );
   }
 
   /**
@@ -1042,7 +928,7 @@ export class ProjectStore {
 
   /** What the session markers said when the Project opened. */
   sessionNotice(): SessionNotice {
-    return structuredClone(this.sessions.notice);
+    return this.sessions.notice();
   }
 
   /**
@@ -1050,25 +936,18 @@ export class ProjectStore {
    * minutes, and watches the folder for changes that a sync client brings.
    */
   async startSession(): Promise<void> {
-    if (this.endSession) return;
-    this.activeAt = this.deps.clock.now();
-    const stopBeating = this.deps.clock.every(HEARTBEAT_MS, () => {
-      void this.writeMarker(true);
-    });
-    let stopWatching = async () => {};
-    this.endSession = async () => {
-      stopBeating();
-      await stopWatching();
-    };
+    if (this.sessions.active) return;
+    this.sessions.begin();
     try {
-      stopWatching = await this.deps.fs.watch(this.path, () =>
-        this.changeSeen(),
-      );
+      const stop = await this.deps.fs.watch(this.path, () => this.changeSeen());
+      // Closed meanwhile: nothing will stop it later.
+      if (this.sessions.active) this.stopWatching = async () => stop();
+      else await stop();
     } catch (error) {
       // Changes are still found on the next open.
       console.error(`Can't watch ${this.path}:`, error);
     }
-    await this.writeMarker(true);
+    await this.sessions.mark();
     // What arrived between opening and watching.
     void this.checkForChanges();
   }
@@ -1078,19 +957,7 @@ export class ProjectStore {
    * once. The Overview pane's state stays on this computer, out of the marker.
    */
   updateSession(change: ProjectView): void {
-    const view = { ...change };
-    delete view.overviewOpen;
-    delete view.pinnedNotes;
-    if (view.panelWidths) {
-      view.panelWidths = { ...view.panelWidths };
-      delete view.panelWidths.overview;
-    }
-    const sceneChanged =
-      view.lastSceneId !== undefined &&
-      view.lastSceneId !== this.view.lastSceneId;
-    this.view = { ...this.view, ...view };
-    this.activeAt = this.deps.clock.now();
-    if (sceneChanged && this.endSession) void this.writeMarker(true);
+    this.sessions.update(change);
   }
 
   /** Whether a sync client keeps any of the Project's files online-only. */
@@ -1106,40 +973,13 @@ export class ProjectStore {
     }
   }
 
-  /** Writes this computer's marker; it is advisory, so failing to is only logged. */
-  private writeMarker(open: boolean): Promise<void> {
-    const marker: SessionMarker = {
-      ...this.view,
-      host: this.host,
-      format: FORMAT,
-      heartbeat: this.deps.clock.now(),
-      activeAt: this.activeAt,
-      open,
-    };
-    const dir = path.join(this.path, SESSIONS);
-    this.markerWrites = this.markerWrites.then(async () => {
-      try {
-        await this.deps.fs.mkdir(dir);
-        await safeWrite(
-          this.deps.fs,
-          this.deps.clock,
-          path.join(dir, markerName(this.host)),
-          `${JSON.stringify(marker, null, 2)}\n`,
-        );
-      } catch (error) {
-        console.error("Can't write the session marker:", error);
-      }
-    });
-    return this.markerWrites;
-  }
-
   /** A watcher event: checks the files once the burst it belongs to is over. */
   private changeSeen(): void {
-    if (this.checkScheduled || !this.endSession) return;
+    if (this.checkScheduled || !this.sessions.active) return;
     this.checkScheduled = true;
     void this.deps.clock.sleep(COALESCE_MS).then(() => {
       this.checkScheduled = false;
-      if (this.endSession) return this.checkForChanges();
+      if (this.sessions.active) return this.checkForChanges();
     });
   }
 
@@ -1335,19 +1175,7 @@ export class ProjectStore {
 
   /** The computer whose session marker says a newer app had the Project open, lately first. */
   private async upgradedOn(): Promise<string | undefined> {
-    try {
-      const markers = await readSessionMarkers(this.path, this.deps.fs);
-      return [...markers.values()]
-        .filter(
-          (m) =>
-            m.host !== this.host &&
-            typeof m.format === 'number' &&
-            m.format > FORMAT,
-        )
-        .sort((a, b) => b.heartbeat - a.heartbeat)[0]?.host;
-    } catch {
-      return undefined;
-    }
+    return this.sessions.upgradedOn();
   }
 
   /** Set once a newer app has upgraded the Project, after which nothing more is written. */
@@ -1387,7 +1215,7 @@ export class ProjectStore {
     // Read only to label a copy: most checks find none.
     let hosts: string[] | undefined;
     const knownHosts = async () =>
-      (hosts ??= [this.host, ...(await markerHosts(this.path, this.deps.fs))]);
+      (hosts ??= [this.host, ...(await this.sessions.hosts())]);
     const found = new Map<string, ConflictEntry>();
     for (const kind of Object.keys(UNIT_DIRS) as UnitRef['kind'][]) {
       const dir = path.join(this.path, UNIT_DIRS[kind]);
@@ -3289,11 +3117,11 @@ export class ProjectStore {
         `${this.displayName} can't close: some changes aren't saved yet`,
       );
     }
-    if (this.endSession) {
-      const end = this.endSession;
-      this.endSession = null;
-      await end();
-      await this.writeMarker(false);
+    if (this.sessions.active) {
+      this.sessions.stop();
+      await this.stopWatching?.();
+      this.stopWatching = null;
+      await this.sessions.leave();
     }
   }
 
