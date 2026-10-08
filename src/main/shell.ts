@@ -33,11 +33,9 @@ import {
   type ExportUnticked,
   type StoryBibleChoice,
 } from '../shared/export-choice';
-import type { Filter } from '../shared/filter';
 import { splitManuscript } from '../shared/manuscript-import';
 import { isProviderId, type Model } from '../shared/models';
 import type { ProseLanguage } from '../shared/project-types';
-import { ALL_DOCKED, type DockedPanes } from '../shared/shortcuts';
 import { unitName } from '../shared/unit-name';
 import type { ViewSettings } from '../shared/view-settings';
 import {
@@ -85,6 +83,7 @@ import {
 import { writeFailureReason } from './project-store/safe-write';
 import { menuTemplate, proseMenuTemplate, type MenuState } from './menu';
 import { menuWindow } from './menu-window';
+import { ProjectWindows } from './project-windows';
 import {
   emit,
   register,
@@ -100,30 +99,22 @@ const deps = { fs: nodeFileSystem, clock: systemClock };
 let settings: AppSettings;
 let providers: ProviderSettings;
 
-/** The open Project of each window, keyed by its webContents id. */
-const stores = new Map<number, ProjectStore>();
-/** Which of Writing's side panes each window, by its contents' id, has docked. */
-const dockedPanes = new Map<number, DockedPanes>();
-/**
- * The windows, by their contents' id, whose Prose has focus, for the Format
- * menu, each with whether that Prose's Scene can be split.
- */
-const focusedProse = new Map<number, { splittable: boolean }>();
-/**
- * The windows in zen mode, by their contents' id, each with whether it was
- * full screen before zen.
- */
-const zenWindows = new Map<number, boolean>();
-/** Stops sending a window its store's events, by webContents id. */
-const unsubscribes = new Map<number, () => void>();
+/** The windows, each with the Project it shows. */
+export const projectWindows = new ProjectWindows<WebContents, ProjectStore>({
+  emit,
+  flush: requestRendererFlush,
+  changeFilters: (projectId, change) =>
+    settings.changeFilters(projectId, change),
+  changed: () => updateMenu(),
+  leftZen: (contents, wasFullScreen) => {
+    const window = BrowserWindow.fromWebContents(contents);
+    if (window && !window.isDestroyed()) window.setFullScreen(wasFullScreen);
+  },
+});
 /** The window the menus follow, kept while the app is in the background. */
 const followed = menuWindow(() => BrowserWindow.getFocusedWindow());
 
 let quitting = false;
-
-export function storeOf(contents: WebContents): ProjectStore | undefined {
-  return stores.get(contents.id);
-}
 
 /** The Model a new Conversation starts on: the one chosen last, or one shortlisted of a Provider that is added. */
 export function defaultModel(): Model {
@@ -163,7 +154,7 @@ export async function startShell(): Promise<void> {
   // A quit waits until every window's Project is closed, its edits on disk,
   // then asks again. Those Projects stay listed to reopen at startup.
   app.on('before-quit', (event) => {
-    if (stores.size === 0) {
+    if (projectWindows.count() === 0) {
       quitting = true;
       return;
     }
@@ -202,7 +193,7 @@ export async function startShell(): Promise<void> {
       console.error(`Can't reopen ${projectPath}:`, error);
     }
   }
-  if (stores.size === 0) createWindow(null);
+  if (projectWindows.count() === 0) createWindow(null);
   rememberOpenProjects();
 }
 
@@ -225,7 +216,7 @@ function createWindow(store: ProjectStore | null): BrowserWindow {
     return { action: 'deny' };
   });
   const rememberBounds = () => {
-    const shown = stores.get(window.webContents.id);
+    const shown = projectWindows.find(window.webContents);
     if (shown) {
       settings.updateProject(shown.id, {
         windowBounds: window.getNormalBounds(),
@@ -236,8 +227,7 @@ function createWindow(store: ProjectStore | null): BrowserWindow {
   window.on('move', rememberBounds);
   // Full screen left some other way, as by F11, leaves zen too.
   window.on('leave-full-screen', () => {
-    const id = window.webContents.id;
-    if (!zenWindows.delete(id)) return;
+    if (projectWindows.exitZen(window.webContents) === undefined) return;
     updateMenu();
     emit(window.webContents, 'shell', 'onCommand', { type: 'zen' });
   });
@@ -287,29 +277,13 @@ function bringToFront(window: BrowserWindow): void {
 }
 
 function windowShowing(projectPath: string): BrowserWindow | undefined {
-  for (const [contentsId, store] of stores) {
-    if (samePath(store.path, projectPath)) {
-      return BrowserWindow.getAllWindows().find(
-        (window) => window.webContents.id === contentsId,
-      );
-    }
-  }
+  const contents = projectWindows.showing(projectPath);
+  return (contents && BrowserWindow.fromWebContents(contents)) || undefined;
 }
 
 /** Makes `store` the Project of the window with these contents. */
 function attach(contents: WebContents, store: ProjectStore): void {
-  stores.set(contents.id, store);
-  unsubscribes.set(
-    contents.id,
-    store.subscribe((event) => {
-      if (contents.isDestroyed()) return;
-      emit(contents, 'project', 'subscribe', event);
-      // Which also spellchecks in the new language.
-      if (event.type === 'languageChanged' || event.type === 'readOnly') {
-        updateMenu();
-      }
-    }),
-  );
+  projectWindows.attach(contents, store);
   settings.recordOpened({
     path: store.path,
     id: store.id,
@@ -333,7 +307,7 @@ function spellcheckIn(contents: WebContents, language: ProseLanguage): void {
 }
 
 function rememberOpenProjects(): void {
-  settings.setOpenAtQuit([...stores.values()].map((store) => store.path));
+  settings.setOpenAtQuit(projectWindows.stores().map((store) => store.path));
 }
 
 function openedProject(store: ProjectStore): OpenedProject {
@@ -370,7 +344,7 @@ function openedProject(store: ProjectStore): OpenedProject {
  * shows the start screen, else in a new one.
  */
 function showOpened(sender: WebContents, store: ProjectStore): OpenResult {
-  if (stores.has(sender.id)) {
+  if (projectWindows.find(sender)) {
     createWindow(store);
     return null;
   }
@@ -443,7 +417,7 @@ function recentProjects(): Promise<RecentProject[]> {
 
 const shellHandlers: Handlers<ShellApi, typeof shellMethods, WindowContext> = {
   currentProject: ({ sender }) => {
-    const store = stores.get(sender.id);
+    const store = projectWindows.find(sender);
     return store ? openedProject(store) : null;
   },
   createProject: async (ctx) => {
@@ -503,22 +477,20 @@ const shellHandlers: Handlers<ShellApi, typeof shellMethods, WindowContext> = {
     }
   },
   exportChoice: ({ sender }) => {
-    const store = stores.get(sender.id);
+    const store = projectWindows.find(sender);
     return (store && settings.project(store.id).exportUnticked) ?? TICK_ALL;
   },
   exportManuscript: async (ctx, unticked) => {
-    const store = stores.get(ctx.sender.id);
-    if (!store) return;
+    const store = projectWindows.of(ctx.sender);
     settings.updateProject(store.id, { exportUnticked: unticked });
     await exportFrom(windowOf(ctx), store, manuscriptExport(store, unticked));
   },
   storyBibleExportImages: (ctx) => {
-    const store = stores.get(ctx.sender.id);
+    const store = projectWindows.find(ctx.sender);
     return (store && settings.project(store.id).storyBibleExportImages) ?? true;
   },
   exportStoryBible: async (ctx, choice) => {
-    const store = stores.get(ctx.sender.id);
-    if (!store) return;
+    const store = projectWindows.of(ctx.sender);
     settings.updateProject(store.id, {
       storyBibleExportImages: choice.images,
     });
@@ -543,15 +515,11 @@ const shellHandlers: Handlers<ShellApi, typeof shellMethods, WindowContext> = {
     return recentProjects();
   },
   showDocked: ({ sender }, docked) => {
-    dockedPanes.set(sender.id, docked);
+    projectWindows.setDocked(sender, docked);
     updateMenu();
   },
   showProseFocus: ({ sender }, focused, splittable) => {
-    const was = focusedProse.get(sender.id);
-    if (focused === !!was && splittable === !!was?.splittable) return;
-    if (focused) focusedProse.set(sender.id, { splittable });
-    else focusedProse.delete(sender.id);
-    updateMenu();
+    if (projectWindows.setProseFocus(sender, focused, splittable)) updateMenu();
   },
   showProseMenu: ({ sender, window }, splittable) => {
     if (!(window instanceof BrowserWindow)) return;
@@ -562,18 +530,17 @@ const shellHandlers: Handlers<ShellApi, typeof shellMethods, WindowContext> = {
     ).popup({ window });
   },
   setZen: ({ sender, window }, on) => {
-    if (!window || on === zenWindows.has(sender.id)) return;
+    if (!window || on === projectWindows.isZen(sender)) return;
     if (on) {
-      zenWindows.set(sender.id, window.isFullScreen());
+      projectWindows.enterZen(sender, window.isFullScreen());
       window.setFullScreen(true);
     } else {
-      leaveZen(sender.id, window);
+      leaveZen(sender, window);
     }
     updateMenu();
   },
   saveView: ({ sender }, change) => {
-    const store = stores.get(sender.id);
-    if (!store) return;
+    const store = projectWindows.of(sender);
     const view = { ...change };
     // A cursor is where it was in the last Scene, so it goes with it: the
     // key, set even to undefined, clears the cursor kept for the Scene before.
@@ -588,15 +555,14 @@ const shellHandlers: Handlers<ShellApi, typeof shellMethods, WindowContext> = {
     store.updateSession(view);
   },
   tips: async ({ sender }): Promise<Tip[]> => {
-    const store = stores.get(sender.id);
+    const store = projectWindows.find(sender);
     if (!store) return [];
     const dismissed = settings.project(store.id).dismissedTips ?? [];
     if (dismissed.includes('keep-on-device')) return [];
     return (await store.hasOnlineOnlyFiles()) ? ['keep-on-device'] : [];
   },
   dismissTip: ({ sender }, tip) => {
-    const store = stores.get(sender.id);
-    if (!store) return;
+    const store = projectWindows.of(sender);
     const dismissed = settings.project(store.id).dismissedTips ?? [];
     if (!dismissed.includes(tip)) {
       settings.updateProject(store.id, {
@@ -605,12 +571,11 @@ const shellHandlers: Handlers<ShellApi, typeof shellMethods, WindowContext> = {
     }
   },
   filter: ({ sender }, place) => {
-    const store = stores.get(sender.id);
+    const store = projectWindows.find(sender);
     return store ? settings.filter(store.id, place) : {};
   },
   setFilter: ({ sender }, place, filter) => {
-    const store = stores.get(sender.id);
-    if (store) settings.setFilter(store.id, place, filter);
+    settings.setFilter(projectWindows.of(sender).id, place, filter);
   },
   highlightMentions: () => settings.highlightMentions(),
   setHighlightMentions: (_ctx, on) => {
@@ -622,21 +587,6 @@ const shellHandlers: Handlers<ShellApi, typeof shellMethods, WindowContext> = {
   viewSettings: () => settings.viewSettings(),
   setViewSettings: (_ctx, change) => setViewSettings(change),
 };
-
-/**
- * Changes the Filters of the Project in `sender` as `change` does, as when
- * a Tag is renamed or deleted, and tells the window.
- */
-export function changeFilters(
-  sender: WebContents,
-  projectId: string,
-  change: (filter: Filter) => Filter,
-): void {
-  const changed = settings.changeFilters(projectId, change);
-  if (Object.keys(changed).length > 0) {
-    emit(sender, 'shell', 'onFilter', changed);
-  }
-}
 
 /**
  * Changes how every window looks: the theme through Chromium, which every
@@ -720,22 +670,12 @@ function announceProviders(view: ProvidersView): void {
 /** The menu bar, made anew for the window it follows whenever what it shows changes. */
 function setApplicationMenu(): void {
   const window = followed.current();
-  const store = window && stores.get(window.webContents.id);
   const state: MenuState = {
     mac: process.platform === 'darwin',
     // Run from the dev server, by `electron-forge start`; what `package`
     // builds, as the e2e tests run, is as it ships.
     dev: Boolean(MAIN_WINDOW_VITE_DEV_SERVER_URL),
-    project: store
-      ? {
-          readOnly: store.readOnly() !== null,
-          docked: dockedPanes.get(window.webContents.id) ?? ALL_DOCKED,
-          zen: zenWindows.has(window.webContents.id),
-          proseFocused: focusedProse.has(window.webContents.id),
-          splittable:
-            focusedProse.get(window.webContents.id)?.splittable ?? false,
-        }
-      : null,
+    project: projectWindows.menuState(window?.webContents ?? null),
     recent: settings
       .recent()
       .map(({ path, displayName }) => ({ path, displayName })),
@@ -769,7 +709,7 @@ function setApplicationMenu(): void {
 function updateMenu(): void {
   setApplicationMenu();
   const window = followed.current();
-  const store = window && stores.get(window.webContents.id);
+  const store = window && projectWindows.find(window.webContents);
   if (store) spellcheckIn(window.webContents, store.language);
 }
 
@@ -920,58 +860,12 @@ async function chooseFolder(
   return canceled || filePaths.length === 0 ? null : filePaths[0];
 }
 
-/** The Projects being closed, by window, so each is closed once. */
-const closing = new Map<number, Promise<void>>();
-
 /** Takes a window out of zen mode, back to the full screen it had before. */
-function leaveZen(id: number, window: BrowserWindow): void {
-  const before = zenWindows.get(id);
-  if (before === undefined) return;
-  zenWindows.delete(id);
-  if (!window.isDestroyed()) window.setFullScreen(before);
-}
-
-/**
- * Asks the window's renderer to hand over pending edits, waits until they are
- * on disk, then closes its Project. Rejects, keeping the Project open, while
- * anything can't be saved.
- */
-function closeProject(window: BrowserWindow): Promise<void> {
-  const contents = window.webContents;
-  const id = contents.id;
-  if (!stores.has(id)) return Promise.resolve();
-  let closed = closing.get(id);
-  if (!closed) {
-    closed = (async () => {
-      try {
-        await requestRendererFlush(contents);
-        await stores.get(id)?.close();
-        unsubscribes.get(id)?.();
-        unsubscribes.delete(id);
-        stores.delete(id);
-        dockedPanes.delete(id);
-        focusedProse.delete(id);
-        leaveZen(id, window);
-        updateMenu();
-      } finally {
-        closing.delete(id);
-      }
-    })();
-    closing.set(id, closed);
+function leaveZen(contents: WebContents, window: BrowserWindow): void {
+  const before = projectWindows.exitZen(contents);
+  if (before !== undefined && !window.isDestroyed()) {
+    window.setFullScreen(before);
   }
-  return closed;
-}
-
-/**
- * Asks the window's renderer to hand over pending edits, and tries to write
- * everything; false while anything is unsaved.
- */
-async function saveWindow(window: BrowserWindow): Promise<boolean> {
-  const store = stores.get(window.webContents.id);
-  if (!store) return true;
-  await requestRendererFlush(window.webContents);
-  await store.flush();
-  return !store.hasUnsaved();
 }
 
 /**
@@ -980,33 +874,26 @@ async function saveWindow(window: BrowserWindow): Promise<boolean> {
  * discarded.
  */
 async function quitWhenSaved(): Promise<void> {
-  const windows = BrowserWindow.getAllWindows().filter((window) =>
-    stores.has(window.webContents.id),
-  );
-  const saved = await Promise.all(windows.map(saveWindow));
-  let stuck = windows.filter((_, i) => !saved[i]);
-  if (stuck.length === 0) {
-    const closed = await Promise.allSettled(windows.map(closeProject));
-    stuck = windows.filter((_, i) => closed[i].status === 'rejected');
-    // An edit that failed between saving and closing: the windows already
-    // closed go, the rest stay.
-    if (stuck.length > 0) {
-      for (const window of windows) {
-        if (!stuck.includes(window)) window.close();
-      }
-    }
-  }
+  const { stuck, closed } = await projectWindows.closeAll();
   if (stuck.length === 0) {
     app.quit();
     return;
   }
+  // An edit that failed between saving and closing: the windows already
+  // closed go, the rest stay.
+  for (const contents of closed) {
+    BrowserWindow.fromWebContents(contents)?.close();
+  }
   quitting = false;
-  for (const window of stuck) warnUnsaved(window);
+  for (const contents of stuck) {
+    const window = BrowserWindow.fromWebContents(contents);
+    if (window) warnUnsaved(window);
+  }
 }
 
 /** Tells the Author why a window's Project can't close yet. */
 function warnUnsaved(window: BrowserWindow): void {
-  const store = stores.get(window.webContents.id);
+  const store = projectWindows.find(window.webContents);
   if (!store || window.isDestroyed()) return;
   const manuscript = store.manuscript();
   const entries = store.listEntries();
@@ -1037,9 +924,9 @@ function warnUnsaved(window: BrowserWindow): void {
  */
 function flushBeforeClose(window: BrowserWindow): void {
   window.on('close', (event) => {
-    if (!stores.has(window.webContents.id)) return;
+    if (!projectWindows.find(window.webContents)) return;
     event.preventDefault();
-    void closeProject(window).then(
+    void projectWindows.close(window.webContents).then(
       () => {
         // Counted now, not when the close began: of windows closed together,
         // the one closed last is kept.

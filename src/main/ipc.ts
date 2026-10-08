@@ -8,13 +8,11 @@ import {
   type ProjectApi,
 } from '../shared/api';
 import type { Handlers } from '../shared/bridge';
-import { renameTagInFilter, withValue } from '../shared/filter';
 import {
   PROSE_LANGUAGES,
   type EntryImage,
   type ProseLanguage,
 } from '../shared/project-types';
-import { spelledTags } from '../shared/tags';
 import { createConversationEngine } from './assistant/conversation-engine';
 import { createImagePrompts } from './assistant/image-prompt';
 import { register } from './electron-transport';
@@ -25,9 +23,8 @@ import { isModel } from '../shared/models';
 import {
   assistantProvider,
   defaultModel,
-  changeFilters,
+  projectWindows,
   rememberModel,
-  storeOf,
 } from './shell';
 import { trashConversationQuestion } from './trash-question';
 
@@ -105,32 +102,19 @@ const projectHandlers: Handlers<
       sender,
       store,
       `The Statuses of ${store.displayName}`,
-      async () => {
-        await store.deleteStatus(statusId, moveTo);
-        changeFilters(sender, store.id, (filter) =>
-          withValue(filter, 'statuses', statusId, false),
-        );
-      },
+      () => store.deleteStatus(statusId, moveTo),
     ),
   tags: async ({ store }) => store.tags(),
   setTags: ({ store }, unitId, tags) => store.setTags(unitId, tags),
   tagUses: async ({ store }) => store.tagUses(),
   renameTag: ({ store, sender }, tag, to) =>
-    saveProjectSetting(sender, store, `The Tag ${tag}`, async () => {
-      await store.renameTag(tag, to);
-      // As the units now spell it, merged onto a Tag in use or not.
-      const [renamed = to] = spelledTags([to], store.tags());
-      changeFilters(sender, store.id, (filter) =>
-        renameTagInFilter(filter, tag, renamed),
-      );
-    }),
+    saveProjectSetting(sender, store, `The Tag ${tag}`, () =>
+      store.renameTag(tag, to),
+    ),
   deleteTag: ({ store, sender }, tag) =>
-    saveProjectSetting(sender, store, `The Tag ${tag}`, async () => {
-      await store.deleteTag(tag);
-      changeFilters(sender, store.id, (filter) =>
-        withValue(filter, 'tags', tag, false),
-      );
-    }),
+    saveProjectSetting(sender, store, `The Tag ${tag}`, () =>
+      store.deleteTag(tag),
+    ),
   listTodos: async ({ store }) => store.listTodos(),
   addTodo: ({ store }, text, link) => store.addTodo(text, link),
   changeTodo: ({ store }, id, change) => store.changeTodo(id, change),
@@ -149,7 +133,7 @@ const projectHandlers: Handlers<
 /** Connects each window's `project` calls to the store of its Project. */
 export function registerProjectIpc(): void {
   register('project', projectHandlers, (sender) => ({
-    store: storeOfWindow(sender),
+    store: projectWindows.of(sender),
     sender,
   }));
 }
@@ -224,7 +208,7 @@ const assistantHandlers: Handlers<
 /** Connects each window's `assistant` calls to the Conversations of its Project. */
 export function registerAssistantIpc(): void {
   register('assistant', assistantHandlers, (sender) => {
-    const store = storeOfWindow(sender);
+    const store = projectWindows.of(sender);
     const engine = createConversationEngine({
       store,
       providerFor: assistantProvider,
@@ -233,12 +217,6 @@ export function registerAssistantIpc(): void {
     });
     return { store, engine, sender };
   });
-}
-
-function storeOfWindow(sender: WebContents): ProjectStore {
-  const store = storeOf(sender);
-  if (!store) throw new Error('No Project is open in this window');
-  return store;
 }
 
 /**

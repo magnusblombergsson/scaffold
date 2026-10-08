@@ -153,6 +153,8 @@ import {
   type HeldDetails,
 } from './unit-details-catalogue';
 import { TODOS, Todos } from './todos';
+import { tagChanges, type VocabularyChange } from './vocabulary';
+export type { VocabularyChange } from './vocabulary';
 import { formatUnitFile, parseUnitFile, type UnitFile } from './unit-file';
 
 export const FORMAT = 1;
@@ -1139,6 +1141,9 @@ export class ProjectStore {
   private readonly retries = new Map<string, number>();
   private retryTokens = 0;
   private readonly listeners = new Set<(event: ProjectEvent) => void>();
+  private readonly vocabularyListeners = new Set<
+    (change: VocabularyChange) => void
+  >();
   /** The latest append to each Conversation's log, which the next waits for. */
   private readonly appends = new Map<string, Promise<void>>();
 
@@ -1360,6 +1365,7 @@ export class ProjectStore {
     return this.enqueueStructure(async () => {
       // What a newer app writes, this one may misread.
       if (this.upgraded) return;
+      const tagsBefore = this.tagsByUnit();
       try {
         await this.checkStructure();
         if (this.upgraded) return;
@@ -1373,6 +1379,9 @@ export class ProjectStore {
           });
         }
         if (await this.todos.read()) this.emitTodos();
+        for (const change of tagChanges(tagsBefore, this.tagsByUnit())) {
+          this.emitVocabulary(change);
+        }
       } catch (error) {
         console.error(`Can't check ${this.path} for changes:`, error);
       }
@@ -1441,6 +1450,10 @@ export class ProjectStore {
     }
     if (!isDeepStrictEqual(this.statuses(), statuses)) {
       this.emit({ type: 'statusesChanged', statuses: this.statuses() });
+      const kept = new Set(this.statuses().map((status) => status.id));
+      for (const { id } of statuses) {
+        if (!kept.has(id)) this.emitVocabulary({ kind: 'status', deleted: id });
+      }
     }
     replaceAll(this.files, units.files);
     this.trash.clear();
@@ -1980,6 +1993,11 @@ export class ProjectStore {
    * unit is gone. Then those of each Entry, those in Trash too.
    */
   private tagLists(except?: string): string[][] {
+    return [...this.tagsByUnit(except).values()];
+  }
+
+  /** `tagLists`, by the id of the unit that has them. */
+  private tagsByUnit(except?: string): Map<string, string[]> {
     const { chapters } = this.manifest.tree;
     const ids = new Set([
       ...chapters.flatMap((c) => [c.id, ...c.scenes.map((s) => s.id)]),
@@ -1989,15 +2007,18 @@ export class ProjectStore {
       ...this.entries.values(),
       ...[...this.trash.values()].filter((item) => item.kind === 'entry'),
     ];
-    return [
+    return new Map<string, string[]>([
       ...[...ids]
         .filter((id) => id !== except && this.outlineOrphaned(id) !== 'gone')
         .filter((id) => id !== PROJECT_OUTLINE)
-        .map((id) => this.unitDetails.get(id)?.tags ?? []),
+        .map((id): [string, string[]] => [
+          id,
+          this.unitDetails.get(id)?.tags ?? [],
+        ]),
       ...entries
         .filter((entry) => entry.id !== except)
-        .map((entry) => entry.tags ?? []),
-    ];
+        .map((entry): [string, string[]] => [entry.id, entry.tags ?? []]),
+    ]);
   }
 
   /**
@@ -2033,6 +2054,8 @@ export class ProjectStore {
         tags.map((t) => (tagKey(t) === key ? renamed : t)),
         [],
       ),
+    ).then(() =>
+      this.emitVocabulary({ kind: 'tag', renamed: { from: tag, to: renamed } }),
     );
   }
 
@@ -2042,7 +2065,9 @@ export class ProjectStore {
    */
   deleteTag(tag: string): Promise<void> {
     const key = tagKey(tag);
-    return this.retag(tag, (tags) => tags.filter((t) => tagKey(t) !== key));
+    return this.retag(tag, (tags) =>
+      tags.filter((t) => tagKey(t) !== key),
+    ).then(() => this.emitVocabulary({ kind: 'tag', deleted: tag }));
   }
 
   /**
@@ -2241,6 +2266,7 @@ export class ProjectStore {
         }
       }
       this.emit({ type: 'statusesChanged', statuses: this.statuses() });
+      this.emitVocabulary({ kind: 'status', deleted: statusId });
     });
   }
 
@@ -4530,6 +4556,20 @@ ${text}`);
     };
   }
 
+  /**
+   * Calls `listener` with each change to the Project's vocabulary of Tags
+   * and Statuses, made here or arriving from another computer; returns an
+   * unsubscribe function.
+   */
+  onVocabularyChanged(
+    listener: (change: VocabularyChange) => void,
+  ): () => void {
+    this.vocabularyListeners.add(listener);
+    return () => {
+      this.vocabularyListeners.delete(listener);
+    };
+  }
+
   /** Flushes, and refuses while anything is unsaved: unsaved changes are never discarded. */
   async close(): Promise<void> {
     await this.flush();
@@ -4743,6 +4783,12 @@ ${text}`);
 
   private emit(event: ProjectEvent): void {
     for (const listener of this.listeners) listener(structuredClone(event));
+  }
+
+  private emitVocabulary(change: VocabularyChange): void {
+    for (const listener of this.vocabularyListeners) {
+      listener(structuredClone(change));
+    }
   }
 }
 
