@@ -17,9 +17,7 @@ test('a Project upgraded elsewhere goes read-only with a banner, and a newer one
   await expect(page.getByLabel('Prose')).toBeFocused();
   await page.keyboard.type('Before the upgrade.');
   await page.keyboard.press('Control+s');
-  await expect(
-    page.getByRole('status').filter({ hasText: 'Saved' }),
-  ).toBeVisible();
+  await expect(page.locator('.save-status.confirmed')).toBeVisible();
 
   await mkdir(path.join(projectPath, '.sessions'), { recursive: true });
   await writeFile(
