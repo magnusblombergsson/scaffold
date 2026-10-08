@@ -1,10 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
-  CallFailure,
   Changed,
-  Conflict,
   Created,
-  Dropped,
   ImportFile,
   OpenedProject,
   OpenResult,
@@ -17,16 +14,16 @@ import {
   ENTRY_TYPE_LABELS,
   PROJECT_OUTLINE,
   unitKey,
-  type EntrySummary,
   type EntryType,
   type Manuscript,
   type ManuscriptChapter,
   type ManuscriptScene,
-  type TrashItem,
   type UnitRef,
   type UnitValue,
 } from '../shared/project-types';
 import { MODE_LABELS, type Mode } from '../shared/conversation';
+import { ProjectMirror } from './project-mirror';
+import { useProject } from './use-project';
 import type { Cut } from '../shared/prose-split';
 import { entryTitle } from '../shared/entry';
 import type { ProposalTarget, ProposalView } from '../shared/proposal';
@@ -41,7 +38,7 @@ import {
   type DockedPanes,
   type SidePane,
 } from '../shared/shortcuts';
-import type { Todo, TodoLink } from '../shared/todo';
+import type { TodoLink } from '../shared/todo';
 import { capitalized, unitName } from '../shared/unit-name';
 import { AssistantPanel } from './AssistantPanel';
 import { Binder, type Selection } from './Binder';
@@ -312,7 +309,21 @@ function ProjectView({
   /** Opens Settings to add an API key for the Assistant. */
   onAddProvider(): void;
 }) {
-  const [manuscript, setManuscript] = useState(project.manuscript);
+  const [mirror] = useState(() => new ProjectMirror(window.project, project));
+  useEffect(() => mirror.start(), [mirror]);
+  const {
+    manuscript,
+    entries,
+    entriesLoaded,
+    trash,
+    todos,
+    conflicts,
+    statuses,
+    language,
+    readOnly,
+    dropped,
+    foldedNoteImage,
+  } = useProject(mirror);
   const [selected, setSelected] = useState<Selection | null>(() => {
     const scenes = allScenes(project.manuscript);
     const last = scenes.find((s) => s.scene.id === project.view.lastSceneId);
@@ -611,15 +622,6 @@ function ProjectView({
   }, [zen]);
   const writingRoom = useRef<HTMLDivElement>(null);
   usePaneCycle(writingRoom, mode === 'writing');
-  const [entries, setEntries] = useState<EntrySummary[]>([]);
-  /** Set once `entries` holds the Story Bible, not the empty list before it. */
-  const entriesLoaded = useRef(false);
-  useEffect(() => {
-    void window.project.listEntries().then((listed) => {
-      entriesLoaded.current = true;
-      setEntries(listed);
-    });
-  }, []);
   useEffect(() => setMentionEntries(entries), [entries]);
   const [highlight, setHighlight] = useState(true);
   useEffect(() => {
@@ -651,7 +653,7 @@ function ProjectView({
   }, []);
   useEffect(() => {
     // A trashed Entry's note goes; one whose Entry lost its image is text.
-    if (!entriesLoaded.current) return;
+    if (!entriesLoaded) return;
     changePinnedNotes(
       textWithoutImage(
         withoutTrashed(
@@ -661,16 +663,11 @@ function ProjectView({
         entries.filter((entry) => entry.image).map((entry) => entry.id),
       ),
     );
-  }, [entries, changePinnedNotes]);
-  /** Whether a folded Pinned note shows its Entry's image, a Project setting. */
-  const [foldedNoteImage, setFoldedNoteImage] = useState(
-    project.foldedNoteImage,
-  );
+  }, [entries, entriesLoaded, changePinnedNotes]);
   const openEntry =
     selected?.kind === 'entry'
       ? entries.find((e) => e.id === selected.id)
       : undefined;
-  const [trash, setTrash] = useState<TrashItem[]>([]);
   /** The latest structure change, while its toast offers to undo it. */
   const [latest, setLatest] = useState<{ message: string; step: number }>();
   const closeToast = useCallback(() => setLatest(undefined), []);
@@ -692,13 +689,6 @@ function ProjectView({
     if (undoable.current !== undefined) await undo(undoable.current);
   }
 
-  const refreshTrash = useCallback(
-    () => window.project.listTrash().then(setTrash),
-    [],
-  );
-  useEffect(() => {
-    void refreshTrash();
-  }, [refreshTrash]);
   /** The Trash item a Todo's link went to; `count` goes to it again. */
   const [trashReveal, setTrashReveal] = useState<{
     id: string;
@@ -715,10 +705,6 @@ function ProjectView({
     setTrashReveal({ id, count: ++trashReveals.current });
   }
 
-  const [todos, setTodos] = useState<Todo[]>([]);
-  useEffect(() => {
-    void window.project.listTodos().then(setTodos);
-  }, []);
   /** What a new Todo is linked to unless the Author unlinks it: the unit open in Writing. */
   const prelink: TodoLink | null = open
     ? { kind: 'scene', id: open.scene.id }
@@ -749,7 +735,6 @@ function ProjectView({
     });
   }
 
-  const [conflicts, setConflicts] = useState<Conflict[]>([]);
   /** The unit whose Conflict the centre shows, instead of the selection. */
   const [resolving, setResolving] = useState<UnitRef | null>(null);
   const resolvingConflict =
@@ -765,16 +750,6 @@ function ProjectView({
       : []),
     'trash',
   ];
-  useEffect(() => {
-    void window.project.listConflicts().then(setConflicts);
-  }, []);
-  const [dropped, setDropped] = useState<Dropped[]>(project.dropped);
-  /** Set once a newer app has upgraded the Project, after which nothing is saved. */
-  const [readOnly, setReadOnly] = useState(project.readOnly);
-  /** The language the Prose is spellchecked and typeset in; the Author may change it. */
-  const [language, setLanguage] = useState(project.language);
-  /** The Project's Status list, which Project Settings or another computer may change. */
-  const [statuses, setStatuses] = useState(project.statuses);
   const [projectSettingsOpen, setProjectSettingsOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [storyBibleExportOpen, setStoryBibleExportOpen] = useState(false);
@@ -800,90 +775,33 @@ function ProjectView({
   /** The Proposal the Author asked to see in its Conversation, from an Entry. */
   const [showProposal, setShowProposal] = useState<ShowProposal | null>(null);
   const shows = useRef(0);
+  // What the UI does as the mirror tells it of the Project.
   useEffect(
     () =>
-      window.project.subscribe((event) => {
-        if (event.type === 'structureChanged') {
-          setManuscript(event.manuscript);
-          const lost = event.dropped;
-          if (lost) setDropped((dropped) => [...dropped, ...lost]);
-          // Main can no longer undo it.
-          changeLatest(undefined);
-          void refreshTrash();
-        } else if (
-          event.type === 'unitReloaded' &&
-          !event.byProposal &&
-          !event.bySplit
-        ) {
+      mirror.onEvent((event) => {
+        if (event.type === 'error') {
+          onError(event.message);
+        } else if (event.type === 'unitReloaded') {
           setReloaded({ ref: event.ref, count: ++reloads.current });
-        } else if (event.type === 'conflictsChanged') {
-          setConflicts(event.conflicts);
-        } else if (event.type === 'conversationsChanged') {
-          // A Conversation may have gone to Trash, or come out.
-          void refreshTrash();
-        } else if (event.type === 'entriesChanged') {
-          entriesLoaded.current = true;
-          setEntries(event.entries);
-          // An Entry may have gone to Trash, or come out, as by a Proposal's undo.
-          void refreshTrash();
         } else if (event.type === 'languageChanged') {
           // Prose editors are made anew in it; their edits reach main first.
           flushPendingEdits();
-          setLanguage(event.language);
-        } else if (event.type === 'foldedNoteImageChanged') {
-          setFoldedNoteImage(event.on);
-        } else if (event.type === 'unitDetailsChanged') {
-          setManuscript(event.manuscript);
-        } else if (event.type === 'statusesChanged') {
-          setStatuses(event.statuses);
-        } else if (event.type === 'todosChanged') {
-          setTodos(event.todos);
-        } else if (event.type === 'readOnly') {
-          // Main still takes edits for a moment: these are the last.
-          flushPendingEdits();
-          setReadOnly({ ...(event.host && { host: event.host }) });
+        } else {
+          if (event.type === 'readOnlyStarted') flushPendingEdits();
           // Main can no longer undo it.
           changeLatest(undefined);
         }
       }),
-    [refreshTrash, changeLatest],
+    [mirror, onError, changeLatest],
   );
 
-  /** Gives a Chapter or Scene a Status; the Manuscript showing it follows from main. */
-  async function setStatus(unitId: string, statusId: string | null) {
-    try {
-      await window.project.setStatus(unitId, statusId);
-      onError(null);
-    } catch (error) {
-      onError(`Can't set the Status: ${(error as CallFailure).message}`);
-    }
-  }
-
-  /**
-   * Gives a Chapter, Scene or the Manuscript a Word target, or none; the
-   * Manuscript showing it follows from main.
-   */
-  async function setWordTarget(unitId: string, words: number | null) {
-    try {
-      await window.project.setWordTarget(unitId, words);
-      onError(null);
-    } catch (error) {
-      onError(`Can't set the Word target: ${(error as CallFailure).message}`);
-    }
-  }
-
-  /**
-   * Gives a Chapter, Scene or Entry Tags; the Manuscript or Entries showing
-   * them follow from main.
-   */
-  async function setTags(unitId: string, tags: string[]) {
-    try {
-      await window.project.setTags(unitId, tags);
-      onError(null);
-    } catch (error) {
-      onError(`Can't save the Tags: ${(error as CallFailure).message}`);
-    }
-  }
+  // The Manuscript or Entries showing a change follow from main.
+  const setStatus = (unitId: string, statusId: string | null) =>
+    mirror.setStatus(unitId, statusId).then(() => {});
+  const setWordTarget = (unitId: string, words: number | null) =>
+    mirror.setWordTarget(unitId, words).then(() => {});
+  const setTags = (unitId: string, tags: string[]) =>
+    mirror.setTags(unitId, tags).then(() => {});
 
   /** Runs a structure operation, and offers to undo it; null when the Author cancelled it. */
   async function change(
@@ -892,16 +810,8 @@ function ProjectView({
   ) {
     // Edits reach main before the structure changes under them.
     flushPendingEdits();
-    try {
-      const result = await operation();
-      if (!result) return;
-      setManuscript(result.manuscript);
-      changeLatest({ message, step: result.step });
-      onError(null);
-    } catch (error) {
-      onError(`Can't make that change: ${(error as CallFailure).message}`);
-    }
-    await refreshTrash();
+    const result = await mirror.change(operation);
+    if (result) changeLatest({ message, step: result.step });
   }
 
   /** Runs a structure operation that makes a unit, as `change` does; its id, if made. */
@@ -1170,36 +1080,22 @@ function ProjectView({
   async function undo(step: number) {
     flushPendingEdits();
     changeLatest(undefined);
-    try {
-      setManuscript(await window.project.undo(step));
-      onError(null);
-    } catch (error) {
-      onError(`Can't undo: ${(error as CallFailure).message}`);
-    }
-    await refreshTrash();
+    await mirror.undo(step);
   }
 
   /** Keeps one version of a unit in Conflict, then opens the unit. */
   async function resolve(ref: UnitRef, kept: UnitValue) {
     flushPendingEdits();
-    try {
-      await window.project.resolveConflict(ref, kept);
-      onError(null);
-    } catch (error) {
-      onError(`Can't resolve the Conflict: ${(error as CallFailure).message}`);
-      return;
-    }
-    await refreshTrash();
+    if (!(await mirror.resolveConflict(ref, kept))) return;
     const selection = selectionOf(ref, manuscript);
     setTab(selection.kind === 'entry' ? 'bible' : 'manuscript');
     select(selection);
   }
 
   async function emptyTrash() {
-    if (await window.project.emptyTrash()) {
+    if (await mirror.emptyTrash()) {
       // Nothing before it can be undone.
       changeLatest(undefined);
-      await refreshTrash();
     }
   }
 
@@ -1272,9 +1168,7 @@ function ProjectView({
           manuscript={manuscript}
           tips={tips}
           dropped={dropped}
-          onDismissDropped={(notice) =>
-            setDropped(dropped.filter((d) => d !== notice))
-          }
+          onDismissDropped={(notice) => mirror.dismissDropped(notice)}
           onContinue={continueAt}
           onDismissTip={(tip) => {
             window.shell.dismissTip(tip);
