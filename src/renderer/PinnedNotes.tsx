@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { PinnedNote } from '../shared/api';
 import { entryTitle } from '../shared/entry';
 import type { EntrySummary, EntryValue } from '../shared/project-types';
-import { useEntryImage } from './EntryImage';
+import { useUnitImage } from './UnitImage';
 import { ViewableImage } from './ImageView';
 import { PeekCard } from './PeekCard';
 import { onEntryWritten } from './entry-written';
@@ -82,7 +82,7 @@ function Note({
   onOpen(entryId: string): void;
 }) {
   const entry = useEntry(summary);
-  const image = useEntryImage(summary);
+  const image = useUnitImage({ kind: 'entry', id: summary.id }, summary.image);
   const title = entryTitle(summary);
   const element = useRef<HTMLElement>(null);
   const [size, setSize] = useState({ width: NOTE_WIDTH, height: 0 });

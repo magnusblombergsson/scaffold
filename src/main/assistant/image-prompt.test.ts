@@ -172,10 +172,13 @@ describe('an Image prompt', () => {
       ...value,
       description: 'A brass compass.',
     }));
-    await store.setEntryImage(id, {
-      data: Buffer.from(SENTINEL),
-      extension: 'png',
-    });
+    await store.setImage(
+      { kind: 'entry', id },
+      {
+        data: Buffer.from(SENTINEL),
+        extension: 'png',
+      },
+    );
 
     await prompts.write(id);
 

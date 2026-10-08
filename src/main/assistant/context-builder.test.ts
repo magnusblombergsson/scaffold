@@ -962,10 +962,13 @@ describe('Entry images', () => {
     const project = await fixture();
     const { store, view, entries } = project;
     for (const id of Object.values(entries)) {
-      await store.setEntryImage(id, {
-        data: new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
-        extension: 'png',
-      });
+      await store.setImage(
+        { kind: 'entry', id },
+        {
+          data: new Uint8Array([0x89, 0x50, 0x4e, 0x47]),
+          extension: 'png',
+        },
+      );
     }
 
     expect(view.listEntries().some((e) => 'image' in e)).toBe(false);

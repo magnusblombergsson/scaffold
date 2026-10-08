@@ -10,9 +10,11 @@ import {
   unitKey,
   VISIBILITIES,
   type ChapterNode,
+  type DetailRef,
   type EntryImage,
   type EntryRef,
   type ImageExtension,
+  type ImageRef,
   type EntrySummary,
   type EntryType,
   type EntryValue,
@@ -92,7 +94,6 @@ import {
   tagVocabulary,
   type TagUse,
 } from '../../shared/tags';
-import { isWordTarget } from '../../shared/word-target';
 import type {
   Compaction,
   Conversation,
@@ -139,6 +140,18 @@ import {
   mergeDetails,
   type Version,
 } from './unit-details';
+import {
+  carriedOnSplit,
+  DETAILS,
+  filesMovingWithTrash,
+  forAssistant,
+  IMAGE_FILE,
+  imageFile,
+  parseDetails,
+  validateDetail,
+  type DetailKey,
+  type HeldDetails,
+} from './unit-details-catalogue';
 import { TODOS, Todos } from './todos';
 import { formatUnitFile, parseUnitFile, type UnitFile } from './unit-file';
 
@@ -540,7 +553,6 @@ const ID = new RegExp(`^${UUID}$`);
 const VERSION_FILE = new RegExp(`^(${UUID})\\.version\\.md$`);
 const CHAPTER_FILE = new RegExp(`^(${UUID})\\.json$`);
 const ENTRY_TRASH_FILE = new RegExp(`^(${UUID})\\.entry\\.md$`);
-const IMAGE_FILE = new RegExp(`^(${UUID})\\.(jpg|png)$`);
 
 const UNPLACED_TITLE = 'Untitled Scene';
 
@@ -850,7 +862,7 @@ type EntryDetails = { image?: string; tags?: string[] };
 
 /**
  * An Entry's `value` with the unit details of `held`, as the store has
- * them: only setEntryImage, removeEntryImage and setTags change those.
+ * them: only setImage, removeImage and setTags change those.
  */
 function withEntryDetails<T extends EntryDetails>(
   value: T,
@@ -867,6 +879,18 @@ function withoutEntryDetails<T extends EntryDetails>(value: T): T {
 function withoutImage<T extends { image?: string }>(value: T): T {
   const { image: _, ...rest } = value;
   return rest as T;
+}
+
+/** `manuscript` as the Assistant sees it: no unit of it has a detail that is hidden. */
+function manuscriptForAssistant(manuscript: Manuscript): Manuscript {
+  return {
+    ...forAssistant(manuscript),
+    chapters: manuscript.chapters.map((chapter) => ({
+      ...forAssistant(chapter),
+      scenes: chapter.scenes.map(forAssistant),
+    })),
+    unplaced: manuscript.unplaced.map(forAssistant),
+  };
 }
 
 function trashedEntry(value: EntryValue, info: TrashedEntryInfo): TrashedEntry {
@@ -1840,24 +1864,19 @@ export class ProjectStore {
    */
   setStatus(unitId: string, statusId: string | null): Promise<void> {
     return this.enqueueWrite(async () => {
-      if (unitId === PROJECT_OUTLINE) {
-        throw new Error('Only a Scene or Chapter has a Status');
-      }
-      const ref = outlineRef(unitId);
-      this.refuseUnavailable(ref);
-      const statuses = this.statuses();
-      if (statusId !== null && !statuses.some((s) => s.id === statusId)) {
-        throw new Error(`No Status ${statusId}`);
-      }
-      // Already so: nothing to save, nor to sync.
-      if (this.unitDetails.get(unitId)?.status === (statusId ?? undefined)) {
-        return;
-      }
-      if (readStatusList(this.manifest.statuses) === undefined) {
-        await this.writeManifest({ ...this.manifest, statuses });
-      }
-      await this.saveDetail(ref, STATUS, statusId ?? undefined);
-      this.emit({ type: 'unitDetailsChanged', manuscript: this.manuscript() });
+      await this.setDetail(
+        this.detailRef(unitId),
+        'status',
+        statusId,
+        async () => {
+          if (readStatusList(this.manifest.statuses) === undefined) {
+            await this.writeManifest({
+              ...this.manifest,
+              statuses: this.statuses(),
+            });
+          }
+        },
+      );
     });
   }
 
@@ -1868,18 +1887,75 @@ export class ProjectStore {
    */
   setWordTarget(unitId: string, words: number | null): Promise<void> {
     return this.enqueueWrite(async () => {
-      if (words !== null && !isWordTarget(words)) {
-        throw new Error(`A Word target is a whole number of words: ${words}`);
-      }
-      const ref = outlineRef(unitId);
-      this.refuseUnavailable(ref);
-      // Already so: nothing to save, nor to sync.
-      if (this.unitDetails.get(unitId)?.wordTarget === (words ?? undefined)) {
-        return;
-      }
-      await this.saveDetail(ref, WORD_TARGET, words ?? undefined);
-      this.emit({ type: 'unitDetailsChanged', manuscript: this.manuscript() });
+      await this.setDetail(this.detailRef(unitId), 'wordTarget', words);
     });
+  }
+
+  /**
+   * The detail ref of a unit by its id: the Manuscript for `PROJECT_OUTLINE`,
+   * an Entry, a Chapter, or else a Scene.
+   */
+  private detailRef(unitId: string): DetailRef {
+    if (unitId === PROJECT_OUTLINE) return { kind: 'manuscript' };
+    if (this.isEntry(unitId)) return { kind: 'entry', id: unitId };
+    return this.sceneOrChapterRef(unitId);
+  }
+
+  /** The Scene or Chapter of `unitId`, as the tree places it. */
+  private sceneOrChapterRef(unitId: string): ImageRef {
+    const chapter = this.manifest.tree.chapters.some((c) => c.id === unitId);
+    return { kind: chapter ? 'chapter' : 'scene', id: unitId };
+  }
+
+  /** The unit whose file holds the details of `ref`: its Outline, or the Entry. */
+  private detailUnit(ref: DetailRef): OutlineRef | EntryRef {
+    if (ref.kind === 'manuscript') return outlineRef(PROJECT_OUTLINE);
+    return ref.kind === 'entry' ? entryRef(ref.id) : outlineRef(ref.id);
+  }
+
+  /** The details of `ref` as the store holds them. */
+  private heldDetails(ref: DetailRef): HeldDetails | undefined {
+    if (ref.kind === 'entry') return this.entries.get(ref.id);
+    return this.unitDetails.get(
+      ref.kind === 'manuscript' ? PROJECT_OUTLINE : ref.id,
+    );
+  }
+
+  /**
+   * Sets one detail of a unit, or takes it away with undefined (null for
+   * a Status or Word target): refused as the catalogue says, and saved as
+   * that one key only. Resolves with whether it changed anything; `beforeSave`
+   * runs just before it is saved, if it will be.
+   */
+  private async setDetail(
+    ref: DetailRef,
+    key: DetailKey,
+    value: unknown,
+    beforeSave?: () => Promise<void>,
+  ): Promise<boolean> {
+    const id = ref.kind === 'manuscript' ? PROJECT_OUTLINE : ref.id;
+    const stored = validateDetail(
+      ref.kind,
+      id,
+      key,
+      value,
+      this.vocabulary(id),
+    );
+    const unit = this.detailUnit(ref);
+    this.refuseUnavailable(unit);
+    // An Entry's are read as now on disk, so what another computer gave it is seen.
+    const held =
+      ref.kind === 'entry'
+        ? (await this.read(entryRef(ref.id)))[key as 'tags' | 'image']
+        : this.heldDetails(ref)?.[key];
+    // Already so: nothing to save, nor to sync.
+    if (isDeepStrictEqual(held, stored)) return false;
+    await beforeSave?.();
+    await this.saveDetail(unit, key, stored);
+    if (unit.kind === 'outline') {
+      this.emit({ type: 'unitDetailsChanged', manuscript: this.manuscript() });
+    }
+    return true;
   }
 
   /**
@@ -1932,28 +2008,7 @@ export class ProjectStore {
    */
   setTags(unitId: string, tags: readonly string[]): Promise<void> {
     return this.enqueueWrite(async () => {
-      if (unitId === PROJECT_OUTLINE) {
-        throw new Error('Only a Scene, Chapter or Entry has Tags');
-      }
-      if (this.isEntry(unitId)) {
-        await this.setEntryTags(unitId, tags);
-        return;
-      }
-      const ref = outlineRef(unitId);
-      this.refuseUnavailable(ref);
-      const spelled = spelledTags(tags, tagVocabulary(this.tagLists(unitId)));
-      // Already so: nothing to save, nor to sync.
-      if (
-        isDeepStrictEqual(spelled, this.unitDetails.get(unitId)?.tags ?? [])
-      ) {
-        return;
-      }
-      await this.saveDetail(
-        ref,
-        TAGS,
-        spelled.length > 0 ? spelled : undefined,
-      );
-      this.emit({ type: 'unitDetailsChanged', manuscript: this.manuscript() });
+      await this.setDetail(this.detailRef(unitId), 'tags', tags);
     });
   }
 
@@ -2070,19 +2125,6 @@ export class ProjectStore {
   }
 
   /**
-   * `setTags` of an Entry, whose list shows them as it changes; refused for
-   * one in Trash, as for a Scene.
-   */
-  private async setEntryTags(
-    entryId: string,
-    tags: readonly string[],
-  ): Promise<void> {
-    this.refuseUnavailable(entryRef(entryId));
-    const spelled = spelledTags(tags, tagVocabulary(this.tagLists(entryId)));
-    await this.retagEntry(entryId, () => spelled);
-  }
-
-  /**
    * Changes an Entry's Tags as `change` does, from those it has as now
    * read, so what another computer gave it is kept.
    */
@@ -2094,12 +2136,11 @@ export class ProjectStore {
     const tags = change(before);
     // Already so: nothing to save, nor to sync.
     if (isDeepStrictEqual(tags, before)) return;
-    // A write takes the Entry's Tags from here.
-    this.setEntries(() => {
-      const entry = this.entries.get(entryId);
-      if (entry) this.entries.set(entryId, withTags(entry, tags));
-    });
-    await this.changeEntry(entryId, (value) => withTags(value, tags));
+    await this.saveDetail(
+      entryRef(entryId),
+      'tags',
+      tags.length > 0 ? tags : undefined,
+    );
   }
 
   /** Adds `status` to the end of the Status list. */
@@ -2183,7 +2224,7 @@ export class ProjectStore {
       let changed = await this.readUnitDetails();
       try {
         for (const id of this.unitsWithStatus(statusId)) {
-          await this.saveDetail(outlineRef(id), STATUS, moveTo ?? undefined);
+          await this.saveDetail(outlineRef(id), 'status', moveTo ?? undefined);
           changed = true;
         }
         await this.writeManifest({
@@ -2204,13 +2245,13 @@ export class ProjectStore {
   }
 
   /**
-   * Saves one detail, such as a Status id, in an Outline's file, or takes it
-   * away with undefined, as changed now; the rest of the file stays as on
-   * disk. The unit's writes wait meanwhile.
+   * Saves one detail, such as a Status id, in an Outline's or Entry's file,
+   * or takes it away with undefined, as changed now; the rest of the file
+   * stays as on disk. The unit's writes wait meanwhile.
    */
   private async saveDetail(
-    ref: OutlineRef,
-    key: typeof STATUS | typeof TAGS | typeof IMAGE | typeof WORD_TARGET,
+    ref: OutlineRef | EntryRef,
+    key: DetailKey,
     value: unknown,
   ): Promise<void> {
     const held = unitKey(ref);
@@ -2241,8 +2282,15 @@ export class ProjectStore {
       ) {
         loaded.fingerprint = saved;
         loaded.hash = hashOf(written);
+        if (ref.kind === 'entry') {
+          loaded.value = withEntryDetails(
+            loaded.value as EntryValue,
+            parseDetails('entry', ref.id, after),
+          );
+        }
       }
-      this.noteDetails(ref.id, saved, after);
+      if (ref.kind === 'outline') this.noteDetails(ref.id, saved, after);
+      else this.noteEntryDetails(ref.id, after);
     })();
     await this.holdingWrites(held, saving);
   }
@@ -2284,8 +2332,8 @@ export class ProjectStore {
   }
 
   /**
-   * Notes a unit's Status, Tags, image and Word target as the header of its
-   * Outline file holds them; true if any changed.
+   * Notes a unit's details as the header of its Outline file holds them;
+   * true if any changed.
    */
   private noteDetails(
     id: string,
@@ -2295,19 +2343,19 @@ export class ProjectStore {
     if (fingerprint) this.outlineFingerprints.set(id, fingerprint);
     else this.outlineFingerprints.delete(id);
     const before = this.unitDetails.get(id) ?? {};
-    const status = header[STATUS];
-    const tags = readTags(header[TAGS]);
-    const image = imageFile(id, header[IMAGE]);
-    const wordTarget = header[WORD_TARGET];
-    const details: HeldDetails = {
-      ...(typeof status === 'string' && { status }),
-      ...(tags.length > 0 && { tags }),
-      ...(image && { image }),
-      ...(isWordTarget(wordTarget) && { wordTarget }),
-    };
+    const details = parseDetails('outline', id, header);
     if (Object.keys(details).length > 0) this.unitDetails.set(id, details);
     else this.unitDetails.delete(id);
     return !isDeepStrictEqual(details, before);
+  }
+
+  /** Notes an Entry's Tags and image as the header of its file holds them. */
+  private noteEntryDetails(id: string, header: UnknownKeys): void {
+    const { tags, image } = parseDetails('entry', id, header);
+    this.setEntries(() => {
+      const entry = this.entries.get(id);
+      if (entry) this.entries.set(id, withTags(withImage(entry, image), tags));
+    });
   }
 
   /** The Todos: those not done, then the done, each in list order. */
@@ -2592,10 +2640,10 @@ export class ProjectStore {
       this.setEntries(() => this.entries.delete(entryId));
       await this.deps.fs.unlink(unitPath(this.path, ref));
       // Last: a crash before leaves it in images/, where restoring finds it.
-      if (latest.image) {
+      for (const name of filesMovingWithTrash(latest)) {
         await this.moveFile(
-          imagePath(this.path, latest.image),
-          path.join(trashDir(this.path), latest.image),
+          imagePath(this.path, name),
+          path.join(trashDir(this.path), name),
         );
       }
     } finally {
@@ -2618,11 +2666,12 @@ export class ProjectStore {
     const { trashedEntry: _, ...own } = frontmatter;
     const file = { frontmatter: own, body };
     // First: a crash after leaves it in images/, where restoring finds it.
-    const image = imageFile(item.id, own.image);
-    if (image) {
+    for (const name of filesMovingWithTrash(
+      parseDetails('entry', item.id, own),
+    )) {
       await this.moveFile(
-        path.join(trashDir(this.path), image),
-        imagePath(this.path, image),
+        path.join(trashDir(this.path), name),
+        imagePath(this.path, name),
       );
     }
     await this.deps.fs.mkdir(path.join(this.path, UNIT_DIRS.entry));
@@ -2649,13 +2698,17 @@ export class ProjectStore {
   }
 
   /**
-   * Sets an Entry's image, stored as `images/<id>.<extension>`, in place of
-   * any it had. It isn't a step: undo has no copy of the image it replaced.
+   * Sets the image of a Scene, Chapter or Entry, stored as
+   * `images/<id>.<extension>` and named in its header, a unit detail (ADR
+   * 0008), in place of any it had. It isn't a step: undo has no copy of the
+   * image it replaced.
    */
-  setEntryImage(entryId: string, image: EntryImage): Promise<void> {
+  setImage(ref: ImageRef, image: EntryImage): Promise<void> {
     return this.enqueueWrite(async () => {
-      this.refuseUnavailable(entryRef(entryId));
-      const name = `${entryId}.${image.extension}`;
+      const name = `${ref.id}.${image.extension}`;
+      // Refused before any file is written.
+      validateDetail(ref.kind, ref.id, 'image', name, this.vocabulary(ref.id));
+      this.refuseUnavailable(this.detailUnit(ref));
       await this.deps.fs.mkdir(path.join(this.path, IMAGES));
       await safeWrite(
         this.deps.fs,
@@ -2663,29 +2716,35 @@ export class ProjectStore {
         imagePath(this.path, name),
         image.data,
       );
-      await this.changeImage(entryId, name);
+      await this.changeImage(ref, name);
     });
   }
 
-  /** Removes an Entry's image, deleting its file. Not a step either. */
-  removeEntryImage(entryId: string): Promise<void> {
+  /** Removes the image of a Scene, Chapter or Entry, deleting its file. Not a step either. */
+  removeImage(ref: ImageRef): Promise<void> {
     return this.enqueueWrite(async () => {
-      this.refuseUnavailable(entryRef(entryId));
-      await this.changeImage(entryId, undefined);
+      validateDetail(
+        ref.kind,
+        ref.id,
+        'image',
+        undefined,
+        this.vocabulary(ref.id),
+      );
+      await this.changeImage(ref, undefined);
     });
   }
 
   /**
-   * The image an Entry's frontmatter names; null without one, or while its
-   * file isn't here, as before it syncs. Other files in `images/`, such as
-   * a sync client's conflict copies, are never read.
+   * The image a unit's header names; null without one, or while its file
+   * isn't here, as before it syncs. Other files in `images/`, such as a sync
+   * client's conflict copies, are never read.
    */
-  readEntryImage(entryId: string): Promise<EntryImage | null> {
-    return this.readImage(this.entries.get(entryId)?.image);
+  readImage(ref: ImageRef): Promise<EntryImage | null> {
+    return this.readImageFile(this.heldDetails(ref)?.image);
   }
 
   /** The image file `name` in `images/`; null without one, or while it isn't here. */
-  private async readImage(name?: string): Promise<EntryImage | null> {
+  private async readImageFile(name?: string): Promise<EntryImage | null> {
     if (!name) return null;
     const file = imagePath(this.path, name);
     if (!(await this.deps.fs.exists(file))) return null;
@@ -2695,94 +2754,40 @@ export class ProjectStore {
     };
   }
 
-  /** Names `image` in the Entry's frontmatter, then deletes the file it named before. */
-  private async changeImage(entryId: string, image?: string): Promise<void> {
-    const before = this.entries.get(entryId)?.image;
-    // A write takes the Entry's image from here.
-    this.setEntries(() => {
-      const entry = this.entries.get(entryId);
-      if (entry) this.entries.set(entryId, withImage(entry, image));
-    });
-    await this.changeEntry(entryId, (value) => withImage(value, image));
-    if (before && before !== image) {
-      const file = imagePath(this.path, before);
-      if (await this.deps.fs.exists(file)) await this.deps.fs.unlink(file);
-    }
-    this.emit({ type: 'entryImageChanged', id: entryId });
+  /** What the catalogue's validators read: the Statuses, and the Tags in use but for `except`'s. */
+  private vocabulary(except: string) {
+    return {
+      statuses: this.statuses(),
+      tags: () => tagVocabulary(this.tagLists(except)),
+    };
   }
 
-  /**
-   * Sets a Scene's or Chapter's image, stored as `images/<id>.<extension>`
-   * and named in its Outline file's header, a unit detail (ADR 0008), in
-   * place of any it had. There is no undo, as for an Entry's.
-   */
-  setUnitImage(unitId: string, image: EntryImage): Promise<void> {
-    return this.enqueueWrite(async () => {
-      const ref = this.unitImageRef(unitId);
-      const name = `${unitId}.${image.extension}`;
-      await this.deps.fs.mkdir(path.join(this.path, IMAGES));
-      await safeWrite(
-        this.deps.fs,
-        this.deps.clock,
-        imagePath(this.path, name),
-        image.data,
-      );
-      await this.changeUnitImage(ref, name);
-    });
-  }
-
-  /** Removes a Scene's or Chapter's image, deleting its file. No undo either. */
-  removeUnitImage(unitId: string): Promise<void> {
-    return this.enqueueWrite(async () => {
-      await this.changeUnitImage(this.unitImageRef(unitId), undefined);
-    });
-  }
-
-  /**
-   * The image a Scene's or Chapter's Outline header names; null without one,
-   * or while its file isn't here, as before it syncs.
-   */
-  readUnitImage(unitId: string): Promise<EntryImage | null> {
-    return this.readImage(this.unitDetails.get(unitId)?.image);
-  }
-
-  /** The Outline of a Scene or Chapter whose image may change now. */
-  private unitImageRef(unitId: string): OutlineRef {
-    if (unitId === PROJECT_OUTLINE) {
-      throw new Error('Only a Scene, Chapter or Entry has an image');
-    }
-    const ref = outlineRef(unitId);
-    this.refuseUnavailable(ref);
-    return ref;
-  }
-
-  /** Names `image` in the Outline's header, then deletes the file it named before. */
-  private async changeUnitImage(
-    ref: OutlineRef,
+  /** Names `image` in the unit's header, then deletes the file it named before. */
+  private async changeImage(
+    ref: ImageRef,
     image: string | undefined,
   ): Promise<void> {
-    const before = this.unitDetails.get(ref.id)?.image;
-    await this.saveDetail(ref, IMAGE, image);
+    const before = this.heldDetails(ref)?.image;
+    await this.setDetail(ref, 'image', image);
     if (before && before !== image) {
       const file = imagePath(this.path, before);
       if (await this.deps.fs.exists(file)) await this.deps.fs.unlink(file);
     }
-    this.emit({ type: 'unitImageChanged', id: ref.id });
-    this.emit({ type: 'unitDetailsChanged', manuscript: this.manuscript() });
+    this.emit({ type: 'imageChanged', ref });
   }
 
-  /** Moves the images the Chapters and Scenes of `ids` have, to Trash or back. */
+  /** Moves the files the Chapters and Scenes of `ids` have in Trash's keeping, to Trash or back. */
   private async moveUnitImages(
     ids: readonly string[],
     to: 'trash' | 'images',
   ): Promise<void> {
     for (const id of ids) {
-      const name = this.unitDetails.get(id)?.image;
-      if (!name) continue;
-      const inTrash = path.join(trashDir(this.path), name);
-      const inImages = imagePath(this.path, name);
-      if (to === 'trash') await this.moveFile(inImages, inTrash);
-      else await this.moveFile(inTrash, inImages);
+      for (const name of filesMovingWithTrash(this.unitDetails.get(id))) {
+        const inTrash = path.join(trashDir(this.path), name);
+        const inImages = imagePath(this.path, name);
+        if (to === 'trash') await this.moveFile(inImages, inTrash);
+        else await this.moveFile(inTrash, inImages);
+      }
     }
   }
 
@@ -2893,9 +2898,10 @@ export class ProjectStore {
         sceneFile({ id, markdown: cut.after }),
       );
       this.files.add(id);
-      const { status, tags } = this.unitDetails.get(sceneId) ?? {};
-      if (status) await this.saveDetail(outlineRef(id), STATUS, status);
-      if (tags) await this.saveDetail(outlineRef(id), TAGS, tags);
+      const carried = carriedOnSplit(this.unitDetails.get(sceneId) ?? {});
+      for (const [key, value] of Object.entries(carried)) {
+        await this.saveDetail(outlineRef(id), key as DetailKey, value);
+      }
       // A crash from here on leaves the text after the cut twice, never lost.
       await this.writeManifest({ ...this.manifest, tree });
       await this.write(ref, { id: sceneId, markdown: cut.before });
@@ -3306,16 +3312,19 @@ export class ProjectStore {
         // restored it, goes back to images/; so does a Scene's or Chapter's
         // back in the Manuscript.
         const owner = IMAGE_FILE.exec(name)?.[1];
-        if (owner && this.entries.get(owner)?.image === name) {
-          await this.moveFile(file, imagePath(this.path, name));
-          this.emit({ type: 'entryImageChanged', id: owner });
-        } else if (
+        if (
           owner &&
-          this.isLive(owner) &&
-          this.unitDetails.get(owner)?.image === name
+          (filesMovingWithTrash(this.entries.get(owner)).includes(name) ||
+            (this.isLive(owner) &&
+              filesMovingWithTrash(this.unitDetails.get(owner)).includes(name)))
         ) {
           await this.moveFile(file, imagePath(this.path, name));
-          this.emit({ type: 'unitImageChanged', id: owner });
+          this.emit({
+            type: 'imageChanged',
+            ref: this.entries.has(owner)
+              ? { kind: 'entry', id: owner }
+              : this.sceneOrChapterRef(owner),
+          });
         } else {
           await this.deps.fs.unlink(file);
         }
@@ -3733,20 +3742,21 @@ export class ProjectStore {
   /** A narrower handle for building the Assistant's context; it has no private notes. */
   assistantView(): AssistantView {
     return {
-      // Nor a Scene's or Chapter's image.
-      manuscript: () => withoutUnitImages(this.manuscript()),
+      // Only the details the catalogue lets it see.
+      manuscript: () => manuscriptForAssistant(this.manuscript()),
       statuses: () => this.statuses(),
-      // Nor an Entry's image.
-      listEntries: () => this.listEntries().map(withoutImage),
+      listEntries: () => this.listEntries().map(forAssistant),
       read: async (ref) => {
         // Refused at run time too, whatever a caller's types say.
         if ((ref as UnitRef).kind === 'private') {
           throw new Error("The Assistant never reads an Entry's private notes");
         }
         const value = await this.read(ref);
-        return ref.kind === 'entry'
-          ? (withoutImage(value as EntryValue) as typeof value)
-          : value;
+        if (ref.kind === 'entry') return forAssistant(value) as typeof value;
+        // The rest of an Outline's header is details, and a newer app's keys.
+        return (
+          ref.kind === 'outline' ? { ...value, meta: {} } : value
+        ) as typeof value;
       },
     };
   }
@@ -3796,8 +3806,7 @@ export class ProjectStore {
     this.refuseUnavailable(ref);
     const key = unitKey(ref);
     if (ref.kind === 'entry') {
-      // Only setEntryImage, removeEntryImage and setTags change its image
-      // and Tags.
+      // Only setImage, removeImage and setTags change its image and Tags.
       value = withEntryDetails(
         value as EntryValue,
         this.entries.get(ref.id),
@@ -4891,24 +4900,6 @@ function imagePath(projectPath: string, name: string): string {
   return path.join(projectPath, IMAGES, name);
 }
 
-/** `image` when it names the unit's own image file, `<id>.jpg` or `<id>.png`. */
-function imageFile(unitId: string, image: unknown): string | undefined {
-  return typeof image === 'string' && IMAGE_FILE.exec(image)?.[1] === unitId
-    ? image
-    : undefined;
-}
-
-/** `manuscript` without the image of any Chapter or Scene. */
-function withoutUnitImages(manuscript: Manuscript): Manuscript {
-  return {
-    chapters: manuscript.chapters.map((chapter) => ({
-      ...withoutImage(chapter),
-      scenes: chapter.scenes.map(withoutImage),
-    })),
-    unplaced: manuscript.unplaced.map(withoutImage),
-  };
-}
-
 const CONVERSATIONS = 'conversations';
 const CONVERSATION_FILE = new RegExp(`^(${UUID})\\.jsonl$`);
 
@@ -5018,41 +5009,8 @@ function checkedStatus({ id, name, colour }: Status): Status {
   return { id, name: name.trim(), colour };
 }
 
-/**
- * The header key of a Chapter's or Scene's Status id, in its Outline file.
- * Only `setStatus` changes it: it isn't in the Outline's metadata, and a
- * write keeps it as on disk, as it does any detail it didn't change.
- */
-const STATUS = 'status';
-
-/**
- * The header key of a Chapter's or Scene's Tags, by spelling, in its
- * Outline file. Only `setTags` changes it, as `setStatus` does the Status.
- */
+/** The header key of an Entry's Tags, by spelling, in its Entry file; see the details catalogue. */
 const TAGS = 'tags';
-
-/**
- * The header key naming a Chapter's or Scene's image file in `images/`, in
- * its Outline file. Only `setUnitImage` and `removeUnitImage` change it.
- */
-const IMAGE = 'image';
-
-/**
- * The header key of a Chapter's, Scene's or, in the Project Outline's file,
- * the Manuscript's Word target, in words. Only `setWordTarget` changes it.
- */
-const WORD_TARGET = 'wordTarget';
-
-/**
- * A Chapter's or Scene's details, or the Manuscript's, as its Outline file
- * holds them.
- */
-type HeldDetails = {
-  status?: string;
-  tags?: string[];
-  image?: string;
-  wordTarget?: number;
-};
 
 /**
  * An Outline's metadata is the rest of its frontmatter, so it already holds
@@ -5134,12 +5092,12 @@ function unitValue(ref: UnitRef, file: UnitFile): UnitValue {
     id: _id,
     format: _format,
     [KEYS_SAVED_AT]: _savedAt,
-    [STATUS]: _status,
-    [TAGS]: _tags,
-    [IMAGE]: _image,
-    [WORD_TARGET]: _wordTarget,
-    ...meta
+    ...rest
   } = frontmatter;
+  // A detail isn't in the Outline's metadata: a write keeps it as on disk.
+  const meta = Object.fromEntries(
+    Object.entries(rest).filter(([key]) => !DETAILS.some((d) => d.key === key)),
+  );
   return { id: ref.id, body, meta };
 }
 

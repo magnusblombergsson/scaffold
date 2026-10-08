@@ -663,7 +663,10 @@ describe('Entry images', () => {
     const events: ProjectEvent[] = [];
     store.subscribe((e) => events.push(e));
 
-    await store.setEntryImage(id, { data: JPEG, extension: 'jpg' });
+    await store.setImage(
+      { kind: 'entry', id },
+      { data: JPEG, extension: 'jpg' },
+    );
 
     const images = path.join(projectPath, 'images');
     expect(await readdir(images)).toEqual([`${id}.jpg`]);
@@ -672,25 +675,31 @@ describe('Entry images', () => {
     ).toEqual(JPEG);
     expect(await frontmatterImage(projectPath, id)).toBe(`${id}.jpg`);
     expect(store.listEntries()[0].image).toBe(`${id}.jpg`);
-    expect(await store.readEntryImage(id)).toEqual({
+    expect(await store.readImage({ kind: 'entry', id })).toEqual({
       data: JPEG,
       extension: 'jpg',
     });
-    expect(events).toContainEqual({ type: 'entryImageChanged', id });
+    expect(events).toContainEqual({
+      type: 'imageChanged',
+      ref: { kind: 'entry', id },
+    });
 
-    await store.setEntryImage(id, { data: PNG, extension: 'png' });
+    await store.setImage(
+      { kind: 'entry', id },
+      { data: PNG, extension: 'png' },
+    );
     expect(await readdir(images)).toEqual([`${id}.png`]);
     expect(await frontmatterImage(projectPath, id)).toBe(`${id}.png`);
-    expect(await store.readEntryImage(id)).toEqual({
+    expect(await store.readImage({ kind: 'entry', id })).toEqual({
       data: PNG,
       extension: 'png',
     });
 
-    await store.removeEntryImage(id);
+    await store.removeImage({ kind: 'entry', id });
     expect(await readdir(images)).toEqual([]);
     expect(await frontmatterImage(projectPath, id)).toBeUndefined();
     expect(store.listEntries()[0].image).toBeUndefined();
-    expect(await store.readEntryImage(id)).toBeNull();
+    expect(await store.readImage({ kind: 'entry', id })).toBeNull();
     await store.close();
   });
 
@@ -710,11 +719,14 @@ describe('Entry images', () => {
       await creating.close();
       const file = path.join(projectPath, 'bible', `${id}.md`);
       const setting = await openProject(projectPath, at(1000));
-      await setting.setEntryImage(id, { data: JPEG, extension: 'jpg' });
+      await setting.setImage(
+        { kind: 'entry', id },
+        { data: JPEG, extension: 'jpg' },
+      );
       await setting.close();
       const older = await readFile(file, 'utf8');
       const removing = await openProject(projectPath, at(2000));
-      await removing.removeEntryImage(id);
+      await removing.removeImage({ kind: 'entry', id });
       await removing.close();
       const removed = await readFile(file, 'utf8');
 
@@ -727,7 +739,7 @@ describe('Entry images', () => {
 
       expect(reopened.listConflicts()).toEqual([]);
       expect(reopened.listEntries()[0].image).toBeUndefined();
-      expect(await reopened.readEntryImage(id)).toBeNull();
+      expect(await reopened.readImage({ kind: 'entry', id })).toBeNull();
       await reopened.close();
       const { frontmatter } = parseUnitFile(await readFile(file, 'utf8'));
       expect(frontmatter).not.toHaveProperty('image');
@@ -740,7 +752,10 @@ describe('Entry images', () => {
     const { id } = await store.createEntry('character', 'Anna');
     const before = await store.read(entry(id));
 
-    await store.setEntryImage(id, { data: JPEG, extension: 'jpg' });
+    await store.setImage(
+      { kind: 'entry', id },
+      { data: JPEG, extension: 'jpg' },
+    );
     await store.write(entry(id), { ...before, description: 'A pilot.' });
     await store.close();
 
@@ -754,7 +769,10 @@ describe('Entry images', () => {
   it('moves the image to trash/ with its Entry, brings it back on restore, and deletes it when Trash is emptied', async () => {
     const { projectPath, store } = await newProject();
     const { id } = await store.createEntry('character', 'Anna');
-    await store.setEntryImage(id, { data: JPEG, extension: 'jpg' });
+    await store.setImage(
+      { kind: 'entry', id },
+      { data: JPEG, extension: 'jpg' },
+    );
     const images = path.join(projectPath, 'images');
     const trash = path.join(projectPath, 'trash');
 
@@ -768,7 +786,7 @@ describe('Entry images', () => {
     await store.restore(id);
     expect(await readdir(images)).toEqual([`${id}.jpg`]);
     expect(await readdir(trash)).toEqual([]);
-    expect(await store.readEntryImage(id)).toEqual({
+    expect(await store.readImage({ kind: 'entry', id })).toEqual({
       data: JPEG,
       extension: 'jpg',
     });
@@ -783,7 +801,10 @@ describe('Entry images', () => {
   it('shows the file frontmatter names, ignoring conflict copies beside it', async () => {
     const { projectPath, store } = await newProject();
     const { id } = await store.createEntry('character', 'Anna');
-    await store.setEntryImage(id, { data: JPEG, extension: 'jpg' });
+    await store.setImage(
+      { kind: 'entry', id },
+      { data: JPEG, extension: 'jpg' },
+    );
     await store.close();
     const images = path.join(projectPath, 'images');
     await writeFile(
@@ -794,7 +815,7 @@ describe('Entry images', () => {
 
     const reopened = await openProject(projectPath, deps());
     expect(reopened.listEntries()[0].image).toBe(`${id}.jpg`);
-    expect(await reopened.readEntryImage(id)).toEqual({
+    expect(await reopened.readImage({ kind: 'entry', id })).toEqual({
       data: JPEG,
       extension: 'jpg',
     });
@@ -815,7 +836,7 @@ describe('Entry images', () => {
 
     const reopened = await openProject(projectPath, deps());
     expect(reopened.listEntries()[0].image).toBeUndefined();
-    expect(await reopened.readEntryImage(id)).toBeNull();
+    expect(await reopened.readImage({ kind: 'entry', id })).toBeNull();
     await reopened.close();
   });
 
@@ -823,7 +844,10 @@ describe('Entry images', () => {
     const { projectPath, store } = await newProject();
     const { id: anna } = await store.createEntry('character', 'Anna');
     const { id: bo } = await store.createEntry('character', 'Bo');
-    await store.setEntryImage(anna, { data: JPEG, extension: 'jpg' });
+    await store.setImage(
+      { kind: 'entry', id: anna },
+      { data: JPEG, extension: 'jpg' },
+    );
     await store.close();
     const file = path.join(projectPath, 'bible', `${bo}.md`);
     const text = await readFile(file, 'utf8');
@@ -838,7 +862,7 @@ describe('Entry images', () => {
     ).toBeUndefined();
     await reopened.trashEntry(bo);
     await reopened.emptyTrash();
-    expect(await reopened.readEntryImage(anna)).toEqual({
+    expect(await reopened.readImage({ kind: 'entry', id: anna })).toEqual({
       data: JPEG,
       extension: 'jpg',
     });
@@ -848,7 +872,10 @@ describe('Entry images', () => {
   it('puts back, not deletes, the image in Trash of an Entry restored elsewhere, as by an MVP app', async () => {
     const { projectPath, store } = await newProject();
     const { id } = await store.createEntry('character', 'Anna');
-    await store.setEntryImage(id, { data: JPEG, extension: 'jpg' });
+    await store.setImage(
+      { kind: 'entry', id },
+      { data: JPEG, extension: 'jpg' },
+    );
     const other = (await store.createEntry('item', 'Key')).id;
     await store.trashEntry(id);
     await store.trashEntry(other);
@@ -865,10 +892,10 @@ describe('Entry images', () => {
     await rm(trashed);
 
     const reopened = await openProject(projectPath, deps());
-    expect(await reopened.readEntryImage(id)).toBeNull();
+    expect(await reopened.readImage({ kind: 'entry', id })).toBeNull();
     await reopened.emptyTrash();
     expect(await readdir(path.join(projectPath, 'trash'))).toEqual([]);
-    expect(await reopened.readEntryImage(id)).toEqual({
+    expect(await reopened.readImage({ kind: 'entry', id })).toEqual({
       data: JPEG,
       extension: 'jpg',
     });
@@ -878,7 +905,10 @@ describe('Entry images', () => {
   it('never shows the image to the Assistant', async () => {
     const { store } = await newProject();
     const { id } = await store.createEntry('character', 'Anna');
-    await store.setEntryImage(id, { data: JPEG, extension: 'jpg' });
+    await store.setImage(
+      { kind: 'entry', id },
+      { data: JPEG, extension: 'jpg' },
+    );
     const view = store.assistantView();
 
     expect(view.listEntries()[0]).not.toHaveProperty('image');

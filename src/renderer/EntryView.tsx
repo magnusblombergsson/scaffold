@@ -28,7 +28,7 @@ import {
   type Visibility,
   type Voice,
 } from '../shared/project-types';
-import { EntryImageSection } from './EntryImage';
+import { EntryImageSection } from './UnitImage';
 import { entryBody, type BodyField } from './entry-layout';
 import { useReveal, type Reveal } from './reveal';
 import {

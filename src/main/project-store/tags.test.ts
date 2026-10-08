@@ -492,10 +492,13 @@ describe('Entry Tags', () => {
     const alphas = await readFile(entryPath(id), 'utf8');
     await writeFile(entryPath(id), base);
     const beta = await open('BETA', 3000);
-    await beta.setEntryImage(id, {
-      data: new Uint8Array([1, 2, 3]),
-      extension: 'png',
-    });
+    await beta.setImage(
+      { kind: 'entry', id },
+      {
+        data: new Uint8Array([1, 2, 3]),
+        extension: 'png',
+      },
+    );
     await beta.close();
     await writeFile(entryPath(id, `${id}-ALPHA.md`), alphas);
 

@@ -117,7 +117,7 @@ function source(
       }
       return entries.find((e) => e.id === ref.id) as ValueOf<R>;
     },
-    readEntryImage: async (id) => images[id] ?? null,
+    readImage: async (ref) => images[ref.id ?? ''] ?? null,
   };
 }
 

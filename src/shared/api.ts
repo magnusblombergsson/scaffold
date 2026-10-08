@@ -1,6 +1,7 @@
 import type {
   EntrySummary,
   EntryType,
+  ImageRef,
   Manuscript,
   ProseLanguage,
   TrashItem,
@@ -149,17 +150,11 @@ export type EntriesChanged = {
 };
 
 /**
- * An Entry's image was set, replaced or removed here. The file can keep its
- * name, so its Entry's summary may not change.
- */
-export type EntryImageChanged = { type: 'entryImageChanged'; id: string };
-
-/**
- * A Scene's or Chapter's image was set, replaced or removed here, or came
- * back from Trash. The file can keep its name, so the Manuscript may not
+ * A Scene's, Chapter's or Entry's image was set, replaced or removed here,
+ * or came back from Trash. The file can keep its name, so the unit may not
  * change.
  */
-export type UnitImageChanged = { type: 'unitImageChanged'; id: string };
+export type ImageChanged = { type: 'imageChanged'; ref: ImageRef };
 
 /**
  * A Scene's or Chapter's unit details, such as its Status, changed, here or
@@ -217,8 +212,7 @@ export type ProjectEvent =
   | TodosChanged
   | ConflictsChanged
   | EntriesChanged
-  | EntryImageChanged
-  | UnitImageChanged
+  | ImageChanged
   | ProposalsChanged
   | ConversationsChanged
   | ReadOnly
@@ -297,24 +291,15 @@ export interface ProjectApi {
    */
   setEntryType(entryId: string, type: EntryType): Promise<Changed>;
   /**
-   * Asks the Author for a JPEG or PNG, then makes it the Entry's image,
-   * scaled down, in place of any it had; false if they cancel or it can't be
-   * read, which main has told them. There is no undo.
+   * Asks the Author for a JPEG or PNG, then makes it the image of a Scene,
+   * Chapter or Entry, scaled down, in place of any it had; false if they
+   * cancel or it can't be read, which main has told them. There is no undo.
    */
-  chooseEntryImage(entryId: string): Promise<boolean>;
-  /** Removes an Entry's image; there is no undo. */
-  removeEntryImage(entryId: string): Promise<void>;
-  /** An Entry's image as a `data:` URL; null without one, or before it syncs. */
-  entryImage(entryId: string): Promise<string | null>;
-  /**
-   * Asks the Author for a JPEG or PNG, then makes it a Scene's or Chapter's
-   * image, as `chooseEntryImage` does an Entry's. There is no undo.
-   */
-  chooseUnitImage(unitId: string): Promise<boolean>;
-  /** Removes a Scene's or Chapter's image; there is no undo. */
-  removeUnitImage(unitId: string): Promise<void>;
-  /** A Scene's or Chapter's image as a `data:` URL; null without one, or before it syncs. */
-  unitImage(unitId: string): Promise<string | null>;
+  chooseImage(ref: ImageRef): Promise<boolean>;
+  /** Removes a Scene's, Chapter's or Entry's image; there is no undo. */
+  removeImage(ref: ImageRef): Promise<void>;
+  /** A Scene's, Chapter's or Entry's image as a `data:` URL; null without one, or before it syncs. */
+  image(ref: ImageRef): Promise<string | null>;
   /** Puts a Trash item back where it was, as near as the Manuscript allows. */
   restore(id: string): Promise<Changed>;
   /** Reverts `step` if it is still the latest structure operation. */
@@ -872,12 +857,9 @@ export const projectMethods = {
   trashEntry: 'invoke',
   setEntryVisibility: 'invoke',
   setEntryType: 'invoke',
-  chooseEntryImage: 'invoke',
-  removeEntryImage: 'invoke',
-  entryImage: 'invoke',
-  chooseUnitImage: 'invoke',
-  removeUnitImage: 'invoke',
-  unitImage: 'invoke',
+  chooseImage: 'invoke',
+  removeImage: 'invoke',
+  image: 'invoke',
   restore: 'invoke',
   undo: 'invoke',
   listTrash: 'invoke',

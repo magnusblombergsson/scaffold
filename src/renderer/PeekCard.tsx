@@ -1,7 +1,7 @@
 import { useRef, useState } from 'react';
 import { entryTitle, roleText } from '../shared/entry';
 import { ENTRY_TYPE_LABELS, type EntryValue } from '../shared/project-types';
-import { useEntryImage } from './EntryImage';
+import { useUnitImage } from './UnitImage';
 import { ViewableImage } from './ImageView';
 import { VISIBILITY_LABELS } from './EntryView';
 import { entryFields, keyFields } from './card-fields';
@@ -30,7 +30,7 @@ export function PeekCard({
 }) {
   const card = useRef<HTMLElement>(null);
   const [expanded, setExpanded] = useState(false);
-  const image = useEntryImage(entry);
+  const image = useUnitImage({ kind: 'entry', id: entry.id }, entry.image);
   const title = entryTitle(entry);
   const role = roleText(entry.fields.role, entry.fields.roleNote);
   const fields = expanded ? entryFields(entry) : keyFields(entry);
