@@ -126,7 +126,9 @@ export class ProjectWindows<
 
   /** The Projects open, one for each window. */
   stores(): S[] {
-    return this.withProject().map((window) => this.find(window)!);
+    return [...this.sessions.values()].flatMap((session) =>
+      session.store ? [session.store] : [],
+    );
   }
 
   /** Which of Writing's side panes the window has docked. */
@@ -204,10 +206,10 @@ export class ProjectWindows<
   }
 
   /**
-   * Closes the Project of every window to quit: all of them once each is
-   * saved, else none. Those it could not save, or could not close after
-   * saving, are `stuck`; `closed` are those closed meanwhile, in the
-   * second case only. Unsaved changes are never discarded.
+   * Closes the Project of every window to quit, once each is saved; while
+   * any isn't, none is closed and those are `stuck`. A Project that then
+   * fails to close is `stuck` too, and the rest are `closed`. Unsaved
+   * changes are never discarded.
    */
   async closeAll(): Promise<{ stuck: W[]; closed: W[] }> {
     const windows = this.withProject();
