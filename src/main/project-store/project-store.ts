@@ -463,7 +463,7 @@ async function newestFormat(
  * client leaves beside it as `<name>.json` files carrying the Project's id.
  * Without asking: the one with the higher `format` is kept, or the original
  * if they are equal, and the other goes to Trash, its Statuses merged into
- * the kept one's list (ADR 0009). Scenes only the other
+ * the kept one's list (ADR 0011). Scenes only the other
  * placed are then Unplaced; what it had that is lost is returned, to tell the
  * Author once. A file with no Project id is logged and left alone. A copy of
  * a format newer than this app reads must be ruled out first, as the gate
