@@ -126,6 +126,12 @@ import { Switches } from './switches';
 import { TODOS, Todos } from './todos';
 import { CUSTOM_FIELDS, CustomFields } from './custom-fields';
 import { labelRefusal, type CustomField } from '../../shared/custom-field';
+import {
+  isChoosable,
+  isKeyField,
+  type KeyFieldChoices,
+  type KeyFieldItem,
+} from '../../shared/key-fields';
 import { tagChanges, type VocabularyChange } from './vocabulary';
 export type { VocabularyChange } from './vocabulary';
 import { parseUnitFile, type UnitFile } from './unit-file';
@@ -407,6 +413,7 @@ export async function openProject(
   await store.readTodos();
   await store.readStars();
   await store.readCustomFields();
+  await store.readKeyFields();
   return store;
 }
 
@@ -603,6 +610,7 @@ async function sweepTempFiles(projectPath: string, fs: FileSystem) {
     TODOS,
     STARS,
     CUSTOM_FIELDS,
+    KEY_FIELDS,
   ].map((d) => path.join(projectPath, d));
   for (const dir of [projectPath, ...dirs]) {
     for (const name of await fs.readdir(dir)) {
@@ -896,6 +904,8 @@ export class ProjectStore {
   private readonly todos: Todos;
   /** The Starred Conversations, in `stars/`, as last read or written. */
   private readonly stars: Switches;
+  /** Each Entry type's Key fields, in `key-fields/`, as last read or written. */
+  private readonly keyFields: Switches;
   /** The Custom fields in `custom-fields/`, as last read or written. */
   private readonly customFields: CustomFields;
   /** What versions of `project.json` that met as the Project opened lost, until told. */
@@ -957,6 +967,7 @@ export class ProjectStore {
     this.entries = units.entries;
     this.todos = todosOf(path, this.deps);
     this.stars = starsOf(path, this.deps);
+    this.keyFields = keyFieldsOf(path, this.deps);
     this.customFields = customFieldsOf(path, this.deps);
     this.host = hostOf(this.deps);
     this.trash = new Trash(
@@ -1124,6 +1135,7 @@ export class ProjectStore {
           this.emit({ type: 'conversationsChanged' });
         }
         if (await this.customFields.read()) this.emitCustomFields();
+        if (await this.keyFields.read()) this.emitKeyFields();
         for (const change of tagChanges(tagsBefore, this.tagsByUnit())) {
           this.emitVocabulary(change);
         }
@@ -2276,6 +2288,49 @@ export class ProjectStore {
       type: 'customFieldsChanged',
       fields: this.customFields.list(),
     });
+  }
+
+  /**
+   * Each Entry type's Key fields as the Author has chosen them, item by
+   * item; an item never chosen is as the type's defaults have it. A choice
+   * for a Custom field in Trash is kept for when it is restored; the window
+   * shows only the Custom fields that are live.
+   */
+  keyFieldChoices(): KeyFieldChoices {
+    return Object.fromEntries(
+      ENTRY_TYPES.flatMap((type) => {
+        const states = this.keyFields.states(type);
+        return Object.keys(states).length > 0 ? [[type, states]] : [];
+      }),
+    );
+  }
+
+  /** Reads the Key fields as the Project opens, merging their copies. */
+  async readKeyFields(): Promise<void> {
+    await this.keyFields.read();
+  }
+
+  /**
+   * Makes `item` a Key field of every Entry of `type`, or not, in a file of
+   * its own per type that merges with its sync copies item by item. Refused
+   * for an item the type has no part for.
+   */
+  setKeyField(type: EntryType, item: KeyFieldItem, on: boolean): Promise<void> {
+    return this.enqueueStructure(async () => {
+      if (
+        !ENTRY_TYPES.includes(type) ||
+        !isChoosable(type, item, this.customFields.list())
+      ) {
+        throw new Error(`A ${type} has no ${item} to show in a Peek`);
+      }
+      await this.passFormatGate();
+      await this.keyFields.set(type, item, on, isKeyField(type, item, {}));
+      this.emitKeyFields();
+    });
+  }
+
+  private emitKeyFields(): void {
+    this.emit({ type: 'keyFieldsChanged', choices: this.keyFieldChoices() });
   }
 
   tree(): ProjectTree {
@@ -3596,6 +3651,13 @@ function starsOf(projectPath: string, deps: StoreDeps): Switches {
 
 function todosOf(projectPath: string, deps: StoreDeps): Todos {
   return new Todos(path.join(projectPath, TODOS), deps.fs, deps.clock);
+}
+
+/** The folder of each Entry type's Key fields, which older apps never look in (ADR 0006). */
+const KEY_FIELDS = 'key-fields';
+
+function keyFieldsOf(projectPath: string, deps: StoreDeps): Switches {
+  return new Switches(path.join(projectPath, KEY_FIELDS), deps.fs, deps.clock);
 }
 
 function customFieldsOf(projectPath: string, deps: StoreDeps): CustomFields {

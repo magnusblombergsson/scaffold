@@ -13,6 +13,7 @@ import type {
   TrashItem,
 } from '../shared/project-types';
 import type { CustomField } from '../shared/custom-field';
+import type { KeyFieldChoices } from '../shared/key-fields';
 import type { Todo } from '../shared/todo';
 import { ProjectMirror, type MirrorEvent } from './project-mirror';
 
@@ -65,6 +66,7 @@ type Held = {
   trash: TrashItem[];
   todos: Todo[];
   customFields: CustomField[];
+  keyFields: KeyFieldChoices;
   conflicts: Conflict[];
   calls: string[];
   failWith?: string;
@@ -78,6 +80,7 @@ function setUp(held: Partial<Held> = {}) {
     trash: [],
     todos: [],
     customFields: [],
+    keyFields: {},
     conflicts: [],
     calls: [],
     undone: emptyManuscript,
@@ -96,6 +99,7 @@ function setUp(held: Partial<Held> = {}) {
       listTrash: async () => main.trash,
       listTodos: async () => main.todos,
       listCustomFields: async () => main.customFields,
+      listKeyFields: async () => main.keyFields,
       listConflicts: async () => main.conflicts,
       setStatus: async (_ctx: unknown, unitId: string) => {
         main.calls.push(`setStatus ${unitId}`);
@@ -136,6 +140,7 @@ describe('ProjectMirror', () => {
       trash: [trashed('t')],
       todos: [todo('x')],
       customFields: [field('f')],
+      keyFields: { item: { description: false } },
       conflicts: [conflict('s')],
     });
     expect(main).toBeDefined();
@@ -154,6 +159,7 @@ describe('ProjectMirror', () => {
       trash: [trashed('t')],
       todos: [todo('x')],
       customFields: [field('f')],
+      keyFields: { item: { description: false } },
       conflicts: [conflict('s')],
       statuses: opened.statuses,
       language: 'en-US',
@@ -175,6 +181,19 @@ describe('ProjectMirror', () => {
     expect(mirror.getSnapshot()).toMatchObject({
       customFields: [field('g')],
       trash: [trashed('f')],
+    });
+  });
+
+  it('takes the Key fields main tells of, over those it was loading', async () => {
+    const { mirror, tell, settle } = setUp({
+      keyFields: { item: { description: false } },
+    });
+    mirror.start();
+    tell({ type: 'keyFieldsChanged', choices: { theme: { aliases: false } } });
+    await settle();
+
+    expect(mirror.getSnapshot().keyFields).toEqual({
+      theme: { aliases: false },
     });
   });
 

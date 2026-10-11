@@ -37,6 +37,7 @@ import {
 } from '../shared/project-types';
 import { AddCustomField, CustomFieldHeading } from './CustomFields';
 import { useCustomFields } from './StatusAndTags';
+import { ShowInPeek } from './ShowInPeek';
 import { EntryImageSection } from './UnitImage';
 import { entryBody, type BodyField } from './entry-layout';
 import { useReveal, type Reveal } from './reveal';
@@ -324,8 +325,17 @@ export function EntryView({
   function bodyField(field: BodyField, inGroup: boolean) {
     if (field === 'role')
       return (
-        <fieldset className="entry-choice" data-field="role" key={field}>
-          <legend>Role</legend>
+        <fieldset
+          className="entry-choice"
+          data-field="role"
+          key={field}
+          // Named by its label alone, not by the switch beside it.
+          aria-labelledby={`role-label-${entryId}`}
+        >
+          <legend>
+            <span id={`role-label-${entryId}`}>Role</span>
+            <ShowInPeek type={entry.type} item="role" label="Role" />
+          </legend>
           {ROLES.map((role) => (
             <label key={role}>
               <input
@@ -342,8 +352,17 @@ export function EntryView({
       );
     if (field === 'status')
       return (
-        <fieldset className="entry-choice" data-field="status" key={field}>
-          <legend>Status</legend>
+        <fieldset
+          className="entry-choice"
+          data-field="status"
+          key={field}
+          // Named by its label alone, not by the switch beside it.
+          aria-labelledby={`status-label-${entryId}`}
+        >
+          <legend>
+            <span id={`status-label-${entryId}`}>Status</span>
+            <ShowInPeek type={entry.type} item="status" label="Status" />
+          </legend>
           {THREAD_STATUSES.map((status) => (
             <label key={status}>
               <input
@@ -362,7 +381,15 @@ export function EntryView({
     const Heading = inGroup ? 'h4' : 'h3';
     return (
       <section className="plain-text-field" key={field} data-field={field}>
-        <Heading>{label}</Heading>
+        {field === 'roleNote' ? (
+          // The Role's switch is the Role note's too.
+          <Heading>{label}</Heading>
+        ) : (
+          <div className="field-heading">
+            <Heading>{label}</Heading>
+            <ShowInPeek type={entry.type} item={field} label={label} />
+          </div>
+        )}
         <UnitEditor
           // The Description's undo history is the Entry's own.
           unitKey={field === 'description' ? entryKey : `${entryKey}:${field}`}
@@ -446,6 +473,8 @@ export function EntryView({
                 attributes={attributes('Aliases')}
               />
               <p className="field-hint">One per line</p>
+              {/* Under the box: the label is inline beside it. */}
+              <ShowInPeek type={summary.type} item="aliases" label="Aliases" />
               {ghosts('aliases')}
             </section>
             {/* The header's bottom line, level with the image's foot. */}

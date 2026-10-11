@@ -7,15 +7,21 @@ import {
 } from '../shared/project-types';
 import { useUnitImage } from './UnitImage';
 import { ViewableImage } from './ImageView';
+import { isKeyField, type KeyFieldItem } from '../shared/key-fields';
 import { entryFields, keyFields } from './card-fields';
-import { useCustomFields } from './StatusAndTags';
+import { useCustomFields, useKeyFields } from './StatusAndTags';
 
 /**
- * An Entry in the Peek, shortened: its image small, type, name, Role and Role
- * note, aliases, the description cut to three lines and the type's key
- * fields cut to two. Read more unfolds it in place: the whole description,
- * every field with a value, who the Assistant sees it for and the image at
- * full size. Either image opens the large view.
+ * An Entry in the Peek, shortened: its image small, type and name, then
+ * those of its Role and Role note, aliases and description that are among
+ * its type's Key fields, and its other Key fields, the description cut to
+ * three lines and the others to two. Read more unfolds it in place: its
+ * Role, aliases and the whole description, every field with a value, who
+ * the Assistant sees it for and the image at full size. Either image opens
+ * the large view. Its parts keep their places whatever is chosen, so that a
+ * type's defaults show as the Peek always did: the Role under the name, then
+ * the aliases and description, then the other Key fields in the order the
+ * Entry view shows them.
  *
  * In a Peek, its header has ↗ and, in Writing, 📌; in a Pinned note, whose
  * header has the name and those, it has neither.
@@ -36,9 +42,16 @@ export function PeekCard({
   const [expanded, setExpanded] = useState(false);
   const image = useUnitImage({ kind: 'entry', id: entry.id }, entry.image);
   const title = entryTitle(entry);
-  const role = roleText(entry.fields.role, entry.fields.roleNote);
   const customFields = useCustomFields();
-  const fields = expanded ? entryFields(entry, customFields) : keyFields(entry);
+  const choices = useKeyFields();
+  const shows = (item: KeyFieldItem) =>
+    expanded || isKeyField(entry.type, item, choices);
+  const role = shows('role')
+    ? roleText(entry.fields.role, entry.fields.roleNote)
+    : null;
+  const fields = expanded
+    ? entryFields(entry, customFields)
+    : keyFields(entry, customFields, choices);
   return (
     <article
       ref={card}
@@ -99,10 +112,10 @@ export function PeekCard({
           </div>
         )}
       </header>
-      {entry.aliases.length > 0 && (
+      {shows('aliases') && entry.aliases.length > 0 && (
         <p className="peek-card-aliases">Also: {entry.aliases.join(', ')}</p>
       )}
-      {entry.description.trim() && (
+      {shows('description') && entry.description.trim() && (
         <p className="peek-card-description">{entry.description}</p>
       )}
       <dl>

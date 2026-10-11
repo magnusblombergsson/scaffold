@@ -138,6 +138,9 @@ const projectHandlers: Handlers<
   moveCustomField: ({ store }, id, index) => store.moveCustomField(id, index),
   trashCustomField: ({ store, sender }, id) =>
     trashCustomField(sender, store, id),
+  listKeyFields: async ({ store }) => store.keyFieldChoices(),
+  setKeyField: ({ store }, type, item, on) =>
+    store.setKeyField(type, item, on === true),
   setFoldedNoteImage: ({ store, sender }, on) =>
     saveProjectSetting(
       sender,

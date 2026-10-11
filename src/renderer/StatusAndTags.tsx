@@ -5,6 +5,7 @@ import type {
   ManuscriptScene,
 } from '../shared/project-types';
 import type { CustomField } from '../shared/custom-field';
+import type { KeyFieldChoices } from '../shared/key-fields';
 import { statusOf, type Status } from '../shared/status';
 import { Menu, statusChoices, StatusDot } from './Binder';
 import { ReadOnlyContext } from './read-only';
@@ -29,26 +30,36 @@ const NO_CUSTOM_FIELDS: CustomField[] = [];
 
 const CustomFieldsContext = createContext<CustomField[]>(NO_CUSTOM_FIELDS);
 
+/** No Key field chosen, the same each time. */
+const NO_KEY_FIELDS: KeyFieldChoices = {};
+
+const KeyFieldsContext = createContext<KeyFieldChoices>(NO_KEY_FIELDS);
+
 /**
  * What every view of an open Project reads: whether it is read-only, its
- * Status list with how to set Status and Tags, and its Custom fields.
+ * Status list with how to set Status and Tags, its Custom fields, and the
+ * Key fields chosen for each Entry type.
  */
 export function ProjectContexts({
   readOnly,
   statusAndTags,
   customFields,
+  keyFields,
   children,
 }: {
   readOnly: boolean;
   statusAndTags: StatusAndTags;
   customFields: CustomField[];
+  keyFields: KeyFieldChoices;
   children: ReactNode;
 }) {
   return (
     <ReadOnlyContext.Provider value={readOnly}>
       <StatusAndTagsContext.Provider value={statusAndTags}>
         <CustomFieldsContext.Provider value={customFields}>
-          {children}
+          <KeyFieldsContext.Provider value={keyFields}>
+            {children}
+          </KeyFieldsContext.Provider>
         </CustomFieldsContext.Provider>
       </StatusAndTagsContext.Provider>
     </ReadOnlyContext.Provider>
@@ -58,6 +69,11 @@ export function ProjectContexts({
 /** The Project's Custom fields, by Entry type, each type's in their order. */
 export function useCustomFields(): CustomField[] {
   return useContext(CustomFieldsContext);
+}
+
+/** The Key fields the Author has chosen for each Entry type; an item not chosen is as its type's defaults have it. */
+export function useKeyFields(): KeyFieldChoices {
+  return useContext(KeyFieldsContext);
 }
 
 function useStatusAndTags(): StatusAndTags {
