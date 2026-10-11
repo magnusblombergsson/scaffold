@@ -21,26 +21,38 @@ One story (a novel or short story) with its own Manuscript and Story Bible.
 _Avoid_: Book, workspace, document
 
 **Manuscript**:
-A Project's Prose, organised as Chapters containing Scenes.
+A Project's Prose, organised as Chapters containing Scenes, with Chapters optionally grouped into Parts.
 _Avoid_: Draft, document
 
+**Part**:
+An optional, ordered group of Chapters within the Manuscript, for an Act in a novel or an Episode in an episodic story. The Project chooses whether Parts are shown as "Part", "Act" or "Episode"; that is only a label, and changing it changes nothing else. A Part has the same details as a Chapter: Status, Tags, its own Word target, image, Outline and Notes. A Project needs no Parts, and a Part is never required to hold a Chapter.
+_Avoid_: Section, book, season, arc
+
 **Chapter**:
-An ordered group of Scenes within the Manuscript. It may have one image, reference for the Author only: never in the Prose, never exported, never sent to the Assistant.
+An ordered group of Scenes within the Manuscript, inside a Part or loose. It may have one image, reference for the Author only: never in the Prose, never exported, never sent to the Assistant.
+
+**Loose Chapter**:
+A Chapter that belongs to no Part, such as a prologue, an epilogue or an interlude. Loose Chapters and Parts share one order at the top of the Manuscript, so a Loose Chapter can sit before, between or after Parts.
+_Avoid_: Standalone, orphan Chapter
+
+**Unplaced Chapter**:
+A Chapter that exists in the Project but has no place in the Manuscript's order and isn't in Trash, such as one made on another computer. It stays after the Parts and Chapters until the Author places it. A Loose Chapter is placed; an Unplaced Chapter is not.
+_Avoid_: Orphan, stray, lost Chapter
 
 **Scene**:
 The smallest movable unit of the Manuscript; the level at which the Assistant compares Prose against its Outline. It may have one image, like a Chapter's.
 _Avoid_: Section, passage
 
 **Binder**:
-The view of the Manuscript's Chapters and Scenes in order, where the Author opens, arranges and titles them.
+The view of the Manuscript's Parts, Chapters and Scenes in order, where the Author opens, arranges and titles them.
 _Avoid_: Outline (that is the structural description), tree, navigator, sidebar
 
 **Corkboard**:
-The view in Writing mode of the Project Outline or a Chapter as index cards, each with its Outline and Notes editable in place; a Scene's or Chapter's card sets its Status, Tags and image too, and shows the image beside its title. A Chapter's Corkboard shows its Scenes as cards; the Project's shows each Chapter as a lane that opens to its Scenes.
+The view in Writing mode of the Project Outline, a Part or a Chapter as index cards, each with its Outline and Notes editable in place; a Scene's, Chapter's or Part's card sets its Status, Tags and image too, and shows the image beside its title. A Chapter's Corkboard shows its Scenes as cards and a Part's shows its Chapters; the Project's shows each Part and each Loose Chapter as a lane, a Part's lane opening to its Chapters and a Chapter's to its Scenes.
 _Avoid_: Board, grid, overview (that is the pane)
 
 **Overview pane**:
-A pane beside the Prose in Writing mode that lists the Chapter or the whole Project one row per unit, so the Author keeps the whole story in view while writing a Scene. A Scene's or Chapter's row shows its Status dot and image, and opens to edit its Status, Tags, image, Outline and Notes.
+A pane beside the Prose in Writing mode that lists the Chapter or the whole Project one row per unit, so the Author keeps the whole story in view while writing a Scene. A Part's row holds its Chapters' rows. A Scene's, Chapter's or Part's row shows its Status dot and image, and opens to edit its Status, Tags, image, Outline and Notes.
 _Avoid_: Outline skeleton (that is Brainstorm's read-only view), navigator, sidebar
 
 **Unplaced Scene**:
@@ -96,23 +108,23 @@ A change to the Story Bible or an Outline suggested by the Assistant during a Co
 _Avoid_: Suggestion (when meaning a Story Bible change), auto-save
 
 **Outline**:
-Structural description of chapters and scenes in bullet form (what happens, who, why). Not Prose; the Assistant may propose it.
+Structural description of parts, chapters and scenes in bullet form (what happens, who, why). Not Prose; the Assistant may propose it.
 _Avoid_: Beat sheet, synopsis, summary
 
 **Notes**:
-The Author's working notes on a Chapter or Scene. Visible to the Assistant, unlike an Entry's private notes.
+The Author's working notes on a Part, Chapter or Scene. Visible to the Assistant, unlike an Entry's private notes.
 _Avoid_: Comments (when meaning the Author's own), annotations
 
 **Status**:
-How far along a Scene or Chapter is, chosen by the Author from the Project's ordered list of Statuses (such as Idea, Outlined, Drafted, Revised, Done); a unit has one Status or none. A Chapter's Status is its own, not derived from its Scenes.
+How far along a Scene, Chapter or Part is, chosen by the Author from the Project's ordered list of Statuses (such as Idea, Outlined, Drafted, Revised, Done); a unit has one Status or none. A Chapter's or Part's Status is its own, not derived from what it holds.
 _Avoid_: Label, stage, state
 
 **Tag**:
-A free word or phrase the Author attaches to Scenes, Chapters and Entries to say what they concern, such as "Mara" or "flashback"; a unit may have any number, and the Project's Tags are simply those in use.
+A free word or phrase the Author attaches to Scenes, Chapters, Parts and Entries to say what they concern, such as "Mara" or "flashback"; a unit may have any number, and the Project's Tags are simply those in use.
 _Avoid_: Keyword, label, category
 
 **Word target**:
-The number of words the Author aims for in a Scene, a Chapter or the Manuscript, shown beside its count; each unit has one or none. A Chapter's or the Manuscript's Word target is its own, not the sum of its parts. Never sent to the Assistant.
+The number of words the Author aims for in a Scene, a Chapter, a Part or the Manuscript, shown beside its count; each unit has one or none. A Chapter's, Part's or the Manuscript's Word target is its own, not the sum of what it holds. Never sent to the Assistant.
 _Avoid_: Goal, quota, target (that is what a Proposal changes)
 
 **Filter**:
@@ -120,23 +132,23 @@ A narrowing of one list or view to the units matching chosen Statuses, Tags or E
 _Avoid_: Search
 
 **Unit details**:
-What the Author sets on a Scene, Chapter, Entry or the Manuscript with a click rather than by writing: its Status, Tags, Word target and image. When computers disagree on them, they merge one by one on their own, the later change of each winning; they never make a Conflict.
+What the Author sets on a Scene, Chapter, Part, Entry or the Manuscript with a click rather than by writing: its Status, Tags, Word target and image. When computers disagree on them, they merge one by one on their own, the later change of each winning; they never make a Conflict.
 _Avoid_: Metadata, properties, attributes, header keys
 
 **Todo**:
-One line on the Project's list of things the Author still means to do, ticked off when done, optionally linked to one Scene, Chapter or Entry. The Author's own bookkeeping: the Assistant never sees or proposes Todos, though the Author may turn a Finding into one. Never exported.
+One line on the Project's list of things the Author still means to do, ticked off when done, optionally linked to one Scene, Chapter, Part or Entry. The Author's own bookkeeping: the Assistant never sees or proposes Todos, though the Author may turn a Finding into one. Never exported.
 _Avoid_: Task, checklist item, reminder
 
 **Trash**:
-Where deleted Scenes, Chapters, Entries and Conversations go within a Project; they stay recoverable until the Author empties it. A Chapter goes with its Scenes and comes back with them; an Entry, Scene or Chapter with its image; a Conversation goes with its pending Proposals.
+Where deleted Scenes, Chapters, Parts, Entries and Conversations go within a Project; they stay recoverable until the Author empties it. A Part goes with its Chapters and their Scenes, and a Chapter with its Scenes, and they come back together; an Entry, Scene, Chapter or Part with its image; a Conversation goes with its pending Proposals.
 _Avoid_: Bin, archive
 
 **Export**:
-A copy written outside the Project for others to read, of either the Manuscript's Prose or the Story Bible. A Manuscript Export holds the Prose of the Scenes the Author ticks, with Chapter titles as headings and Scenes separated by a break, and nothing else from the Project. A Story Bible Export holds the chosen Entries grouped by type, with their images, and their private notes only if the Author asks. Neither includes Outlines, Notes or Conversations.
+A copy written outside the Project for others to read, of either the Manuscript's Prose or the Story Bible. A Manuscript Export holds the Prose of the Scenes the Author ticks, with Chapter titles as headings, a Part's title as a heading one level above them, and Scenes separated by a break, and nothing else from the Project. A Part with none of its Scenes ticked leaves no heading. A Story Bible Export holds the chosen Entries grouped by type, with their images, and their private notes only if the Author asks. Neither includes Outlines, Notes or Conversations.
 _Avoid_: Compile, publish, backup
 
 **Import**:
-Making a new Project from a Word or Markdown manuscript, the mirror of an Export: a Heading 1 starts a Chapter and a break such as `***` starts a Scene, unless the Author chooses another split after seeing it. An Import never adds to an existing Project.
+Making a new Project from a Word or Markdown manuscript, the mirror of an Export: a Heading 1 starts a Chapter and a break such as `***` starts a Scene, unless the Author chooses another split after seeing it. When the file also has Heading 2s, the Author may choose that a Heading 1 starts a Part and a Heading 2 a Chapter; it is never chosen for them. An Import never adds to an existing Project.
 _Avoid_: Open (when meaning a manuscript file), convert
 
 **Conflict**:
@@ -144,7 +156,7 @@ Two or more versions of one Scene, Outline, Notes or Entry, saved on different c
 _Avoid_: Conflicted copy, sync error, merge conflict
 
 **Project setting**:
-A choice the Author makes for one Project, such as its Prose language, saved with the Project so it is the same on every computer. Where a window or pane sat on this computer is remembered, not a Project setting.
+A choice the Author makes for one Project, such as its Prose language or whether its Parts are called Parts, Acts or Episodes, saved with the Project so it is the same on every computer. Where a window or pane sat on this computer is remembered, not a Project setting.
 _Avoid_: Preference, option
 
 **Setting**:
@@ -183,7 +195,7 @@ _Avoid_: Chat, session, history
 Mode for free idea generation with the Assistant.
 
 **Interview**:
-Mode where the Assistant asks the Author questions to capture facts about the story's world, characters, and plot into the Story Bible and Outlines. The Author chooses a focus (one Entry, one Entry type, a Tag, a Chapter or Scene, or open) and may change it at any time; within it the Assistant asks about what is missing, one question at a time, and turns each answer into Proposals.
+Mode where the Assistant asks the Author questions to capture facts about the story's world, characters, and plot into the Story Bible and Outlines. The Author chooses a focus (one Entry, one Entry type, a Tag, a Part, Chapter or Scene, or open) and may change it at any time; within it the Assistant asks about what is missing, one question at a time, and turns each answer into Proposals.
 _Avoid_: Q&A, questionnaire
 
 **Writing**:
