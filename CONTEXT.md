@@ -88,8 +88,12 @@ A description of an Entry, written by the Assistant on request from what the Ent
 _Avoid_: Image description, caption
 
 **Peek**:
-A short, read-only look at the Entries a highlighted name refers to, opened by clicking the name; or at a Proposal's target, an Entry or an Outline, opened by clicking its title in Brainstorm and Interview. Long text is cut off until the Author asks to read more.
+A short, read-only look at the Entries a highlighted name refers to, opened by clicking the name; or at a Proposal's target, an Entry or an Outline, opened by clicking its title in Brainstorm and Interview. An Entry shows only its type's Key fields, long text cut off, until the Author asks to read more.
 _Avoid_: Popup, tooltip, preview
+
+**Key fields**:
+The parts of an Entry a Peek shows before the Author asks to read more, chosen by the Author for each Entry type in a Project from its description, aliases, Role, type-specific fields and Custom fields. They change only what the Author sees, never what the Assistant sees.
+_Avoid_: Summary fields, pinned fields
 
 **Pinned note**:
 A Peek the Author has pinned in Writing so it stays while they write: it floats over the page, can be dragged aside, folded to its title, switched to show the Entry's image instead of its text, and unpinned, and stays where it was left for the Project until unpinned.
