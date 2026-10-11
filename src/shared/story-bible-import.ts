@@ -3,7 +3,7 @@ import {
   type CustomField,
   type CustomValues,
 } from './custom-field';
-import { emptyFields, entryCollisions } from './entry';
+import { emptyFields, entryCollisions, entryTitle } from './entry';
 import {
   ENTRY_GROUP_TITLES,
   ENTRY_TYPE_LABELS,
@@ -100,7 +100,8 @@ function knownLabels(customFields: readonly CustomField[]): Set<string> {
 
 /**
  * A paragraph's label and the text after it: its label in bold, or in
- * plain text one that `known` holds, as a hand-written file may have;
+ * plain text one that `known` holds, as a hand-written file without bold
+ * labels may have;
  * null when it has none, so belongs to the description.
  */
 function labelOf(
@@ -148,7 +149,11 @@ export function mapEntry(
   customFields: readonly CustomField[],
   type?: EntryType,
 ): MappedEntry {
-  const known = knownLabels(customFields);
+  // With a label in bold, as an Export writes them all, text that only
+  // looks like one is the description's.
+  const known = entry.paragraphs.some((p) => p.label !== undefined)
+    ? new Set<string>()
+    : knownLabels(customFields);
   const labelled = entry.paragraphs.map((p) => labelOf(p, known));
   const read = readType(labelled, entry.group);
   const chosen = type ?? read.type;
@@ -267,7 +272,7 @@ export function importClashes(
   return others.map((entry) =>
     entryCollisions(entry, candidates).map(
       ({ name, entry: other }) =>
-        `“${name}” is also ${other.name.trim() || 'Untitled'}, ${other.imported ? 'also imported' : 'in the Story Bible'}`,
+        `“${name}” is also ${entryTitle(other)}, ${other.imported ? 'also imported' : 'in the Story Bible'}`,
     ),
   );
 }

@@ -2453,31 +2453,48 @@ export class ProjectStore {
   ): Promise<Changed & { ids: string[] }> {
     const ids = entries.map(() => randomUUID());
     const changed = await this.step(async () => {
-      for (const [i, entry] of entries.entries()) {
-        const id = ids[i];
-        await this.addEntry({
-          ...newEntryValue(id, entry.type, entry.name, entry.description),
-          aliases: [...entry.aliases],
-          fields: structuredClone(entry.fields),
-          ...(entry.custom && { custom: { ...entry.custom } }),
-        });
-        if (entry.tags.length > 0) {
-          await this.setDetail({ kind: 'entry', id }, 'tags', entry.tags);
+      const trashAdded = async () => {
+        for (const id of ids) {
+          if (this.entries.has(id)) await this.trash.move('entry', id);
         }
-        if (entry.image) {
-          await this.writeImage({ kind: 'entry', id }, entry.image);
-        }
-        if (entry.privateNotes) {
-          const ref: PrivateRef = { kind: 'private', id };
-          await this.write(ref, { id, body: entry.privateNotes });
-          await this.unitWriter.settled(unitKey(ref));
-        }
-      }
-      return async () => {
-        for (const id of ids) await this.trash.move('entry', id);
       };
+      try {
+        await this.addEntries(ids, entries);
+      } catch (error) {
+        // All or none: what it added before failing goes to Trash.
+        await trashAdded();
+        throw error;
+      }
+      return trashAdded;
     });
     return { ...changed, ids };
+  }
+
+  /** Adds each of `entries` as `importEntries` does, by `ids`. */
+  private async addEntries(
+    ids: readonly string[],
+    entries: readonly NewEntry[],
+  ): Promise<void> {
+    for (const [i, entry] of entries.entries()) {
+      const id = ids[i];
+      await this.addEntry({
+        ...newEntryValue(id, entry.type, entry.name, entry.description),
+        aliases: [...entry.aliases],
+        fields: structuredClone(entry.fields),
+        ...(entry.custom && { custom: { ...entry.custom } }),
+      });
+      if (entry.tags.length > 0) {
+        await this.setDetail({ kind: 'entry', id }, 'tags', entry.tags);
+      }
+      if (entry.image) {
+        await this.writeImage({ kind: 'entry', id }, entry.image);
+      }
+      if (entry.privateNotes) {
+        const ref: PrivateRef = { kind: 'private', id };
+        await this.write(ref, { id, body: entry.privateNotes });
+        await this.unitWriter.settled(unitKey(ref));
+      }
+    }
   }
 
   /** Writes a new Entry's file, then lists it in the Story Bible. */

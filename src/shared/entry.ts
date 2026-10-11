@@ -15,6 +15,11 @@ export function entryTitle(entry: { name: string }): string {
   return entry.name.trim() || 'Untitled';
 }
 
+/** Such as "1 Entry" or "12 Entries". */
+export function entryCount(count: number): string {
+  return count === 1 ? '1 Entry' : `${count.toLocaleString('en-US')} Entries`;
+}
+
 /** The fields an Entry of `type` starts with: empty, and a Plot Thread open. */
 export function emptyFields(type: EntryType): EntryFields {
   switch (type) {

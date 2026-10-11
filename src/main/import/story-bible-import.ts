@@ -139,6 +139,13 @@ class EntryReader {
     entry.image = image;
   }
 
+  /** Footnotes, endnotes or comments in Word, which are never imported. */
+  notesLeftOut(): void {
+    const warning = 'Its footnotes and comments were left out';
+    if (this.entry) warnEntry(this.entry, warning);
+    else this.warnOnce('Footnotes and comments were left out');
+  }
+
   /** An image in Markdown, which is never imported. */
   markdownImage(): void {
     if (this.entry) warnEntry(this.entry, 'Images in Markdown aren’t imported');
@@ -288,6 +295,13 @@ async function readDocx(
   readHtml(html, reader, images);
 }
 
+/** The Entries of HTML as mammoth writes it, without images. */
+export function readStoryBibleHtml(html: string): Omit<StoryBibleFile, 'name'> {
+  const reader = new EntryReader();
+  readHtml(html, reader, []);
+  return reader.done();
+}
+
 /**
  * The blocks of the HTML that mammoth writes: headings, paragraphs and list
  * items, with their bold runs, and images.
@@ -355,6 +369,8 @@ function readHtml(
       /\bid="(footnote|endnote|comment)-/.test(attributes)
     ) {
       skipping = 1;
+      // A note's own text comes after every Entry: its reference says whose.
+      if (name === 'sup') reader.notesLeftOut();
       continue;
     }
     if (name === 'strong' || name === 'b') bold++;

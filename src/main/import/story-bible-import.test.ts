@@ -158,6 +158,22 @@ describe('reading a Story Bible in Word', () => {
   });
 });
 
+describe('reading notes in a Story Bible in Word', () => {
+  it('leaves out footnotes and comments, with a warning', async () => {
+    const { readStoryBibleHtml } = await import('./story-bible-import');
+    const read = readStoryBibleHtml(
+      '<h2>Mara</h2><p>She runs the ferry.<sup><a href="#footnote-1" id="footnote-ref-1">[1]</a></sup></p>' +
+        '<ol><li id="footnote-1"><p>Mostly.</p></li></ol>',
+    );
+    expect(read.entries[0].paragraphs).toEqual([
+      { text: 'She runs the ferry.' },
+    ]);
+    expect(read.entries[0].warnings).toEqual([
+      'Its footnotes and comments were left out',
+    ]);
+  });
+});
+
 describe('reading a Story Bible file', () => {
   let dir: string;
   beforeEach(async () => {

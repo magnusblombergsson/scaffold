@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { CustomField } from '../shared/custom-field';
-import { entryTitle } from '../shared/entry';
+import { entryCount, entryTitle } from '../shared/entry';
 import {
   ENTRY_GROUP_TITLES,
   ENTRY_TYPE_LABELS,
@@ -14,11 +14,6 @@ import {
   type NewEntry,
   type StoryBibleFile,
 } from '../shared/story-bible-import';
-
-/** Such as "1 Entry" or "12 Entries". */
-export function entryCount(count: number): string {
-  return count === 1 ? '1 Entry' : `${count.toLocaleString('en-US')} Entries`;
-}
 
 /**
  * The preview of a Story Bible Import: the Entries the file holds, grouped

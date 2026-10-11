@@ -228,6 +228,23 @@ describe('the labels of an imported Entry', () => {
     expect(mapped.warnings).toEqual([]);
   });
 
+  it('reads no plain paragraph as labelled in an Entry with a bold label, as an Export writes it', () => {
+    const mapped = mapEntry(
+      read('Mara', [
+        { label: 'Type', text: 'Character' },
+        { text: 'Role: she has none.' },
+        { text: 'Tags: none either.' },
+      ]),
+      [],
+    );
+    expect(mapped.fields.roleNote).toBe('');
+    expect(mapped.tags).toEqual([]);
+    expect(mapped.description).toBe(
+      'Role: she has none.\n\nTags: none either.',
+    );
+    expect(mapped.warnings).toEqual([]);
+  });
+
   it('keeps what reading the Entry warned of', () => {
     expect(
       mapEntry(

@@ -987,6 +987,23 @@ describe('Importing Entries', () => {
     await store.close();
   });
 
+  it('adds none when one can’t be added, those added before it going to Trash', async () => {
+    const { store } = await newProject();
+    const { id: there } = await store.createEntry('item', 'The Key');
+
+    await expect(
+      store.importEntries([
+        imported('character', 'Mara'),
+        imported('place', 'Harbour', {
+          image: { data: JPEG, extension: 'gif' as 'jpg' },
+        }),
+      ]),
+    ).rejects.toThrow();
+
+    expect(store.listEntries().map((e) => e.id)).toEqual([there]);
+    await store.close();
+  });
+
   it('is undone in one step, moving every Entry it added to Trash, from where each can be restored', async () => {
     const { store } = await newProject();
     const { id: there } = await store.createEntry('item', 'The Key');
