@@ -48,7 +48,7 @@ The view of the Manuscript's Parts, Chapters and Scenes in order, where the Auth
 _Avoid_: Outline (that is the structural description), tree, navigator, sidebar
 
 **Corkboard**:
-The view in Writing mode of the Project Outline, a Part or a Chapter as index cards, each with its Outline and Notes editable in place; a Scene's, Chapter's or Part's card sets its Status, Tags and image too, and shows the image beside its title. A Chapter's Corkboard shows its Scenes as cards and a Part's shows its Chapters; the Project's shows each Part and each Loose Chapter as a lane, a Part's lane opening to its Chapters and a Chapter's to its Scenes.
+The view in Writing mode of the Project Outline, a Part or a Chapter as index cards, each with its Outline and Notes editable in place; a Scene's, Chapter's or Part's card sets its Status, Tags and image too, and shows the image beside its title. The Author may switch every Corkboard to show images instead: each card's image large, with its title, its Outline's beginning on hover, and nothing to edit in place but Status, Tags and image. A Chapter's Corkboard shows its Scenes as cards and a Part's shows its Chapters; the Project's shows each Part and each Loose Chapter as a lane, a Part's lane opening to its Chapters and a Chapter's to its Scenes.
 _Avoid_: Board, grid, overview (that is the pane)
 
 **Overview pane**:
@@ -98,6 +98,10 @@ _Avoid_: Summary fields, pinned fields
 **Pinned note**:
 A Peek the Author has pinned in Writing so it stays while they write: it floats over the page, can be dragged aside, folded to its title, switched to show the Entry's image instead of its text, and unpinned, and stays where it was left for the Project until unpinned.
 _Avoid_: Sticky, pin (as a noun), floating window
+
+**Floating image**:
+The image of the Scene being written, floating over the page in Writing so the Author can look at it while writing: it can be dragged aside, resized, folded to its title and closed, stays where it was left, and changes as the Author moves to another Scene.
+_Avoid_: Pinned image, picture-in-picture
 
 **Large view**:
 An Entry's, Scene's or Chapter's image shown alone over the dimmed app, as large as the window allows, with that Entry's or unit's name beneath; opened by clicking the image wherever it shows. It only shows: there is nothing to edit and no going to the next image.
