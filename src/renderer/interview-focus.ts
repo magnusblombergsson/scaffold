@@ -3,17 +3,20 @@ import {
   OPEN_FOCUS,
   type InterviewFocus,
 } from '../shared/conversation';
+import { topLevel } from '../shared/manuscript-order';
 import {
   ENTRY_TYPE_LABELS,
   ENTRY_TYPES,
+  partName,
   type EntrySummary,
   type EntryType,
+  type ManuscriptChapter,
 } from '../shared/project-types';
 import { tagSpelling, tagVocabulary } from '../shared/tags';
 import type { Names } from './Conversation';
 
 // An Interview's focus as the Author picks it and reads it: one Entry, one
-// Entry type, a Chapter or Scene, a Tag, or open.
+// Entry type, a Part, Chapter or Scene, a Tag, or open.
 
 function typeLabel(type: EntryType): string {
   return type === 'other'
@@ -26,11 +29,12 @@ function entryName(entry: EntrySummary): string {
 }
 
 /**
- * The Tags on the Project's Chapters, Scenes and Entries, each once in its
- * first spelling, sorted.
+ * The Tags on the Project's Parts, Chapters, Scenes and Entries, each once
+ * in its first spelling, sorted.
  */
 export function tagsInUse({ manuscript, entries }: Names): string[] {
   return tagVocabulary([
+    ...(manuscript.parts ?? []).map((p) => p.tags ?? []),
     ...manuscript.chapters.flatMap((c) => [
       c.tags ?? [],
       ...c.scenes.map((s) => s.tags ?? []),
@@ -56,6 +60,12 @@ export function focusLabel(focus: InterviewFocus, names: Names): string {
     case 'entry': {
       const entry = entries.find((e) => e.id === focus.id);
       return entry ? entryName(entry) : 'An Entry no longer there';
+    }
+    case 'part': {
+      const name = partName(manuscript.partLabel);
+      const part = manuscript.parts?.find((p) => p.id === focus.id);
+      if (part) return `${name} “${part.title}”`;
+      return `${/^[AEIOU]/.test(name) ? 'An' : 'A'} ${name} no longer there`;
     }
     case 'chapter': {
       const chapter = manuscript.chapters.find((c) => c.id === focus.id);
@@ -113,18 +123,22 @@ export type FocusOption = { value: string; label: string };
 
 /**
  * What the picker offers, in groups: open; each Entry type; each Entry; each
- * Tag in use; each Chapter with its Scenes indented, then the Unplaced
- * Scenes.
+ * Tag in use; each Part with its Chapters indented and each Chapter with its
+ * Scenes indented, in Manuscript order, then the Unplaced Scenes.
  */
 export function focusOptions(names: Names): {
   label: string;
   options: FocusOption[];
 }[] {
-  const option = (focus: InterviewFocus, indent = false): FocusOption => ({
+  const option = (focus: InterviewFocus, indent = 0): FocusOption => ({
     value: valueOf(focus),
-    label: `${indent ? ' ' : ''}${focusLabel(focus, names)}`,
+    label: `${' '.repeat(indent)}${focusLabel(focus, names)}`,
   });
   const { manuscript, entries } = names;
+  const chapter = (c: ManuscriptChapter, indent: number) => [
+    option({ kind: 'chapter', id: c.id }, indent),
+    ...c.scenes.map((s) => option({ kind: 'scene', id: s.id }, indent + 1)),
+  ];
   return [
     { label: '', options: [option(OPEN_FOCUS)] },
     {
@@ -142,10 +156,14 @@ export function focusOptions(names: Names): {
     {
       label: 'Manuscript',
       options: [
-        ...manuscript.chapters.flatMap((c) => [
-          option({ kind: 'chapter', id: c.id }),
-          ...c.scenes.map((s) => option({ kind: 'scene', id: s.id }, true)),
-        ]),
+        ...topLevel(manuscript).flatMap((item) =>
+          item.kind === 'part'
+            ? [
+                option({ kind: 'part', id: item.part.id }),
+                ...item.chapters.flatMap((c) => chapter(c, 1)),
+              ]
+            : chapter(item.chapter, 0),
+        ),
         ...manuscript.unplaced.map((s) => option({ kind: 'scene', id: s.id })),
       ],
     },

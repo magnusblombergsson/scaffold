@@ -3,6 +3,7 @@ import {
   PROJECT_OUTLINE,
   type Manuscript,
   type ManuscriptChapter,
+  type ManuscriptPart,
   type ManuscriptScene,
   type OutlineValue,
   type ProseLanguage,
@@ -10,6 +11,7 @@ import {
 import { OutlineNotes } from './OutlineNotes';
 import { StatusAndTagsEditor, UnitStatusDot } from './StatusAndTags';
 import { UnitImageButtons, UnitThumbnail } from './UnitImage';
+import { topItems, unplacedChapters } from '../shared/manuscript-order';
 import {
   defaultScope,
   expandable,
@@ -23,6 +25,7 @@ import {
 type Navigation = {
   onOpenScene(id: string): void;
   onOpenChapter(id: string): void;
+  onOpenPart(id: string): void;
   onOpenProject(): void;
 };
 
@@ -30,7 +33,7 @@ type Navigation = {
  * The column between the Binder and the Prose: a row per unit of the Chapter
  * being written, or of the whole Project, each its Status dot, title and its
  * Outline's first line, and its image, opening to edit its Status, Tags,
- * image, Outline and Notes in place. The Scene being written is marked, and
+ * image, Outline and Notes in place. A Part's row holds its Chapters' rows. The Scene being written is marked, and
  * doesn't open: its Outline & Notes are above the Prose, and one unit's
  * field is open in only one place.
  */
@@ -112,6 +115,7 @@ function Rows({
   header,
   onOpenScene,
   onOpenChapter,
+  onOpenPart,
   onOpenProject,
 }: Navigation & {
   manuscript: Manuscript;
@@ -122,15 +126,21 @@ function Rows({
 }) {
   /** The rows whose Outline and Notes are open. */
   const [open, setOpen] = useState<ReadonlySet<string>>(() => new Set());
-  /** In Project scope, the Chapters, or the Unplaced Scenes, listing their Scenes. */
-  const [listed, setListed] = useState(() => startListed(scope, writing));
+  /**
+   * In Project scope, the Parts listing their Chapters, and the Chapters, or
+   * the Unplaced Scenes, listing their Scenes.
+   */
+  const [listed, setListed] = useState(() =>
+    startListed(scope, writing, manuscript),
+  );
   /** Counts rows closing: each shows its Outline's first line as it is now. */
   const [refreshes, setRefreshes] = useState(0);
   const without = (set: ReadonlySet<string>, id: string) =>
     new Set([...set].filter((other) => other !== id));
   /**
    * Opens or closes a row. A Chapter in Project scope opens to its Outline
-   * and Notes and its Scenes, and closes from either.
+   * and Notes and its Scenes, a Part to its own and its Chapters, and
+   * closes from either.
    */
   const toggle = (id: string, { lists = false, fields = true } = {}) => {
     const expanded = (fields && open.has(id)) || (lists && listed.has(id));
@@ -148,7 +158,9 @@ function Rows({
     scope === 'project'
       ? expandableIds.filter(
           (id) =>
-            id === UNPLACED || manuscript.chapters.some((c) => c.id === id),
+            id === UNPLACED ||
+            manuscript.chapters.some((c) => c.id === id) ||
+            !!manuscript.parts?.some((p) => p.id === id),
         )
       : [];
   const withFields = expandableIds.filter((id) => id !== UNPLACED);
@@ -160,6 +172,7 @@ function Rows({
         : []
       : [
           PROJECT_OUTLINE,
+          ...(manuscript.parts ?? []).map((p) => p.id),
           ...manuscript.chapters.flatMap((c) => [
             c.id,
             ...c.scenes.map((s) => s.id),
@@ -180,11 +193,11 @@ function Rows({
   }: {
     id: string;
     title: string;
-    kind: 'project' | 'chapter' | 'scene';
-    /** A Chapter or Scene, with its Status and Tags; none for the Project. */
-    unit?: ManuscriptChapter | ManuscriptScene;
+    kind: 'project' | 'part' | 'chapter' | 'scene';
+    /** A Part, Chapter or Scene, with its Status and Tags; none for the Project. */
+    unit?: ManuscriptPart | ManuscriptChapter | ManuscriptScene;
     missing?: boolean;
-    /** Whether the row lists Scenes under it while expanded. */
+    /** Whether the row lists Scenes, or a Part's Chapters, under it while expanded. */
     lists?: boolean;
     children?: ReactNode;
   }) => {
@@ -197,7 +210,9 @@ function Rows({
         ? () => onOpenScene(id)
         : kind === 'chapter'
           ? () => onOpenChapter(id)
-          : onOpenProject;
+          : kind === 'part'
+            ? () => onOpenPart(id)
+            : onOpenProject;
     return (
       <section
         key={id}
@@ -271,6 +286,25 @@ function Rows({
       </div>
     );
 
+  const chapterRow = (c: ManuscriptChapter) =>
+    row({
+      id: c.id,
+      title: c.title,
+      kind: 'chapter',
+      unit: c,
+      lists: true,
+      children: (open.has(c.id) || listed.has(c.id)) && sceneRows(c.scenes),
+    });
+
+  const chapterRows = (chapters: ManuscriptChapter[]) =>
+    chapters.length === 0 ? (
+      <p className="overview-empty">No Chapters yet.</p>
+    ) : (
+      <div className="overview-children">{chapters.map(chapterRow)}</div>
+    );
+
+  const unplaced = unplacedChapters(manuscript);
+
   const actions = (
     <>
       <button
@@ -324,16 +358,32 @@ function Rows({
               title: 'Project Outline',
               kind: 'project',
             })}
-            {manuscript.chapters.map((c) =>
-              row({
-                id: c.id,
-                title: c.title,
-                kind: 'chapter',
-                unit: c,
-                lists: true,
-                children:
-                  (open.has(c.id) || listed.has(c.id)) && sceneRows(c.scenes),
-              }),
+            {topItems(manuscript).map((item) =>
+              item.kind === 'chapter'
+                ? chapterRow(item.chapter)
+                : row({
+                    id: item.part.id,
+                    title: item.part.title,
+                    kind: 'part',
+                    unit: item.part,
+                    lists: true,
+                    children:
+                      (open.has(item.part.id) || listed.has(item.part.id)) &&
+                      chapterRows(item.chapters),
+                  }),
+            )}
+            {unplaced.length > 0 && (
+              <section
+                className="overview-row group"
+                aria-label="Unplaced Chapters"
+              >
+                <div className="overview-row-head">
+                  <span className="overview-title">Unplaced Chapters</span>
+                </div>
+                <div className="overview-children">
+                  {unplaced.map(chapterRow)}
+                </div>
+              </section>
             )}
             {manuscript.unplaced.length > 0 && (
               <section

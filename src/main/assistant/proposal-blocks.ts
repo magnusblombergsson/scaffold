@@ -34,8 +34,8 @@ export async function readProposals(
 
 /**
  * What a block proposes: a new Entry, under the id it will get; a whole
- * Outline of a Chapter or Scene in the Project, or of the story; or a change
- * to a field of an Entry in the Story Bible. `'unchanged'` when it
+ * Outline of a Part, Chapter or Scene in the Project, or of the story; or a
+ * change to a field of an Entry in the Story Bible. `'unchanged'` when it
  * proposes what its target holds; null when it can't be read as any.
  */
 async function changeOf(
@@ -49,12 +49,15 @@ async function changeOf(
   const proposed = newEntryOf(block);
   if (proposed) return { kind: 'new-entry', entryId: randomUUID(), proposed };
   if (typeof outlineId === 'string') {
-    const { chapters, unplaced } = view.manuscript();
+    const { parts = [], chapters, unplaced } = view.manuscript();
     const known =
       outlineId === PROJECT_OUTLINE ||
-      [...chapters, ...chapters.flatMap((c) => c.scenes), ...unplaced].some(
-        (unit) => unit.id === outlineId,
-      );
+      [
+        ...parts,
+        ...chapters,
+        ...chapters.flatMap((c) => c.scenes),
+        ...unplaced,
+      ].some((unit) => unit.id === outlineId);
     if (!known) return null;
     const outline = await view.read({ kind: 'outline', id: outlineId });
     return outlineChangeOf(block, outline);

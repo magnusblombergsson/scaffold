@@ -96,7 +96,7 @@ export function StatusBar({
   notice?: string;
   shown: ShownCounts;
   manuscript: Counts;
-  /** Gives a Scene, a Chapter or, with `project`, the Manuscript a Word target, or none. */
+  /** Gives a Scene, a Chapter, a Part or, with `project`, the Manuscript a Word target, or none. */
   onSetWordTarget(unitId: string, words: number | null): void;
 }) {
   const readOnly = useContext(ReadOnlyContext);

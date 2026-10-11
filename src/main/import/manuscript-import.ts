@@ -8,6 +8,7 @@ import {
   plainText,
   type ImportBlock,
   type ImportedChapter,
+  type ImportedItem,
 } from '../../shared/manuscript-import';
 import {
   ALIGN_NAME,
@@ -18,10 +19,13 @@ import {
   type Mark,
   type Span,
 } from '../../shared/prose-markdown';
-import type { NewChapter } from '../project-store/project-store';
+import type {
+  NewChapter,
+  NewManuscriptItem,
+} from '../project-store/project-store';
 
 // The Import: a Word or Markdown manuscript read as blocks of Prose, which
-// the Author splits into Chapters and Scenes (src/shared/manuscript-import)
+// the Author splits into Parts, Chapters and Scenes (src/shared/manuscript-import)
 // before it becomes a new Project. Only paragraphs, block quotes, centre and
 // right alignment, italic and bold come in.
 
@@ -91,6 +95,15 @@ export function newChapters(chapters: ImportedChapter[]): NewChapter[] {
       markdown: writeProse(scene.paragraphs),
     })),
   }));
+}
+
+/** The Parts and Loose Chapters to create a Project with, in order. */
+export function newManuscript(items: ImportedItem[]): NewManuscriptItem[] {
+  return items.map((item) =>
+    'chapters' in item
+      ? { title: item.title, chapters: newChapters(item.chapters) }
+      : newChapters([item])[0],
+  );
 }
 
 // --- Prose ---

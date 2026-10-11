@@ -1,19 +1,27 @@
 import { useEffect, useRef } from 'react';
-import { ENTRY_TYPE_LABELS, type TrashItem } from '../shared/project-types';
+import {
+  ENTRY_TYPE_LABELS,
+  partName,
+  type PartLabel,
+  type TrashItem,
+} from '../shared/project-types';
 import { MODE_LABELS } from '../shared/conversation';
 import { versionLabel } from './conflict-labels';
 
 /**
- * The Trash tab: deleted Scenes, Chapters, Entries and Conversations, and
- * set-aside versions, latest first.
+ * The Trash tab: deleted Scenes, Chapters, Parts, Entries and
+ * Conversations, and set-aside versions, latest first.
  */
 export function TrashView({
   items,
+  partLabel,
   reveal,
   onRestore,
   onEmpty,
 }: {
   items: TrashItem[];
+  /** What the Project calls its Parts. */
+  partLabel?: PartLabel;
   /**
    * The item to go to, as a Todo's link to a unit in Trash asks: it is
    * marked, scrolled to and its Restore focused; `count` asks again.
@@ -47,7 +55,7 @@ export function TrashView({
           >
             <span className="trash-title">
               {trashTitle(item)}
-              <span className="trash-detail">{detail(item)}</span>
+              <span className="trash-detail">{detail(item, partLabel)}</span>
             </span>
             <button
               aria-label={`Restore ${trashTitle(item)}`}
@@ -70,7 +78,7 @@ export function trashTitle(item: TrashItem): string {
   return item.kind === 'version' ? `Version of ${item.title}` : item.title;
 }
 
-function detail(item: TrashItem): string {
+function detail(item: TrashItem, partLabel?: PartLabel): string {
   if (item.kind === 'version') return versionLabel(item);
   if (item.kind === 'entry') return ENTRY_TYPE_LABELS[item.type];
   if (item.kind === 'conversation') {
@@ -79,6 +87,15 @@ function detail(item: TrashItem): string {
   if (item.kind === 'chapter') {
     const n = item.scenes.length;
     return `Chapter · ${n} ${n === 1 ? 'Scene' : 'Scenes'}`;
+  }
+  if (item.kind === 'part') {
+    const n = item.chapters.length;
+    const scenes = item.chapters.reduce((sum, c) => sum + c.scenes.length, 0);
+    return [
+      partName(partLabel),
+      `${n} ${n === 1 ? 'Chapter' : 'Chapters'}`,
+      `${scenes} ${scenes === 1 ? 'Scene' : 'Scenes'}`,
+    ].join(' · ');
   }
   return item.chapterTitle ? `Scene from ${item.chapterTitle}` : 'Scene';
 }

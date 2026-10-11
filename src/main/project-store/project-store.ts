@@ -5,9 +5,14 @@ import { isDeepStrictEqual } from 'node:util';
 import {
   ENTRY_TYPES,
   PROJECT_OUTLINE,
+  partLabel,
+  partName,
   proseLanguage,
   unitKey,
   type ChapterNode,
+  type ManuscriptChapter,
+  type ManuscriptPart,
+  type PartLabel,
   type DetailRef,
   type EntryImage,
   type EntryRef,
@@ -125,10 +130,12 @@ import {
   Trash,
   trashedChapter,
   trashedEntry,
+  trashedPart,
   trashedScene,
   trashedVersion,
   UNPLACED_TITLE,
   type ChapterFile,
+  type PartFile,
   type Trashed,
   type TrashedChapter,
   type TrashedConversation,
@@ -139,7 +146,20 @@ import {
   type TrashedVersion,
   type TrashedVersionInfo,
 } from './trash';
-import { findChapter, sceneIds, tryFindScene } from './tree';
+import {
+  expanded,
+  findChapter,
+  findPart,
+  isPart,
+  place,
+  placeOf,
+  sceneIds,
+  settled,
+  structureOf,
+  tryFindScene,
+  unplace,
+  type FullTree,
+} from './tree';
 import { ProjectError } from './project-error';
 import {
   CHAPTER_FILE,
@@ -157,6 +177,8 @@ import {
   imagePath,
   logOnce,
   outlineRef,
+  PART_FILE,
+  partTrashPath,
   scenePath,
   sceneRef,
   trashDir,
@@ -201,6 +223,8 @@ type Manifest = {
   foldedNoteImage?: unknown;
   /** The Status list, in order; without one, the Project shows the defaults. */
   statuses?: unknown;
+  /** What the Project calls its Parts; Part unless it says Act or Episode. */
+  partLabel?: unknown;
   tree: ProjectTree;
 };
 
@@ -225,15 +249,19 @@ export type NewChapter = {
   title: string;
   scenes: { title: string; markdown: string }[];
 };
+/** A Part of Chapters to create a Project with. */
+export type NewPart = { title: string; chapters: NewChapter[] };
+/** The top of a new Manuscript: Parts and Loose Chapters, in order. */
+export type NewManuscriptItem = NewChapter | NewPart;
 
 /**
  * Creates a new Project folder: with the `manuscript` given, or else one
- * Chapter holding one empty Scene.
+ * Chapter holding one empty Scene. Its Parts, if any, are called Parts.
  */
 export async function createProject(
   projectPath: string,
   deps: StoreDeps,
-  options: { language?: string; manuscript?: NewChapter[] } = {},
+  options: { language?: string; manuscript?: NewManuscriptItem[] } = {},
 ): Promise<ProjectStore> {
   const { fs, clock } = deps;
   if (await fs.exists(path.join(projectPath, MANIFEST))) {
@@ -242,26 +270,43 @@ export async function createProject(
       `${projectPath} is already a Project`,
     );
   }
-  const chapters = options.manuscript?.length
+  const items: NewManuscriptItem[] = options.manuscript?.length
     ? options.manuscript
     : [{ title: 'Chapter 1', scenes: [{ title: 'Scene 1', markdown: '' }] }];
   const scenes: SceneValue[] = [];
+  // Every Chapter in reading order, as a tree holds them.
+  const chapters: ChapterNode[] = [];
+  const chapterNode = (chapter: NewChapter): string => {
+    const id = randomUUID();
+    chapters.push({
+      id,
+      title: chapter.title,
+      scenes: chapter.scenes.map(({ title, markdown }) => {
+        const sceneId = randomUUID();
+        scenes.push({ id: sceneId, markdown });
+        return { id: sceneId, title };
+      }),
+    });
+    return id;
+  };
+  const parts: NonNullable<ProjectTree['parts']> = [];
+  const top = items.map((item) => {
+    if (!('chapters' in item)) return chapterNode(item);
+    const part = {
+      id: randomUUID(),
+      title: item.title,
+      chapters: item.chapters.map(chapterNode),
+    };
+    parts.push(part);
+    return part.id;
+  });
   const manifest: Manifest = {
     format: FORMAT,
     id: randomUUID(),
     language: options.language ?? 'en-US',
     statuses: DEFAULT_STATUSES,
-    tree: {
-      chapters: chapters.map((chapter) => ({
-        id: randomUUID(),
-        title: chapter.title,
-        scenes: chapter.scenes.map(({ title, markdown }) => {
-          const id = randomUUID();
-          scenes.push({ id, markdown });
-          return { id, title };
-        }),
-      })),
-    },
+    // Without Parts, the tree is as it always was.
+    tree: parts.length > 0 ? { chapters, parts, top } : { chapters },
   };
   // A new folder has no newer app to find: the gate only claims project.json.
   const gated = new GatedFileSystem(fs, {
@@ -473,7 +518,11 @@ async function resolveManifestCopies(
     manifest = winner;
 
     const lost = await lostWith(projectPath, fs, loser.tree, winner.tree);
-    if (lost.chapters.length > 0 || lost.scenes.length > 0) {
+    if (
+      lost.chapters.length > 0 ||
+      lost.scenes.length > 0 ||
+      (lost.parts?.length ?? 0) > 0
+    ) {
       dropped.push({ ...(!copyWins && hostOfCopy(name, hosts)), ...lost });
     }
   }
@@ -494,6 +543,15 @@ async function lostWith(
   const placed = new Set(sceneIds(winner));
   const chapters: string[] = [];
   const scenes: string[] = [];
+  const parts: string[] = [];
+  for (const part of loser.parts ?? []) {
+    if (
+      !isPart(winner, part.id) &&
+      !(await fs.exists(partTrashPath(projectPath, part.id)))
+    ) {
+      parts.push(part.title);
+    }
+  }
   for (const chapter of loser.chapters) {
     if (
       !chapterIds.has(chapter.id) &&
@@ -510,7 +568,7 @@ async function lostWith(
       }
     }
   }
-  return { chapters, scenes };
+  return { chapters, scenes, ...(parts.length > 0 && { parts }) };
 }
 
 /** Removes temp files left by a write that crashed before its rename. */
@@ -574,6 +632,7 @@ async function scanUnits(
   const placed = new Set(sceneIds(tree));
   const chapterIds = new Set(tree.chapters.map((c) => c.id));
   const chapters = new Map<string, TrashedChapter>();
+  const partFiles: PartFile[] = [];
   const scenes: TrashedScene[] = [];
   const versions: TrashedVersion[] = [];
   const conversations: TrashedConversation[] = [];
@@ -611,6 +670,16 @@ async function scanUnits(
       }
       continue;
     }
+    const partId = PART_FILE.exec(name)?.[1];
+    if (partId) {
+      if (isPart(tree, partId)) {
+        if (repair) await fs.unlink(file);
+        continue;
+      }
+      const part = await readJson<PartFile>(fs, file);
+      if (part) partFiles.push(part);
+      continue;
+    }
     const chapterId = CHAPTER_FILE.exec(name)?.[1];
     if (chapterId) {
       if (chapterIds.has(chapterId)) {
@@ -641,7 +710,16 @@ async function scanUnits(
     scenes.push(trashedScene(id, info));
   }
 
-  const trash = new Map<string, Trashed>(chapters);
+  const trash = new Map<string, Trashed>();
+  // A Chapter deleted with its Part is restored with it, unless the Part's
+  // record isn't here.
+  const parts = new Set(partFiles.map((part) => part.id));
+  for (const [id, chapter] of chapters) {
+    if (!chapter.withPart || !parts.has(chapter.part ?? '')) {
+      trash.set(id, chapter);
+    }
+  }
+  for (const part of partFiles) trash.set(part.id, trashedPart(part, chapters));
   for (const version of versions) trash.set(version.id, version);
   for (const item of trashedEntries) trash.set(item.id, item);
   for (const item of conversations) trash.set(item.id, item);
@@ -710,6 +788,7 @@ function manuscriptForAssistant(manuscript: Manuscript): Manuscript {
       ...forAssistant(chapter),
       scenes: chapter.scenes.map(forAssistant),
     })),
+    ...(manuscript.parts && { parts: manuscript.parts.map(forAssistant) }),
     unplaced: manuscript.unplaced.map(forAssistant),
   };
 }
@@ -1460,6 +1539,22 @@ export class ProjectStore {
   }
 
   /**
+   * Calls the Project's Parts Part, Act or Episode from now on, a Project
+   * setting that changes nothing else. The Manuscript carrying it follows as
+   * a `unitDetailsChanged`.
+   */
+  setPartLabel(label: PartLabel): Promise<void> {
+    return this.enqueueWrite(async () => {
+      if (partLabel(this.manifest.partLabel) === label) return;
+      const { partLabel: _, ...rest } = this.manifest;
+      await this.writeManifest(
+        label === 'part' ? rest : { ...rest, partLabel: label },
+      );
+      this.emit({ type: 'unitDetailsChanged', manuscript: this.manuscript() });
+    });
+  }
+
+  /**
    * The Status list, in order: as `project.json` holds it, or the defaults
    * while it holds none, until a Status is first set.
    */
@@ -1507,7 +1602,7 @@ export class ProjectStore {
 
   /**
    * The detail ref of a unit by its id: the Manuscript for `PROJECT_OUTLINE`,
-   * an Entry, a Chapter, or else a Scene.
+   * an Entry, a Part, a Chapter, or else a Scene.
    */
   private detailRef(unitId: string): DetailRef {
     if (unitId === PROJECT_OUTLINE) return { kind: 'manuscript' };
@@ -1515,9 +1610,13 @@ export class ProjectStore {
     return this.sceneOrChapterRef(unitId);
   }
 
-  /** The Scene or Chapter of `unitId`, as the tree places it. */
+  /** The Scene, Chapter or Part of `unitId`, as the tree or Trash has it. */
   private sceneOrChapterRef(unitId: string): ImageRef {
-    const chapter = this.manifest.tree.chapters.some((c) => c.id === unitId);
+    const { tree } = this.manifest;
+    if (isPart(tree, unitId) || this.trash.kindOf(unitId) === 'part') {
+      return { kind: 'part', id: unitId };
+    }
+    const chapter = tree.chapters.some((c) => c.id === unitId);
     return { kind: chapter ? 'chapter' : 'scene', id: unitId };
   }
 
@@ -1599,8 +1698,9 @@ export class ProjectStore {
 
   /** `tagLists`, by the id of the unit that has them. */
   private tagsByUnit(except?: string): Map<string, string[]> {
-    const { chapters } = this.manifest.tree;
+    const { chapters, parts = [] } = this.manifest.tree;
     const ids = new Set([
+      ...parts.map((p) => p.id),
       ...chapters.flatMap((c) => [c.id, ...c.scenes.map((s) => s.id)]),
       ...this.unitDetails.keys(),
     ]);
@@ -2054,30 +2154,58 @@ export class ProjectStore {
    * Chapter and Scene has its details, and the Manuscript its Word target.
    */
   manuscript(): Manuscript {
-    const placed = new Set(sceneIds(this.manifest.tree));
+    const { tree } = this.manifest;
+    const placed = new Set(sceneIds(tree));
     const wordTarget = this.unitDetails.get(PROJECT_OUTLINE)?.wordTarget;
+    const label = partLabel(this.manifest.partLabel);
     const withUnitDetails = <T extends { id: string }>(node: T): T => {
       const details = this.unitDetails.get(node.id);
       return details ? { ...node, ...structuredClone(details) } : node;
     };
-    return {
-      chapters: this.manifest.tree.chapters.map((chapter) =>
-        withUnitDetails({
-          ...chapter,
-          scenes: chapter.scenes.map((scene) =>
-            withUnitDetails<ManuscriptScene>(
-              this.files.has(scene.id)
-                ? { ...scene }
-                : { ...scene, missing: true },
-            ),
+    const chapter = (
+      node: ChapterNode,
+      place: { part: string } | { unplaced: true } | null,
+    ): ManuscriptChapter =>
+      withUnitDetails({
+        ...node,
+        scenes: node.scenes.map((scene) =>
+          withUnitDetails<ManuscriptScene>(
+            this.files.has(scene.id)
+              ? { ...scene }
+              : { ...scene, missing: true },
           ),
-        }),
-      ),
+        ),
+        ...place,
+      });
+    const { top, unplaced } = structureOf(tree);
+    const parts = top.flatMap((item) => ('part' in item ? [item] : []));
+    return {
+      chapters: [
+        ...top.flatMap((item) =>
+          'part' in item
+            ? item.chapters.map((c) => chapter(c, { part: item.part.id }))
+            : [chapter(item.chapter, null)],
+        ),
+        ...unplaced.map((c) => chapter(c, { unplaced: true })),
+      ],
+      ...(parts.length > 0 && {
+        parts: parts.map(({ part, chapters }) =>
+          withUnitDetails<ManuscriptPart>({
+            id: part.id,
+            title: part.title,
+            chapters: chapters.map((c) => c.id),
+          }),
+        ),
+        top: top.map((item) =>
+          'part' in item ? item.part.id : item.chapter.id,
+        ),
+      }),
       unplaced: [...this.files]
         .filter((id) => !placed.has(id))
         .sort()
         .map((id) => withUnitDetails({ id, title: UNPLACED_TITLE })),
       ...(wordTarget !== undefined && { wordTarget }),
+      ...(label !== 'part' && { partLabel: label }),
     };
   }
 
@@ -2311,19 +2439,70 @@ export class ProjectStore {
     return { id, ...changed };
   }
 
-  /** Creates an empty Chapter at `index`. Chapters have no file. */
-  async createChapter(index: number, title?: string): Promise<Created> {
+  /**
+   * Creates an empty Chapter at `index` in a Part, or with no `partId` among
+   * the Parts and Loose Chapters. Chapters have no file.
+   */
+  async createChapter(
+    index: number,
+    title?: string,
+    partId?: string,
+  ): Promise<Created> {
     const id = randomUUID();
     const changed = await this.step(() =>
-      this.restructure((tree) => {
-        tree.chapters.splice(index, 0, {
+      this.restructureParts((tree) => {
+        tree.chapters.push({
           id,
           title: title ?? `Chapter ${tree.chapters.length + 1}`,
           scenes: [],
         });
+        place(tree, id, index, partId);
       }),
     );
     return { id, ...changed };
+  }
+
+  /** Creates a Part holding no Chapters at `index` among the Parts and Loose Chapters. */
+  async createPart(index: number, title?: string): Promise<Created> {
+    const id = randomUUID();
+    const changed = await this.step(() =>
+      this.restructureParts((tree) => {
+        const name = partName(partLabel(this.manifest.partLabel));
+        tree.parts.push({
+          id,
+          title: title ?? `${name} ${tree.parts.length + 1}`,
+          chapters: [],
+        });
+        tree.top.splice(Math.min(index, tree.top.length), 0, id);
+      }),
+    );
+    return { id, ...changed };
+  }
+
+  renamePart(partId: string, title: string): Promise<Changed> {
+    return this.step(() =>
+      this.restructure((tree) => {
+        findPart(tree, partId).title = title;
+      }),
+    );
+  }
+
+  /** Moves a Part to `index` among the Parts and Loose Chapters once it is taken out. */
+  movePart(partId: string, index: number): Promise<Changed> {
+    return this.step(() =>
+      this.restructureParts((tree) => {
+        findPart(tree, partId);
+        tree.top.splice(tree.top.indexOf(partId), 1);
+        tree.top.splice(Math.min(index, tree.top.length), 0, partId);
+      }),
+    );
+  }
+
+  /** Moves a Part to Trash with its Chapters and their Scenes. The last Chapter stays. */
+  trashPart(partId: string): Promise<Changed> {
+    return this.step(async () => {
+      return this.trash.move('part', partId);
+    });
   }
 
   /**
@@ -2357,15 +2536,28 @@ export class ProjectStore {
       let index = chapter.scenes.indexOf(found.scene) + 1;
       let created: string | undefined;
       if (toNextChapter) {
-        const next = tree.chapters[tree.chapters.indexOf(chapter) + 1];
-        chapter = next ?? {
-          id: randomUUID(),
-          title: `Chapter ${tree.chapters.length + 1}`,
-          scenes: [],
-        };
-        if (!next) {
-          tree.chapters.push(chapter);
+        const full = expanded(tree);
+        const placed = full.chapters.filter((c) => placeOf(full, c.id));
+        const at = placed.findIndex((c) => c.id === found.chapter.id);
+        const next = at < 0 ? undefined : placed[at + 1];
+        if (next) {
+          chapter = findChapter(tree, next.id);
+        } else {
+          // After its own: last in its Part, or at the end of the Manuscript.
+          const own = placeOf(full, found.chapter.id);
+          chapter = {
+            id: randomUUID(),
+            title: `Chapter ${tree.chapters.length + 1}`,
+            scenes: [],
+          };
+          full.chapters.push(chapter);
+          if (own?.part !== undefined) {
+            place(full, chapter.id, own.index + 1, own.part);
+          } else {
+            place(full, chapter.id, full.top.length);
+          }
           created = chapter.id;
+          Object.assign(tree, settled(full));
         }
         index = 0;
       }
@@ -2428,10 +2620,14 @@ export class ProjectStore {
         found.chapter.scenes.indexOf(found.scene),
         1,
       );
-      tree.chapters = tree.chapters.filter(
-        (c) => c.id !== created || c.scenes.length > 0,
-      );
-      await this.writeManifest({ ...this.manifest, tree });
+      const full = expanded(tree);
+      if (
+        full.chapters.some((c) => c.id === created && c.scenes.length === 0)
+      ) {
+        unplace(full, created!);
+        full.chapters = full.chapters.filter((c) => c.id !== created);
+      }
+      await this.writeManifest({ ...this.manifest, tree: settled(full) });
       await this.write(ref, { id: sceneId, markdown });
     });
     await this.deleteOutlineAndNotes(newId);
@@ -2503,13 +2699,20 @@ export class ProjectStore {
     );
   }
 
-  /** Moves a Chapter to `index` among the Chapters once it is taken out. */
-  moveChapter(chapterId: string, index: number): Promise<Changed> {
+  /**
+   * Moves a Chapter, placed or Unplaced, to `index` in a Part, or with no
+   * `partId` among the Parts and Loose Chapters, once it is taken out.
+   */
+  moveChapter(
+    chapterId: string,
+    index: number,
+    partId?: string,
+  ): Promise<Changed> {
     return this.step(() =>
-      this.restructure((tree) => {
-        const chapter = findChapter(tree, chapterId);
-        tree.chapters.splice(tree.chapters.indexOf(chapter), 1);
-        tree.chapters.splice(index, 0, chapter);
+      this.restructureParts((tree) => {
+        findChapter(tree, chapterId);
+        unplace(tree, chapterId);
+        place(tree, chapterId, index, partId);
       }),
     );
   }
@@ -2678,13 +2881,14 @@ export class ProjectStore {
     });
   }
 
-  /** Whether a Chapter or Scene of this id is in the Manuscript or Unplaced. */
+  /** Whether a Part, Chapter or Scene of this id is in the Manuscript or Unplaced. */
   private isLive(id: string): boolean {
     const tree = this.manifest.tree;
     return (
       this.files.has(id) ||
       sceneIds(tree).includes(id) ||
-      tree.chapters.some((c) => c.id === id)
+      tree.chapters.some((c) => c.id === id) ||
+      isPart(tree, id)
     );
   }
 
@@ -2776,6 +2980,18 @@ export class ProjectStore {
     const tree = this.tree();
     await change(tree);
     await this.writeManifest({ ...this.manifest, tree });
+  }
+
+  /**
+   * Runs one change to the Parts and Chapters: `change` edits a copy of the
+   * tree with its structure spelt out, which is settled before it is written.
+   */
+  private async restructureParts(
+    change: (tree: FullTree) => void,
+  ): Promise<void> {
+    const tree = expanded(this.tree());
+    change(tree);
+    await this.writeManifest({ ...this.manifest, tree: settled(tree) });
   }
 
   /**
@@ -3188,10 +3404,10 @@ function todoText(text: string): string {
   return line;
 }
 
-/** Only a Scene, Chapter or Entry, by its id. */
+/** Only a Scene, Chapter, Part or Entry, by its id. */
 function todoLink(link: TodoLink): TodoLink {
   if (!isTodoLink(link)) {
-    throw new Error('A Todo links only to a Scene, Chapter or Entry');
+    throw new Error('A Todo links only to a Scene, Chapter, Part or Entry');
   }
   return { kind: link.kind, id: link.id };
 }

@@ -1,13 +1,22 @@
 import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import type { PanelWidths } from '../shared/api';
-import { filterManuscript, filterOn, matchesFilter } from '../shared/filter';
 import {
+  filterManuscript,
+  filterOn,
+  matchesFilter,
+  type FilteredChapter,
+} from '../shared/filter';
+import { topLevel } from '../shared/manuscript-order';
+import {
+  partName,
   PROJECT_OUTLINE,
   type EntryValue,
   type Manuscript,
   type ManuscriptChapter,
+  type ManuscriptPart,
   type ManuscriptScene,
 } from '../shared/project-types';
+import { statusOf } from '../shared/status';
 import { anyAdded, NoProviderState, useProviders } from './Providers';
 import {
   Composer,
@@ -257,10 +266,12 @@ function BibleReference({
 }
 
 /**
- * The Outline of the whole story, then each Chapter and Scene in Manuscript
- * order with its Outline, as the Assistant is sent it, its Status dot and
- * Tags shown, not edited. A Filter narrows it to the matching Chapters
- * whole, and the matching Scenes of others under their dimmed headings.
+ * The Outline of the whole story, then each Part, Chapter and Scene in
+ * Manuscript order with its Outline, a Part's Chapters nested in it, as the
+ * Assistant is sent it, its Status dot and Tags shown, not edited. A Filter
+ * narrows it to the matching Chapters whole, and the matching Scenes of
+ * others under their dimmed headings; a Part shows when it matches, and
+ * dimmed over its Chapters that show.
  */
 function OutlineSkeleton({
   manuscript,
@@ -280,6 +291,7 @@ function OutlineSkeleton({
     let current = true;
     const ids = [
       PROJECT_OUTLINE,
+      ...(manuscript.parts ?? []).map((p) => p.id),
       ...manuscript.chapters.flatMap((c) => [
         c.id,
         ...c.scenes.map((s) => s.id),
@@ -308,19 +320,42 @@ function OutlineSkeleton({
       <p className="reference-outline reference-empty">No Outline.</p>
     );
   };
-  /** A Chapter's or Scene's title, its dot shown first, then its Tags. */
+  /** A unit's title, its dot shown first, then its Tags. */
   const heading = (
-    Heading: 'h3' | 'h4',
-    unit: ManuscriptChapter | ManuscriptScene,
+    Heading: 'h3' | 'h4' | 'h5',
+    unit: ManuscriptPart | ManuscriptChapter | ManuscriptScene,
+    title = unit.title,
   ) => (
     <>
       <Heading>
-        {unit.title}
+        {title}
         <UnitStatusDot unit={unit} />
       </Heading>
       <TagChips tags={unit.tags} />
     </>
   );
+  const nested = !!manuscript.parts;
+  const shownChapters = new Map(shown.chapters.map((c) => [c.chapter.id, c]));
+  const chapterSection = (
+    { chapter, dimmed, scenes }: FilteredChapter,
+    inPart: boolean,
+  ) => (
+    <section
+      key={chapter.id}
+      aria-label={chapter.title}
+      data-dimmed={dimmed || undefined}
+    >
+      {heading(inPart ? 'h4' : 'h3', chapter)}
+      {!dimmed && outline(chapter.id)}
+      {scenes.map((scene) => (
+        <section key={scene.id} aria-label={scene.title}>
+          {heading(inPart ? 'h5' : 'h4', scene)}
+          {outline(scene.id)}
+        </section>
+      ))}
+    </section>
+  );
+  const label = partName(manuscript.partLabel);
   return (
     <div className="reference-skeleton">
       {shown.total > 0 && (
@@ -342,22 +377,34 @@ function OutlineSkeleton({
           No Chapters or Scenes match the Filter.
         </p>
       )}
-      {shown.chapters.map(({ chapter, dimmed, scenes }) => (
-        <section
-          key={chapter.id}
-          aria-label={chapter.title}
-          data-dimmed={dimmed || undefined}
-        >
-          {heading('h3', chapter)}
-          {!dimmed && outline(chapter.id)}
-          {scenes.map((scene) => (
-            <section key={scene.id} aria-label={scene.title}>
-              {heading('h4', scene)}
-              {outline(scene.id)}
+      {!nested && shown.chapters.map((c) => chapterSection(c, false))}
+      {nested &&
+        topLevel(manuscript).map((item) => {
+          if (item.kind === 'chapter') {
+            const c = shownChapters.get(item.chapter.id);
+            return c && chapterSection(c, false);
+          }
+          const { part } = item;
+          const chapters = item.chapters.flatMap(
+            (c) => shownChapters.get(c.id) ?? [],
+          );
+          const matches = matchesFilter(filter, {
+            status: statusOf(statuses, part.status)?.id,
+            tags: part.tags,
+          });
+          if (!matches && chapters.length === 0) return null;
+          return (
+            <section
+              key={part.id}
+              aria-label={part.title}
+              data-dimmed={!matches || undefined}
+            >
+              {heading('h3', part, `${label} “${part.title}”`)}
+              {matches && outline(part.id)}
+              {chapters.map((c) => chapterSection(c, true))}
             </section>
-          ))}
-        </section>
-      ))}
+          );
+        })}
     </div>
   );
 }

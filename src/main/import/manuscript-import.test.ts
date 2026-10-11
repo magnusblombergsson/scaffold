@@ -1,3 +1,6 @@
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import type {
   Manuscript,
@@ -7,6 +10,7 @@ import type {
 import type { Paragraph } from '../../shared/prose-markdown';
 import {
   defaultConvention,
+  importedChapters,
   splitManuscript,
   type ImportBlock,
 } from '../../shared/manuscript-import';
@@ -16,7 +20,15 @@ import {
   exportManuscript,
   type ExportFormat,
 } from '../export/manuscript-export';
-import { importFormat, newChapters, readImport } from './manuscript-import';
+import { instantClock } from '../project-store/clock';
+import { nodeFileSystem } from '../project-store/file-system';
+import { createProject } from '../project-store/project-store';
+import {
+  importFormat,
+  newChapters,
+  newManuscript,
+  readImport,
+} from './manuscript-import';
 
 const W = 'http://schemas.openxmlformats.org/wordprocessingml/2006/main';
 
@@ -346,7 +358,7 @@ describe('Importing an Export', () => {
       );
       const read = await readImport(file, format);
       const chapters = newChapters(
-        splitManuscript(read, defaultConvention(read)),
+        importedChapters(splitManuscript(read, defaultConvention(read))),
       );
       expect(chapters).toEqual([
         {
@@ -392,12 +404,12 @@ describe('Importing an Export', () => {
       TICK_ALL,
     );
     const read = await readImport(file, format);
-    return newChapters(splitManuscript(read, defaultConvention(read))).map(
-      ({ title, scenes }) => ({
-        title,
-        scenes: scenes.map((scene) => scene.markdown),
-      }),
-    );
+    return newChapters(
+      importedChapters(splitManuscript(read, defaultConvention(read))),
+    ).map(({ title, scenes }) => ({
+      title,
+      scenes: scenes.map((scene) => scene.markdown),
+    }));
   }
 
   it('keeps a paragraph of escaped asterisks as Prose in Markdown', async () => {
@@ -420,7 +432,7 @@ describe('Importing an Export', () => {
     const read = await readImport(word, 'docx');
     expect(defaultConvention(read).chapters).toBe('pageBreak');
     const imported = newChapters(
-      splitManuscript(read, defaultConvention(read)),
+      importedChapters(splitManuscript(read, defaultConvention(read))),
     ).map(({ title, scenes }) => ({
       title,
       scenes: scenes.map((scene) => scene.markdown),
@@ -434,4 +446,97 @@ describe('Importing an Export', () => {
       expect(await roundTrip(imported, format)).toEqual(imported);
     }
   });
+});
+
+describe('Importing an Export with Parts', () => {
+  const manuscript: Manuscript = {
+    chapters: [
+      { id: 'c0', title: 'Prologue', scenes: [{ id: 's0', title: 'P' }] },
+      {
+        id: 'c1',
+        title: 'The Storm',
+        part: 'p1',
+        scenes: [
+          { id: 's1', title: 'A' },
+          { id: 's2', title: 'B' },
+        ],
+      },
+      {
+        id: 'c2',
+        title: 'The Calm',
+        part: 'p1',
+        scenes: [{ id: 's3', title: 'C' }],
+      },
+    ],
+    parts: [{ id: 'p1', title: 'Act One', chapters: ['c1', 'c2'] }],
+    top: ['c0', 'p1'],
+    unplaced: [],
+    partLabel: 'act',
+  };
+  const scenes: Record<string, string> = {
+    s0: 'Before it all.',
+    s1: 'It was a *dark* night.',
+    s2: 'Morning came.',
+    s3: 'All was quiet.',
+  };
+
+  for (const format of ['markdown', 'docx'] as ExportFormat[]) {
+    it(`gives back the Part with its Chapters and Scenes from ${format}, when the Author chooses Parts`, async () => {
+      const file = await exportManuscript(
+        {
+          language: 'en-US',
+          manuscript: () => manuscript,
+          read: async (ref: SceneRef): Promise<SceneValue> => ({
+            id: ref.id,
+            markdown: scenes[ref.id],
+          }),
+        },
+        format,
+        TICK_ALL,
+      );
+      const read = await readImport(file, format);
+      const imported = newManuscript(
+        splitManuscript(read, {
+          parts: true,
+          chapters: 'heading2',
+          scenes: 'separator',
+        }),
+      );
+      const dir = await mkdtemp(path.join(tmpdir(), 'scaffold-'));
+      try {
+        const store = await createProject(
+          path.join(dir, 'Imported'),
+          { fs: nodeFileSystem, clock: instantClock() },
+          { manuscript: imported },
+        );
+        const got = store.manuscript();
+        const text = async (id: string) =>
+          (await store.read({ kind: 'scene', id })).markdown;
+        expect(got.partLabel).toBeUndefined();
+        expect(got.parts).toEqual([
+          {
+            id: got.top![1],
+            title: 'Act One',
+            chapters: [got.chapters[1].id, got.chapters[2].id],
+          },
+        ]);
+        expect(got.top).toEqual([got.chapters[0].id, got.parts![0].id]);
+        expect(
+          await Promise.all(
+            got.chapters.map(async (chapter) => [
+              chapter.title,
+              chapter.part && 'in Part',
+              await Promise.all(chapter.scenes.map((s) => text(s.id))),
+            ]),
+          ),
+        ).toEqual([
+          ['Prologue', undefined, [scenes.s0]],
+          ['The Storm', 'in Part', [scenes.s1, scenes.s2]],
+          ['The Calm', 'in Part', [scenes.s3]],
+        ]);
+      } finally {
+        await rm(dir, { recursive: true, force: true, maxRetries: 5 });
+      }
+    });
+  }
 });

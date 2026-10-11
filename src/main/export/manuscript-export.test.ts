@@ -16,6 +16,7 @@ import {
 import {
   TICK_ALL,
   toggleChapter,
+  togglePart,
   toggleScene,
   type ExportUnticked,
 } from '../../shared/export-choice';
@@ -244,6 +245,100 @@ describe('Exporting only the ticked Scenes and Chapters', () => {
         toggleChapter(empty.chapters[0], TICK_ALL),
       ),
     ).toEqual(['Kept Empty', 'One', 'Text.']);
+  });
+});
+
+describe('Exporting a Manuscript with Parts', () => {
+  const acts: Manuscript = {
+    chapters: [
+      chapter('c0', 'Prologue', 's0'),
+      { ...chapter('c1', 'The Storm', 's1'), part: 'p1' },
+      { ...chapter('c2', 'The Calm', 's2'), part: 'p1' },
+      chapter('c3', 'Interlude', 's3'),
+      { ...chapter('c4', 'The Return', 's4'), part: 'p2' },
+      { ...chapter('c9', 'Unplaced', 's9'), unplaced: true },
+    ],
+    parts: [
+      { id: 'p1', title: 'Act One', chapters: ['c1', 'c2'] },
+      { id: 'p2', title: 'Act Two', chapters: ['c4'] },
+      { id: 'p3', title: 'Act Three', chapters: [] },
+    ],
+    top: ['c0', 'p1', 'c3', 'p2', 'p3'],
+    unplaced: [],
+    partLabel: 'act',
+  };
+  const text = {
+    s0: 'Before.',
+    s1: 'Rain.',
+    s2: 'Quiet.',
+    s3: 'Between.',
+    s4: 'Home.',
+    s9: 'Never exported.',
+  };
+
+  it('writes Part titles one level above Chapter titles, Loose Chapters in their place', async () => {
+    expect(await markdownOf(acts, text)).toBe(
+      [
+        '## Prologue',
+        'Before.',
+        '# Act One',
+        '## The Storm',
+        'Rain.',
+        '## The Calm',
+        'Quiet.',
+        '## Interlude',
+        'Between.',
+        '# Act Two',
+        '## The Return',
+        'Home.',
+      ].join('\n\n') + '\n',
+    );
+  });
+
+  it('leaves no heading for a Part with nothing ticked', async () => {
+    const unticked = togglePart(acts, acts.parts![0], TICK_ALL);
+    expect(await markdownOf(acts, text, unticked)).toBe(
+      [
+        '## Prologue',
+        'Before.',
+        '## Interlude',
+        'Between.',
+        '# Act Two',
+        '## The Return',
+        'Home.',
+      ].join('\n\n') + '\n',
+    );
+  });
+
+  it('keeps Chapter titles as Heading 1 when no Part is ticked', async () => {
+    let unticked = togglePart(acts, acts.parts![0], TICK_ALL);
+    unticked = togglePart(acts, acts.parts![1], unticked);
+    expect(await markdownOf(acts, text, unticked)).toBe(
+      '# Prologue\n\nBefore.\n\n# Interlude\n\nBetween.\n',
+    );
+  });
+
+  it('writes Part titles as Heading 1 and Chapter titles as Heading 2 in .docx', async () => {
+    const { 'word/document.xml': document } = await docxOf(acts, text);
+    expect(
+      paragraphs(document).map((p) => [
+        p.style,
+        p.runs.map((r) => r.text).join(''),
+      ]),
+    ).toEqual([
+      ['Heading2', 'Prologue'],
+      [undefined, 'Before.'],
+      ['Heading1', 'Act One'],
+      ['Heading2', 'The Storm'],
+      [undefined, 'Rain.'],
+      ['Heading2', 'The Calm'],
+      [undefined, 'Quiet.'],
+      ['Heading2', 'Interlude'],
+      [undefined, 'Between.'],
+      ['Heading1', 'Act Two'],
+      ['Heading2', 'The Return'],
+      [undefined, 'Home.'],
+    ]);
   });
 });
 

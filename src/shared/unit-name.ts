@@ -32,6 +32,8 @@ export function capitalized(text: string): string {
 }
 
 function titleOf(id: string, manuscript: Manuscript): string | undefined {
+  const part = manuscript.parts?.find((p) => p.id === id);
+  if (part) return part.title;
   for (const chapter of manuscript.chapters) {
     if (chapter.id === id) return chapter.title;
     const scene = chapter.scenes.find((s) => s.id === id);

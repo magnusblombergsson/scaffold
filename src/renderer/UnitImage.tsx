@@ -4,6 +4,7 @@ import type {
   EntrySummary,
   ImageRef,
   ManuscriptChapter,
+  ManuscriptPart,
   ManuscriptScene,
 } from '../shared/project-types';
 import type { MenuItem } from './Binder';
@@ -11,11 +12,13 @@ import { ImagePromptDialog } from './ImagePromptDialog';
 import { useImageUrl, ViewableImage } from './ImageView';
 import { ReadOnlyContext } from './read-only';
 
-type Unit = ManuscriptChapter | ManuscriptScene;
+type Unit = ManuscriptPart | ManuscriptChapter | ManuscriptScene;
 
-/** The image ref of a Chapter or Scene. */
+/** The image ref of a Part, Chapter or Scene. */
 function unitRef(unit: Unit): ImageRef {
-  return { kind: 'scenes' in unit ? 'chapter' : 'scene', id: unit.id };
+  const kind =
+    'chapters' in unit ? 'part' : 'scenes' in unit ? 'chapter' : 'scene';
+  return { kind, id: unit.id };
 }
 
 /** The image ref of an Entry. */
@@ -24,7 +27,7 @@ function entryRef({ id }: EntrySummary): ImageRef {
 }
 
 /**
- * The image of a Scene, Chapter or Entry as a `data:` URL, or null without
+ * The image of a Scene, Chapter, Part or Entry as a `data:` URL, or null without
  * one; `image` is the file its summary names. It is read again when the
  * unit's image changes, even under the same file name.
  */
@@ -104,7 +107,7 @@ export function EntryImageSection({ entry }: { entry: EntrySummary }) {
 }
 
 /**
- * A Scene's or Chapter's image, small, beside its title on a card, a lane,
+ * A Scene's, Chapter's or Part's image, small, beside its title on a card, a lane,
  * a Corkboard's header or an Overview row; clicked, the large view.
  */
 export function UnitThumbnail({ unit }: { unit: Unit }) {

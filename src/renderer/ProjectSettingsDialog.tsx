@@ -1,5 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { PROSE_LANGUAGES, type ProseLanguage } from '../shared/project-types';
+import {
+  PART_LABELS,
+  partLabel as readPartLabel,
+  PROSE_LANGUAGES,
+  type PartLabel,
+  type ProseLanguage,
+} from '../shared/project-types';
 import type { Status } from '../shared/status';
 import { StatusSettings } from './StatusSettings';
 import { TagSettings } from './TagSettings';
@@ -13,6 +19,7 @@ export function ProjectSettingsDialog({
   displayName,
   language,
   foldedNoteImage,
+  partLabel,
   statuses,
   readOnly,
   onClose,
@@ -22,6 +29,8 @@ export function ProjectSettingsDialog({
   language: ProseLanguage;
   /** Whether a folded Pinned note shows its Entry's image, as main last said. */
   foldedNoteImage: boolean;
+  /** What the Project calls its Parts, as main last said; Part when absent. */
+  partLabel?: PartLabel;
   /** The Status list as main last said. */
   statuses: Status[];
   readOnly: boolean;
@@ -34,6 +43,8 @@ export function ProjectSettingsDialog({
   const [saving, setSaving] = useState<ProseLanguage | null>(null);
   /** Whether a folded Pinned note shows its image, as chosen, while main saves it. */
   const [savingImage, setSavingImage] = useState<boolean | null>(null);
+  /** What Parts are called, as chosen, while main saves it. */
+  const [savingLabel, setSavingLabel] = useState<PartLabel | null>(null);
   useEffect(() => dialogRef.current?.showModal(), []);
 
   async function chooseLanguage(chosen: ProseLanguage) {
@@ -42,6 +53,13 @@ export function ProjectSettingsDialog({
     await window.project.setLanguage(chosen);
     // A later choice is still being saved.
     setSaving((latest) => (latest === chosen ? null : latest));
+  }
+
+  async function choosePartLabel(chosen: PartLabel) {
+    setSavingLabel(chosen);
+    // Saved, the Manuscript carrying it follows from main before this resolves.
+    await window.project.setPartLabel(chosen);
+    setSavingLabel((latest) => (latest === chosen ? null : latest));
   }
 
   async function chooseFoldedImage(on: boolean) {
@@ -90,6 +108,26 @@ export function ProjectSettingsDialog({
         </label>
         <p id="prose-language-hint" className="field-hint">
           Used for spellchecking and Export.
+        </p>
+        <label className="setting">
+          Parts are called
+          <select
+            value={savingLabel ?? partLabel ?? 'part'}
+            disabled={readOnly}
+            aria-describedby="part-label-hint"
+            onChange={(event) =>
+              void choosePartLabel(readPartLabel(event.target.value))
+            }
+          >
+            {PART_LABELS.map(({ label, plural }) => (
+              <option key={label} value={label}>
+                {plural}
+              </option>
+            ))}
+          </select>
+        </label>
+        <p id="part-label-hint" className="field-hint">
+          The optional level above Chapters. Only the name changes.
         </p>
       </section>
       <section aria-labelledby="pinned-notes-heading">

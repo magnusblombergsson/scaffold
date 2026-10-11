@@ -131,3 +131,54 @@ describe('picker values', () => {
     ]);
   });
 });
+
+describe('Parts', () => {
+  const withParts: Manuscript = {
+    chapters: [
+      { id: 'c0', title: 'Prologue', scenes: [] },
+      {
+        id: 'c1',
+        title: 'Arrival',
+        scenes: [{ id: 's1', title: 'Harbour' }],
+        part: 'p1',
+      },
+    ],
+    parts: [{ id: 'p1', title: 'The Sea', chapters: ['c1'], tags: ['tide'] }],
+    top: ['c0', 'p1'],
+    unplaced: [],
+    partLabel: 'act',
+  };
+  const partNames = { manuscript: withParts, entries: [] };
+
+  it('names a Part focus by the Project’s label, and one no longer there by it too', () => {
+    expect(focusLabel({ kind: 'part', id: 'p1' }, partNames)).toBe(
+      'Act “The Sea”',
+    );
+    expect(focusLabel({ kind: 'part', id: 'gone' }, partNames)).toBe(
+      'An Act no longer there',
+    );
+    expect(focusLabel({ kind: 'part', id: 'p1' }, names)).toBe(
+      'A Part no longer there',
+    );
+  });
+
+  it('turns a Part focus into a value and back', () => {
+    const focus: InterviewFocus = { kind: 'part', id: 'p1' };
+
+    expect(focusOfValue(valueOf(focus))).toEqual(focus);
+  });
+
+  it('offers each Part with its Chapters nested, and the Loose Chapters between, and a Part’s Tags', () => {
+    const groups = focusOptions(partNames);
+
+    expect(groups.find((g) => g.label === 'Manuscript')!.options).toEqual([
+      { value: 'chapter:c0', label: 'Chapter “Prologue”' },
+      { value: 'part:p1', label: 'Act “The Sea”' },
+      { value: 'chapter:c1', label: '\u2003Chapter “Arrival”' },
+      { value: 'scene:s1', label: '\u2003\u2003Scene “Harbour”' },
+    ]);
+    expect(groups.find((g) => g.label === 'Tags')!.options).toEqual([
+      { value: 'tag:tide', label: 'Tag: tide' },
+    ]);
+  });
+});

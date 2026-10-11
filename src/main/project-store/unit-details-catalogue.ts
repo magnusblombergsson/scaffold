@@ -58,8 +58,8 @@ export function imageFile(unitId: string, image: unknown): string | undefined {
 export const DETAILS: readonly Row[] = [
   {
     key: 'status',
-    only: 'Only a Scene or Chapter has a Status',
-    kinds: ['scene', 'chapter'],
+    only: 'Only a Scene, Chapter or Part has a Status',
+    kinds: ['scene', 'chapter', 'part'],
     parse: (raw) => (typeof raw === 'string' ? raw : undefined),
     validate(value, _unitId, { statuses }) {
       if (value === null || value === undefined) return undefined;
@@ -74,8 +74,8 @@ export const DETAILS: readonly Row[] = [
   },
   {
     key: 'tags',
-    only: 'Only a Scene, Chapter or Entry has Tags',
-    kinds: ['scene', 'chapter', 'entry'],
+    only: 'Only a Scene, Chapter, Part or Entry has Tags',
+    kinds: ['scene', 'chapter', 'part', 'entry'],
     parse: (raw) => {
       const tags = readTags(raw);
       return tags.length > 0 ? tags : undefined;
@@ -90,8 +90,8 @@ export const DETAILS: readonly Row[] = [
   },
   {
     key: 'wordTarget',
-    only: 'Only a Scene, Chapter or the Manuscript has a Word target',
-    kinds: ['scene', 'chapter', 'manuscript'],
+    only: 'Only a Scene, Chapter, Part or the Manuscript has a Word target',
+    kinds: ['scene', 'chapter', 'part', 'manuscript'],
     parse: (raw) => (isWordTarget(raw) ? raw : undefined),
     validate(value) {
       if (value === null || value === undefined) return undefined;
@@ -106,8 +106,8 @@ export const DETAILS: readonly Row[] = [
   },
   {
     key: 'image',
-    only: 'Only a Scene, Chapter or Entry has an image',
-    kinds: ['scene', 'chapter', 'entry'],
+    only: 'Only a Scene, Chapter, Part or Entry has an image',
+    kinds: ['scene', 'chapter', 'part', 'entry'],
     parse: (raw, unitId) => imageFile(unitId, raw),
     validate(value, unitId) {
       if (value === undefined) return undefined;

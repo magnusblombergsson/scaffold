@@ -65,7 +65,7 @@ export function Notices({
     ),
     ...dropped.map((notice, i) => (
       <div className="notice" key={`dropped-${i}`}>
-        <p>{droppedMessage(notice)}</p>
+        <p>{droppedMessage(notice, manuscript.partLabel)}</p>
         <button onClick={() => onDismissDropped(notice)}>Dismiss</button>
       </div>
     )),

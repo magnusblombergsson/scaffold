@@ -530,6 +530,16 @@ button.recent-open:hover {
   background: color-mix(in srgb, var(--accent) 5%, var(--sheet));
 }
 
+/* A Part's card, a little above its Chapters'. */
+.card.own.part {
+  background: color-mix(in srgb, var(--accent) 9%, var(--sheet));
+
+  button.card-title {
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+}
+
 /* Outline and Notes side by side, unless there are no Notes. */
 .card.wide .outline-notes-fields:not(:has(> :only-child)) {
   grid-template-columns: 1fr 1fr;
@@ -771,10 +781,18 @@ span.card-title {
   padding: 0.2rem 0;
 }
 
+.overview-row.part > .overview-row-head,
 .overview-row.chapter > .overview-row-head,
 .overview-row.project > .overview-row-head,
 .overview-row.group > .overview-row-head {
   font-weight: 600;
+}
+
+/* A Part's row stands above its Chapters'. */
+.overview-row.part > .overview-row-head .overview-title {
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.85rem;
 }
 
 /* Only the arrow opens and closes a row. */
@@ -1304,6 +1322,56 @@ button.counts.reached:hover {
   padding-left: 1.25rem;
 }
 
+/* A Part: a little above its Chapters, which it holds indented. */
+.binder-part-head {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0 0.5rem 0 0.15rem;
+  margin-top: 0.75rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  font-size: 0.85rem;
+}
+
+.binder-part-head .binder-rename {
+  text-transform: none;
+  letter-spacing: normal;
+}
+
+.binder-part .binder-chapter-head {
+  padding-left: 1.25rem;
+}
+
+.binder-part .binder-scene {
+  padding-left: 2rem;
+}
+
+.binder-collapse {
+  flex: none;
+  width: 1.1rem;
+  background: none;
+  border: none;
+  border-radius: 4px;
+  color: var(--muted);
+  font: inherit;
+  padding: 0;
+  cursor: pointer;
+}
+
+.binder-collapse:hover {
+  background: var(--hover);
+  color: var(--accent);
+}
+
+.binder-part-empty {
+  margin: 0.15rem 0 0 2.5rem;
+  color: var(--muted);
+  font-style: italic;
+  font-size: 0.85rem;
+}
+
 .binder-title {
   flex: 1;
   min-width: 0;
@@ -1447,7 +1515,10 @@ h2.binder-title > button:hover::after {
   font: inherit;
 }
 
-.binder-add {
+.binder-adds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
   margin: 0.75rem 0.5rem 0;
 }
 
@@ -2890,6 +2961,10 @@ header.entry-header {
 
 .import-chapter {
   font-weight: 600;
+}
+
+.import-part {
+  font-weight: 700;
 }
 
 .import-opening {

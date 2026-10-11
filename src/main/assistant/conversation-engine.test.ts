@@ -764,6 +764,25 @@ describe('Proposals in a reply', () => {
     expect((await store.read({ kind: 'notes', id: sceneId })).body).toBe('');
   });
 
+  it('turns a whole new Outline of a Part into a Proposal, as a Chapter’s', async () => {
+    let partId = '';
+    const { store, engine } = await setUp(() => [
+      'An Outline, then.\n',
+      block({ outline: partId, value: '- The crossing.' }),
+    ]);
+    partId = (await store.createPart(0, 'The Sea')).id;
+    const { id } = await store.startConversation('brainstorm', 'Ideas');
+
+    await engine.askAssistant(id, 'Outline it.', { sceneId: null }, () => {});
+
+    const [, replied] = (await store.readConversation(id)).messages;
+    expect(
+      replied.proposals?.map((p) =>
+        p.kind === 'outline' ? [p.outlineId, p.proposed] : p.kind,
+      ),
+    ).toEqual([[partId, '- The crossing.']]);
+  });
+
   it('tells the Assistant how to propose a new Entry or an Outline, and which Outline is which', async () => {
     const { store, engine, provider, chapterId, sceneId } = await setUp(() => [
       'Hm.',

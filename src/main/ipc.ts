@@ -10,6 +10,7 @@ import {
 import type { Handlers } from '../shared/bridge';
 import {
   PROSE_LANGUAGES,
+  partLabel,
   type EntryImage,
   type ProseLanguage,
 } from '../shared/project-types';
@@ -44,7 +45,12 @@ const projectHandlers: Handlers<
   flush: ({ store }) => store.flush(),
   hasUnsaved: async ({ store }) => store.hasUnsaved(),
   saveStatuses: async ({ store }) => store.saveStatuses(),
-  createChapter: ({ store }, index, title) => store.createChapter(index, title),
+  createChapter: ({ store }, index, title, partId) =>
+    store.createChapter(index, title, partId),
+  createPart: ({ store }, index, title) => store.createPart(index, title),
+  renamePart: ({ store }, partId, title) => store.renamePart(partId, title),
+  movePart: ({ store }, partId, index) => store.movePart(partId, index),
+  trashPart: ({ store }, partId) => store.trashPart(partId),
   createScene: ({ store }, chapterId, index, title) =>
     store.createScene(chapterId, index, title),
   renameChapter: ({ store }, chapterId, title) =>
@@ -52,8 +58,8 @@ const projectHandlers: Handlers<
   renameScene: ({ store }, sceneId, title) => store.renameScene(sceneId, title),
   splitScene: ({ store }, sceneId, cut, toNextChapter) =>
     store.splitScene(sceneId, cut, toNextChapter),
-  moveChapter: ({ store }, chapterId, index) =>
-    store.moveChapter(chapterId, index),
+  moveChapter: ({ store }, chapterId, index, partId) =>
+    store.moveChapter(chapterId, index, partId),
   moveScene: ({ store }, sceneId, chapterId, index) =>
     store.moveScene(sceneId, chapterId, index),
   trashScene: ({ store }, sceneId) => store.trashScene(sceneId),
@@ -129,6 +135,13 @@ const projectHandlers: Handlers<
       store,
       `The Pinned notes setting of ${store.displayName}`,
       () => store.setFoldedNoteImage(on === true),
+    ),
+  setPartLabel: ({ store, sender }, label) =>
+    saveProjectSetting(
+      sender,
+      store,
+      `What ${store.displayName} calls its Parts`,
+      () => store.setPartLabel(partLabel(label)),
     ),
 };
 

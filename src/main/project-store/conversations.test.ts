@@ -345,6 +345,25 @@ ${JSON.stringify({ type: 'message', role: 'assistant', text: 'Odd.', focus: [], 
     });
   });
 
+  it('keeps a Part focus by the Part’s id', async () => {
+    const { store } = await newProject();
+    const { id: partId } = await store.createPart(0, 'Act One');
+    const { id } = await store.conversations.startConversation(
+      'interview',
+      'Act One',
+    );
+
+    await store.conversations.setInterviewFocus(id, {
+      kind: 'part',
+      id: partId,
+    });
+
+    expect((await store.conversations.readConversation(id)).focus).toEqual({
+      kind: 'part',
+      id: partId,
+    });
+  });
+
   it('sets a focus only in an Interview, and skips a focus it can’t read', async () => {
     const { projectPath, store } = await newProject();
     const writing = await store.conversations.startConversation(

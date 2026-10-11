@@ -58,7 +58,7 @@ import {
 } from './export/story-bible-export';
 import {
   IMPORT_FORMATS,
-  newChapters,
+  newManuscript,
   readImportFile,
 } from './import/manuscript-import';
 import { connectProvider } from './assistant/connect-provider';
@@ -462,7 +462,7 @@ const shellHandlers: Handlers<ShellApi, typeof shellMethods, WindowContext> = {
       properties: ['createDirectory', 'showOverwriteConfirmation'],
     });
     if (canceled || !filePath) return 'canceled';
-    const manuscript = newChapters(splitManuscript(file.blocks, convention));
+    const manuscript = newManuscript(splitManuscript(file.blocks, convention));
     try {
       return showOpened(
         ctx.sender,
