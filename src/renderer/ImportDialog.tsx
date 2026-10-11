@@ -3,6 +3,9 @@ import type { ImportFile } from '../shared/api';
 import {
   CHAPTER_SPLIT_LABELS,
   defaultConvention,
+  importedChapters,
+  PART_SPLIT_LABEL,
+  partSplitOffered,
   plainText,
   SCENE_SPLIT_LABELS,
   sceneSplitAllowed,
@@ -10,6 +13,7 @@ import {
   wordCount,
   type ChapterSplit,
   type ImportConvention,
+  type ImportedChapter,
   type SceneSplit,
 } from '../shared/manuscript-import';
 import { countOf } from './word-count';
@@ -18,9 +22,10 @@ import { countOf } from './word-count';
 const OPENING_WORDS = 12;
 
 /**
- * The preview of an Import: the Chapters and Scenes the file splits into,
- * and where it splits them, which the Author can change before the new
- * Project is created.
+ * The preview of an Import: the Parts, Chapters and Scenes the file splits
+ * into, and where it splits them, which the Author can change before the new
+ * Project is created. Parts are offered only when the file has Heading 1s
+ * and Heading 2s, and never chosen for the Author.
  */
 export function ImportDialog({
   file,
@@ -35,10 +40,13 @@ export function ImportDialog({
   const [convention, setConvention] = useState(() =>
     defaultConvention(file.blocks),
   );
-  const chapters = useMemo(
+  const items = useMemo(
     () => splitManuscript(file.blocks, convention),
     [file, convention],
   );
+  const chapters = importedChapters(items);
+  const partCount = items.length - items.filter((i) => 'scenes' in i).length;
+  const partsOffered = useMemo(() => partSplitOffered(file.blocks), [file]);
   const sceneCount = chapters.reduce((sum, c) => sum + c.scenes.length, 0);
   const words = chapters.reduce(
     (sum, c) => sum + c.scenes.reduce((n, s) => n + wordCount(s.paragraphs), 0),
@@ -49,8 +57,9 @@ export function ImportDialog({
     dialogRef.current?.showModal();
   }, []);
 
-  function setChapters(chapters: ChapterSplit) {
+  function setChapters(chapters: ChapterSplit, parts = false) {
     setConvention(({ scenes }) => ({
+      ...(parts && { parts }),
       chapters,
       scenes: sceneSplitAllowed(scenes, chapters) ? scenes : 'separator',
     }));
@@ -74,6 +83,7 @@ export function ImportDialog({
           New Chapter at{' '}
           <select
             value={convention.chapters}
+            disabled={convention.parts}
             onChange={(e) => setChapters(e.target.value as ChapterSplit)}
           >
             {Object.entries(CHAPTER_SPLIT_LABELS).map(([value, label]) => (
@@ -83,6 +93,20 @@ export function ImportDialog({
             ))}
           </select>
         </label>
+        {partsOffered && (
+          <label>
+            <input
+              type="checkbox"
+              checked={convention.parts ?? false}
+              onChange={(e) =>
+                e.target.checked
+                  ? setChapters('heading2', true)
+                  : setChapters('heading1')
+              }
+            />{' '}
+            {PART_SPLIT_LABEL}
+          </label>
+        )}
         <label>
           New Scene at{' '}
           <select
@@ -109,38 +133,55 @@ export function ImportDialog({
         </label>
       </div>
       <p className="import-summary" aria-live="polite">
+        {partCount > 0 && `${countOf(partCount, 'Part')}, `}
         {countOf(chapters.length, 'Chapter')}, {countOf(sceneCount, 'Scene')},{' '}
         {countOf(words, 'word')}
       </p>
       <ol className="import-preview" aria-label="Chapters and Scenes">
-        {chapters.map((chapter, i) => (
-          <li key={i}>
-            <span className="import-chapter">{chapter.title}</span>
-            <ol>
-              {chapter.scenes.map((scene, j) => (
-                <li key={j}>
-                  <span className="import-scene">{scene.title}</span>{' '}
-                  <span className="import-words">
-                    {countOf(wordCount(scene.paragraphs), 'word')}
-                  </span>
-                  <span className="import-opening">
-                    {opening(
-                      scene.paragraphs
-                        .map(({ spans }) => plainText(spans))
-                        .join(' '),
-                    )}
-                  </span>
-                </li>
-              ))}
-            </ol>
-          </li>
-        ))}
+        {items.map((item, i) =>
+          'scenes' in item ? (
+            <ChapterPreview key={i} chapter={item} />
+          ) : (
+            <li key={i}>
+              <span className="import-part">{item.title}</span>
+              <ol>
+                {item.chapters.map((chapter, j) => (
+                  <ChapterPreview key={j} chapter={chapter} />
+                ))}
+              </ol>
+            </li>
+          ),
+        )}
       </ol>
       <div className="settings-close">
         <button onClick={() => dialogRef.current?.close()}>Cancel</button>
         <button onClick={() => onImport(convention)}>Create Project…</button>
       </div>
     </dialog>
+  );
+}
+
+/** A Chapter in the preview, with its Scenes' titles, length and opening. */
+function ChapterPreview({ chapter }: { chapter: ImportedChapter }) {
+  return (
+    <li>
+      <span className="import-chapter">{chapter.title}</span>
+      <ol>
+        {chapter.scenes.map((scene, j) => (
+          <li key={j}>
+            <span className="import-scene">{scene.title}</span>{' '}
+            <span className="import-words">
+              {countOf(wordCount(scene.paragraphs), 'word')}
+            </span>
+            <span className="import-opening">
+              {opening(
+                scene.paragraphs.map(({ spans }) => plainText(spans)).join(' '),
+              )}
+            </span>
+          </li>
+        ))}
+      </ol>
+    </li>
   );
 }
 

@@ -65,6 +65,8 @@ export function logOnce(logged: Set<string>, message: string): void {
 
 export const VERSION_FILE = new RegExp(`^(${UUID})\\.version\\.md$`);
 export const CHAPTER_FILE = new RegExp(`^(${UUID})\\.json$`);
+/** A Part's record in Trash; no app without Parts reads it as a Chapter's. */
+export const PART_FILE = new RegExp(`^(${UUID})\\.part\\.json$`);
 export const ENTRY_TRASH_FILE = new RegExp(`^(${UUID})\\.entry\\.md$`);
 
 /** Where Entry, Scene and Chapter images are, each named by its unit's `image`. */
@@ -96,4 +98,12 @@ export function chapterTrashPath(projectPath: string, id: string): string {
 
 export function isChapterFile(name: string): boolean {
   return CHAPTER_FILE.test(name);
+}
+
+export function partTrashPath(projectPath: string, id: string): string {
+  return path.join(trashDir(projectPath), `${id}.part.json`);
+}
+
+export function isPartFile(name: string): boolean {
+  return PART_FILE.test(name);
 }

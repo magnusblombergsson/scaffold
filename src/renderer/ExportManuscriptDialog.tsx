@@ -1,23 +1,30 @@
 import { useEffect, useRef, useState } from 'react';
 import {
   chapterTick,
+  partTick,
   pickedManuscript,
   sceneTicked,
   TICK_ALL,
   tickMatching,
   toggleChapter,
+  togglePart,
   toggleScene,
   type ExportUnticked,
   type Tick,
 } from '../shared/export-choice';
 import { filterManuscript, filterOn, type Filter } from '../shared/filter';
-import type { Manuscript } from '../shared/project-types';
+import type {
+  Manuscript,
+  ManuscriptChapter,
+  ManuscriptPart,
+} from '../shared/project-types';
 import { FilterControl, useFilter } from './Filter';
 import { useStatuses } from './StatusAndTags';
 
 /**
  * File › Export Manuscript…: which Scenes and Chapters go in, each Chapter
- * with its Scenes ticked under it, before the save dialog. Tick matching…
+ * with its Scenes ticked under it, and each Part with its Chapters, before
+ * the save dialog. Unplaced Chapters never go in, so aren't listed. Tick matching…
  * ticks only what a Filter matches, for the Author to adjust by hand. What
  * they leave unticked is remembered for the Project on this computer.
  */
@@ -81,37 +88,38 @@ export function ExportManuscriptDialog({
       )}
       {unticked && (
         <ul className="export-tree" aria-label="Scenes and Chapters">
-          {manuscript.chapters.map((chapter) => (
-            <li key={chapter.id}>
-              <label className="export-chapter">
-                <TickBox
-                  tick={chapterTick(chapter, unticked)}
-                  onChange={() => setUnticked(toggleChapter(chapter, unticked))}
-                />
-                {chapter.title}
-              </label>
-              {chapter.scenes.length > 0 && (
+          {topLevel(manuscript).map((item) =>
+            'chapter' in item ? (
+              <ChapterTicks
+                key={item.chapter.id}
+                chapter={item.chapter}
+                unticked={unticked}
+                onChange={setUnticked}
+              />
+            ) : (
+              <li key={item.part.id}>
+                <label className="export-chapter">
+                  <TickBox
+                    tick={partTick(manuscript, item.part, unticked)}
+                    onChange={() =>
+                      setUnticked(togglePart(manuscript, item.part, unticked))
+                    }
+                  />
+                  {item.part.title}
+                </label>
                 <ul>
-                  {chapter.scenes.map((scene) => (
-                    <li key={scene.id}>
-                      <label>
-                        <input
-                          type="checkbox"
-                          checked={sceneTicked(scene.id, unticked)}
-                          onChange={() =>
-                            setUnticked(
-                              toggleScene(chapter, scene.id, unticked),
-                            )
-                          }
-                        />
-                        {scene.title}
-                      </label>
-                    </li>
+                  {item.chapters.map((chapter) => (
+                    <ChapterTicks
+                      key={chapter.id}
+                      chapter={chapter}
+                      unticked={unticked}
+                      onChange={setUnticked}
+                    />
                   ))}
                 </ul>
-              )}
-            </li>
-          ))}
+              </li>
+            ),
+          )}
         </ul>
       )}
       <div className="settings-close">
@@ -127,6 +135,71 @@ export function ExportManuscriptDialog({
         </button>
       </div>
     </dialog>
+  );
+}
+
+/**
+ * The Manuscript's top level as the dialog lists it: each Part with its
+ * Chapters, and the Loose Chapters between them. A Part with no Chapters
+ * and the Unplaced Chapters are left out, as they never go in.
+ */
+type TopItem =
+  | { chapter: ManuscriptChapter }
+  | { part: ManuscriptPart; chapters: ManuscriptChapter[] };
+
+function topLevel(manuscript: Manuscript): TopItem[] {
+  const chapters = manuscript.chapters.filter((c) => !c.unplaced);
+  if (!manuscript.parts) return chapters.map((chapter) => ({ chapter }));
+  const parts = new Map(manuscript.parts.map((p) => [p.id, p]));
+  return (manuscript.top ?? []).flatMap((id): TopItem[] => {
+    const part = parts.get(id);
+    if (part) {
+      const members = chapters.filter((c) => c.part === id);
+      return members.length > 0 ? [{ part, chapters: members }] : [];
+    }
+    const chapter = chapters.find((c) => c.id === id);
+    return chapter ? [{ chapter }] : [];
+  });
+}
+
+/** A Chapter's tick box, with its Scenes' under it. */
+function ChapterTicks({
+  chapter,
+  unticked,
+  onChange,
+}: {
+  chapter: ManuscriptChapter;
+  unticked: ExportUnticked;
+  onChange(unticked: ExportUnticked): void;
+}) {
+  return (
+    <li>
+      <label className="export-chapter">
+        <TickBox
+          tick={chapterTick(chapter, unticked)}
+          onChange={() => onChange(toggleChapter(chapter, unticked))}
+        />
+        {chapter.title}
+      </label>
+      {chapter.scenes.length > 0 && (
+        <ul>
+          {chapter.scenes.map((scene) => (
+            <li key={scene.id}>
+              <label>
+                <input
+                  type="checkbox"
+                  checked={sceneTicked(scene.id, unticked)}
+                  onChange={() =>
+                    onChange(toggleScene(chapter, scene.id, unticked))
+                  }
+                />
+                {scene.title}
+              </label>
+            </li>
+          ))}
+        </ul>
+      )}
+    </li>
   );
 }
 

@@ -7,6 +7,7 @@ import { unitName } from '../../shared/unit-name';
 import {
   unitKey,
   type ChapterNode,
+  type PartNode,
   type EntrySummary,
   type EntryType,
   type EntryValue,
@@ -23,6 +24,9 @@ import type { FileSystem } from './file-system';
 import {
   CHAPTER_FILE,
   chapterTrashPath,
+  isPartFile,
+  PART_FILE,
+  partTrashPath,
   ENTRY_TRASH_FILE,
   entryRef,
   entryTrashPath,
@@ -38,7 +42,17 @@ import {
 } from './layout';
 import { ProjectError } from './project-error';
 import { freeName, renameWithRetry, safeWrite } from './safe-write';
-import { findChapter, sceneIds, tryFindScene } from './tree';
+import {
+  expanded,
+  findChapter,
+  findPart,
+  isPart,
+  place,
+  sceneIds,
+  settled,
+  tryFindScene,
+  unplace,
+} from './tree';
 import {
   copyPath,
   entryFile,
@@ -76,14 +90,33 @@ export type TrashedScene = {
   node?: UnknownKeys;
 };
 
-/** A Chapter in Trash, with the Scenes deleted along with it. */
+/**
+ * A Chapter in Trash, with the Scenes deleted along with it. `index` is its
+ * place in its `part`, or without one among the Parts and Loose Chapters.
+ */
 export type TrashedChapter = {
   kind: 'chapter';
   id: string;
   title: string;
   trashedAt: number;
   index: number;
+  part?: string;
+  /** Deleted with its Part, which `trash/<part id>.part.json` records. */
+  withPart?: true;
   scenes: SceneNode[];
+  /** The keys of its place in the tree that this app doesn't know. */
+  node: UnknownKeys;
+};
+
+/** A Part in Trash, with the Chapters deleted along with it. */
+export type TrashedPart = {
+  kind: 'part';
+  id: string;
+  title: string;
+  trashedAt: number;
+  /** Its place among the Parts and Loose Chapters. */
+  index: number;
+  chapters: TrashedChapter[];
   /** The keys of its place in the tree that this app doesn't know. */
   node: UnknownKeys;
 };
@@ -121,6 +154,7 @@ export type TrashedConversation = {
 export type Trashed =
   | TrashedScene
   | TrashedChapter
+  | TrashedPart
   | TrashedVersion
   | TrashedEntry
   | TrashedConversation;
@@ -153,7 +187,11 @@ export type TrashedSceneInfo = {
   node?: UnknownKeys;
 };
 
-/** Beside these, the keys of the Chapter's place in the tree that this app doesn't know. */
+/**
+ * Beside these, the keys of the Chapter's place in the tree that this app
+ * doesn't know. `inPart` is the Part it was in, which an app without Parts
+ * keeps as such a key; `withPart` marks a Chapter deleted with its Part.
+ */
 export type ChapterFile = {
   id: string;
   format: number;
@@ -161,6 +199,21 @@ export type ChapterFile = {
   index: number;
   trashedAt: number;
   scenes: SceneNode[];
+  inPart?: string;
+  withPart?: true;
+};
+
+/**
+ * What `trash/<id>.part.json` records of a Part, its Chapters by id, beside
+ * the keys of its place in the tree that this app doesn't know.
+ */
+export type PartFile = {
+  id: string;
+  format: number;
+  title: string;
+  index: number;
+  trashedAt: number;
+  chapters: string[];
 };
 
 export function trashedEntry(
@@ -203,18 +256,68 @@ export function trashedVersion(
 }
 
 export function trashedChapter(file: ChapterFile): TrashedChapter {
-  const { id, format: _, title, index, trashedAt, scenes, ...node } = file;
-  return { kind: 'chapter', id, title, trashedAt, index, scenes, node };
+  const {
+    id,
+    format: _,
+    title,
+    index,
+    trashedAt,
+    scenes,
+    inPart,
+    withPart,
+    ...node
+  } = file;
+  return {
+    kind: 'chapter',
+    id,
+    title,
+    trashedAt,
+    index,
+    ...(typeof inPart === 'string' && { part: inPart }),
+    ...(withPart === true && { withPart }),
+    scenes,
+    node,
+  };
 }
 
-/** The keys of a Chapter's or Scene's place in the tree that this app doesn't know. */
-function unknownKeys(node: ChapterNode | SceneNode): UnknownKeys | undefined {
+/** A Part in Trash, with those of its Chapters whose records are here. */
+export function trashedPart(
+  file: PartFile,
+  chapters: ReadonlyMap<string, TrashedChapter>,
+): TrashedPart {
+  const {
+    id,
+    format: _,
+    title,
+    index,
+    trashedAt,
+    chapters: ids,
+    ...node
+  } = file;
+  return {
+    kind: 'part',
+    id,
+    title,
+    trashedAt,
+    index,
+    chapters: (Array.isArray(ids) ? ids : [])
+      .map((chapterId) => chapters.get(chapterId))
+      .filter((chapter) => chapter !== undefined),
+    node,
+  };
+}
+
+/** The keys of a Part's, Chapter's or Scene's place in the tree that this app doesn't know. */
+function unknownKeys(
+  node: PartNode | ChapterNode | SceneNode,
+): UnknownKeys | undefined {
   const {
     id: _,
     title: _t,
     scenes: _s,
+    chapters: _c,
     ...unknown
-  } = node as Partial<ChapterNode>;
+  } = node as Partial<ChapterNode & PartNode>;
   return Object.keys(unknown).length > 0 ? unknown : undefined;
 }
 
@@ -248,7 +351,7 @@ export type TrashDeps = {
     toTrash: (prose: Map<string, UnitFile>) => Promise<void>,
   ) => Promise<void>;
   conversations: () => Conversations;
-  /** Whether a Chapter or Scene of this id is in the Manuscript or Unplaced. */
+  /** Whether a Part, Chapter or Scene of this id is in the Manuscript or Unplaced. */
   isLive: (id: string) => boolean;
   sceneOrChapterRef: (id: string) => ImageRef;
   deleteOutlineAndNotes: (id: string) => Promise<void>;
@@ -262,7 +365,12 @@ export type TrashDeps = {
 export type Undo = () => Promise<void>;
 
 /** The kinds that can be moved to Trash by id; a version is set aside by a Conflict. */
-export type MovableKind = 'scene' | 'chapter' | 'entry' | 'conversation';
+export type MovableKind =
+  | 'scene'
+  | 'chapter'
+  | 'part'
+  | 'entry'
+  | 'conversation';
 
 /** How one kind of Trashed item is described, moved, restored and emptied. */
 type Row<T extends Trashed> = {
@@ -314,6 +422,28 @@ export class Trash {
       restore: async (item) => {
         await this.restoreProse(item);
         return this.again('chapter', item.id);
+      },
+    },
+    part: {
+      ids: (item) => [
+        item.id,
+        ...item.chapters.flatMap((c) => [c.id, ...c.scenes.map((s) => s.id)]),
+      ],
+      describe: (item) => ({
+        kind: 'part',
+        id: item.id,
+        title: item.title,
+        trashedAt: item.trashedAt,
+        chapters: item.chapters.map((c) => ({
+          id: c.id,
+          title: c.title,
+          scenes: c.scenes.map((s) => ({ ...s })),
+        })),
+      }),
+      move: (id) => this.movePart(id),
+      restore: async (item) => {
+        await this.restorePart(item);
+        return this.again('part', item.id);
       },
     },
     entry: {
@@ -393,12 +523,13 @@ export class Trash {
     for (const [id, item] of items) this.items.set(id, item);
   }
 
-  /** Whether a Chapter or Scene is in Trash, on its own or with its Chapter. */
+  /** Whether a Part, Chapter or Scene is in Trash, on its own or with what held it. */
   has(id: string): boolean {
     return [...this.items.values()].some(
       (item) =>
         item.id === id ||
-        (item.kind === 'chapter' && item.scenes.some((s) => s.id === id)),
+        ((item.kind === 'chapter' || item.kind === 'part') &&
+          this.row(item).ids(item).includes(id)),
     );
   }
 
@@ -560,7 +691,7 @@ export class Trash {
   }
 
   private async moveChapter(chapterId: string): Promise<void> {
-    const tree = this.deps.tree();
+    const tree = expanded(this.deps.tree());
     const chapter = findChapter(tree, chapterId);
     if (tree.chapters.length === 1) {
       throw new ProjectError(
@@ -574,38 +705,109 @@ export class Trash {
     const ids = chapter.scenes.map((s) => s.id);
     await this.deps.closeScenes(ids, async (prose) => {
       const at = this.deps.clock.now();
-      const index = tree.chapters.indexOf(chapter);
-      for (const [i, scene] of chapter.scenes.entries()) {
-        await this.writeScene(scene.id, prose.get(scene.id)!, {
-          at,
-          title: scene.title,
-          chapter: { id: chapter.id, title: chapter.title },
-          index: i,
-          withChapter: true,
+      const where = unplace(tree, chapterId);
+      const record = await this.writeChapter(chapter, prose, at, {
+        index: where?.index ?? tree.top.length,
+        ...(where?.part !== undefined && { inPart: where.part }),
+      });
+      tree.chapters = tree.chapters.filter((c) => c.id !== chapterId);
+      await this.deps.saveTree(settled(tree));
+      this.items.set(chapter.id, trashedChapter(record));
+    });
+    // Its Scenes' images go with its own.
+    await this.moveImages([chapterId, ...ids], 'trash');
+  }
+
+  /** Writes a Chapter's Scenes and its record to Trash, which the tree still places. */
+  private async writeChapter(
+    chapter: ChapterNode,
+    prose: Map<string, UnitFile>,
+    at: number,
+    place: Pick<ChapterFile, 'index' | 'inPart' | 'withPart'>,
+  ): Promise<ChapterFile> {
+    for (const [i, scene] of chapter.scenes.entries()) {
+      await this.writeScene(scene.id, prose.get(scene.id)!, {
+        at,
+        title: scene.title,
+        chapter: { id: chapter.id, title: chapter.title },
+        index: i,
+        withChapter: true,
+      });
+    }
+    const record: ChapterFile = {
+      ...unknownKeys(chapter),
+      id: chapter.id,
+      format: FORMAT,
+      title: chapter.title,
+      trashedAt: at,
+      scenes: chapter.scenes,
+      ...place,
+    };
+    await this.deps.fs.mkdir(trashDir(this.deps.path));
+    await safeWrite(
+      this.deps.fs,
+      this.deps.clock,
+      chapterTrashPath(this.deps.path, chapter.id),
+      `${JSON.stringify(record, null, 2)}\n`,
+    );
+    return record;
+  }
+
+  /**
+   * Moves a Part to Trash with its Chapters and their Scenes: each Chapter
+   * as when deleted on its own, marked as deleted with the Part, then the
+   * Part's record, then the tree.
+   */
+  private async movePart(partId: string): Promise<void> {
+    const tree = expanded(this.deps.tree());
+    const part = findPart(tree, partId);
+    const chapters = part.chapters.map((id) => findChapter(tree, id));
+    if (tree.chapters.length === chapters.length && chapters.length > 0) {
+      throw new ProjectError(
+        'last-chapter',
+        "The last Chapter can't be deleted",
+      );
+    }
+    const ids = chapters.flatMap((c) => c.scenes.map((s) => s.id));
+    for (const id of ids) this.deps.refuseMissing(sceneRef(id));
+    await this.deps.closeScenes(ids, async (prose) => {
+      const at = this.deps.clock.now();
+      const records = new Map<string, TrashedChapter>();
+      for (const [index, chapter] of chapters.entries()) {
+        const record = await this.writeChapter(chapter, prose, at, {
+          index,
+          inPart: partId,
+          withPart: true,
         });
+        records.set(chapter.id, trashedChapter(record));
       }
-      const record: ChapterFile = {
-        ...unknownKeys(chapter),
-        id: chapter.id,
+      const index = tree.top.indexOf(partId);
+      const record: PartFile = {
+        ...unknownKeys(part),
+        id: partId,
         format: FORMAT,
-        title: chapter.title,
+        title: part.title,
         index,
         trashedAt: at,
-        scenes: chapter.scenes,
+        chapters: [...part.chapters],
       };
       await this.deps.fs.mkdir(trashDir(this.deps.path));
       await safeWrite(
         this.deps.fs,
         this.deps.clock,
-        chapterTrashPath(this.deps.path, chapter.id),
+        partTrashPath(this.deps.path, partId),
         `${JSON.stringify(record, null, 2)}\n`,
       );
-      tree.chapters.splice(index, 1);
-      await this.deps.saveTree(tree);
-      this.items.set(chapter.id, trashedChapter(record));
+      tree.top.splice(index, 1);
+      tree.parts = tree.parts.filter((p) => p.id !== partId);
+      tree.chapters = tree.chapters.filter((c) => !records.has(c.id));
+      await this.deps.saveTree(settled(tree));
+      this.items.set(partId, trashedPart(record, records));
     });
-    // Its Scenes' images go with its own.
-    await this.moveImages([chapterId, ...ids], 'trash');
+    await this.moveImages(
+      [partId, ...chapters.map((c) => c.id), ...ids],
+      'trash',
+    );
   }
 
   private async writeScene(
@@ -704,7 +906,7 @@ export class Trash {
   /** Puts a Scene or Chapter back, with its Scenes. */
   private async restoreProse(item: TrashedScene | TrashedChapter) {
     const { id } = item;
-    const { path: projectPath, fs, clock, files } = this.deps;
+    const { path: projectPath, fs, files } = this.deps;
     const tree = this.deps.tree();
     const placed = new Set(sceneIds(tree));
     const live = (sceneId: string) => placed.has(sceneId) || files.has(sceneId);
@@ -725,29 +927,18 @@ export class Trash {
     // Scene files first, the tree next, the Trash copies last.
     const restored: string[] = [];
     const restoreFile = async (sceneId: string) => {
-      const file = sceneTrashPath(projectPath, sceneId);
-      if (!(await fs.exists(file))) return;
-      const { frontmatter, body } = parseUnitFile(await fs.readFile(file));
-      const { trashed: _, ...previous } = frontmatter;
-      await safeWrite(
-        fs,
-        clock,
-        scenePath(projectPath, sceneId),
-        sceneFile({ id: sceneId, markdown: body }, previous),
-      );
-      restored.push(sceneId);
+      if (await this.restoreSceneFile(sceneId)) restored.push(sceneId);
     };
 
     if (item.kind === 'chapter') {
       const scenes = item.scenes.filter((s) => !live(s.id));
       for (const scene of scenes) await restoreFile(scene.id);
-      tree.chapters.splice(Math.min(item.index, tree.chapters.length), 0, {
-        ...item.node,
-        id,
-        title: item.title,
-        scenes,
-      });
-      await this.deps.saveTree(tree);
+      const full = expanded(tree);
+      full.chapters.push({ ...item.node, id, title: item.title, scenes });
+      // Back in its Part if that is here, else among the Loose Chapters.
+      const inPart = item.part !== undefined && isPart(full, item.part);
+      place(full, id, item.index, inPart ? item.part : undefined);
+      await this.deps.saveTree(settled(full));
     } else {
       await restoreFile(id);
       if (item.chapter) {
@@ -777,7 +968,80 @@ export class Trash {
     }
   }
 
-  /** Moves the files the Chapters and Scenes of `ids` have in Trash's keeping, to Trash or back. */
+  /**
+   * Writes a Scene's Trash copy back to `scenes/`, if it is here; its Trash
+   * copy stays until the tree places it. Resolves with whether it was.
+   */
+  private async restoreSceneFile(sceneId: string): Promise<boolean> {
+    const { path: projectPath, fs, clock } = this.deps;
+    const file = sceneTrashPath(projectPath, sceneId);
+    if (!(await fs.exists(file))) return false;
+    const { frontmatter, body } = parseUnitFile(await fs.readFile(file));
+    const { trashed: _, ...previous } = frontmatter;
+    await safeWrite(
+      fs,
+      clock,
+      scenePath(projectPath, sceneId),
+      sceneFile({ id: sceneId, markdown: body }, previous),
+    );
+    return true;
+  }
+
+  /**
+   * Puts a Part back with its Chapters and their Scenes: images first,
+   * Scene files next, then the tree, and the Trash records last. A Chapter
+   * already back in the Manuscript stays where it is.
+   */
+  private async restorePart(item: TrashedPart): Promise<void> {
+    const { path: projectPath, fs, files } = this.deps;
+    const full = expanded(this.deps.tree());
+    if (isPart(full, item.id)) {
+      throw new ProjectError(
+        'in-manuscript',
+        `${item.title} is already in the Manuscript`,
+      );
+    }
+    await this.moveImages(this.row(item).ids(item), 'images');
+    const placed = new Set(sceneIds(full));
+    const chapterIds = new Set(full.chapters.map((c) => c.id));
+    const chapters = item.chapters.filter((c) => !chapterIds.has(c.id));
+    const restored: string[] = [];
+    for (const chapter of chapters) {
+      const scenes = chapter.scenes.filter(
+        (s) => !placed.has(s.id) && !files.has(s.id),
+      );
+      for (const scene of scenes) {
+        if (await this.restoreSceneFile(scene.id)) restored.push(scene.id);
+      }
+      full.chapters.push({
+        ...chapter.node,
+        id: chapter.id,
+        title: chapter.title,
+        scenes,
+      });
+    }
+    full.parts.push({
+      ...item.node,
+      id: item.id,
+      title: item.title,
+      chapters: chapters.map((c) => c.id),
+    });
+    full.top.splice(Math.min(item.index, full.top.length), 0, item.id);
+    await this.deps.saveTree(settled(full));
+    for (const sceneId of restored) files.add(sceneId);
+    this.items.delete(item.id);
+
+    for (const sceneId of restored) {
+      await fs.unlink(sceneTrashPath(projectPath, sceneId));
+    }
+    for (const chapter of item.chapters) {
+      const file = chapterTrashPath(projectPath, chapter.id);
+      if (await fs.exists(file)) await fs.unlink(file);
+    }
+    await fs.unlink(partTrashPath(projectPath, item.id));
+  }
+
+  /** Moves the files the Parts, Chapters and Scenes of `ids` have in Trash's keeping, to Trash or back. */
   private async moveImages(
     ids: readonly string[],
     to: 'trash' | 'images',
@@ -806,15 +1070,17 @@ export class Trash {
   async empty(): Promise<void> {
     const { path: projectPath, fs, entries } = this.deps;
     const dir = trashDir(projectPath);
-    // Chapter records first: a crash then leaves their Scenes in Trash on
-    // their own, still restorable.
-    const names = (await fs.readdir(dir)).sort(
-      (a, b) => Number(isChapterFile(b)) - Number(isChapterFile(a)),
-    );
+    // Part records first, then Chapter records: a crash then leaves their
+    // Chapters and Scenes in Trash on their own, still restorable.
+    const rank = (name: string) =>
+      isPartFile(name) ? 2 : isChapterFile(name) ? 1 : 0;
+    const names = (await fs.readdir(dir)).sort((a, b) => rank(b) - rank(a));
     // Outlines and Notes stay in place while their unit is in Trash, and go
     // first: a crash then leaves the unit restorable, without them.
     for (const name of names) {
-      const id = (ID_FILE.exec(name) ?? CHAPTER_FILE.exec(name))?.[1];
+      const id = (ID_FILE.exec(name) ??
+        CHAPTER_FILE.exec(name) ??
+        PART_FILE.exec(name))?.[1];
       if (id && !this.deps.isLive(id))
         await this.deps.deleteOutlineAndNotes(id);
       // So do an Entry's private notes.

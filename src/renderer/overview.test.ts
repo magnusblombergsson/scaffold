@@ -83,6 +83,44 @@ describe('expandable', () => {
   });
 });
 
+describe('with Parts', () => {
+  const acts: Manuscript = {
+    chapters: [
+      { id: 'c0', title: 'Prologue', scenes: [{ id: 's0', title: 'Dawn' }] },
+      { ...manuscript.chapters[0], part: 'p1' },
+      { ...manuscript.chapters[1], part: 'p1' },
+      {
+        id: 'c9',
+        title: 'Stray',
+        scenes: [{ id: 's9', title: 'Lost' }],
+        unplaced: true,
+      },
+    ],
+    parts: [{ id: 'p1', title: 'Act One', chapters: ['c1', 'c2'] }],
+    top: ['c0', 'p1'],
+    unplaced: [],
+  };
+
+  it('lists the Chapter being written and its Part in Project scope', () => {
+    expect([...startListed('project', inChapter1, acts)]).toEqual(['c1', 'p1']);
+  });
+
+  it("in Project scope, puts each Part's row before its Chapters' rows, and the Unplaced Chapters last", () => {
+    expect(expandable(acts, 'project', inChapter1)).toEqual([
+      PROJECT_OUTLINE,
+      'c0',
+      's0',
+      'p1',
+      'c1',
+      's2',
+      'c2',
+      's3',
+      'c9',
+      's9',
+    ]);
+  });
+});
+
 describe('firstLine', () => {
   it("is an Outline's first line with text, without its bullet", () => {
     expect(firstLine('\n  \n- Anna finds the letter\n- She burns it')).toBe(

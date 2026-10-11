@@ -1,11 +1,14 @@
 import type { EntrySummary, Manuscript, TrashItem } from './project-types';
 
-/** What a Todo may link to: one Scene, Chapter or Entry. */
-export type TodoLink = { kind: 'scene' | 'chapter' | 'entry'; id: string };
+/** What a Todo may link to: one Scene, Chapter, Part or Entry. */
+export type TodoLink = {
+  kind: 'scene' | 'chapter' | 'part' | 'entry';
+  id: string;
+};
 
-const LINK_KINDS: readonly unknown[] = ['scene', 'chapter', 'entry'];
+const LINK_KINDS: readonly unknown[] = ['scene', 'chapter', 'part', 'entry'];
 
-/** Whether `value` is a link to a Scene, Chapter or Entry by its id. */
+/** Whether `value` is a link to a Scene, Chapter, Part or Entry by its id. */
 export function isTodoLink(value: unknown): value is TodoLink {
   if (typeof value !== 'object' || value === null) return false;
   const { kind, id } = value as Record<string, unknown>;
@@ -46,7 +49,7 @@ export type TodoChange = {
 /**
  * A link as the Todo shows it: the unit's title, and while the unit is in
  * Trash, the id of the Trash item that holds it (a Scene's Chapter's, if the
- * Scene went with it).
+ * Scene went with it, or the Part's, if the Chapter did).
  */
 export type LinkView = { title: string; trashId?: string };
 
@@ -66,6 +69,9 @@ export function linkView(
   } else if (kind === 'chapter') {
     const chapter = manuscript.chapters.find((c) => c.id === id);
     if (chapter) return { title: chapter.title };
+  } else if (kind === 'part') {
+    const part = manuscript.parts?.find((p) => p.id === id);
+    if (part) return { title: part.title };
   } else {
     const scene = [
       ...manuscript.chapters.flatMap((c) => c.scenes),
@@ -80,6 +86,14 @@ export function linkView(
     if (kind === 'scene' && item.kind === 'chapter') {
       const scene = item.scenes.find((s) => s.id === id);
       if (scene) return { title: scene.title, trashId: item.id };
+    }
+    if (item.kind === 'part' && (kind === 'chapter' || kind === 'scene')) {
+      const units =
+        kind === 'chapter'
+          ? item.chapters
+          : item.chapters.flatMap((c) => c.scenes);
+      const unit = units.find((u) => u.id === id);
+      if (unit) return { title: unit.title, trashId: item.id };
     }
   }
   return null;

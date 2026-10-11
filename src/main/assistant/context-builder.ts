@@ -11,10 +11,12 @@ import { findingBlock, type ReviewCommand } from '../../shared/finding';
 import { roleText } from '../../shared/entry';
 import { mentionMatcher } from '../../shared/mentions';
 import { statusOf } from '../../shared/status';
+import { partOf, topLevel } from '../../shared/manuscript-order';
 import { hasTag, tagged, tagSpelling } from '../../shared/tags';
 import { proposalBlock, type ProposalView } from '../../shared/proposal';
 import {
   ENTRY_TYPE_LABELS,
+  partName,
   PROJECT_OUTLINE,
   STATUS_LABELS,
   unitKey,
@@ -23,6 +25,7 @@ import {
   type EntryValue,
   type Manuscript,
   type ManuscriptChapter,
+  type ManuscriptPart,
   type ManuscriptScene,
 } from '../../shared/project-types';
 import type { AssistantView } from '../project-store/project-store';
@@ -270,8 +273,9 @@ function entryText(entry: EntryValue): string {
 
 /**
  * Every Outline in Manuscript order, the Project's first, under the titles
- * of its Chapters and Scenes, with the Status of each that has one in the
- * list, and its Tags; no Prose. `texts` holds the Outlines.
+ * of its Parts, Chapters and Scenes, a Chapter in a Part nested under it,
+ * with the Status of each that has one in the list, and its Tags; no Prose.
+ * `texts` holds the Outlines.
  */
 async function outlineSkeleton(
   view: AssistantView,
@@ -286,7 +290,7 @@ async function outlineSkeleton(
   }
   async function unit(
     heading: string,
-    node: ManuscriptChapter | ManuscriptScene,
+    node: ManuscriptPart | ManuscriptChapter | ManuscriptScene,
   ): Promise<string> {
     const status = statusOf(statuses, node.status);
     return [
@@ -297,17 +301,29 @@ async function outlineSkeleton(
       await outline(node.id),
     ].join('\n');
   }
-  const parts = [
-    'The Outline skeleton: the Outline of the whole story, then each Chapter and Scene in Manuscript order with its Outline, each under its Id and, if the Author gave them, its Status and Tags. It holds no Prose.',
+  const label = partName(manuscript.partLabel);
+  const blocks = [
+    manuscript.parts
+      ? `The Outline skeleton: the Outline of the whole story, then each ${label}, Chapter and Scene in Manuscript order with its Outline, a Chapter in ${withArticle(label)} under it, each under its Id and, if the Author gave them, its Status and Tags. It holds no Prose.`
+      : 'The Outline skeleton: the Outline of the whole story, then each Chapter and Scene in Manuscript order with its Outline, each under its Id and, if the Author gave them, its Status and Tags. It holds no Prose.',
     `## The story\nId: ${PROJECT_OUTLINE}\n${await outline(PROJECT_OUTLINE)}`,
   ];
-  for (const chapter of manuscript.chapters) {
-    parts.push(await unit(`## Chapter “${chapter.title}”`, chapter));
-    for (const scene of chapter.scenes) {
-      parts.push(await unit(`### Scene “${scene.title}”`, scene));
+  async function chapter(node: ManuscriptChapter, level: string) {
+    const name = node.unplaced ? 'Unplaced Chapter' : 'Chapter';
+    blocks.push(await unit(`${level} ${name} “${node.title}”`, node));
+    for (const scene of node.scenes) {
+      blocks.push(await unit(`${level}# Scene “${scene.title}”`, scene));
     }
   }
-  return { text: parts.join('\n\n'), texts };
+  for (const item of topLevel(manuscript)) {
+    if (item.kind === 'chapter') {
+      await chapter(item.chapter, '##');
+      continue;
+    }
+    blocks.push(await unit(`## ${label} “${item.part.title}”`, item.part));
+    for (const c of item.chapters) await chapter(c, '###');
+  }
+  return { text: blocks.join('\n\n'), texts };
 }
 
 /** One unit's text in focus, under a heading that names it. */
@@ -321,6 +337,7 @@ async function inFocus(
 ): Promise<UnitInFocus[]> {
   const units = new Map<string, UnitInFocus>();
   const where = placesOf(manuscript);
+  const label = partName(manuscript.partLabel);
 
   async function add(unit: SawUnit, heading: string): Promise<void> {
     const key = unitKey(unit);
@@ -328,13 +345,27 @@ async function inFocus(
     const text = unitText(await view.read(unit));
     units.set(key, { unit, heading, text });
   }
-  /** A Scene's Prose, unless it is Missing, and with `context`, its Outline and Notes and its Chapter's Outline. */
+  /** The Outline of the Part `chapter` is in, if any. */
+  async function partOutline(chapter: ManuscriptChapter): Promise<void> {
+    const part = partOf(manuscript, chapter.id);
+    if (part) {
+      await add(
+        { kind: 'outline', id: part.id },
+        `Outline of ${label} “${part.title}”`,
+      );
+    }
+  }
+  /**
+   * A Scene's Prose, unless it is Missing, and with `context`, its Outline
+   * and Notes and its Chapter's Outline, after its Part's, if it has one.
+   */
   async function scene(id: string, context: boolean): Promise<void> {
     const place = where.scenes.get(id);
     if (!place) return;
     const name = `Scene “${place.scene.title}”`;
     if (context) {
       if (place.chapter) {
+        await partOutline(place.chapter);
         await add(
           { kind: 'outline', id: place.chapter.id },
           `Outline of Chapter “${place.chapter.title}”`,
@@ -348,11 +379,15 @@ async function inFocus(
       await add({ kind: 'scene', id }, `Prose of ${name}${of}\nId: ${id}`);
     }
   }
-  /** Each Scene's Prose in a Chapter, and with `context`, the Outlines and the Chapter's Notes. */
+  /**
+   * Each Scene's Prose in a Chapter, and with `context`, the Outlines, its
+   * Part's first, if it has one, and the Chapter's Notes.
+   */
   async function chapter(id: string, context: boolean): Promise<void> {
     const found = where.chapters.get(id);
     if (!found) return;
     if (context) {
+      await partOutline(found);
       await add({ kind: 'outline', id }, `Outline of Chapter “${found.title}”`);
       await add({ kind: 'notes', id }, `Notes on Chapter “${found.title}”`);
     }
@@ -366,11 +401,29 @@ async function inFocus(
       await scene(s.id, false);
     }
   }
+  /**
+   * A Part's Outline and Notes, and its Chapters' Outlines; never their
+   * Prose, which may be much of the story.
+   */
+  async function part(id: string): Promise<void> {
+    const found = where.parts.get(id);
+    if (!found) return;
+    const name = `${label} “${found.title}”`;
+    await add({ kind: 'outline', id }, `Outline of ${name}`);
+    await add({ kind: 'notes', id }, `Notes on ${name}`);
+    for (const c of found.chapters) {
+      const title = where.chapters.get(c)?.title;
+      if (title !== undefined) {
+        await add({ kind: 'outline', id: c }, `Outline of Chapter “${title}”`);
+      }
+    }
+  }
 
   if (request.mode === 'interview') {
     const { focus } = request;
     if (focus.kind === 'scene') await scene(focus.id, false);
     if (focus.kind === 'chapter') await chapter(focus.id, false);
+    if (focus.kind === 'part') await part(focus.id);
     // A Tag adds the Outlines of what has it, never its Prose.
     if (focus.kind === 'tag') {
       for (const { unit, name } of tagged(manuscript, focus.tag)) {
@@ -398,7 +451,8 @@ async function inFocus(
       }
       const asked = request.messages.at(-1)?.text ?? '';
       for (const id of atMentioned(asked, manuscript)) {
-        if (where.chapters.has(id)) await chapter(id, true);
+        if (where.parts.has(id)) await part(id);
+        else if (where.chapters.has(id)) await chapter(id, true);
         else await scene(id, true);
       }
     }
@@ -446,6 +500,19 @@ function interviewFocusText(
       }
       return `${heading} the Entries, Chapters and Scenes tagged “${spelling}”. Ask about what is missing among them.`;
     }
+    case 'part': {
+      const label = partName(manuscript.partLabel);
+      const part = where.parts.get(focus.id);
+      if (!part) return `${heading} ${withArticle(label)} ${gone}`;
+      const chapters = part.chapters
+        .flatMap((id) => where.chapters.get(id) ?? [])
+        .map((c) => `Chapter “${c.title}”`);
+      const holds =
+        chapters.length > 0
+          ? `which holds ${chapters.join(', ')}`
+          : 'which holds no Chapters yet';
+      return `${heading} the ${label} “${part.title}”, Id: ${part.id}, ${holds}. Interview out its Outline: what happens, who and why.`;
+    }
     case 'chapter': {
       const chapter = where.chapters.get(focus.id);
       if (!chapter) return `${heading} a Chapter ${gone}`;
@@ -461,10 +528,13 @@ function interviewFocusText(
 
 function focusBlock(units: UnitInFocus[]): string {
   const prose = units.some(({ unit }) => unit.kind === 'scene');
+  const notes = units.some(({ unit }) => unit.kind === 'notes');
   return [
     prose
       ? 'In focus: the Author’s own Prose, with the Outlines and Notes that go with it. Quote it; never rewrite it.'
-      : 'In focus: the Author’s own Outlines. Quote them; never rewrite them.',
+      : notes
+        ? 'In focus: the Author’s own Outlines and Notes. Quote them; never rewrite them.'
+        : 'In focus: the Author’s own Outlines. Quote them; never rewrite them.',
     ...units.map(
       ({ heading, text }) => `## ${heading}\n${text.trim() || '(Empty.)'}`,
     ),
@@ -472,6 +542,7 @@ function focusBlock(units: UnitInFocus[]): string {
 }
 
 type Places = {
+  parts: Map<string, ManuscriptPart>;
   chapters: Map<string, ManuscriptChapter>;
   scenes: Map<
     string,
@@ -480,7 +551,11 @@ type Places = {
 };
 
 function placesOf(manuscript: Manuscript): Places {
-  const places: Places = { chapters: new Map(), scenes: new Map() };
+  const places: Places = {
+    parts: new Map((manuscript.parts ?? []).map((p) => [p.id, p])),
+    chapters: new Map(),
+    scenes: new Map(),
+  };
   for (const chapter of manuscript.chapters) {
     places.chapters.set(chapter.id, chapter);
     for (const scene of chapter.scenes) {
@@ -493,14 +568,20 @@ function placesOf(manuscript: Manuscript): Places {
   return places;
 }
 
+/** `name` after “a” or “an”, as in “an Act”. */
+function withArticle(name: string): string {
+  return `${/^[AEIOU]/.test(name) ? 'an' : 'a'} ${name}`;
+}
+
 /**
- * The Chapters and Scenes the Author @-mentions in `text` by title, ignoring
- * case, in the order mentioned. Where titles overlap, the longest wins; a
- * title more than one unit has mentions them all.
+ * The Parts, Chapters and Scenes the Author @-mentions in `text` by title,
+ * ignoring case, in the order mentioned. Where titles overlap, the longest
+ * wins; a title more than one unit has mentions them all.
  */
 function atMentioned(text: string, manuscript: Manuscript): string[] {
   const byTitle = new Map<string, string[]>();
   const units = [
+    ...(manuscript.parts ?? []),
     ...manuscript.chapters.flatMap((c) => [c, ...c.scenes]),
     ...manuscript.unplaced,
   ];

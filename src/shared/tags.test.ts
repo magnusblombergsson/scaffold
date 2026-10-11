@@ -111,4 +111,28 @@ describe('tagged', () => {
       ['s3', 'Scene “Loose”'],
     ]);
   });
+
+  it('lists a Part with a Tag before its Chapters, by the Project’s label', () => {
+    const units = tagged(
+      {
+        chapters: [
+          { id: 'c1', title: 'Prologue', tags: ['mara'], scenes: [] },
+          { id: 'c2', title: 'Storm', tags: ['mara'], scenes: [], part: 'p1' },
+        ],
+        parts: [
+          { id: 'p1', title: 'The Sea', chapters: ['c2'], tags: ['Mara'] },
+        ],
+        top: ['c1', 'p1'],
+        unplaced: [],
+        partLabel: 'episode',
+      },
+      'Mara',
+    );
+
+    expect(units.map(({ unit, name }) => [unit.id, name])).toEqual([
+      ['c1', 'Chapter “Prologue”'],
+      ['p1', 'Episode “The Sea”'],
+      ['c2', 'Chapter “Storm”'],
+    ]);
+  });
 });

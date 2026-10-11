@@ -3,6 +3,7 @@ import type {
   EntryType,
   ImageRef,
   Manuscript,
+  PartLabel,
   ProseLanguage,
   TrashItem,
   UnitRef,
@@ -113,10 +114,16 @@ export type StructureChanged = {
 
 /**
  * What two versions of `project.json` saved on different computers lost when
- * one was kept: the Chapters only the other had, and the Scenes only it
+ * one was kept: the Parts and Chapters only the other had, and the Scenes only it
  * placed, which are Unplaced now. `host` is where it came from, if known.
  */
-export type Dropped = { host?: string; chapters: string[]; scenes: string[] };
+export type Dropped = {
+  host?: string;
+  chapters: string[];
+  scenes: string[];
+  /** The Parts only the other had; absent when none. */
+  parts?: string[];
+};
 
 /**
  * One version of a unit in Conflict. The `original` is the one the app works
@@ -250,7 +257,22 @@ export interface ProjectApi {
 
   // Structure operations change project.json, and move unit files in and out
   // of Trash. They resolve once the change is on disk.
-  createChapter(index: number, title?: string): Promise<Created>;
+  /**
+   * Creates a Chapter at `index` in a Part, or with no `partId` among the
+   * Parts and Loose Chapters, which without Parts are all the Chapters.
+   */
+  createChapter(
+    index: number,
+    title?: string,
+    partId?: string,
+  ): Promise<Created>;
+  /** Creates a Part holding no Chapters at `index` among the Parts and Loose Chapters. */
+  createPart(index: number, title?: string): Promise<Created>;
+  renamePart(partId: string, title: string): Promise<Changed>;
+  /** Moves a Part to `index` among the Parts and Loose Chapters. */
+  movePart(partId: string, index: number): Promise<Changed>;
+  /** Moves a Part to Trash with its Chapters and their Scenes; never the last Chapter. */
+  trashPart(partId: string): Promise<Changed>;
   createScene(
     chapterId: string,
     index: number,
@@ -258,7 +280,15 @@ export interface ProjectApi {
   ): Promise<Created>;
   renameChapter(chapterId: string, title: string): Promise<Changed>;
   renameScene(sceneId: string, title: string): Promise<Changed>;
-  moveChapter(chapterId: string, index: number): Promise<Changed>;
+  /**
+   * Moves a Chapter, placed or Unplaced, to `index` in a Part, or with no
+   * `partId` among the Parts and Loose Chapters: into, out of or between Parts.
+   */
+  moveChapter(
+    chapterId: string,
+    index: number,
+    partId?: string,
+  ): Promise<Changed>;
   moveScene(
     sceneId: string,
     chapterId: string,
@@ -331,6 +361,13 @@ export interface ProjectApi {
    * False when it can't be saved, which main has told the Author.
    */
   setFoldedNoteImage(on: boolean): Promise<boolean>;
+  /**
+   * Calls the Project's Parts Part, Act or Episode, a Project setting that
+   * changes nothing else; the Manuscript carrying it follows as a
+   * `unitDetailsChanged`. False when it can't be saved, which main has told
+   * the Author.
+   */
+  setPartLabel(label: PartLabel): Promise<boolean>;
   /**
    * Gives a Scene or Chapter the Status of `statusId`, or none with null;
    * there is no undo. The Manuscript showing it follows as a
@@ -844,6 +881,10 @@ export const projectMethods = {
   saveStatuses: 'invoke',
   subscribe: 'event',
   createChapter: 'invoke',
+  createPart: 'invoke',
+  renamePart: 'invoke',
+  movePart: 'invoke',
+  trashPart: 'invoke',
   createScene: 'invoke',
   renameChapter: 'invoke',
   renameScene: 'invoke',
@@ -869,6 +910,7 @@ export const projectMethods = {
   emptyTrash: 'invoke',
   setLanguage: 'invoke',
   setFoldedNoteImage: 'invoke',
+  setPartLabel: 'invoke',
   setStatus: 'invoke',
   setWordTarget: 'invoke',
   editStatus: 'invoke',

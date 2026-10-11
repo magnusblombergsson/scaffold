@@ -4,6 +4,7 @@ import {
   chapterMove,
   highlightAfter,
   listRows,
+  partMove,
   sceneMove,
 } from './binder-keys';
 
@@ -118,9 +119,113 @@ describe('listRows and highlightAfter', () => {
 
 describe('chapterMove', () => {
   it('moves a Chapter up or down, but not past either end', () => {
-    expect(chapterMove(manuscript, 'c2', 'up')).toBe(0);
-    expect(chapterMove(manuscript, 'c2', 'down')).toBe(2);
+    expect(chapterMove(manuscript, 'c2', 'up')).toEqual({ index: 0 });
+    expect(chapterMove(manuscript, 'c2', 'down')).toEqual({ index: 2 });
     expect(chapterMove(manuscript, 'c1', 'up')).toBeNull();
     expect(chapterMove(manuscript, 'c3', 'down')).toBeNull();
+  });
+});
+
+/** Prologue, Act One (c1, c2), Interlude, Act Two (empty), then Unplaced c9. */
+const acts: Manuscript = {
+  chapters: [
+    { id: 'c0', title: 'Prologue', scenes: [{ id: 's0', title: 'Dawn' }] },
+    {
+      id: 'c1',
+      title: 'Storm',
+      scenes: [{ id: 's1', title: 'Rain' }],
+      part: 'p1',
+    },
+    { id: 'c2', title: 'Calm', scenes: [], part: 'p1' },
+    { id: 'c3', title: 'Interlude', scenes: [] },
+    {
+      id: 'c9',
+      title: 'Stray',
+      scenes: [{ id: 's9', title: 'Lost' }],
+      unplaced: true,
+    },
+  ],
+  parts: [
+    { id: 'p1', title: 'Act One', chapters: ['c1', 'c2'] },
+    { id: 'p2', title: 'Act Two', chapters: [] },
+  ],
+  top: ['c0', 'p1', 'c3', 'p2'],
+  unplaced: [{ id: 'u1', title: 'Lighthouse' }],
+};
+
+describe('with Parts', () => {
+  const rows = listRows(acts);
+  const after = (id: string, key: string) => {
+    const to = highlightAfter(
+      rows,
+      rows.findIndex((r) => r.id === id),
+      key,
+    );
+    return to === null ? null : rows[to].id;
+  };
+
+  it('lists each Part then its Chapters, Loose Chapters between, then the Unplaced Chapters and Scenes', () => {
+    expect(rows.map((r) => r.id)).toEqual([
+      'c0',
+      's0',
+      'p1',
+      'c1',
+      's1',
+      'c2',
+      'c3',
+      'p2',
+      'c9',
+      's9',
+      'u1',
+    ]);
+  });
+
+  it("leaves out a collapsed Part's Chapters and their Scenes", () => {
+    expect(listRows(acts, new Set(['p1'])).map((r) => r.id)).toEqual([
+      'c0',
+      's0',
+      'p1',
+      'c3',
+      'p2',
+      'c9',
+      's9',
+      'u1',
+    ]);
+  });
+
+  it('goes from a Chapter to its Part with ←, and from a Part to its first Chapter with →', () => {
+    expect(after('c2', 'ArrowLeft')).toBe('p1');
+    expect(after('p1', 'ArrowRight')).toBe('c1');
+    expect(after('p2', 'ArrowRight')).toBeNull();
+    expect(after('c3', 'ArrowLeft')).toBeNull();
+    expect(after('s1', 'ArrowLeft')).toBe('c1');
+  });
+
+  it('moves a Chapter within its Part', () => {
+    expect(chapterMove(acts, 'c1', 'down')).toEqual({ index: 1, partId: 'p1' });
+    expect(chapterMove(acts, 'c2', 'up')).toEqual({ index: 0, partId: 'p1' });
+  });
+
+  it('moves a Chapter out of either end of its Part, loose before or after it', () => {
+    expect(chapterMove(acts, 'c1', 'up')).toEqual({ index: 1 });
+    expect(chapterMove(acts, 'c2', 'down')).toEqual({ index: 2 });
+  });
+
+  it('moves a Loose Chapter into the Part beside it: last going up, first going down', () => {
+    expect(chapterMove(acts, 'c3', 'up')).toEqual({ index: 2, partId: 'p1' });
+    expect(chapterMove(acts, 'c3', 'down')).toEqual({ index: 0, partId: 'p2' });
+    expect(chapterMove(acts, 'c0', 'down')).toEqual({ index: 0, partId: 'p1' });
+  });
+
+  it('goes nowhere past either end, nor for an Unplaced Chapter', () => {
+    expect(chapterMove(acts, 'c0', 'up')).toBeNull();
+    expect(chapterMove(acts, 'c9', 'up')).toBeNull();
+    expect(chapterMove(acts, 'c9', 'down')).toBeNull();
+  });
+
+  it('moves a Part among the Parts and Loose Chapters, but not past either end', () => {
+    expect(partMove(acts, 'p1', 'up')).toBe(0);
+    expect(partMove(acts, 'p1', 'down')).toBe(2);
+    expect(partMove(acts, 'p2', 'down')).toBeNull();
   });
 });

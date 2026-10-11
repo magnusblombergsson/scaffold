@@ -1,4 +1,8 @@
-import { PROJECT_OUTLINE, type Manuscript } from '../shared/project-types';
+import {
+  partName,
+  PROJECT_OUTLINE,
+  type Manuscript,
+} from '../shared/project-types';
 import { isWordTarget } from '../shared/word-target';
 import { readProse } from '../shared/prose-markdown';
 
@@ -28,12 +32,19 @@ export function proseCounts(markdown: string): Counts {
     .reduce(addCounts, NO_COUNTS);
 }
 
-/** What the counts are of. */
-export type Scope = 'Selection' | 'Scene' | 'Chapter' | 'Manuscript';
+/** What the counts are of; a Part as the Project calls it, such as Act. */
+export type Scope =
+  | 'Selection'
+  | 'Scene'
+  | 'Chapter'
+  | 'Part'
+  | 'Act'
+  | 'Episode'
+  | 'Manuscript';
 
 /**
  * The counts the status bar shows, and what they are of. Of a Scene, a
- * Chapter or the Manuscript: `unitId`, its id, or `project` for the
+ * Chapter, a Part or the Manuscript: `unitId`, its id, or `project` for the
  * Manuscript; `wordTarget`, its Word target, if it has one. A selection has
  * neither.
  */
@@ -46,15 +57,16 @@ export type ShownCounts = {
 
 /** The unit open in Writing, whose counts the status bar shows. */
 export type OpenUnit =
-  | { kind: 'scene' | 'chapter'; id: string }
+  | { kind: 'scene' | 'chapter' | 'part'; id: string }
   | { kind: 'project' }
   | null;
 
 /**
  * The counts to show: of a selection in the Prose, else of the open Scene,
- * else of the open Chapter's Scenes, else of the Manuscript, as for the
- * Project Outline; and the Manuscript's, its Chapters' Scenes, which an
- * Export has. A Scene not counted yet counts as empty.
+ * else of the open Chapter's Scenes, else of the open Part's Chapters'
+ * Scenes, against the Part's own Word target, else of the Manuscript, as
+ * for the Project Outline; and the Manuscript's, its placed Chapters'
+ * Scenes, which an Export has. A Scene not counted yet counts as empty.
  */
 export function statusCounts({
   manuscript,
@@ -70,9 +82,9 @@ export function statusCounts({
 }): { shown: ShownCounts; manuscript: Counts } {
   const total = (ids: string[]) =>
     ids.map((id) => scenes.get(id) ?? NO_COUNTS).reduce(addCounts, NO_COUNTS);
-  const whole = total(
-    manuscript.chapters.flatMap((chapter) => chapter.scenes.map((s) => s.id)),
-  );
+  const sceneIds = (chapters: Manuscript['chapters']) =>
+    chapters.flatMap((chapter) => chapter.scenes.map((s) => s.id));
+  const whole = total(sceneIds(manuscript.chapters.filter((c) => !c.unplaced)));
   const ofUnit = (unitId: string, wordTarget: number | undefined) => ({
     unitId,
     ...(wordTarget !== undefined && { wordTarget }),
@@ -80,6 +92,10 @@ export function statusCounts({
   const chapter =
     open?.kind === 'chapter'
       ? manuscript.chapters.find((c) => c.id === open.id)
+      : undefined;
+  const part =
+    open?.kind === 'part'
+      ? manuscript.parts?.find((p) => p.id === open.id)
       : undefined;
   const scene =
     open?.kind === 'scene'
@@ -103,11 +119,23 @@ export function statusCounts({
               counts: total(chapter.scenes.map((s) => s.id)),
               ...ofUnit(chapter.id, chapter.wordTarget),
             }
-          : {
-              scope: 'Manuscript',
-              counts: whole,
-              ...ofUnit(PROJECT_OUTLINE, manuscript.wordTarget),
-            };
+          : part
+            ? {
+                scope: partName(manuscript.partLabel) as Scope,
+                counts: total(
+                  sceneIds(
+                    manuscript.chapters.filter((c) =>
+                      part.chapters.includes(c.id),
+                    ),
+                  ),
+                ),
+                ...ofUnit(part.id, part.wordTarget),
+              }
+            : {
+                scope: 'Manuscript',
+                counts: whole,
+                ...ofUnit(PROJECT_OUTLINE, manuscript.wordTarget),
+              };
   return { shown, manuscript: whole };
 }
 

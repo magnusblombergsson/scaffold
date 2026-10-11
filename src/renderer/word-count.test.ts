@@ -275,3 +275,45 @@ describe('readWordTarget', () => {
     }
   });
 });
+
+describe('statusCounts with Parts', () => {
+  const acts: Manuscript = {
+    chapters: [
+      { ...manuscript.chapters[0], part: 'p1' },
+      { ...manuscript.chapters[1], part: 'p1' },
+      {
+        id: 'c9',
+        title: 'Stray',
+        scenes: [{ id: 's4', title: 'Four' }],
+        unplaced: true,
+      },
+    ],
+    parts: [
+      { id: 'p1', title: 'Act One', chapters: ['c1', 'c2'], wordTarget: 80 },
+    ],
+    top: ['p1'],
+    unplaced: [],
+    partLabel: 'act',
+  };
+
+  it("shows a Part's Chapters' totals against its own Word target, named as the Project calls it", () => {
+    expect(
+      statusCounts({
+        manuscript: acts,
+        scenes,
+        open: { kind: 'part', id: 'p1' },
+      }).shown,
+    ).toEqual({
+      scope: 'Act',
+      counts: { words: 35, characters: 175 },
+      unitId: 'p1',
+      wordTarget: 80,
+    });
+  });
+
+  it('totals the Manuscript without Unplaced Chapters, which Export leaves out', () => {
+    expect(
+      statusCounts({ manuscript: acts, scenes, open: null }).manuscript,
+    ).toEqual({ words: 35, characters: 175 });
+  });
+});

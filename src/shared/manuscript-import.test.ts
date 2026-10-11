@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
   defaultConvention,
+  partSplitOffered,
   sceneSplitAllowed,
   splitManuscript,
   type ImportBlock,
-  type ImportedChapter,
+  type ImportConvention,
+  type ImportedItem,
 } from './manuscript-import';
 
 const p = (text: string): ImportBlock => ({
@@ -19,15 +21,22 @@ const h = (level: number, text: string): ImportBlock => ({
 const separator: ImportBlock = { kind: 'separator' };
 const pageBreak: ImportBlock = { kind: 'pageBreak' };
 
-/** Each Chapter as its title and its Scenes, each as its title and paragraphs' text. */
-function shape(chapters: ImportedChapter[]) {
-  return chapters.map(({ title, scenes }) => [
-    title,
-    scenes.map(({ title, paragraphs }) => [
-      title,
-      paragraphs.map(({ spans }) => spans.map((s) => s.text).join('')),
-    ]),
-  ]);
+/**
+ * Each Chapter as its title and its Scenes, each as its title and
+ * paragraphs' text; a Part as its title and its Chapters so.
+ */
+function shape(items: ImportedItem[]): unknown[] {
+  return items.map((item) =>
+    'chapters' in item
+      ? { [item.title]: shape(item.chapters) }
+      : [
+          item.title,
+          item.scenes.map(({ title, paragraphs }) => [
+            title,
+            paragraphs.map(({ spans }) => spans.map((s) => s.text).join('')),
+          ]),
+        ],
+  );
 }
 
 describe('Splitting an imported manuscript', () => {
@@ -156,6 +165,93 @@ describe('Splitting an imported manuscript', () => {
     expect(
       shape(splitManuscript([], { chapters: 'heading1', scenes: 'separator' })),
     ).toEqual([['Chapter 1', []]]);
+  });
+});
+
+describe('Splitting an imported manuscript into Parts', () => {
+  const parts: ImportConvention = {
+    parts: true,
+    chapters: 'heading2',
+    scenes: 'separator',
+  };
+
+  it('starts a Part at each Heading 1 and a Chapter at each Heading 2 when chosen', () => {
+    const blocks = [
+      h(1, 'Act One'),
+      h(2, 'The Storm'),
+      p('A.'),
+      separator,
+      p('B.'),
+      h(2, 'The Calm'),
+      p('C.'),
+      h(1, 'Act Two'),
+      h(2, 'The Return'),
+      p('D.'),
+      h(1, 'Act Three'),
+    ];
+    expect(shape(splitManuscript(blocks, parts))).toEqual([
+      {
+        'Act One': [
+          [
+            'The Storm',
+            [
+              ['Scene 1', ['A.']],
+              ['Scene 2', ['B.']],
+            ],
+          ],
+          ['The Calm', [['Scene 1', ['C.']]]],
+        ],
+      },
+      { 'Act Two': [['The Return', [['Scene 1', ['D.']]]]] },
+      { 'Act Three': [] },
+    ]);
+  });
+
+  it('makes what comes before the first Heading 1 Loose Chapters, Prose before any heading a Chapter of its own', () => {
+    const blocks = [
+      p('A foreword.'),
+      h(2, 'Prologue'),
+      p('A.'),
+      h(1, 'Act One'),
+      p('Opening.'),
+      h(2, 'One'),
+      p('B.'),
+    ];
+    expect(shape(splitManuscript(blocks, parts))).toEqual([
+      ['Chapter 1', [['Scene 1', ['A foreword.']]]],
+      ['Prologue', [['Scene 1', ['A.']]]],
+      {
+        'Act One': [
+          ['Chapter 3', [['Scene 1', ['Opening.']]]],
+          ['One', [['Scene 1', ['B.']]]],
+        ],
+      },
+    ]);
+  });
+
+  it('can split Scenes on Heading 3 within Parts', () => {
+    const blocks = [h(1, 'Act One'), h(2, 'One'), h(3, 'Dawn'), p('A.')];
+    expect(
+      shape(splitManuscript(blocks, { ...parts, scenes: 'heading3' })),
+    ).toEqual([{ 'Act One': [['One', [['Dawn', ['A.']]]]] }]);
+  });
+
+  it('always gives at least one Chapter', () => {
+    expect(shape(splitManuscript([h(1, 'Act One')], parts))).toEqual([
+      { 'Act One': [] },
+      ['Chapter 1', []],
+    ]);
+  });
+
+  it('is offered only when the file has Heading 1s and Heading 2s, and never chosen for the Author', () => {
+    const blocks = [h(1, 'Act One'), h(2, 'One'), p('A.')];
+    expect(partSplitOffered(blocks)).toBe(true);
+    expect(partSplitOffered([h(1, 'One'), p('A.')])).toBe(false);
+    expect(partSplitOffered([h(2, 'One'), p('A.')])).toBe(false);
+    expect(defaultConvention(blocks)).toEqual({
+      chapters: 'heading1',
+      scenes: 'separator',
+    });
   });
 });
 

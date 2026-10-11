@@ -287,6 +287,7 @@ function InFocus({
           onOpenEntry={onOpenEntry}
         />
       );
+    case 'part':
     case 'chapter':
     case 'scene':
       return (
@@ -505,18 +506,22 @@ function TagFocus({
 }
 
 /**
- * A Chapter or Scene in focus: its Outline, and a Scene's Prose, or a
- * Chapter's Scenes with their Outlines.
+ * A Part, Chapter or Scene in focus: its Outline, and a Scene's Prose, a
+ * Chapter's Scenes or a Part's Chapters with their Outlines.
  */
 function FocusUnit({
   focus,
   manuscript,
   changes,
 }: {
-  focus: { kind: 'chapter' | 'scene'; id: string };
+  focus: { kind: 'part' | 'chapter' | 'scene'; id: string };
   manuscript: Manuscript;
   changes: number;
 }) {
+  const part =
+    focus.kind === 'part'
+      ? manuscript.parts?.find((p) => p.id === focus.id)
+      : undefined;
   const chapter =
     focus.kind === 'chapter'
       ? manuscript.chapters.find((c) => c.id === focus.id)
@@ -528,15 +533,20 @@ function FocusUnit({
           ...manuscript.unplaced,
         ].find((s) => s.id === focus.id)
       : undefined;
-  const scenes = chapter?.scenes ?? [];
+  // What it holds, each shown with its Outline.
+  const held: { id: string; title: string }[] = part
+    ? part.chapters.flatMap(
+        (id) => manuscript.chapters.find((c) => c.id === id) ?? [],
+      )
+    : (chapter?.scenes ?? []);
   const [read, setRead] = useState<{
     outlines: Map<string, string>;
     prose: string | null;
   } | null>(null);
-  const key = [focus.id, ...scenes.map((s) => s.id)].join(',');
+  const key = [focus.id, ...held.map((s) => s.id)].join(',');
   useEffect(() => {
     let current = true;
-    const ids = [focus.id, ...scenes.map((s) => s.id)];
+    const ids = [focus.id, ...held.map((s) => s.id)];
     void Promise.all([
       Promise.all(
         ids.map((id) =>
@@ -559,7 +569,7 @@ function FocusUnit({
       current = false;
     };
   }, [key, changes, scene?.missing]);
-  if (!chapter && !scene) {
+  if (!part && !chapter && !scene) {
     return <p className="reference-empty">This is no longer in the Project.</p>;
   }
   if (!read) return null;
@@ -577,7 +587,7 @@ function FocusUnit({
         <h4>Outline</h4>
         {outline(focus.id)}
       </section>
-      {scenes.map((s) => (
+      {held.map((s) => (
         <section key={s.id} aria-label={s.title}>
           <h4>{s.title}</h4>
           {outline(s.id)}

@@ -1,11 +1,14 @@
-// A Tag is a free word or phrase on Scenes, Chapters and Entries (v3 spec
-// §1). The Project's Tags are simply those in use; matching ignores case,
-// and the first spelling wins. A comma ends a Tag.
+// A Tag is a free word or phrase on Scenes, Chapters, Parts and Entries
+// (v3 spec §1). The Project's Tags are simply those in use; matching ignores
+// case, and the first spelling wins. A comma ends a Tag.
 
-import type {
-  Manuscript,
-  ManuscriptChapter,
-  ManuscriptScene,
+import { topLevel } from './manuscript-order';
+import {
+  partName,
+  type Manuscript,
+  type ManuscriptChapter,
+  type ManuscriptPart,
+  type ManuscriptScene,
 } from './project-types';
 
 /** What a Tag matches by: its spelling, ignoring case. */
@@ -29,20 +32,35 @@ export function tagSpelling(
   return [...lists].flat().find((t) => tagKey(t) === tagKey(tag));
 }
 
-/** The Chapters and Scenes with `tag`, in Manuscript order, Unplaced Scenes last, each with its name. */
+/**
+ * The Parts, Chapters and Scenes with `tag`, in Manuscript order, a Part
+ * before its Chapters and Unplaced Scenes last, each with its name.
+ */
 export function tagged(
   manuscript: Manuscript,
   tag: string,
-): { unit: ManuscriptChapter | ManuscriptScene; name: string }[] {
+): {
+  unit: ManuscriptPart | ManuscriptChapter | ManuscriptScene;
+  name: string;
+}[] {
   const scene = (unit: ManuscriptScene) => ({
     unit,
     name: `Scene “${unit.title}”`,
   });
+  const chapter = (unit: ManuscriptChapter) => [
+    { unit, name: `Chapter “${unit.title}”` },
+    ...unit.scenes.map(scene),
+  ];
+  const label = partName(manuscript.partLabel);
   return [
-    ...manuscript.chapters.flatMap((chapter) => [
-      { unit: chapter, name: `Chapter “${chapter.title}”` },
-      ...chapter.scenes.map(scene),
-    ]),
+    ...topLevel(manuscript).flatMap((item) =>
+      item.kind === 'part'
+        ? [
+            { unit: item.part, name: `${label} “${item.part.title}”` },
+            ...item.chapters.flatMap(chapter),
+          ]
+        : chapter(item.chapter),
+    ),
     ...manuscript.unplaced.map(scene),
   ].filter(({ unit }) => hasTag(unit.tags, tag));
 }

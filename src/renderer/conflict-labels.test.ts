@@ -10,6 +10,17 @@ describe('versionLabel', () => {
     );
   });
 
+  it('lists the Parts dropped before the Chapters, by the Project’s label', () => {
+    expect(
+      droppedMessage({ chapters: [], scenes: [], parts: ['Act One'] }),
+    ).toBe(
+      'The Manuscript was rearranged on two computers at once; the order from another computer was set aside. Dropped: Part “Act One”.',
+    );
+    expect(
+      droppedMessage({ chapters: [], scenes: [], parts: ['I', 'II'] }, 'act'),
+    ).toContain('Dropped: Acts “I”, “II”.');
+  });
+
   it('says another computer when it is not known', () => {
     expect(versionLabel({ savedAt: at })).toMatch(/^Another computer · /);
   });

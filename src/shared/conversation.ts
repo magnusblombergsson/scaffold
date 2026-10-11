@@ -18,14 +18,16 @@ export const MODE_LABELS: Record<Mode, string> = {
 };
 
 /**
- * What an Interview is about: one Entry, one Entry type, a Chapter or Scene,
- * a Tag, or open.
+ * What an Interview is about: one Entry, one Entry type, a Part, Chapter or
+ * Scene, a Tag, or open. An app from before Parts skips a focus change to a
+ * Part in the log, as it does any it can't read (ADR 0006).
  */
 export type InterviewFocus =
   | { kind: 'open' }
   | { kind: 'entry'; id: string }
   | { kind: 'entry-type'; type: EntryType }
   | { kind: 'tag'; tag: string }
+  | { kind: 'part'; id: string }
   | { kind: 'chapter'; id: string }
   | { kind: 'scene'; id: string };
 
@@ -41,6 +43,7 @@ export function isInterviewFocus(value: unknown): value is InterviewFocus {
     case 'tag':
       return typeof focus.tag === 'string' && focus.tag.trim() !== '';
     case 'entry':
+    case 'part':
     case 'chapter':
     case 'scene':
       return typeof focus.id === 'string';
@@ -49,7 +52,7 @@ export function isInterviewFocus(value: unknown): value is InterviewFocus {
   }
 }
 
-/** The ids of the Entry, Chapter or Scene an Interview's focus is, if any. */
+/** The ids of the Entry, Part, Chapter or Scene an Interview's focus is, if any. */
 export function focusIds(focus: InterviewFocus): string[] {
   return 'id' in focus ? [focus.id] : [];
 }
