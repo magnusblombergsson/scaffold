@@ -94,7 +94,8 @@ describe('menuTemplate', () => {
       'New Project…',
       'Open Project…',
       'Open Recent',
-      'Import…',
+      'Import Manuscript…',
+      'Import Story Bible…',
       'Export Manuscript…',
       'Export Story Bible…',
       undefined,
@@ -103,14 +104,36 @@ describe('menuTemplate', () => {
     expect(item(file, 'Open Project…').accelerator).toBe('CmdOrCtrl+O');
     click(item(file, 'New Project…'));
     click(item(menu(file, 'Open Recent'), 'The Ferry'));
+    click(item(file, 'Import Manuscript…'));
+    click(item(file, 'Import Story Bible…'));
     click(item(file, 'Export Manuscript…'));
     click(item(file, 'Export Story Bible…'));
     expect(sent).toEqual([
       { type: 'newProject' },
       { type: 'openRecent', path: 'D:/Stories/Ferry' },
+      { type: 'import' },
+      { type: 'importStoryBible' },
       { type: 'exportManuscript' },
       { type: 'exportStoryBible' },
     ]);
+  });
+
+  it('imports a manuscript without a Project, but a Story Bible only into one that isn’t read-only', () => {
+    const file = menu(build(noProject).template, 'File');
+    expect(item(file, 'Import Manuscript…').enabled).not.toBe(false);
+    expect(item(file, 'Import Story Bible…').enabled).toBe(false);
+    const readOnly = menu(
+      build({
+        ...writable,
+        project: { ...writable.project!, readOnly: true },
+      }).template,
+      'File',
+    );
+    expect(item(readOnly, 'Import Story Bible…').enabled).toBe(false);
+    expect(
+      item(menu(build(writable).template, 'File'), 'Import Story Bible…')
+        .enabled,
+    ).toBe(true);
   });
 
   it('switches Mode from View with Ctrl+1/2/3, taken by the window', () => {

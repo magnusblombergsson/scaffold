@@ -28,7 +28,10 @@ export type Command = (
   | { type: 'newProject' }
   | { type: 'openProject' }
   | { type: 'openRecent'; path: string }
+  /** File › Import Manuscript…, into a new Project. */
   | { type: 'import' }
+  /** File › Import Story Bible…, into the open Project's Story Bible. */
+  | { type: 'importStoryBible' }
   /** File › Export Manuscript…, which asks which Scenes and Chapters. */
   | { type: 'exportManuscript' }
   /** File › Export Story Bible…, which asks which Entries, and with what. */

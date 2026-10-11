@@ -3,7 +3,9 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import type { ProjectEvent } from '../../shared/api';
+import { emptyFields } from '../../shared/entry';
 import type { EntryFields, EntryType } from '../../shared/project-types';
+import type { NewEntry } from '../../shared/story-bible-import';
 import { createProject, openProject } from './project-store';
 import { nodeFileSystem } from './file-system';
 import { instantClock } from './clock';
@@ -913,6 +915,107 @@ describe('Entry images', () => {
 
     expect(view.listEntries()[0]).not.toHaveProperty('image');
     expect(await view.read(entry(id))).not.toHaveProperty('image');
+    await store.close();
+  });
+});
+
+describe('Importing Entries', () => {
+  const JPEG = new Uint8Array([0xff, 0xd8, 0xff, 1, 2, 3]);
+  const imported = (
+    type: EntryType,
+    name: string,
+    change: Partial<NewEntry> = {},
+  ): NewEntry => ({
+    type,
+    name,
+    aliases: [],
+    tags: [],
+    description: '',
+    fields: emptyFields(type),
+    privateNotes: '',
+    ...change,
+  });
+
+  it('adds each Entry beside those there, seen when mentioned, with its Tags spelt as in use, private notes and image', async () => {
+    const { store } = await newProject();
+    const { id: there } = await store.createEntry('character', 'Anna');
+    await store.setTags(there, ['Ferry']);
+    const before = await store.read(entry(there));
+    const fields: EntryFields = { status: 'resolved' };
+
+    const { ids } = await store.importEntries([
+      imported('character', 'Mara', {
+        aliases: ['M'],
+        tags: ['ferry', 'flashback'],
+        description: 'She runs the ferry.',
+        custom: { f1: 'Midsummer' },
+        privateNotes: 'Based on Gran.',
+        image: { data: JPEG, extension: 'jpg' },
+      }),
+      imported('plot-thread', 'The feud', { fields }),
+    ]);
+
+    expect(ids).toHaveLength(2);
+    const [mara, feud] = ids;
+    expect(await store.read(entry(mara))).toEqual({
+      id: mara,
+      type: 'character',
+      name: 'Mara',
+      aliases: ['M'],
+      visibility: 'mentioned',
+      description: 'She runs the ferry.',
+      fields: emptyFields('character'),
+      custom: { f1: 'Midsummer' },
+      tags: ['Ferry', 'flashback'],
+      image: `${mara}.jpg`,
+    });
+    expect(await store.read(privateNotes(mara))).toEqual({
+      id: mara,
+      body: 'Based on Gran.',
+    });
+    expect(await store.readImage({ kind: 'entry', id: mara })).toEqual({
+      data: JPEG,
+      extension: 'jpg',
+    });
+    expect((await store.read(entry(feud))).fields).toEqual(fields);
+    expect(await store.read(entry(there))).toEqual(before);
+    expect(store.listEntries().map((e) => e.name)).toEqual([
+      'Anna',
+      'Mara',
+      'The feud',
+    ]);
+    await store.close();
+  });
+
+  it('is undone in one step, moving every Entry it added to Trash, from where each can be restored', async () => {
+    const { store } = await newProject();
+    const { id: there } = await store.createEntry('item', 'The Key');
+    const { ids, step } = await store.importEntries([
+      imported('character', 'Mara', {
+        privateNotes: 'Based on Gran.',
+        image: { data: JPEG, extension: 'jpg' },
+      }),
+      imported('place', 'Harbour'),
+    ]);
+
+    await store.undo(step);
+
+    expect(store.listEntries().map((e) => e.id)).toEqual([there]);
+    expect(
+      store
+        .listTrash()
+        .map((item) => item.id)
+        .sort(),
+    ).toEqual([...ids].sort());
+    await store.restore(ids[0]);
+    expect(await store.read(privateNotes(ids[0]))).toEqual({
+      id: ids[0],
+      body: 'Based on Gran.',
+    });
+    expect(await store.readImage({ kind: 'entry', id: ids[0] })).toEqual({
+      data: JPEG,
+      extension: 'jpg',
+    });
     await store.close();
   });
 });

@@ -155,7 +155,17 @@ export function menuTemplate(
           })),
         },
         // The window shows the file's split before anything is written.
-        { label: 'Import…', ...sending({ type: 'import' }) },
+        {
+          label: 'Import Manuscript…',
+          ...sending({ type: 'import' }),
+        },
+        // The window shows the Entries to tick before any is added.
+        {
+          id: 'importStoryBible',
+          label: 'Import Story Bible…',
+          enabled: writable,
+          ...sending({ type: 'importStoryBible' }),
+        },
         // The window asks which Scenes and Chapters first.
         {
           id: 'exportManuscript',

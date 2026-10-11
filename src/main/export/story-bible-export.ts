@@ -1,13 +1,17 @@
 import type { Conflict } from '../../shared/api';
 import { customValues, type CustomField } from '../../shared/custom-field';
-import { entryTitle, roleText } from '../../shared/entry';
+import { entryTitle } from '../../shared/entry';
 import type { StoryBibleChoice } from '../../shared/export-choice';
 import { matchesFilter, type Filter } from '../../shared/filter';
+import {
+  COMMON_LABELS,
+  TYPE_FIELDS,
+  type LabelledField,
+} from '../../shared/story-bible-fields';
 import {
   ENTRY_GROUP_TITLES,
   ENTRY_TYPE_LABELS,
   ENTRY_TYPES,
-  STATUS_LABELS,
   type EntryImage,
   type EntryRef,
   type EntrySummary,
@@ -135,45 +139,25 @@ function entryBlocks(
   customFields: readonly CustomField[],
   privateNotes: string,
 ): Block[] {
-  const { role, roleNote, appearance, voice, senses, status } = value.fields;
   const description = value.description
     .split(/\n[ \t]*\n/)
     .map((text): Block => ({ text }));
-  const fields: Block[] =
-    value.type === 'character'
-      ? [
-          { label: 'Role', text: roleText(role, roleNote) },
-          ...description,
-          { label: 'Appearance', text: appearance ?? '' },
-          { label: 'Voice traits', text: voice?.traits ?? '' },
-          { label: 'Says', text: voice?.says.join(', ') ?? '' },
-          { label: 'Never says', text: voice?.neverSays.join(', ') ?? '' },
-          { label: 'Example lines', text: voice?.examples.join('\n') ?? '' },
-        ]
-      : value.type === 'place'
-        ? [
-            ...description,
-            { label: 'Atmosphere', text: senses?.atmosphere ?? '' },
-            { label: 'Sight', text: senses?.sight ?? '' },
-            { label: 'Sound', text: senses?.sound ?? '' },
-            { label: 'Smells', text: senses?.smells ?? '' },
-            { label: 'Touch', text: senses?.touch ?? '' },
-          ]
-        : value.type === 'plot-thread'
-          ? [
-              { label: 'Status', text: status ? STATUS_LABELS[status] : '' },
-              ...description,
-            ]
-          : description;
+  const fields = TYPE_FIELDS[value.type];
+  const field = ({ label, text }: LabelledField): Block => ({
+    label,
+    text: text(value.fields),
+  });
   return [
-    { label: 'Type', text: ENTRY_TYPE_LABELS[value.type] },
-    { label: 'Aliases', text: value.aliases.join(', ') },
-    { label: 'Tags', text: (value.tags ?? []).join(', ') },
-    ...fields,
+    { label: COMMON_LABELS.type, text: ENTRY_TYPE_LABELS[value.type] },
+    { label: COMMON_LABELS.aliases, text: value.aliases.join(', ') },
+    { label: COMMON_LABELS.tags, text: (value.tags ?? []).join(', ') },
+    ...fields.filter((f) => f.beforeDescription).map(field),
+    ...description,
+    ...fields.filter((f) => !f.beforeDescription).map(field),
     ...customValues(value, customFields).map(
       ({ field, value }): Block => ({ label: field.label, text: value }),
     ),
-    { label: 'Private notes', text: privateNotes },
+    { label: COMMON_LABELS.privateNotes, text: privateNotes },
   ]
     .map((block) => ({ ...block, text: block.text.trim() }))
     .filter((block) => block.text !== '');
