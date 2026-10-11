@@ -100,6 +100,7 @@ import { StoryBible } from './StoryBible';
 import { ProjectContexts } from './StatusAndTags';
 import { TagsDialog } from './TagsDialog';
 import { WordTargetDialog } from './WordTarget';
+import { TodoDockPane, useTodoDock } from './TodoDock';
 import { TodoList, type TodoDraft } from './TodoList';
 import { trashTitle, TrashView } from './TrashView';
 import { Toast } from './Toast';
@@ -371,7 +372,7 @@ function ProjectView({
       if (done) window.shell.saveView({ panelWidths: next });
     };
     return {
-      width: widths[key] ?? DEFAULT_WIDTHS[key],
+      size: widths[key] ?? DEFAULT_WIDTHS[key],
       onResize: (width) => resize(width, false),
       onResized: (width) => resize(width, true),
     };
@@ -733,20 +734,20 @@ function ProjectView({
         : openEntry
           ? { kind: 'entry', id: openEntry.id }
           : null;
-  /** Whether Writing's Todos tab shows only the open unit's. In memory for the window. */
-  const [onlyOpenTodos, setOnlyOpenTodos] = useState(false);
-  /** The Todo the Author started from elsewhere, while the Todos tab is open. */
+  const [todoDock, changeTodoDock] = useTodoDock(project.todoDock);
+  /** The Todo the Author started from elsewhere, while the Todos dock is raised. */
   const [todoDraft, setTodoDraft] = useState<TodoDraft>();
   const todoDrafts = useRef(0);
   useEffect(() => {
-    if (tab !== 'todos') setTodoDraft(undefined);
-  }, [tab]);
+    if (todoDock.folded) setTodoDraft(undefined);
+  }, [todoDock.folded]);
   /**
-   * Starts a Todo in Writing's Todos tab, docking the left pane if
-   * collapsed: New Todo, focused, linked to `link`, holding `text` if given.
+   * Starts a Todo in Writing's Todos dock, raising it and docking the left
+   * pane if collapsed: New Todo, focused, linked to `link`, holding `text`
+   * if given.
    */
   function startTodo(link: TodoLink | null, text?: string) {
-    setTab('todos');
+    if (todoDock.folded) changeTodoDock({ folded: false });
     dockLeftPane();
     setTodoDraft({
       link,
@@ -764,7 +765,6 @@ function ProjectView({
   const tabs: Tab[] = [
     'manuscript',
     'bible',
-    'todos',
     ...(conflicts.length > 0 || tab === 'conflicts'
       ? (['conflicts'] as const)
       : []),
@@ -1262,7 +1262,7 @@ function ProjectView({
                 </div>
               )}
               <aside
-                className="left-pane"
+                className="left-pane with-todo-dock"
                 hidden={!docked.left}
                 style={{ width: binderWidth }}
               >
@@ -1296,15 +1296,6 @@ function ProjectView({
                       onClick={() => setTab('bible')}
                     >
                       Story Bible
-                    </button>
-                    <button
-                      role="tab"
-                      aria-selected={tab === 'todos'}
-                      tabIndex={tab === 'todos' ? 0 : -1}
-                      id="todos-tab"
-                      onClick={() => setTab('todos')}
-                    >
-                      Todos
                     </button>
                     {tabs.includes('conflicts') && (
                       <button
@@ -1382,18 +1373,6 @@ function ProjectView({
                       }}
                       onAddTodo={(id) => startTodo({ kind: 'entry', id })}
                     />
-                  ) : tab === 'todos' ? (
-                    <TodoList
-                      todos={todos}
-                      names={{ manuscript, entries, trash }}
-                      prelink={prelink}
-                      draft={todoDraft}
-                      onlyOpen={onlyOpenTodos}
-                      onOnlyOpen={setOnlyOpenTodos}
-                      onOpen={select}
-                      onOpenTrash={openTrashItem}
-                      onError={onError}
-                    />
                   ) : tab === 'conflicts' ? (
                     <ConflictList
                       conflicts={conflicts}
@@ -1422,6 +1401,17 @@ function ProjectView({
                     />
                   )}
                 </div>
+                <TodoDockPane
+                  dock={todoDock}
+                  onDock={changeTodoDock}
+                  todos={todos}
+                  names={{ manuscript, entries, trash }}
+                  prelink={prelink}
+                  draft={todoDraft}
+                  onOpen={select}
+                  onOpenTrash={openTrashItem}
+                  onError={onError}
+                />
               </aside>
               {docked.left && (
                 <PanelResizer
@@ -1443,7 +1433,7 @@ function ProjectView({
                         sceneId: open.scene.id,
                         chapterId: open.chapter?.id ?? null,
                       }}
-                      width={pane('overview').width}
+                      width={pane('overview').size}
                       onOpenScene={(id) => select({ kind: 'scene', id })}
                       onOpenChapter={(id) => select({ kind: 'chapter', id })}
                       onOpenPart={(id) => select({ kind: 'part', id })}
@@ -1629,7 +1619,7 @@ function ProjectView({
                   active={mode === 'writing'}
                   docked={docked.assistant}
                   onCollapse={() => togglePane('assistant')}
-                  width={pane('assistant').width}
+                  width={pane('assistant').size}
                   onAddProvider={onAddProvider}
                   sceneId={open && !open.scene.missing ? open.scene.id : null}
                   names={{ manuscript, entries }}
@@ -1791,7 +1781,7 @@ function ProjectView({
 type PanesBeforeZen = { docked: DockedPanes; overviewOpen: boolean };
 
 /** The left pane's tabs in Writing. */
-type Tab = 'manuscript' | 'bible' | 'todos' | 'conflicts' | 'trash';
+type Tab = 'manuscript' | 'bible' | 'conflicts' | 'trash';
 
 /** The tab ← / →, Home or End switches to from `tab`, round the ends; null for other keys. */
 function tabAfter(key: string, tab: Tab, tabs: Tab[]): Tab | null {

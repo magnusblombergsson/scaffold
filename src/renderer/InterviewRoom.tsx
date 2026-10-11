@@ -103,7 +103,7 @@ export function InterviewRoom({
     <>
       <RoomList
         label="Interview Conversations"
-        width={listPane.width}
+        width={listPane.size}
         conversations={listed}
         conversation={conversation}
         detail={(c) => focusLabel(c.focus ?? OPEN_FOCUS, names)}
@@ -196,7 +196,7 @@ export function InterviewRoom({
       <aside
         className="reference"
         aria-label="In focus"
-        style={{ width: referencePane.width }}
+        style={{ width: referencePane.size }}
       >
         <div className="reference-body">
           <h3 className="in-focus-heading">{label}</h3>

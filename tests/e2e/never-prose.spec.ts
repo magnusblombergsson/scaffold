@@ -46,7 +46,7 @@ const LEAKS = {
 /**
  * The only controls a message may have: deciding Proposals, editing one's
  * value first, retrying a call, and starting a Todo from a Finding, which
- * the Author writes in the Todos tab, never the Manuscript.
+ * the Author writes in the Todos dock, never the Manuscript.
  */
 const ALLOWED_CONTROLS = [
   'Accept',

@@ -78,7 +78,7 @@ export function BrainstormRoom({
     <>
       <RoomList
         label="Brainstorm Conversations"
-        width={listPane.width}
+        width={listPane.size}
         conversations={listed}
         conversation={conversation}
       />
@@ -123,7 +123,7 @@ export function BrainstormRoom({
         max={640}
       />
       <Reference
-        width={referencePane.width}
+        width={referencePane.size}
         manuscript={names.manuscript}
         entries={names.entries}
         onOpenEntry={onOpenEntry}

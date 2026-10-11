@@ -15,6 +15,7 @@ import { projectLookup } from '../project-store/project-store';
 import { loadAppSettings, type AppSettings } from './app-settings';
 import { renameTagInFilter, type Filter } from '../../shared/filter';
 import { DEFAULT_MODEL } from '../../shared/models';
+import { DEFAULT_TODO_DOCK } from '../../shared/todo-dock';
 
 let dir: string;
 let file: string;
@@ -97,6 +98,44 @@ describe('saving', () => {
     await settings.flush();
 
     expect((await load()).highlightMentions()).toBe(false);
+  });
+
+  it('keeps the Todos dock folded, showing All, until the Author changes it, and remembers that', async () => {
+    const settings = await load();
+    expect(settings.todoDock()).toEqual(DEFAULT_TODO_DOCK);
+
+    settings.setTodoDock({ folded: false, height: 260 });
+    settings.setTodoDock({ scope: 'context' });
+    await settings.flush();
+
+    expect((await load()).todoDock()).toEqual({
+      folded: false,
+      height: 260,
+      scope: 'context',
+    });
+  });
+
+  it('keeps only what is valid of a Todos dock a window sends or the file holds', async () => {
+    await writeFile(
+      file,
+      JSON.stringify({
+        version: 1,
+        global: { todoDock: { folded: 'no', height: 300, scope: 'mine' } },
+        projects: {},
+        recent: [],
+      }),
+    );
+    const settings = await load();
+    expect(settings.todoDock()).toEqual({ ...DEFAULT_TODO_DOCK, height: 300 });
+
+    settings.setTodoDock({ height: Infinity, scope: 'context' } as never);
+    settings.setTodoDock('raised' as never);
+
+    expect(settings.todoDock()).toEqual({
+      ...DEFAULT_TODO_DOCK,
+      height: 300,
+      scope: 'context',
+    });
   });
 
   it('looks as today until the Author changes the writing width, theme or spell check, and remembers them', async () => {

@@ -31,11 +31,34 @@ export type Todo = {
   link?: TodoLink;
 };
 
-/** The Todos linked to `link`, as “Only the open unit’s Todos” shows; none without one. */
-export function linkedTo(todos: Todo[], link: TodoLink | null): Todo[] {
+/**
+ * The Todos This context shows for the unit open, `link`: those linked to it
+ * and to the units containing it, a Scene's Chapter and Part, or a Chapter's
+ * Part, in the Author's order; none with nothing open.
+ */
+export function inContext(
+  todos: Todo[],
+  link: TodoLink | null,
+  manuscript: Manuscript,
+): Todo[] {
   if (!link) return [];
-  return todos.filter(
-    (todo) => todo.link?.kind === link.kind && todo.link.id === link.id,
+  const units = [link];
+  const chapter =
+    link.kind === 'chapter'
+      ? manuscript.chapters.find((c) => c.id === link.id)
+      : link.kind === 'scene'
+        ? manuscript.chapters.find((c) =>
+            c.scenes.some((s) => s.id === link.id),
+          )
+        : undefined;
+  if (chapter && link.kind === 'scene') {
+    units.push({ kind: 'chapter', id: chapter.id });
+  }
+  if (chapter?.part) units.push({ kind: 'part', id: chapter.part });
+  return todos.filter((todo) =>
+    units.some(
+      (unit) => todo.link?.kind === unit.kind && todo.link.id === unit.id,
+    ),
   );
 }
 
