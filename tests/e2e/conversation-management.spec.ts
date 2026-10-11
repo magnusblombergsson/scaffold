@@ -110,3 +110,68 @@ test('the Author renames a Conversation, deletes it to Trash and restores it, an
   ).toBeVisible();
   await app.close();
 });
+
+test('the Author stars a Conversation to keep it on top, and unstars it from its menu by keyboard', async () => {
+  const projectPath = path.join(tempDir(), 'My Novel');
+  const app = await launch(tempDir(), { anthropicUrl: anthropic.url });
+  await answerDialogs(app, projectPath);
+  const page = await app.firstWindow();
+  await page.getByRole('button', { name: 'New Project…' }).click();
+  await expect(page.getByLabel('Prose')).toBeFocused();
+  await addAnthropicKey(page);
+  await switchTo(page, 'Brainstorm');
+  const room = page.getByRole('main', { name: 'Brainstorm' });
+  const list = page.getByRole('navigation', {
+    name: 'Brainstorm Conversations',
+  });
+  for (const question of ['Anna’s sister?', 'Ben’s secret?']) {
+    anthropic.calls.push({ reply: ['Maybe.'] });
+    await list.getByRole('button', { name: 'New Conversation' }).click();
+    await room.getByRole('textbox', { name: 'Message' }).fill(question);
+    await room.getByRole('button', { name: 'Send' }).click();
+    await expect(
+      list.getByRole('button', { name: question, exact: true }),
+    ).toBeVisible();
+  }
+  const titles = () =>
+    list.locator('.room-conversation .binder-title').allTextContents();
+  await expect(list.getByRole('heading', { name: 'Starred' })).toHaveCount(0);
+  await expect.poll(titles).toEqual(['Ben’s secret?', 'Anna’s sister?']);
+
+  await list
+    .getByRole('listitem')
+    .filter({ hasText: 'Anna’s sister?' })
+    .hover();
+  await list.getByRole('button', { name: 'Star Anna’s sister?' }).click();
+
+  await expect(list.getByRole('heading', { name: 'Starred' })).toBeVisible();
+  await expect(
+    list.getByRole('list', { name: 'Starred' }).getByRole('listitem'),
+  ).toHaveText([/Anna’s sister\?/]);
+  await expect.poll(titles).toEqual(['Anna’s sister?', 'Ben’s secret?']);
+  await expect(
+    list.getByRole('button', { name: 'Star Anna’s sister?' }),
+  ).toHaveAttribute('aria-pressed', 'true');
+  const stars = JSON.parse(
+    await readFile(
+      path.join(projectPath, 'stars', 'conversations.json'),
+      'utf8',
+    ),
+  );
+  expect(Object.values(stars.switches)).toEqual([
+    expect.objectContaining({ on: true }),
+  ]);
+
+  await list
+    .getByRole('button', { name: 'Conversation actions: Anna’s sister?' })
+    .focus();
+  await page.keyboard.press('Enter');
+  await expect(page.getByRole('menuitem', { name: 'Unstar' })).toBeVisible();
+  await page.keyboard.press('ArrowDown');
+  await expect(page.getByRole('menuitem', { name: 'Unstar' })).toBeFocused();
+  await page.keyboard.press('Enter');
+
+  await expect(list.getByRole('heading', { name: 'Starred' })).toHaveCount(0);
+  await expect.poll(titles).toEqual(['Ben’s secret?', 'Anna’s sister?']);
+  await app.close();
+});

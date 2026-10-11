@@ -74,6 +74,11 @@ export type ConversationSummary = {
   /** When the Author started it, in ms since the epoch. */
   created: number;
   focus?: InterviewFocus;
+  /**
+   * Whether the Author starred it, as the Conversation list says; kept in
+   * the Project, never in its log.
+   */
+  starred?: boolean;
 };
 
 /** A unit whose text the Assistant saw in focus: a Scene's Prose, or an Outline or Notes. */

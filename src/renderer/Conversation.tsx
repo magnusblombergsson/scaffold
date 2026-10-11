@@ -380,6 +380,18 @@ export function useConversation({
     }
   }
 
+  /** Stars or unstars a Conversation; the list shows it once main says so. */
+  async function star(id: string, starred: boolean) {
+    setError(null);
+    try {
+      await window.assistant.starConversation(id, starred);
+    } catch (error) {
+      setError(
+        `Can't ${starred ? 'star' : 'unstar'} the Conversation: ${(error as CallFailure).message}`,
+      );
+    }
+  }
+
   /**
    * Moves a whole Conversation to Trash once the Author confirms it, with
    * Undo offered; single messages can't be deleted.
@@ -462,6 +474,7 @@ export function useConversation({
     retry,
     changeFocus,
     rename,
+    star,
     trash,
   };
 }
@@ -470,18 +483,25 @@ export type ConversationState = ReturnType<typeof useConversation>;
 
 /**
  * What can be done to a listed Conversation: rename it in place, which
- * `startRename` begins, or move it to Trash. Never while the Project is
- * read-only or the Assistant answers.
+ * `startRename` begins, star or unstar it, or move it to Trash. Never while
+ * the Project is read-only, nor, but for the star, which isn't in its log,
+ * while the Assistant answers.
  */
 export function conversationActions(
-  { streaming, trash }: ConversationState,
+  { list, streaming, star, trash }: ConversationState,
   id: string,
   startRename: () => void,
   readOnly: boolean,
 ): MenuItem[] {
   const disabled = readOnly || streaming !== null;
+  const starred = list.find((c) => c.id === id)?.starred === true;
   return [
     { label: 'Rename…', run: startRename, disabled },
+    {
+      label: starred ? 'Unstar' : 'Star',
+      run: () => void star(id, !starred),
+      disabled: readOnly,
+    },
     { label: 'Move to Trash…', run: () => trash(id), disabled },
   ];
 }

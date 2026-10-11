@@ -3931,6 +3931,44 @@ button.finding-quote:hover {
   padding: 0.3rem 0.5rem;
 }
 
+/* The Starred group's heading, as a Story Bible group's. */
+.room-group {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin: 0.5rem 0 0.25rem;
+  padding: 0 1rem;
+}
+
+/* ☆ shows on the row the pointer or focus is on; ★ always. */
+.room-star {
+  flex-shrink: 0;
+  background: none;
+  border: none;
+  color: var(--muted);
+  font: inherit;
+  cursor: pointer;
+  padding: 0.2rem 0.3rem;
+  border-radius: 4px;
+  opacity: 0;
+}
+
+.room-star[aria-pressed='true'] {
+  color: var(--accent);
+}
+
+.room-conversation:hover .room-star,
+.room-conversation:focus-within .room-star,
+.room-star[aria-pressed='true'] {
+  opacity: 1;
+}
+
+.room-star:disabled {
+  cursor: default;
+}
+
 .room-centre .conversations {
   width: 100%;
   max-width: 44rem;

@@ -789,6 +789,11 @@ export interface AssistantApi {
   /** Gives a Conversation a new title; refused for an empty one. */
   renameConversation(conversationId: string, title: string): Promise<void>;
   /**
+   * Stars or unstars a Conversation, which every computer then sees; never
+   * written to its log.
+   */
+  starConversation(conversationId: string, starred: boolean): Promise<void>;
+  /**
    * Asks the Author to confirm, saying how many pending Proposals go with
    * it, then moves the whole Conversation to Trash; null if not. Single
    * messages can't be deleted.
@@ -947,6 +952,7 @@ export const assistantMethods = {
   startConversation: 'invoke',
   chooseModel: 'invoke',
   renameConversation: 'invoke',
+  starConversation: 'invoke',
   trashConversation: 'invoke',
   setInterviewFocus: 'invoke',
   ask: 'stream',
