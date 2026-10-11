@@ -76,8 +76,12 @@ The Author-visible, Author-editable body of knowledge about a story: characters,
 _Avoid_: Memory, knowledge base, lore, wiki
 
 **Entry**:
-One typed item in the Story Bible — a Character, Place, Item, World Rule, Plot Thread, Theme, or Other — with a name, aliases, a free-text description, private notes the Assistant never sees, an optional image the Assistant never sees, and a few optional type-specific fields.
+One typed item in the Story Bible — a Character, Place, Item, World Rule, Plot Thread, Theme, or Other — with a name, aliases, a free-text description, private notes the Assistant never sees, an optional image the Assistant never sees, a few optional type-specific fields, and the Custom fields its Project defines for its type.
 _Avoid_: Card, note, record
+
+**Custom field**:
+A free-text field the Author adds to one Entry type in one Project, such as a Character's "Allegiance", held by every Entry of that type in addition to the type's own fields. The Assistant sees it like any other field.
+_Avoid_: Attribute, property, trait
 
 **Image prompt**:
 A description of an Entry, written by the Assistant on request from what the Entry says it looks, sounds, smells and feels like, for the Author to paste into an image generator elsewhere. It describes only: no narration, new dialogue or story moment, so it is not Prose, though it may quote the Author's own lines. It isn't kept.
@@ -140,7 +144,7 @@ One line on the Project's list of things the Author still means to do, ticked of
 _Avoid_: Task, checklist item, reminder
 
 **Trash**:
-Where deleted Scenes, Chapters, Parts, Entries and Conversations go within a Project; they stay recoverable until the Author empties it. A Part goes with its Chapters and their Scenes, and a Chapter with its Scenes, and they come back together; an Entry, Scene, Chapter or Part with its image; a Conversation goes with its pending Proposals.
+Where deleted Scenes, Chapters, Parts, Entries, Custom fields and Conversations go within a Project; they stay recoverable until the Author empties it. A Part goes with its Chapters and their Scenes, and a Chapter with its Scenes, and they come back together; an Entry, Scene, Chapter or Part with its image; a Custom field with the values Entries held in it; a Conversation goes with its pending Proposals.
 _Avoid_: Bin, archive
 
 **Export**:
