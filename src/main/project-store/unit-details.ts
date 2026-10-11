@@ -1,6 +1,6 @@
 import { isDeepStrictEqual } from 'node:util';
 import type { UnitRef } from '../../shared/project-types';
-import { ENTRY_FIELD_KEYS } from './entry-fields-file';
+import { CUSTOM, ENTRY_FIELD_KEYS } from './entry-fields-file';
 import { formatUnitFile, type UnitFile } from './unit-file';
 
 // A unit's details are the keys of its file's header that aren't its text
@@ -22,7 +22,7 @@ const HEADER_TEXT_KEYS: Record<Kind, readonly string[]> = {
   outline: [],
   notes: [],
   private: [],
-  entry: ['type', 'name', 'aliases', 'visibility', ...ENTRY_FIELD_KEYS],
+  entry: ['type', 'name', 'aliases', 'visibility', ...ENTRY_FIELD_KEYS, CUSTOM],
 };
 
 /** A unit's details, and when each was last saved changed. */

@@ -3,12 +3,15 @@ import type { PanelWidths } from '../shared/api';
 import { OPEN_FOCUS, type InterviewFocus } from '../shared/conversation';
 import { entryTitle } from '../shared/entry';
 import { hasTag, tagged } from '../shared/tags';
+import { fieldsOfType } from '../shared/custom-field';
 import {
+  customFieldKey,
   FIELD_LABELS,
   fieldOf,
   fieldText,
   PROPOSAL_FIELDS,
   type PendingProposal,
+  type ProposalField,
 } from '../shared/proposal';
 import {
   ENTRY_TYPE_LABELS,
@@ -38,6 +41,7 @@ import {
 import { PanelResizer, type PaneSize } from './PanelResizer';
 import { ReadOnlyContext } from './read-only';
 import { RoomList } from './RoomList';
+import { useCustomFields } from './StatusAndTags';
 
 /**
  * The Interview room: its Conversations with their focus on the left, the
@@ -301,8 +305,8 @@ function InFocus({
 }
 
 /**
- * An Entry in focus: each field its type has, with what it holds and the
- * values Proposals pending on it would give it.
+ * An Entry in focus: each field its type has, its Custom fields last, with
+ * what it holds and the values Proposals pending on it would give it.
  */
 function FocusEntry({
   entryId,
@@ -319,6 +323,7 @@ function FocusEntry({
 }) {
   const [entry, setEntry] = useState<EntryValue | null | undefined>();
   const [pending, setPending] = useState<PendingProposal[]>([]);
+  const customFields = useCustomFields();
   useEffect(() => {
     let current = true;
     void Promise.all([
@@ -340,8 +345,37 @@ function FocusEntry({
   }
   const fields = PROPOSAL_FIELDS.filter(
     (field) => fieldOf(entry, field) !== undefined,
+  ).map((field) => ({ field, label: FIELD_LABELS[field] }));
+  const custom = fieldsOfType(customFields, entry.type).map(
+    (f): { field: ProposalField; label: string } => ({
+      field: customFieldKey(f.id),
+      label: f.label,
+    }),
   );
   const examples = entry.fields.voice?.examples ?? [];
+  const section = ({
+    field,
+    label,
+  }: {
+    field: ProposalField;
+    label: string;
+  }) => {
+    const text = fieldText(field, fieldOf(entry, field, customFields)!).trim();
+    return (
+      <section key={field} className="focus-field" aria-label={label}>
+        <h4>{label}</h4>
+        <p className={text ? 'focus-value' : 'focus-value reference-empty'}>
+          {text || '—'}
+        </p>
+        <Ghosts
+          field={field}
+          pending={pending}
+          onShow={onShow}
+          showable={showable}
+        />
+      </section>
+    );
+  };
   return (
     <article className="focus-entry" aria-label={entryTitle(entry)}>
       <header>
@@ -355,27 +389,7 @@ function FocusEntry({
           <span aria-hidden="true">↗</span>
         </button>
       </header>
-      {fields.map((field) => {
-        const text = fieldText(field, fieldOf(entry, field)!).trim();
-        return (
-          <section
-            key={field}
-            className="focus-field"
-            aria-label={FIELD_LABELS[field]}
-          >
-            <h4>{FIELD_LABELS[field]}</h4>
-            <p className={text ? 'focus-value' : 'focus-value reference-empty'}>
-              {text || '—'}
-            </p>
-            <Ghosts
-              field={field}
-              pending={pending}
-              onShow={onShow}
-              showable={showable}
-            />
-          </section>
-        );
-      })}
+      {fields.map(section)}
       {entry.type === 'character' && (
         <section className="focus-field" aria-label="Example lines">
           <h4>Example lines</h4>
@@ -390,6 +404,7 @@ function FocusEntry({
           </p>
         </section>
       )}
+      {custom.map(section)}
     </article>
   );
 }

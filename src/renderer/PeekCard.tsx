@@ -5,6 +5,7 @@ import { useUnitImage } from './UnitImage';
 import { ViewableImage } from './ImageView';
 import { VISIBILITY_LABELS } from './EntryView';
 import { entryFields, keyFields } from './card-fields';
+import { useCustomFields } from './StatusAndTags';
 
 /**
  * An Entry in the Peek, shortened: its image small, type, name, Role and Role
@@ -33,7 +34,8 @@ export function PeekCard({
   const image = useUnitImage({ kind: 'entry', id: entry.id }, entry.image);
   const title = entryTitle(entry);
   const role = roleText(entry.fields.role, entry.fields.roleNote);
-  const fields = expanded ? entryFields(entry) : keyFields(entry);
+  const customFields = useCustomFields();
+  const fields = expanded ? entryFields(entry, customFields) : keyFields(entry);
   return (
     <article
       ref={card}

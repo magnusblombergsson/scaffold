@@ -4,6 +4,7 @@ import type {
   ManuscriptPart,
   ManuscriptScene,
 } from '../shared/project-types';
+import type { CustomField } from '../shared/custom-field';
 import { statusOf, type Status } from '../shared/status';
 import { Menu, statusChoices, StatusDot } from './Binder';
 import { ReadOnlyContext } from './read-only';
@@ -23,26 +24,40 @@ export type StatusAndTags = {
 
 const StatusAndTagsContext = createContext<StatusAndTags | null>(null);
 
+/** No Custom fields, the same each time. */
+const NO_CUSTOM_FIELDS: CustomField[] = [];
+
+const CustomFieldsContext = createContext<CustomField[]>(NO_CUSTOM_FIELDS);
+
 /**
- * What every view of an open Project reads: whether it is read-only, and
- * its Status list with how to set Status and Tags.
+ * What every view of an open Project reads: whether it is read-only, its
+ * Status list with how to set Status and Tags, and its Custom fields.
  */
 export function ProjectContexts({
   readOnly,
   statusAndTags,
+  customFields,
   children,
 }: {
   readOnly: boolean;
   statusAndTags: StatusAndTags;
+  customFields: CustomField[];
   children: ReactNode;
 }) {
   return (
     <ReadOnlyContext.Provider value={readOnly}>
       <StatusAndTagsContext.Provider value={statusAndTags}>
-        {children}
+        <CustomFieldsContext.Provider value={customFields}>
+          {children}
+        </CustomFieldsContext.Provider>
       </StatusAndTagsContext.Provider>
     </ReadOnlyContext.Provider>
   );
+}
+
+/** The Project's Custom fields, by Entry type, each type's in their order. */
+export function useCustomFields(): CustomField[] {
+  return useContext(CustomFieldsContext);
 }
 
 function useStatusAndTags(): StatusAndTags {

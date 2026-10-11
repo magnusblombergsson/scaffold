@@ -38,6 +38,7 @@ function conversationsOver() {
     changeUnit: unsupported,
     pendingUnit: () => undefined,
     addEntry: unsupported,
+    customFields: () => [],
     moveEntryToTrash: unsupported,
     enqueueWrite: (operation) => operation(),
     passFormatGate: async () => {},

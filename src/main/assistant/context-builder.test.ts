@@ -1298,3 +1298,72 @@ describe('Parts', () => {
     );
   });
 });
+
+describe('Custom fields', () => {
+  it('are sent in an Entry that has them, labelled after its own fields, and named for Proposals', async () => {
+    const { store, view, entries } = await fixture();
+    const allegiance = await store.addCustomField('character', 'Allegiance');
+    const debt = await store.addCustomField('character', 'Debt');
+    await store.addCustomField('item', 'Maker');
+    const mira = await store.read({ kind: 'entry', id: entries.mira });
+    await store.write(
+      { kind: 'entry', id: entries.mira },
+      {
+        ...mira,
+        fields: { ...mira.fields, appearance: 'Freckled.' },
+        custom: { [debt]: 'Owes the harbour master.', [allegiance]: '' },
+      },
+    );
+
+    const text = sent(
+      await buildContext(view, {
+        mode: 'brainstorm',
+        messages: [message('author', 'What if it rains?')],
+      }),
+    );
+
+    expect(text).toContain(
+      'Her sister.\nAppearance: Freckled.\nDebt: Owes the harbour master.',
+    );
+    expect(text).not.toContain('Allegiance:');
+    expect(text).toContain(
+      `- Characters: Allegiance ("custom:${allegiance}"), Debt ("custom:${debt}")\n- Items: Maker (`,
+    );
+  });
+
+  it('send nothing new for a Project without any', async () => {
+    const { view } = await fixture();
+
+    const text = sent(
+      await buildContext(view, {
+        mode: 'brainstorm',
+        messages: [message('author', 'Go.')],
+      }),
+    );
+
+    expect(text).not.toContain('Fields the Author added');
+  });
+
+  it('are asked about in an Interview on an Entry or type that has them', async () => {
+    const { store, view, entries } = await fixture();
+    await store.addCustomField('character', 'Allegiance');
+    const focusOf = async (focus: InterviewFocus) =>
+      (
+        await buildContext(view, {
+          mode: 'interview',
+          focus,
+          messages: [message('author', 'Go on.')],
+        })
+      ).system.find((b) => b.text.startsWith('The Interview’s focus'))?.text;
+
+    expect(await focusOf({ kind: 'entry', id: entries.anna })).toContain(
+      'The Author added a field to every Character: Allegiance; ask about it when empty too',
+    );
+    expect(await focusOf({ kind: 'entry-type', type: 'character' })).toContain(
+      'Allegiance',
+    );
+    expect(await focusOf({ kind: 'entry', id: entries.kista })).not.toContain(
+      'added',
+    );
+  });
+});

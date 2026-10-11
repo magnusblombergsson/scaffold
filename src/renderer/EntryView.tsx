@@ -1,8 +1,14 @@
 import type { Node } from '@tiptap/pm/model';
 import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
+import {
+  customValue,
+  fieldsOfType,
+  withCustomValue,
+} from '../shared/custom-field';
 import { entryCollisions, entryTitle } from '../shared/entry';
 import {
-  FIELD_LABELS,
+  customFieldKey,
+  fieldLabel,
   fieldText,
   isAppending,
   type PendingProposal,
@@ -28,6 +34,8 @@ import {
   type Visibility,
   type Voice,
 } from '../shared/project-types';
+import { AddCustomField, CustomFieldHeading } from './CustomFields';
+import { useCustomFields } from './StatusAndTags';
 import { EntryImageSection } from './UnitImage';
 import { entryBody, type BodyField } from './entry-layout';
 import { useReveal, type Reveal } from './reveal';
@@ -153,7 +161,9 @@ type Loaded = { entry: EntryValue; privateNotes: PrivateValue };
  * warning once it is saved. A Proposal pending on a field shows under it as
  * a ghost value, until it is decided; an accepted one fills the field in.
  * A Proposal's title in Writing brings the Author to its field, focused,
- * with its ghost highlighted.
+ * with its ghost highlighted. The Custom fields of its type follow its own,
+ * and the Author can add, rename, move and delete them there, for every
+ * Entry of the type.
  */
 export function EntryView({
   entry: summary,
@@ -191,6 +201,7 @@ export function EntryView({
   /** A Character's Role and a Plot Thread's Status, as last saved or reloaded. */
   const [choices, setChoices] = useState<EntryFields>({});
   const [pending, setPending] = useState<PendingProposal[]>([]);
+  const customFields = useCustomFields();
   const view = useRef<HTMLElement>(null);
   const entryKey = unitKey({ kind: 'entry', id: entryId });
   // A new selection for each ask, so that the Name takes focus again.
@@ -482,6 +493,45 @@ export function EntryView({
             <Fragment key={index}>{parts}</Fragment>
           );
         })}
+        {fieldsOfType(customFields, summary.type).map((field, index) => {
+          const key = customFieldKey(field.id);
+          const text = (value: UnitValue) =>
+            customValue(value as EntryValue, field.id);
+          return (
+            <section
+              className="plain-text-field custom-field"
+              key={field.id}
+              data-field={key}
+            >
+              <CustomFieldHeading
+                field={field}
+                index={index}
+                fields={customFields}
+              />
+              <UnitEditor
+                unitKey={`${entryKey}:${key}`}
+                field={{ unitKey: entryKey, text }}
+                // As last saved: it may show anew, as once restored from Trash.
+                text={text(value.current ?? entry)}
+                extensions={plainTextExtensions({ bullets: false })}
+                toDoc={textToDoc}
+                toText={docToText}
+                save={(typed) =>
+                  save({
+                    custom: withCustomValue(
+                      value.current?.custom,
+                      field.id,
+                      typed,
+                    ),
+                  })
+                }
+                attributes={attributes(field.label)}
+              />
+              {ghosts(key)}
+            </section>
+          );
+        })}
+        <AddCustomField type={summary.type} fields={customFields} />
         <section className="plain-text-field private-notes">
           <h3>Private notes</h3>
           <p className="private-notes-warning">
@@ -530,7 +580,10 @@ export function Ghosts({
   const on = pending.filter((p) => p.proposal.field === field);
   if (on.length === 0) return null;
   return (
-    <ul className="ghost-values" aria-label={`Proposed ${FIELD_LABELS[field]}`}>
+    <ul
+      className="ghost-values"
+      aria-label={`Proposed ${fieldLabel(on[0].proposal)}`}
+    >
       {on.map(({ conversationId, proposal }) => (
         <li
           key={proposal.id}

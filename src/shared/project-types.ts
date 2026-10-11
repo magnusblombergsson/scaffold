@@ -1,4 +1,5 @@
 import type { Mode } from './conversation';
+import type { CustomValues } from './custom-field';
 
 // Types shared by main, preload and renderer. The renderer never sees paths or
 // file formats, only these values.
@@ -143,6 +144,12 @@ export type EntryValue = {
   visibility: Visibility;
   description: string;
   fields: EntryFields;
+  /**
+   * Its values in the Project's Custom fields, by field id; none when it
+   * holds none. A value of a field that isn't defined here, as one in Trash
+   * or not yet synced, is kept and not shown.
+   */
+  custom?: CustomValues;
   /**
    * Its image's file in `images/`, if it has one. Only `setImage` and
    * `removeImage` change it; a write keeps the image the Entry has.
@@ -361,6 +368,14 @@ export type TrashItem =
       title: string;
       trashedAt: number;
       mode: Mode;
+    }
+  | {
+      /** A Custom field, its `title` its label; its values stay in the Entries. */
+      kind: 'custom-field';
+      id: string;
+      title: string;
+      trashedAt: number;
+      type: EntryType;
     };
 
 /** The languages Prose is spellchecked and typeset in. */

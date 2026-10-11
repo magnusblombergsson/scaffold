@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
+import type { CustomField } from './custom-field';
 import type { EntryValue } from './project-types';
 import {
   accept,
+  customFieldKey,
   appendedOnto,
   canAppend,
   decided,
@@ -1148,5 +1150,95 @@ describe('proposalTarget', () => {
         ),
       ).toBeNull();
     }
+  });
+});
+
+describe('a Proposal to a Custom field', () => {
+  const fields: CustomField[] = [
+    { id: 'f-allegiance', type: 'character', label: 'Allegiance' },
+    { id: 'f-climate', type: 'place', label: 'Climate' },
+  ];
+  const allegiance = customFieldKey('f-allegiance');
+  const withAllegiance = { ...anna, custom: { 'f-allegiance': 'The Crown' } };
+
+  it('reads and writes the field by its id, for an Entry of its type only', () => {
+    expect(fieldOf(withAllegiance, allegiance, fields)).toBe('The Crown');
+    expect(fieldOf(anna, allegiance, fields)).toBe('');
+    expect(fieldOf(withAllegiance, allegiance)).toBeUndefined();
+    expect(
+      fieldOf(harbour, customFieldKey('f-allegiance'), fields),
+    ).toBeUndefined();
+    expect(withField(anna, allegiance, 'The Rebels').custom).toEqual({
+      'f-allegiance': 'The Rebels',
+    });
+    expect(withField(withAllegiance, allegiance, '')).not.toHaveProperty(
+      'custom',
+    );
+  });
+
+  it('is read from a block naming the field by its key, as a Replace or an Append on a new line', () => {
+    expect(
+      proposalOf(
+        { entry: 'anna', field: allegiance, value: 'The Rebels' },
+        withAllegiance,
+        fields,
+      ),
+    ).toEqual({
+      kind: 'field',
+      entryId: 'anna',
+      field: allegiance,
+      base: 'The Crown',
+      proposed: 'The Rebels',
+    });
+    const append = proposalOf(
+      { entry: 'anna', field: allegiance, append: ' Secretly. ' },
+      withAllegiance,
+      fields,
+    );
+    expect(append).toEqual({
+      kind: 'field',
+      entryId: 'anna',
+      field: allegiance,
+      operation: 'append',
+      proposed: 'Secretly.',
+    });
+    expect(appendedOnto(append as AppendingChange, 'The Crown')).toBe(
+      'The Crown\nSecretly.',
+    );
+    expect(proposalBlock(append as ProposalChange)).toBe(
+      '```proposal\n{"entry":"anna","field":"custom:f-allegiance","append":"Secretly."}\n```',
+    );
+  });
+
+  it('takes nothing for a field the Project or the type lacks, or an Add', () => {
+    for (const block of [
+      { entry: 'anna', field: customFieldKey('f-unknown'), value: 'x' },
+      { entry: 'anna', field: customFieldKey('f-climate'), value: 'x' },
+      { entry: 'anna', field: allegiance, add: 'x' },
+      { entry: 'anna', field: 'custom:', value: 'x' },
+    ]) {
+      expect(proposalOf(block, anna, fields)).toBeNull();
+    }
+  });
+
+  it('names the field by its label now, and can’t be accepted once the field is gone', () => {
+    const change: ProposalChange = {
+      kind: 'field',
+      entryId: 'anna',
+      field: allegiance,
+      base: 'The Crown',
+      proposed: 'The Rebels',
+    };
+    const labelled = { ...logged(change), fieldLabel: 'Loyalty' };
+    expect(accept(labelled, { current: 'The Crown' }, 'The Rebels')).toEqual({
+      wrote: 'The Rebels',
+    });
+    expect(accept(labelled, { current: 'Nobody' }, 'The Rebels')).toEqual({
+      refused: 'stale',
+      text: 'Loyalty has changed since this was proposed',
+    });
+    expect(accept(logged(change), { orphaned: 'field' }, 'The Rebels')).toEqual(
+      { refused: 'orphaned', text: 'Anna no longer has that field.' },
+    );
   });
 });

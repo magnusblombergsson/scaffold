@@ -17,7 +17,11 @@ import {
   type Visibility,
 } from '../../shared/project-types';
 import { readTags } from '../../shared/tags';
-import { entryFieldsFrontmatter, readEntryFields } from './entry-fields-file';
+import {
+  CUSTOM,
+  entryFieldsFrontmatter,
+  readEntryFields,
+} from './entry-fields-file';
 import { DETAILS, imageFile } from './unit-details-catalogue';
 import { KEYS_SAVED_AT } from './unit-details';
 import { formatUnitFile, type UnitFile } from './unit-file';
@@ -141,6 +145,7 @@ export function entryFile(
     visibility: previousVisibility,
     image: previousImage,
     [TAGS]: _tags,
+    [CUSTOM]: previousCustom,
     ...unknown
   } = previous;
   const { id, name, aliases, description } = value;
@@ -163,6 +168,7 @@ export function entryFile(
     keepsType ? value.type : previousType,
     rest,
   );
+  const custom = customFrontmatter(value.custom, previousCustom);
   return formatUnitFile({
     frontmatter: {
       id,
@@ -174,9 +180,44 @@ export function entryFile(
       ...(image !== undefined && { image }),
       ...(value.tags && value.tags.length > 0 && { [TAGS]: value.tags }),
       ...fields,
+      ...(custom && { [CUSTOM]: custom }),
     },
     body: description,
   });
+}
+
+/**
+ * An Entry's Custom field values as its header holds them: those with text,
+ * then what this app doesn't understand of the ones it had, as a newer app's
+ * value that isn't text; none if that leaves nothing.
+ */
+function customFrontmatter(
+  values: EntryValue['custom'],
+  previous: unknown,
+): UnknownKeys | undefined {
+  const kept = Object.entries(asKeys(previous)).filter(
+    ([key, value]) => typeof value !== 'string' && !(values && key in values),
+  );
+  const written = Object.entries(values ?? {}).filter(([, value]) => value);
+  const custom = Object.fromEntries([...written, ...kept]);
+  return Object.keys(custom).length > 0 ? custom : undefined;
+}
+
+/** The values an Entry's header holds as text, by field id; none without any. */
+function readCustom(value: unknown): EntryValue['custom'] {
+  const custom = Object.fromEntries(
+    Object.entries(asKeys(value)).filter(
+      (pair): pair is [string, string] =>
+        typeof pair[1] === 'string' && pair[1] !== '',
+    ),
+  );
+  return Object.keys(custom).length > 0 ? custom : undefined;
+}
+
+function asKeys(value: unknown): UnknownKeys {
+  return value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as UnknownKeys)
+    : {};
 }
 
 export function unitValue(ref: UnitRef, file: UnitFile): UnitValue {
@@ -222,6 +263,7 @@ export function entryValue(
   const { type, name, aliases, visibility } = frontmatter;
   const image = imageFile(id, frontmatter.image);
   const tags = readTags(frontmatter[TAGS]);
+  const custom = readCustom(frontmatter[CUSTOM]);
   const entryType = ENTRY_TYPES.includes(type as EntryType)
     ? (type as EntryType)
     : 'other';
@@ -237,6 +279,7 @@ export function entryValue(
       : DEFAULT_VISIBILITY,
     description: body,
     fields: readEntryFields(entryType, frontmatter),
+    ...(custom && { custom }),
     ...(image && { image }),
     ...(tags.length > 0 && { tags }),
   };

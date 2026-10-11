@@ -78,4 +78,26 @@ describe('the fields a Peek shows', () => {
       ['Atmosphere', 'Watchful.'],
     ]);
   });
+
+  it('lists the Custom fields with a value after the type’s own, in their order, never as key fields', () => {
+    const place = {
+      ...entry('place', { senses }),
+      custom: { climate: 'Wet.', ruler: '', gone: 'Never shown.' },
+    };
+    const fields = [
+      { id: 'ruler', type: 'place', label: 'Ruler' },
+      { id: 'climate', type: 'place', label: 'Climate' },
+    ] as const;
+
+    expect(entryFields(place, [...fields])).toEqual([
+      ['Smells', 'Tar.'],
+      ['Sight', 'A white tower.'],
+      ['Atmosphere', 'Watchful.'],
+      ['Climate', 'Wet.'],
+    ]);
+    expect(keyFields(place)).toEqual([
+      ['Atmosphere', 'Watchful.'],
+      ['Sight', 'A white tower.'],
+    ]);
+  });
 });
