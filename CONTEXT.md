@@ -155,6 +155,10 @@ _Avoid_: Task, checklist item, reminder
 Where deleted Scenes, Chapters, Parts, Entries, Custom fields and Conversations go within a Project; they stay recoverable until the Author empties it. A Part goes with its Chapters and their Scenes, and a Chapter with its Scenes, and they come back together; an Entry, Scene, Chapter or Part with its image; a Custom field with the values Entries held in it; a Conversation goes with its pending Proposals.
 _Avoid_: Bin, archive
 
+**Drawer**:
+Where the Author keeps Scenes, Chapters, Parts, Entries and Conversations they've taken out of the story but don't mean to delete, such as material for a sequel. Unlike Trash, it is never emptied. An Entry in the Drawer is never seen by the Assistant.
+_Avoid_: Archive, bin, shelf, trunk, For Later
+
 **Export**:
 A copy written outside the Project for others to read, of either the Manuscript's Prose or the Story Bible. A Manuscript Export holds the Prose of the Scenes the Author ticks, with Chapter titles as headings, a Part's title as a heading one level above them, and Scenes separated by a break, and nothing else from the Project. A Part with none of its Scenes ticked leaves no heading. A Story Bible Export holds the chosen Entries grouped by type, with their images, and their private notes only if the Author asks. Neither includes Outlines, Notes or Conversations.
 _Avoid_: Compile, publish, backup
@@ -202,6 +206,10 @@ _Avoid_: State, phase
 **Conversation**:
 A thread of exchanges between the Author and the Assistant, started by the Author and belonging to one Mode. In a Writing Conversation, the Scene in focus is the one open in the editor when a message is sent; each message notes it, and the Conversation is not bound to it. The Assistant sees only the current Conversation, never earlier ones.
 _Avoid_: Chat, session, history
+
+**Starred**:
+Said of a Conversation the Author has marked to keep it at the top of the Conversation list, above the rest. Every computer sees the same stars.
+_Avoid_: Pinned (that is a Pinned note), favorite
 
 **Brainstorm**:
 Mode for free idea generation with the Assistant.
