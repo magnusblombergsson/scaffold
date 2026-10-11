@@ -4041,14 +4041,31 @@ button.finding-quote:hover {
 
 .composer {
   display: flex;
+  flex-shrink: 0;
   flex-direction: column;
   gap: 0.4rem;
 }
 
-/* The composer is a rounded bordered box. */
+/*
+ * The bar along the composer's top edge that makes it taller or shorter: a
+ * tall target close above the box, its grip showing on hover.
+ */
+.composer .composer-grab {
+  height: 4px;
+  padding: 5px 0;
+  margin-bottom: -0.4rem;
+}
+
+/*
+ * The composer is a rounded bordered box that grows with its text between
+ * the heights the Composer sets, then scrolls.
+ */
 .composer textarea {
-  resize: vertical;
+  resize: none;
+  field-sizing: content;
+  box-sizing: border-box;
   font: inherit;
+  line-height: 1.4;
   color: inherit;
   background: var(--sheet);
   border: 1px solid var(--pill-line);

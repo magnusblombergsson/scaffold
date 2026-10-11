@@ -57,6 +57,12 @@ import { NO_SHORTLISTS, useProviders, useShortlists } from './Providers';
 import { ReadOnlyContext } from './read-only';
 import { ReplyInlineText, ReplyText } from './ReplyText';
 import { sawList } from './saw-list';
+import {
+  composerBounds,
+  ComposerHeightContext,
+  useComposerMeasures,
+} from './composer-height';
+import { PanelResizer } from './PanelResizer';
 
 // A Conversation with the Assistant, wherever it is shown: in the Assistant
 // panel beside the editor, or in a Mode's room.
@@ -702,7 +708,8 @@ function FocusChanges({
 /**
  * Where the Author writes the next message; Enter sends it. Given the
  * Manuscript, typing @ offers its Chapters and Scenes by title, to bring
- * one into the question.
+ * one into the question. Its box grows with the text, and a bar along its
+ * top makes it taller, one height for every composer.
  */
 export function Composer({
   conversation: { draft, setDraft, streaming, send },
@@ -714,7 +721,11 @@ export function Composer({
   manuscript?: Manuscript;
 }) {
   const readOnly = useContext(ReadOnlyContext);
+  const form = useRef<HTMLFormElement>(null);
   const textarea = useRef<HTMLTextAreaElement>(null);
+  const { dragged, onDrag } = useContext(ComposerHeightContext);
+  const { threeRows, pane } = useComposerMeasures(form, textarea);
+  const { min, max, dragMax } = composerBounds({ dragged, threeRows, pane });
   const listId = useId();
   const [mention, setMention] = useState<AtMention | null>(null);
   /** The @ the list is closed for, by where it is: dismissed, or completed. */
@@ -791,12 +802,24 @@ export function Composer({
   const optionId = (index: number) => `${listId}-${index}`;
   return (
     <form
+      ref={form}
       className="composer"
       onSubmit={(event) => {
         event.preventDefault();
         void send();
       }}
     >
+      <PanelResizer
+        label="Message box height"
+        className="composer-grab"
+        panel="below"
+        size={min}
+        min={threeRows}
+        max={dragMax}
+        onResize={(height) => onDrag(height, false)}
+        onResized={(height) => onDrag(height)}
+        onReset={() => onDrag(null)}
+      />
       <textarea
         ref={textarea}
         aria-label="Message"
@@ -814,6 +837,7 @@ export function Composer({
         onKeyDown={onKeyDown}
         disabled={readOnly}
         rows={3}
+        style={threeRows ? { minHeight: min, maxHeight: max } : undefined}
       />
       {listed && (
         <ul

@@ -106,6 +106,7 @@ import { ProjectContexts } from './StatusAndTags';
 import { TagsDialog } from './TagsDialog';
 import { WordTargetDialog } from './WordTarget';
 import { TodoDockPane, useTodoDock } from './TodoDock';
+import { useComposerHeight } from './composer-height';
 import { TodoList, type TodoDraft } from './TodoList';
 import { movedText, trashTitle, TrashView } from './TrashView';
 import { Toast } from './Toast';
@@ -766,6 +767,7 @@ function ProjectView({
           ? { kind: 'entry', id: openEntry.id }
           : null;
   const [todoDock, changeTodoDock] = useTodoDock(project.todoDock);
+  const composerHeight = useComposerHeight(project.composerHeight);
   /** The Todo the Author started from elsewhere, while the Todos dock is raised. */
   const [todoDraft, setTodoDraft] = useState<TodoDraft>();
   const todoDrafts = useRef(0);
@@ -1190,6 +1192,7 @@ function ProjectView({
       readOnly={readOnly !== null}
       customFields={customFields}
       keyFields={keyFields}
+      composerHeight={composerHeight}
       statusAndTags={{
         statuses,
         setStatus: (unitId, statusId) => void setStatus(unitId, statusId),
