@@ -6,12 +6,14 @@ export type Direction = 'up' | 'down';
 /**
  * A row of a list the highlight moves through: a Part, a Chapter with the
  * Part it is in (none when Loose or Unplaced), a Scene with the Chapter it
- * is in (null when Unplaced), or an Entry.
+ * is in (null when Unplaced), or an Entry. An Entry may show more than once,
+ * under each of its Tags, so its row has an id of its own.
  */
 export type Row =
-  | { kind: 'part' | 'entry'; id: string }
+  | { kind: 'part'; id: string }
   | { kind: 'chapter'; id: string; partId?: string }
-  | { kind: 'scene'; id: string; chapterId: string | null };
+  | { kind: 'scene'; id: string; chapterId: string | null }
+  | { kind: 'entry'; id: string; entryId: string };
 
 /**
  * The Binder's rows: the Parts and Loose Chapters in order, each Part then

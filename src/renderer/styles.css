@@ -1988,6 +1988,61 @@ h2.binder-title > button:hover::after {
   padding: 0;
 }
 
+/* A group's heading collapses it, its mark saying which way. */
+.group-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  font: inherit;
+  color: inherit;
+  text-transform: inherit;
+  letter-spacing: inherit;
+  background: transparent;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+}
+
+.group-toggle-mark {
+  display: inline-block;
+  width: 0.7em;
+}
+
+/* With Group by Tag on: a subheading per Tag within each type. */
+.story-bible-tag h3 {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.8rem;
+  font-weight: 600;
+  color: var(--muted);
+  margin: 0.35rem 0 0.1rem;
+  padding: 0 0.5rem 0 1rem;
+}
+
+.story-bible-tag ol {
+  padding-left: 0.5rem;
+}
+
+/* The Tag subgroup an Entry is dragged over, saying what dropping does. */
+.story-bible-tag.drop-target {
+  background: var(--accent-tint);
+  outline: 1px dashed var(--accent);
+  outline-offset: -1px;
+}
+
+.drop-hint {
+  font-weight: 400;
+  color: var(--accent);
+}
+
+/* The Filter, and Group by Tag beside it. */
+.story-bible-view {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
 /* An Entry's row: its name, then its thumbnail at the right. */
 .story-bible .binder-title {
   display: flex;
@@ -2353,7 +2408,8 @@ header.entry-header {
   width: 100%;
 }
 
-.story-bible-highlight {
+.story-bible-highlight,
+.story-bible-group-by {
   display: flex;
   align-items: center;
   gap: 0.35rem;

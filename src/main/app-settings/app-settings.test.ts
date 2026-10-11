@@ -301,6 +301,49 @@ describe('saving', () => {
     expect(settings.filter('b', 'writing-bible')).toEqual({ tags: ['mara'] });
   });
 
+  it('remembers how the Story Bible list shows, per Project', async () => {
+    const settings = await load();
+    expect(settings.bibleView('a')).toEqual({});
+
+    settings.setBibleView('a', {
+      collapsedTypes: ['place'],
+      groupByTag: true,
+      collapsedTags: { character: ['red hand', ''] },
+    });
+    await settings.flush();
+
+    const reloaded = await load();
+    expect(reloaded.bibleView('a')).toEqual({
+      collapsedTypes: ['place'],
+      groupByTag: true,
+      collapsedTags: { character: ['red hand', ''] },
+    });
+    expect(reloaded.bibleView('b')).toEqual({});
+  });
+
+  it('keeps only the valid values of a Story Bible view a window sends', async () => {
+    const settings = await load();
+    settings.setBibleView('a', {
+      collapsedTypes: ['place', 'bad'],
+      groupByTag: 'yes',
+      collapsedTags: { character: ['x', 3], bad: ['y'], place: 'z' },
+    } as never);
+
+    expect(settings.bibleView('a')).toEqual({
+      collapsedTypes: ['place'],
+      collapsedTags: { character: ['x'] },
+    });
+  });
+
+  it('forgets a Story Bible view as it shows by default', async () => {
+    const settings = await load();
+    settings.setBibleView('a', { groupByTag: true });
+
+    settings.setBibleView('a', { groupByTag: false, collapsedTypes: [] });
+
+    expect(settings.project('a')).not.toHaveProperty('bibleView');
+  });
+
   it('forgets a Filter changed to none chosen', async () => {
     const settings = await load();
     settings.setFilter('a', 'writing-bible', { tags: ['Mara'] });
@@ -568,6 +611,25 @@ describe('a bad or newer settings file', () => {
     expect(settings.project('a').filters).toEqual({
       'writing-bible': { types: ['place'], tags: ['Mara'] },
     });
+    expect(settings.project('b')).toEqual({});
+  });
+
+  it('reads the Story Bible view kept for a Project, its valid values', async () => {
+    await writeFile(
+      file,
+      JSON.stringify({
+        version: 1,
+        global: {},
+        projects: {
+          a: { bibleView: { groupByTag: true, collapsedTypes: 'all' } },
+          b: { bibleView: 'none' },
+        },
+        recent: [],
+      }),
+    );
+    const settings = await load();
+
+    expect(settings.bibleView('a')).toEqual({ groupByTag: true });
     expect(settings.project('b')).toEqual({});
   });
 

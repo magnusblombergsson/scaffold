@@ -4,6 +4,7 @@ import type { FileSystem } from '../project-store/file-system';
 import type { ProjectLookup } from '../project-store/project-store';
 import { safeWrite, setAside } from '../project-store/safe-write';
 import type { PanelWidths, PinnedNote, Tip } from '../../shared/api';
+import { readBibleView, type BibleView } from '../../shared/bible-view';
 import type { ExportUnticked } from '../../shared/export-choice';
 import {
   readFilters,
@@ -65,6 +66,8 @@ export type ProjectSettings = {
   storyBibleExportImages?: boolean;
   /** The Filter of each place that has one on. */
   filters?: Filters;
+  /** How the Story Bible list shows, unless as by default. */
+  bibleView?: BibleView;
 };
 
 /**
@@ -259,6 +262,12 @@ function parseProjectSettings(raw: JsonObject): ProjectSettings & JsonObject {
   } else {
     delete settings.filters;
   }
+  const bibleView = readBibleView(settings.bibleView);
+  if (Object.keys(bibleView).length > 0) {
+    settings.bibleView = bibleView;
+  } else {
+    delete settings.bibleView;
+  }
   return settings;
 }
 
@@ -436,6 +445,21 @@ export class AppSettings {
       delete filters[place];
     }
     this.updateProject(id, { filters });
+  }
+
+  /** How the Story Bible list shows for a Project; as by default when it has none. */
+  bibleView(id: string): BibleView {
+    return structuredClone(this.data.projects[id]?.bibleView ?? {});
+  }
+
+  /** Keeps the valid values of `view`, as a window may send anything. */
+  setBibleView(id: string, view: BibleView): void {
+    const kept = readBibleView(view);
+    // Not `updateProject`, which can't take the key away.
+    const { bibleView: _, ...rest } = this.data.projects[id] ?? {};
+    this.data.projects[id] =
+      Object.keys(kept).length > 0 ? { ...rest, bibleView: kept } : rest;
+    this.changed();
   }
 
   /**
