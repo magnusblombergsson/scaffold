@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ProjectEvent } from '../../shared/api';
+import { DEFAULT_STATUSES } from '../../shared/status';
 import { instantClock, type Clock } from './clock';
 import { nodeFileSystem, type FileSystem } from './file-system';
 import { createProject, openProject, type ProjectStore } from './project-store';
@@ -458,6 +459,122 @@ describe('project.json saved on two computers', () => {
       },
     ]);
     expect(store.manuscript().chapters[0].scenes).toEqual([scene]);
+  });
+
+  describe('their Status lists', () => {
+    const polish = { id: 'polish', name: 'Polish', colour: 'yellow' };
+
+    /** project.json holds the defaults; BETA's copy added Polish. */
+    async function polishedCopy(edit: (manifest: any) => void = () => {}) {
+      await newProject();
+      const theirs = await readManifest();
+      theirs.statuses.push(polish);
+      edit(theirs);
+      await writeFile(
+        path.join(projectPath, 'project-BETA.json'),
+        JSON.stringify(theirs),
+      );
+    }
+
+    it('adds a Status only the losing copy has, at the end', async () => {
+      await polishedCopy();
+
+      const store = await open();
+
+      expect(store.statuses().map((s) => s.name)).toEqual([
+        ...DEFAULT_STATUSES.map((s) => s.name),
+        'Polish',
+      ]);
+      expect((await readManifest()).statuses).toEqual(store.statuses());
+      expect(await readdir(path.join(projectPath, 'trash'))).toContain(
+        'project-BETA.json',
+      );
+    });
+
+    it('keeps the winner’s name and colour, and brings back what it removed', async () => {
+      await polishedCopy((theirs) => {
+        theirs.statuses[0].name = 'Notion';
+        theirs.statuses[1].colour = 'red';
+      });
+      const ours = await readManifest();
+      ours.statuses = ours.statuses.filter((s: any) => s.id !== 'done');
+      await writeFile(manifestPath(), JSON.stringify(ours));
+
+      const store = await open();
+
+      expect(store.statuses()).toEqual([
+        ...DEFAULT_STATUSES.filter((s) => s.id !== 'done'),
+        DEFAULT_STATUSES.find((s) => s.id === 'done'),
+        polish,
+      ]);
+    });
+
+    it('merges the loser’s into a copy with the higher format', async () => {
+      await polishedCopy();
+      const ours = await readManifest();
+      const ownStatus = { id: 'ours', name: 'Ours', colour: 'blue' };
+      ours.statuses.push(ownStatus);
+      await writeFile(
+        manifestPath(),
+        JSON.stringify({ ...ours, format: ours.format - 1 }),
+      );
+
+      const store = await open();
+
+      expect(store.statuses()).toEqual([
+        ...DEFAULT_STATUSES,
+        polish,
+        ownStatus,
+      ]);
+      expect((await readManifest()).format).toBe(ours.format);
+    });
+
+    it('tells of the merged list when the copy arrives while open', async () => {
+      await polishedCopy();
+      const theirs = await readFile(
+        path.join(projectPath, 'project-BETA.json'),
+        'utf8',
+      );
+      await rm(path.join(projectPath, 'project-BETA.json'));
+      const store = await open();
+      const events = eventsOf(store);
+      await writeFile(path.join(projectPath, 'project-BETA.json'), theirs);
+
+      await store.checkForChanges();
+
+      expect(events).toEqual([
+        {
+          type: 'statusesChanged',
+          statuses: [...DEFAULT_STATUSES, polish],
+        },
+      ]);
+    });
+
+    it('keeps the defaults when neither copy holds a readable list', async () => {
+      await newProject();
+      const ours = await readManifest();
+      delete ours.statuses;
+      await writeFile(manifestPath(), JSON.stringify(ours));
+      await writeFile(
+        path.join(projectPath, 'project-BETA.json'),
+        JSON.stringify({ ...ours, statuses: 'unreadable' }),
+      );
+
+      const store = await open();
+
+      expect(store.statuses()).toEqual(DEFAULT_STATUSES);
+    });
+
+    it('uses the copy’s list when the winner holds none', async () => {
+      await polishedCopy();
+      const ours = await readManifest();
+      delete ours.statuses;
+      await writeFile(manifestPath(), JSON.stringify(ours));
+
+      const store = await open();
+
+      expect(store.statuses()).toEqual([...DEFAULT_STATUSES, polish]);
+    });
   });
 });
 

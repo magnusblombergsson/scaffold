@@ -59,3 +59,19 @@ export function readStatusList(stored: unknown): Status[] | undefined {
         : 'grey',
     }));
 }
+
+/**
+ * One Status list from those of two copies of `project.json`, by id: the
+ * winner's Statuses as they are, then those only the loser has, in its order.
+ * A Status deleted in one copy comes back if the other still has it. Either
+ * list missing, the other is used as is.
+ */
+export function mergeStatusLists(
+  winner: readonly Status[] | undefined,
+  loser: readonly Status[] | undefined,
+): Status[] | undefined {
+  if (!winner || !loser) return (winner ?? loser)?.slice();
+  const ids = new Set(winner.map((s) => s.id));
+  const added = loser.filter((s) => !ids.has(s.id) && ids.add(s.id));
+  return [...winner, ...added];
+}

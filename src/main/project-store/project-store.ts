@@ -58,6 +58,7 @@ import { type PendingProposal, type Proposal } from '../../shared/proposal';
 import { joinProse, type Cut } from '../../shared/prose-split';
 import {
   DEFAULT_STATUSES,
+  mergeStatusLists,
   readStatusList,
   STATUS_COLOURS,
   type Status,
@@ -461,7 +462,8 @@ async function newestFormat(
  * Settles versions of `project.json` that two computers saved, which a sync
  * client leaves beside it as `<name>.json` files carrying the Project's id.
  * Without asking: the one with the higher `format` is kept, or the original
- * if they are equal, and the other goes to Trash. Scenes only the other
+ * if they are equal, and the other goes to Trash, its Statuses merged into
+ * the kept one's list (ADR 0011). Scenes only the other
  * placed are then Unplaced; what it had that is lost is returned, to tell the
  * Author once. A file with no Project id is logged and left alone. A copy of
  * a format newer than this app reads must be ruled out first, as the gate
@@ -511,18 +513,19 @@ async function resolveManifestCopies(
       path.join(trashDir(projectPath), trashName),
       await fs.readFile(copyWins ? manifestPath : file),
     );
-    if (copyWins) {
+    const kept = withStatusesOf(winner, loser);
+    if (copyWins || kept !== winner) {
       await claim(() =>
         safeWrite(
           fs,
           clock,
           manifestPath,
-          `${JSON.stringify(winner, null, 2)}\n`,
+          `${JSON.stringify(kept, null, 2)}\n`,
         ),
       );
     }
     await fs.unlink(file);
-    manifest = winner;
+    manifest = kept;
 
     const lost = await lostWith(projectPath, fs, loser.tree, winner.tree);
     if (
@@ -534,6 +537,17 @@ async function resolveManifestCopies(
     }
   }
   return { manifest, dropped };
+}
+
+/**
+ * `winner` with the Statuses only `loser` has added to its list, so a Status
+ * added on one computer isn't lost with its copy; `winner` itself when that
+ * changes nothing.
+ */
+function withStatusesOf(winner: Manifest, loser: Manifest): Manifest {
+  const own = readStatusList(winner.statuses);
+  const statuses = mergeStatusLists(own, readStatusList(loser.statuses));
+  return isDeepStrictEqual(statuses, own) ? winner : { ...winner, statuses };
 }
 
 /**
