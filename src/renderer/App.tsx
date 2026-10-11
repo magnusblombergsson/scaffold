@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import type {
   Changed,
   Created,
+  FloatingImage,
   ImportFile,
   OpenedProject,
   OpenResult,
@@ -72,6 +73,8 @@ import { ProjectSettingsDialog } from './ProjectSettingsDialog';
 import { ProposalTargetContext } from './ProposalCard';
 import { ProposalPeek, type TargetPeek } from './ProposalPeek';
 import { PinnedNotes } from './PinnedNotes';
+import { FloatingImagePanel, OutlineBarImage } from './FloatingImage';
+import { applyImageChange, floatImage } from './floating-image';
 import {
   applyChange,
   textWithoutImage,
@@ -685,6 +688,31 @@ function ProjectView({
       ),
     );
   }, [entries, entriesLoaded, changePinnedNotes]);
+  const [floatingImage, setFloatingImage] = useState(
+    project.view.floatingImage,
+  );
+  /** The Floating image as last changed, for changes made before React renders. */
+  const floatingNow = useRef(floatingImage);
+  /** Changes the Floating image; `save` remembers it on this computer. */
+  const changeFloatingImage = useCallback(
+    (next: FloatingImage, save = true) => {
+      floatingNow.current = next;
+      setFloatingImage(next);
+      if (save) window.shell.saveView({ floatingImage: next });
+    },
+    [],
+  );
+  /** Floats the Floating image, where it was left. */
+  const showFloatingImage = useCallback(() => {
+    changeFloatingImage(
+      floatImage(floatingNow.current, {
+        width: window.innerWidth,
+        height: window.innerHeight,
+      }),
+    );
+  }, [changeFloatingImage]);
+  /** Whether the Floating image stacks over the Pinned notes: used last. */
+  const [imageOnTop, setImageOnTop] = useState(false);
   const openEntry =
     selected?.kind === 'entry'
       ? entries.find((e) => e.id === selected.id)
@@ -1597,13 +1625,20 @@ function ProjectView({
                         </span>{' '}
                         Outline & Notes
                       </button>
-                      <button
-                        className="overview-button"
-                        aria-pressed={overviewOpen}
-                        onClick={toggleOverview}
-                      >
-                        <span aria-hidden="true">☰</span> Overview
-                      </button>
+                      <div className="outline-notes-bar-end">
+                        <OutlineBarImage
+                          scene={open.scene}
+                          floating={floatingImage?.on === true}
+                          onFloat={showFloatingImage}
+                        />
+                        <button
+                          className="overview-button"
+                          aria-pressed={overviewOpen}
+                          onClick={toggleOverview}
+                        >
+                          <span aria-hidden="true">☰</span> Overview
+                        </button>
+                      </div>
                     </div>
                     {outlineNotesOpen && (
                       <OutlineNotes
@@ -1734,14 +1769,34 @@ function ProjectView({
             notes={pinnedNotes}
             entries={entries}
             foldedImage={foldedNoteImage}
-            onChange={(entryId, change, save) =>
+            onChange={(entryId, change, save) => {
+              if (change.type === 'raise') setImageOnTop(false);
               changePinnedNotes(
                 applyChange(notesNow.current, entryId, change),
                 save,
-              )
-            }
+              );
+            }}
             onOpen={showEntry}
-          />
+          >
+            {/* While a Scene is open: not on a Corkboard or an Entry. */}
+            {floatingImage?.on &&
+              !resolvingConflict &&
+              open &&
+              !open.scene.missing && (
+                <FloatingImagePanel
+                  image={floatingImage}
+                  scene={open.scene}
+                  onTop={imageOnTop}
+                  onChange={(change, save) => {
+                    const now = floatingNow.current;
+                    if (now) {
+                      changeFloatingImage(applyImageChange(now, change), save);
+                    }
+                  }}
+                  onRaise={() => setImageOnTop(true)}
+                />
+              )}
+          </PinnedNotes>
         )}
         {taggingUnit && (
           <TagsDialog

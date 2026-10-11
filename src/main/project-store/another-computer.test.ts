@@ -454,9 +454,11 @@ describe('session markers', () => {
       cursor: 12,
       outlineNotesOpen: false,
       panelWidths: { binder: 300, overview: 320 },
-      // The Overview pane's state and Pinned notes stay on this computer.
+      // The Overview pane's state, Pinned notes and the Floating image stay
+      // on this computer.
       overviewOpen: true,
       pinnedNotes: [{ entryId: 'e1', x: 10, y: 20, folded: false }],
+      floatingImage: { on: true, x: 10, y: 20, width: 240, folded: false },
     });
     await store.close();
 

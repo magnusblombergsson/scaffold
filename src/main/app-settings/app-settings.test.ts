@@ -581,6 +581,10 @@ describe('a bad or newer settings file', () => {
             ],
           },
           d: { pinnedNotes: 'e1' },
+          e: {
+            floatingImage: { on: true, x: 5, y: 6, width: 240, folded: true },
+          },
+          f: { floatingImage: { on: true, x: 5, y: 'top', width: 240 } },
           b: 'nonsense',
         },
         recent: [valid, { path: 'C:/B' }, null],
@@ -612,6 +616,10 @@ describe('a bad or newer settings file', () => {
       ],
     });
     expect(settings.project('d')).toEqual({});
+    expect(settings.project('e')).toEqual({
+      floatingImage: { on: true, x: 5, y: 6, width: 240, folded: true },
+    });
+    expect(settings.project('f')).toEqual({});
   });
 
   it('reads the Export choice kept for a Project, or a bad one as everything ticked', async () => {

@@ -1,7 +1,10 @@
 import type { PinnedNote } from '../shared/api';
 
-/** How far a Pinned note keeps from the window's edges, in CSS pixels. */
-const MARGIN = 8;
+/**
+ * How far a Pinned note or the Floating image keeps from the window's edges,
+ * in CSS pixels.
+ */
+export const MARGIN = 8;
 
 export type Point = { x: number; y: number };
 export type Size = { width: number; height: number };

@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { PinnedNote } from '../shared/api';
 import { entryTitle } from '../shared/entry';
 import type { EntrySummary, EntryValue } from '../shared/project-types';
@@ -6,12 +6,8 @@ import { useUnitImage } from './UnitImage';
 import { ViewableImage } from './ImageView';
 import { PeekCard } from './PeekCard';
 import { onEntryWritten } from './entry-written';
-import {
-  placeInside,
-  type NoteChange,
-  type Point,
-  type Size,
-} from './pinned-notes';
+import { useDrag, useElementSize, useWindowSize } from './floating-panel';
+import { placeInside, type NoteChange, type Size } from './pinned-notes';
 
 const NOTE_WIDTH = 320;
 
@@ -19,7 +15,8 @@ const NOTE_WIDTH = 320;
  * The Pinned notes, floating over the Writing room, the one on top last.
  * Each is dragged by its header, folded to its title, switched between its
  * Entry's text and image, opened or unpinned; the window shrinking never
- * leaves one outside it.
+ * leaves one outside it. `children`, the Floating image, float in the same
+ * layer.
  */
 export function PinnedNotes({
   notes,
@@ -27,6 +24,7 @@ export function PinnedNotes({
   foldedImage,
   onChange,
   onOpen,
+  children,
 }: {
   notes: PinnedNote[];
   entries: EntrySummary[];
@@ -35,6 +33,7 @@ export function PinnedNotes({
   /** `save` once the change is done, not while a note is dragged. */
   onChange(entryId: string, change: NoteChange, save: boolean): void;
   onOpen(entryId: string): void;
+  children?: ReactNode;
 }) {
   const room = useWindowSize();
   // In the same order however they stack, so that raising the one dragged
@@ -59,6 +58,7 @@ export function PinnedNotes({
           )
         );
       })}
+      {children}
     </div>
   );
 }
@@ -85,31 +85,11 @@ function Note({
   const image = useUnitImage({ kind: 'entry', id: summary.id }, summary.image);
   const title = entryTitle(summary);
   const element = useRef<HTMLElement>(null);
-  const [size, setSize] = useState({ width: NOTE_WIDTH, height: 0 });
-  useLayoutEffect(() => {
-    const observed = element.current;
-    if (!observed) return;
-    const observer = new ResizeObserver(() =>
-      setSize({
-        width: observed.offsetWidth,
-        height: observed.offsetHeight,
-      }),
-    );
-    observer.observe(observed);
-    return () => observer.disconnect();
-  }, []);
-  /** Where the pointer holds the note while it is dragged, from its corner. */
-  const grip = useRef<Point | null>(null);
-  /** Where the dragged note was last moved to, to save once it is let go. */
-  const dragged = useRef<Point | null>(null);
-  /** Ends a drag, the pointer let go or lost: the note is saved where it was moved. */
-  const drop = () => {
-    const at = dragged.current;
-    grip.current = null;
-    dragged.current = null;
-    if (at) onChange({ type: 'move', at }, true);
-  };
+  const size = useElementSize(element, NOTE_WIDTH);
   const shown = placeInside(note, size, room);
+  const drag = useDrag(shown, size, room, (at, save) =>
+    onChange({ type: 'move', at }, save),
+  );
   /** Shown as its image: only while the Entry has one. */
   const asImage = Boolean(note.image && summary.image);
 
@@ -121,35 +101,7 @@ function Note({
       style={{ left: shown.x, top: shown.y, width: NOTE_WIDTH, zIndex: layer }}
       onPointerDown={() => onChange({ type: 'raise' }, true)}
     >
-      <header
-        className="pinned-note-header"
-        title="Drag to move"
-        onPointerDown={(event) => {
-          const target = event.target as HTMLElement;
-          if (target.closest('button, .viewable-image')) return;
-          if (event.button !== 0) return;
-          event.currentTarget.setPointerCapture(event.pointerId);
-          grip.current = {
-            x: event.clientX - shown.x,
-            y: event.clientY - shown.y,
-          };
-        }}
-        onPointerMove={(event) => {
-          if (!grip.current) return;
-          const at = placeInside(
-            {
-              x: event.clientX - grip.current.x,
-              y: event.clientY - grip.current.y,
-            },
-            size,
-            room,
-          );
-          dragged.current = at;
-          onChange({ type: 'move', at }, false);
-        }}
-        onPointerUp={drop}
-        onLostPointerCapture={drop}
-      >
+      <header className="pinned-note-header" title="Drag to move" {...drag}>
         <span className="pinned-note-grip" aria-hidden="true">
           ⠿
         </span>
@@ -259,19 +211,4 @@ function useEntry(summary: EntrySummary): EntryValue | null {
     };
   }, [id, summaryKey]);
   return entry;
-}
-
-/** The window's inner size, as it changes. */
-function useWindowSize(): Size {
-  const measure = () => ({
-    width: window.innerWidth,
-    height: window.innerHeight,
-  });
-  const [size, setSize] = useState(measure);
-  useEffect(() => {
-    const resize = () => setSize(measure());
-    window.addEventListener('resize', resize);
-    return () => window.removeEventListener('resize', resize);
-  }, []);
-  return size;
 }

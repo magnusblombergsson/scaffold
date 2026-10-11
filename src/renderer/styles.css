@@ -751,6 +751,27 @@ span.card-title {
   padding-right: 0.5rem;
 }
 
+/* The Scene's image, then the Overview pane's switch. */
+.outline-notes-bar-end {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+}
+
+.outline-notes-image {
+  display: flex;
+  align-items: center;
+}
+
+/* As tall as the bar allows. */
+.outline-notes-thumbnail {
+  height: 1.6rem;
+  max-width: 3.2rem;
+  object-fit: cover;
+  border-radius: 3px;
+  border: 1px solid var(--line);
+}
+
 .overview-button {
   background: none;
   border: 1px solid transparent;
@@ -2991,6 +3012,51 @@ legend .show-in-peek {
   width: 100%;
   object-fit: contain;
   border-radius: 0 0 7px 7px;
+}
+
+/* The Floating image: a Pinned note's frame, as tall as its image at the
+   width chosen, never cut short. */
+.floating-image {
+  max-height: none;
+}
+
+.floating-image .pinned-note-picture img {
+  height: auto;
+}
+
+.floating-image-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  color: var(--muted);
+}
+
+.floating-image-empty p {
+  margin: 0;
+}
+
+/* The corner it is resized from. */
+.floating-image-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 14px;
+  height: 14px;
+  cursor: nwse-resize;
+  touch-action: none;
+  background: linear-gradient(
+    135deg,
+    transparent 50%,
+    var(--line) 50%,
+    var(--line) 60%,
+    transparent 60%,
+    transparent 75%,
+    var(--line) 75%,
+    var(--line) 85%,
+    transparent 85%
+  );
+  border-bottom-right-radius: 7px;
 }
 
 .entry-card + .entry-card {
