@@ -531,12 +531,25 @@ export type PinnedNote = {
 };
 
 /**
+ * The Floating image: whether it is on, where its top left corner was left in
+ * the window in CSS pixels, how wide the Author made it, and whether it is
+ * folded to its title. Kept while it is off, to float where it was again.
+ */
+export type FloatingImage = {
+  on: boolean;
+  x: number;
+  y: number;
+  width: number;
+  folded: boolean;
+};
+
+/**
  * How the Author left a Project's window on this computer; `cursor` is where
  * it was in the last Scene, `outlineNotesOpen` says whether the Outline &
  * Notes box above the Prose is open, and `overviewOpen` whether the Overview
  * pane beside it is. `pinnedNotes` are the Pinned notes, the one on top last.
- * The Overview pane's state and the Pinned notes are never kept in the
- * Project.
+ * The Overview pane's state, the Pinned notes and the Floating image are
+ * never kept in the Project.
  */
 export type ProjectView = {
   lastSceneId?: string;
@@ -545,6 +558,7 @@ export type ProjectView = {
   outlineNotesOpen?: boolean;
   overviewOpen?: boolean;
   pinnedNotes?: PinnedNote[];
+  floatingImage?: FloatingImage;
 };
 
 /**

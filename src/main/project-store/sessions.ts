@@ -183,12 +183,14 @@ export class Sessions {
 
   /**
    * Records how the Author leaves the Project; a new Scene is written at
-   * once. The Overview pane's state stays on this computer, out of the marker.
+   * once. The Overview pane's state, the Pinned notes and the Floating image
+   * stay on this computer, out of the marker.
    */
   update(change: ProjectView): void {
     const view = { ...change };
     delete view.overviewOpen;
     delete view.pinnedNotes;
+    delete view.floatingImage;
     if (view.panelWidths) {
       view.panelWidths = { ...view.panelWidths };
       delete view.panelWidths.overview;

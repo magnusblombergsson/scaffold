@@ -3,7 +3,12 @@ import type { Clock } from '../project-store/clock';
 import type { FileSystem } from '../project-store/file-system';
 import type { ProjectLookup } from '../project-store/project-store';
 import { safeWrite, setAside } from '../project-store/safe-write';
-import type { PanelWidths, PinnedNote, Tip } from '../../shared/api';
+import type {
+  FloatingImage,
+  PanelWidths,
+  PinnedNote,
+  Tip,
+} from '../../shared/api';
 import { readBibleView, type BibleView } from '../../shared/bible-view';
 import {
   readCorkboardView,
@@ -68,6 +73,8 @@ export type ProjectSettings = {
   overviewOpen?: boolean;
   /** The Pinned notes, the one on top last. */
   pinnedNotes?: PinnedNote[];
+  /** The Floating image, kept while it is off too. */
+  floatingImage?: FloatingImage;
   dismissedTips?: Tip[];
   /** What the Author left unticked at the last Manuscript Export. */
   exportUnticked?: ExportUnticked;
@@ -263,6 +270,7 @@ function parseProjectSettings(raw: JsonObject): ProjectSettings & JsonObject {
   } else {
     delete settings.pinnedNotes;
   }
+  if (!isFloatingImage(settings.floatingImage)) delete settings.floatingImage;
   const unticked = settings.exportUnticked;
   if (
     !isJsonObject(unticked) ||
@@ -313,6 +321,17 @@ function pinnedNotes(raw: unknown[]): PinnedNote[] {
     }
   }
   return notes;
+}
+
+function isFloatingImage(value: unknown): value is FloatingImage {
+  return (
+    isJsonObject(value) &&
+    typeof value.on === 'boolean' &&
+    isFiniteNumber(value.x) &&
+    isFiniteNumber(value.y) &&
+    isFiniteNumber(value.width) &&
+    typeof value.folded === 'boolean'
+  );
 }
 
 function isFiniteNumber(value: unknown): value is number {

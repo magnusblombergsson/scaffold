@@ -321,6 +321,7 @@ function openedProject(store: ProjectStore): OpenedProject {
     outlineNotesOpen,
     overviewOpen,
     pinnedNotes,
+    floatingImage,
   } = settings.project(store.id);
   return {
     displayName: store.displayName,
@@ -335,6 +336,7 @@ function openedProject(store: ProjectStore): OpenedProject {
       outlineNotesOpen,
       overviewOpen,
       pinnedNotes,
+      floatingImage,
     },
     todoDock: settings.todoDock(),
     sessions: store.sessionNotice(),
