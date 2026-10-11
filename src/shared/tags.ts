@@ -47,6 +47,37 @@ export function tagged(
   ].filter(({ unit }) => hasTag(unit.tags, tag));
 }
 
+/** A change to a unit's Tags: a Tag to add, a Tag to take off, either ignoring case. */
+export type TagChange = { add?: string; remove?: string };
+
+/** `tags` as `change` leaves them: the one taken off, then the one added at the end, if not there already. */
+export function changeTags(
+  tags: readonly string[],
+  { add, remove }: TagChange,
+): string[] {
+  const kept =
+    remove === undefined
+      ? [...tags]
+      : tags.filter((tag) => tagKey(tag) !== tagKey(remove));
+  return add === undefined || hasTag(kept, add) ? kept : [...kept, add];
+}
+
+/**
+ * `tags` with what changed from `before` to `after` reverted: the Tags added
+ * taken off, and those taken off put back, keeping any other change since.
+ */
+export function revertTags(
+  tags: readonly string[],
+  before: readonly string[],
+  after: readonly string[],
+): string[] {
+  const removed = before.filter((tag) => !hasTag(after, tag));
+  return [
+    ...tags.filter((tag) => hasTag(before, tag) || !hasTag(after, tag)),
+    ...removed.filter((tag) => !hasTag(tags, tag)),
+  ];
+}
+
 /**
  * `typed` as Tags: split at commas, trimmed, spaces within one made single,
  * each once in its first spelling, and that of `vocabulary` where it has

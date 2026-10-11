@@ -575,6 +575,13 @@ const shellHandlers: Handlers<ShellApi, typeof shellMethods, WindowContext> = {
   setFilter: ({ sender }, place, filter) => {
     settings.setFilter(projectWindows.of(sender).id, place, filter);
   },
+  bibleView: ({ sender }) => {
+    const store = projectWindows.find(sender);
+    return store ? settings.bibleView(store.id) : {};
+  },
+  setBibleView: ({ sender }, view) => {
+    settings.setBibleView(projectWindows.of(sender).id, view);
+  },
   highlightMentions: () => settings.highlightMentions(),
   setHighlightMentions: (_ctx, on) => {
     settings.setHighlightMentions(on);

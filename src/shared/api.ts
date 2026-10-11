@@ -11,10 +11,11 @@ import type {
   Visibility,
 } from './project-types';
 import type { ExportUnticked, StoryBibleChoice } from './export-choice';
+import type { BibleView } from './bible-view';
 import type { Filter, FilterPlace, Filters } from './filter';
 import type { ReviewCommand } from './finding';
 import type { Status } from './status';
-import type { TagUse } from './tags';
+import type { TagChange, TagUse } from './tags';
 import type { Todo, TodoChange, TodoLink } from './todo';
 import type { ImportBlock, ImportConvention } from './manuscript-import';
 import type { Cut } from './prose-split';
@@ -371,6 +372,12 @@ export interface ProjectApi {
    */
   setTags(unitId: string, tags: string[]): Promise<void>;
   /**
+   * Adds a Tag to an Entry, or takes one off, or both, ignoring case, as a
+   * step that `undo` reverts. The Entries showing it follow as an
+   * `entriesChanged`.
+   */
+  changeEntryTags(entryId: string, change: TagChange): Promise<Changed>;
+  /**
    * The Tags in use, as `tags`, each with how many Chapters, Scenes and
    * Entries have it, those in Trash too.
    */
@@ -693,6 +700,10 @@ export interface ShellApi {
    * unsubscribe function.
    */
   onFilter(listener: (filters: Filters) => void): () => void;
+  /** How the Story Bible list shows for this window's Project, on this computer. */
+  bibleView(): Promise<BibleView>;
+  /** Remembers how the Story Bible list shows. */
+  setBibleView(view: BibleView): void;
   /** Whether Entry names and aliases are highlighted where mentioned, on this computer. */
   highlightMentions(): Promise<boolean>;
   /** Turns the highlighting on or off, in every window. */
@@ -876,6 +887,7 @@ export const projectMethods = {
   deleteStatus: 'invoke',
   tags: 'invoke',
   setTags: 'invoke',
+  changeEntryTags: 'invoke',
   tagUses: 'invoke',
   renameTag: 'invoke',
   deleteTag: 'invoke',
@@ -944,6 +956,8 @@ export const shellMethods = {
   filter: 'invoke',
   setFilter: 'send',
   onFilter: 'event',
+  bibleView: 'invoke',
+  setBibleView: 'send',
   highlightMentions: 'invoke',
   setHighlightMentions: 'send',
   onHighlightMentions: 'event',

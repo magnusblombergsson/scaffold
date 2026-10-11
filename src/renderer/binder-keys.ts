@@ -4,11 +4,13 @@ export type Direction = 'up' | 'down';
 
 /**
  * A row of a list the highlight moves through: a Chapter, a Scene with the
- * Chapter it is in (null when Unplaced), or an Entry.
+ * Chapter it is in (null when Unplaced), or an Entry. An Entry may show more
+ * than once, under each of its Tags, so its row has an id of its own.
  */
 export type Row =
-  | { kind: 'chapter' | 'entry'; id: string }
-  | { kind: 'scene'; id: string; chapterId: string | null };
+  | { kind: 'chapter'; id: string }
+  | { kind: 'scene'; id: string; chapterId: string | null }
+  | { kind: 'entry'; id: string; entryId: string };
 
 /** The Binder's rows: each Chapter then its Scenes, then the Unplaced Scenes. */
 export function listRows(manuscript: Manuscript): Row[] {

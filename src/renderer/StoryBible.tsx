@@ -1,5 +1,13 @@
-import { useContext, useState } from 'react';
+import {
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type DragEvent,
+  type ReactNode,
+} from 'react';
 import type { Changed } from '../shared/api';
+import type { BibleView } from '../shared/bible-view';
 import { filterOn, matchesFilter } from '../shared/filter';
 import { entryTitle } from '../shared/entry';
 import {
@@ -11,6 +19,18 @@ import {
 } from '../shared/project-types';
 import { SHORTCUTS, withShortcut } from '../shared/shortcuts';
 import { addTodoItem, ConflictMarker, Menu } from './Binder';
+import {
+  bibleGroups,
+  bibleRows,
+  movesTags,
+  rowId,
+  tagDrop,
+  toggleTag,
+  toggleType,
+  type TagDrop,
+  type TagGroup,
+  type SubgroupRef,
+} from './bible-groups';
 import { EntryThumbnail } from './UnitImage';
 import { FilterControl, useFilter } from './Filter';
 import { ImagePromptDialog } from './ImagePromptDialog';
@@ -23,7 +43,9 @@ import { ReadOnlyContext } from './read-only';
 /**
  * The Story Bible tab: the Entries, grouped by type, narrowed by a Filter,
  * and whether their names are highlighted where the Prose, Outlines and
- * Notes mention them.
+ * Notes mention them. Each group collapses; with Group by Tag on, each type
+ * has a subgroup per Tag, and dragging an Entry onto one adds that Tag, or
+ * with the move key moves it there from the Tag it was dragged from.
  */
 export function StoryBible({
   entries,
@@ -59,23 +81,152 @@ export function StoryBible({
 }) {
   const readOnly = useContext(ReadOnlyContext);
   const { filter, setFilter, inUse } = useFilter('writing-bible');
+  const [view, setView] = useBibleView();
   const shown = entries.filter((e) => matchesFilter(filter, e));
-  // The Entries in the order they show, grouped by type.
-  const rows = ENTRY_TYPES.flatMap((type) =>
-    shown
-      .filter((e) => e.type === type)
-      .map((e): Row => ({ kind: 'entry', id: e.id })),
-  );
-  /** The Entry whose ⋯ menu is open, as by Shift+F10. */
+  const groups = bibleGroups(shown, view);
+  // The rows that show, in order; an Entry may show under each of its Tags.
+  const rows = bibleRows(groups);
+  /** The row whose ⋯ menu is open, as by Shift+F10. */
   const [menuFor, setMenuFor] = useState<string | null>(null);
   /** The Entry whose Image prompt dialog is open. */
   const [imagePromptFor, setImagePromptFor] = useState<string | null>(null);
   const imagePromptEntry = entries.find((e) => e.id === imagePromptFor);
   const keys = useListKeys(rows, {
-    rename: (row) => onRename(row.id),
+    rename: (row) => onRename(entryIdOf(row)),
     menu: (row) => setMenuFor(row.id),
     undo: onUndo,
   });
+  /** The Entry being dragged, and the Tag subgroup it is dragged from. */
+  const dragging = useRef<{ entry: EntrySummary; from: SubgroupRef } | null>(
+    null,
+  );
+  /** The Tag subgroup a drag is over, and what dropping there will do. */
+  const [target, setTarget] = useState<DropTarget | null>(null);
+
+  /** What dropping the dragged Entry on `to` does, with the keys held in `event`. */
+  function dropOn(to: SubgroupRef, event: DragEvent): TagDrop | null {
+    const drag = dragging.current;
+    if (!drag || !event.dataTransfer.types.includes(ENTRY)) return null;
+    return tagDrop(drag.entry, drag.from, to, movesTags(event, MAC));
+  }
+
+  function entryRow(entry: EntrySummary, sub?: TagGroup) {
+    const id = rowId(entry.id, sub);
+    return (
+      <li
+        key={id}
+        className="binder-scene"
+        draggable={sub !== undefined && !readOnly}
+        onDragStart={(event) => {
+          if (!sub) return;
+          dragging.current = {
+            entry,
+            from: { type: entry.type, tag: sub.tag },
+          };
+          event.dataTransfer.setData(ENTRY, entry.id);
+          event.dataTransfer.effectAllowed = 'copyMove';
+        }}
+        onDragEnd={() => {
+          dragging.current = null;
+          setTarget(null);
+        }}
+        onContextMenu={(event) =>
+          keys.onContextMenu(event, menuFor === id, () => setMenuFor(id))
+        }
+      >
+        <button
+          className="binder-title"
+          data-row={id}
+          aria-current={entry.id === openId ? 'true' : undefined}
+          onClick={() => onOpen(entry.id)}
+        >
+          <span className="story-bible-name">{entryTitle(entry)}</span>
+          <TagChips tags={entry.tags} />
+          <EntryThumbnail entry={entry} />
+          <ConflictMarker shown={conflicted.has(entry.id)} />
+        </button>
+        <Menu
+          label={`Entry actions: ${entryTitle(entry)}`}
+          open={menuFor === id}
+          onOpenChange={(open) => setMenuFor(open ? id : null)}
+          returnFocus={() => keys.focusRow(id)}
+          items={[
+            {
+              label: 'Image prompt…',
+              run: () => setImagePromptFor(entry.id),
+            },
+            addTodoItem(readOnly, () => onAddTodo(entry.id)),
+            {
+              label: 'Move to Trash',
+              run: () =>
+                onChange(
+                  () => window.project.trashEntry(entry.id),
+                  `“${entryTitle(entry)}” moved to Trash`,
+                ),
+            },
+          ]}
+        />
+      </li>
+    );
+  }
+
+  /** A Tag subgroup of `type`: its subheading and its rows, the drop target for both. */
+  function tagGroup(type: EntryType, sub: TagGroup) {
+    const to: SubgroupRef = { type, tag: sub.tag };
+    const name = sub.tag ?? 'No Tag';
+    const here = (t: DropTarget | null): t is DropTarget =>
+      t?.type === type && t.key === sub.key;
+    const hint = here(target) ? target.label : null;
+    // By the state as it is, as a leave and an over may come in one render.
+    const showHint = (label: string | null) =>
+      setTarget((t) => {
+        if (label === null) return here(t) ? null : t;
+        return here(t) && t.label === label ? t : { type, key: sub.key, label };
+      });
+    return (
+      <section
+        key={sub.key}
+        className={hint ? 'story-bible-tag drop-target' : 'story-bible-tag'}
+        aria-label={name}
+        onDragOver={(event) => {
+          const drop = dropOn(to, event);
+          showHint(drop?.label ?? null);
+          if (!drop) return;
+          event.preventDefault();
+          event.dataTransfer.dropEffect = drop.effect;
+        }}
+        onDragLeave={(event) => {
+          if (!event.currentTarget.contains(event.relatedTarget as Node)) {
+            showHint(null);
+          }
+        }}
+        onDrop={(event) => {
+          const drag = dragging.current;
+          const drop = dropOn(to, event);
+          setTarget(null);
+          if (!drag || !drop) return;
+          event.preventDefault();
+          void onChange(
+            () => window.project.changeEntryTags(drag.entry.id, drop.change),
+            dropMessage(entryTitle(drag.entry), drop),
+          );
+        }}
+      >
+        <h3>
+          <GroupToggle
+            collapsed={sub.collapsed}
+            onToggle={() => setView((v) => toggleTag(v, type, sub.key))}
+          >
+            {name}
+          </GroupToggle>
+          {hint && <span className="drop-hint">{hint}</span>}
+        </h3>
+        {!sub.collapsed && (
+          <ol>{sub.entries.map((entry) => entryRow(entry, sub))}</ol>
+        )}
+      </section>
+    );
+  }
 
   return (
     <nav
@@ -105,13 +256,25 @@ export function StoryBible({
         Highlight Entry names
       </label>
       {entries.length > 0 && (
-        <FilterControl
-          filter={filter}
-          onChange={setFilter}
-          inUse={inUse}
-          shown={shown.length}
-          total={entries.length}
-        />
+        <div className="story-bible-view">
+          <FilterControl
+            filter={filter}
+            onChange={setFilter}
+            inUse={inUse}
+            shown={shown.length}
+            total={entries.length}
+          />
+          <label className="story-bible-group-by">
+            <input
+              type="checkbox"
+              checked={view.groupByTag ?? false}
+              onChange={(event) =>
+                setView((v) => ({ ...v, groupByTag: event.target.checked }))
+              }
+            />
+            Group by Tag
+          </label>
+        </div>
       )}
       {entries.length === 0 ? (
         <p className="story-bible-empty">No Entries yet</p>
@@ -121,67 +284,27 @@ export function StoryBible({
           <p className="story-bible-empty">No Entries match the Filter</p>
         )
       )}
-      {ENTRY_TYPES.map((type) => {
-        const group = shown.filter((e) => e.type === type);
-        if (group.length === 0) return null;
-        return (
-          <section
-            key={type}
-            className="story-bible-group"
-            aria-label={ENTRY_GROUP_TITLES[type]}
-          >
-            <h2>{ENTRY_GROUP_TITLES[type]}</h2>
-            <ol>
-              {group.map((entry) => (
-                <li
-                  key={entry.id}
-                  className="binder-scene"
-                  onContextMenu={(event) =>
-                    keys.onContextMenu(event, menuFor === entry.id, () =>
-                      setMenuFor(entry.id),
-                    )
-                  }
-                >
-                  <button
-                    className="binder-title"
-                    data-row={entry.id}
-                    aria-current={entry.id === openId ? 'true' : undefined}
-                    onClick={() => onOpen(entry.id)}
-                  >
-                    <span className="story-bible-name">
-                      {entryTitle(entry)}
-                    </span>
-                    <TagChips tags={entry.tags} />
-                    <EntryThumbnail entry={entry} />
-                    <ConflictMarker shown={conflicted.has(entry.id)} />
-                  </button>
-                  <Menu
-                    label={`Entry actions: ${entryTitle(entry)}`}
-                    open={menuFor === entry.id}
-                    onOpenChange={(open) => setMenuFor(open ? entry.id : null)}
-                    returnFocus={() => keys.focusRow(entry.id)}
-                    items={[
-                      {
-                        label: 'Image prompt…',
-                        run: () => setImagePromptFor(entry.id),
-                      },
-                      addTodoItem(readOnly, () => onAddTodo(entry.id)),
-                      {
-                        label: 'Move to Trash',
-                        run: () =>
-                          onChange(
-                            () => window.project.trashEntry(entry.id),
-                            `“${entryTitle(entry)}” moved to Trash`,
-                          ),
-                      },
-                    ]}
-                  />
-                </li>
-              ))}
-            </ol>
-          </section>
-        );
-      })}
+      {groups.map((group) => (
+        <section
+          key={group.type}
+          className="story-bible-group"
+          aria-label={ENTRY_GROUP_TITLES[group.type]}
+        >
+          <h2>
+            <GroupToggle
+              collapsed={group.collapsed}
+              onToggle={() => setView((v) => toggleType(v, group.type))}
+            >
+              {ENTRY_GROUP_TITLES[group.type]}
+            </GroupToggle>
+          </h2>
+          {group.collapsed ? null : group.tags ? (
+            group.tags.map((sub) => tagGroup(group.type, sub))
+          ) : (
+            <ol>{group.entries.map((entry) => entryRow(entry))}</ol>
+          )}
+        </section>
+      ))}
       {imagePromptEntry && (
         <ImagePromptDialog
           entry={imagePromptEntry}
@@ -190,4 +313,81 @@ export function StoryBible({
       )}
     </nav>
   );
+}
+
+/** The Tag subgroup a drag is over, and what dropping there does. */
+type DropTarget = { type: EntryType; key: string; label: string };
+
+/** What dragging an Entry row carries: the Entry's id. */
+const ENTRY = 'application/x-scaffold-entry';
+
+/** The Entry a row of the list shows. */
+function entryIdOf(row: Row): string {
+  return row.kind === 'entry' ? row.entryId : row.id;
+}
+
+/** What a drop did, as said beside Undo. */
+function dropMessage(name: string, { change, effect }: TagDrop): string {
+  if (change.add === undefined) {
+    return `“${change.remove}” removed from “${name}”`;
+  }
+  return effect === 'move'
+    ? `“${name}” moved to “${change.add}”`
+    : `“${change.add}” added to “${name}”`;
+}
+
+/** A group's heading: a button that collapses the group, or expands it. */
+function GroupToggle({
+  collapsed,
+  onToggle,
+  children,
+}: {
+  collapsed: boolean;
+  onToggle(): void;
+  children: ReactNode;
+}) {
+  return (
+    <button
+      className="group-toggle"
+      aria-expanded={!collapsed}
+      onClick={onToggle}
+    >
+      <span className="group-toggle-mark" aria-hidden="true">
+        {collapsed ? '▸' : '▾'}
+      </span>
+      {children}
+    </button>
+  );
+}
+
+/**
+ * How the Story Bible list shows, as this computer remembers it for the
+ * Project; as by default until it is read. A change made before then wins.
+ */
+function useBibleView(): [
+  BibleView,
+  (change: (view: BibleView) => BibleView) => void,
+] {
+  const [view, setView] = useState<BibleView>({});
+  const changed = useRef(false);
+  useEffect(() => {
+    let current = true;
+    void window.shell.bibleView().then((stored) => {
+      if (current && !changed.current) setView(stored);
+    });
+    return () => {
+      current = false;
+    };
+  }, []);
+  return [
+    view,
+    (change) => {
+      changed.current = true;
+      setView((before) => {
+        const next = change(before);
+        window.shell.setBibleView(next);
+        return next;
+      });
+    },
+  ];
 }

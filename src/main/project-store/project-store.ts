@@ -58,11 +58,14 @@ import {
   type Status,
 } from '../../shared/status';
 import {
+  changeTags,
   hasTag,
+  revertTags,
   spelledTags,
   tagKey,
   tagUses,
   tagVocabulary,
+  type TagChange,
   type TagUse,
 } from '../../shared/tags';
 import type {
@@ -1625,6 +1628,32 @@ export class ProjectStore {
   setTags(unitId: string, tags: readonly string[]): Promise<void> {
     return this.enqueueWrite(async () => {
       await this.setDetail(this.detailRef(unitId), 'tags', tags);
+    });
+  }
+
+  /**
+   * Adds a Tag to an Entry, or takes one off, or both, as `setTags` does,
+   * but as a step: undo reverts what it changed, keeping any other change
+   * to the Entry's Tags since.
+   */
+  changeEntryTags(entryId: string, change: TagChange): Promise<Changed> {
+    const ref: DetailRef = { kind: 'entry', id: entryId };
+    const tagsNow = async () => (await this.read(entryRef(entryId))).tags ?? [];
+    return this.step(async () => {
+      const before = await tagsNow();
+      await this.setDetail(ref, 'tags', changeTags(before, change));
+      // As spelt once saved.
+      const after = await tagsNow();
+      return async () => {
+        const now = await tagsNow();
+        await this.setDetail(
+          ref,
+          'tags',
+          isDeepStrictEqual(now, after)
+            ? before
+            : revertTags(now, before, after),
+        );
+      };
     });
   }
 

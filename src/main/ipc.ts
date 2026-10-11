@@ -106,6 +106,8 @@ const projectHandlers: Handlers<
     ),
   tags: async ({ store }) => store.tags(),
   setTags: ({ store }, unitId, tags) => store.setTags(unitId, tags),
+  changeEntryTags: ({ store }, entryId, change) =>
+    store.changeEntryTags(entryId, change),
   tagUses: async ({ store }) => store.tagUses(),
   renameTag: ({ store, sender }, tag, to) =>
     saveProjectSetting(sender, store, `The Tag ${tag}`, () =>

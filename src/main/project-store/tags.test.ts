@@ -526,6 +526,107 @@ describe('Entry Tags', () => {
   });
 });
 
+// Dropping an Entry on a Tag in the Story Bible list adds that Tag, or moves
+// the Entry there from another; each is a step undo reverts.
+describe('Changing an Entry’s Tags as a step', () => {
+  async function withAnna(tags: string[]) {
+    await newProject();
+    const store = await open();
+    const { id } = await store.createEntry('character', 'Anna');
+    if (tags.length > 0) await store.setTags(id, tags);
+    return { store, id };
+  }
+
+  it('adds a Tag, keeping the others, and undo takes it off', async () => {
+    const { store, id } = await withAnna(['Red Hand']);
+
+    const { step } = await store.changeEntryTags(id, { add: 'Officers' });
+
+    expect(store.listEntries()[0].tags).toEqual(['Red Hand', 'Officers']);
+    await store.undo(step);
+    expect(store.listEntries()[0].tags).toEqual(['Red Hand']);
+  });
+
+  it('moves the Entry from one Tag to another, and undo moves it back', async () => {
+    const { store, id } = await withAnna(['Red Hand', 'spy']);
+
+    const { step } = await store.changeEntryTags(id, {
+      add: 'Officers',
+      remove: 'red hand',
+    });
+
+    expect(store.listEntries()[0].tags).toEqual(['spy', 'Officers']);
+    await store.undo(step);
+    expect(store.listEntries()[0].tags).toEqual(['Red Hand', 'spy']);
+  });
+
+  it('removes a Tag only; none left takes the key away', async () => {
+    const { store, id } = await withAnna(['Red Hand']);
+
+    await store.changeEntryTags(id, { remove: 'Red Hand' });
+
+    expect(store.listEntries()[0]).not.toHaveProperty('tags');
+  });
+
+  it('spells an added Tag as the one in use', async () => {
+    const { store, id } = await withAnna([]);
+    const { id: bo } = await store.createEntry('character', 'Bo');
+    await store.setTags(bo, ['Red Hand']);
+
+    await store.changeEntryTags(id, { add: 'RED HAND' });
+
+    expect((await store.read(entry(id))).tags).toEqual(['Red Hand']);
+  });
+
+  it('undoes only what it changed, keeping a Tag the Entry had already', async () => {
+    const { store, id } = await withAnna(['Officers', 'Red Hand']);
+
+    const { step } = await store.changeEntryTags(id, {
+      add: 'Officers',
+      remove: 'Red Hand',
+    });
+    expect(store.listEntries()[0].tags).toEqual(['Officers']);
+    await store.undo(step);
+
+    expect(store.listEntries()[0].tags).toEqual(['Officers', 'Red Hand']);
+  });
+
+  it('undoes onto Tags changed since, keeping those changes', async () => {
+    const { store, id } = await withAnna(['Red Hand']);
+    const { step } = await store.changeEntryTags(id, { add: 'Officers' });
+    // As a merge from another computer may, without a step of its own.
+    await store.setTags(id, ['Red Hand', 'Officers', 'spy']);
+
+    await store.undo(step);
+
+    expect(store.listEntries()[0].tags).toEqual(['Red Hand', 'spy']);
+  });
+
+  it('is saved in the Entry file’s header, with no Conflict', async () => {
+    const { store, id } = await withAnna(['Red Hand']);
+
+    await store.changeEntryTags(id, { add: 'Officers' });
+    await store.flush();
+
+    expect(
+      parseUnitFile(
+        await readFile(path.join(projectPath, 'bible', `${id}.md`), 'utf8'),
+      ).frontmatter,
+    ).toMatchObject({ tags: ['Red Hand', 'Officers'] });
+    expect(store.listConflicts()).toEqual([]);
+  });
+
+  it('is refused for an Entry there isn’t', async () => {
+    const { store } = await withAnna([]);
+
+    await expect(
+      store.changeEntryTags('5e6dbfac-0000-4000-8000-000000000000', {
+        add: 'Mara',
+      }),
+    ).rejects.toThrow();
+  });
+});
+
 // Project Settings lists the Tags in use with counts, and renames, merges
 // and deletes a Tag on every unit that has it, those in Trash too (v3 spec
 // §1, §14).
