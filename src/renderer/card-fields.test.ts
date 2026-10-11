@@ -41,7 +41,7 @@ describe('the fields a Peek shows', () => {
       appearance: 'Tall, wind-red cheeks.',
       voice,
     });
-    expect(keyFields(anna)).toEqual([
+    expect(keyFields(anna, [], {})).toEqual([
       ['Appearance', 'Tall, wind-red cheeks.'],
       ['Voice traits', 'Clipped.'],
     ]);
@@ -54,21 +54,21 @@ describe('the fields a Peek shows', () => {
   });
 
   it('shows a Place’s Atmosphere and Sight, and a Plot Thread’s Status', () => {
-    expect(keyFields(entry('place', { senses }))).toEqual([
+    expect(keyFields(entry('place', { senses }), [], {})).toEqual([
       ['Atmosphere', 'Watchful.'],
       ['Sight', 'A white tower.'],
     ]);
-    expect(keyFields(entry('plot-thread', { status: 'resolved' }))).toEqual([
-      ['Status', 'Resolved'],
-    ]);
+    expect(
+      keyFields(entry('plot-thread', { status: 'resolved' }), [], {}),
+    ).toEqual([['Status', 'Resolved']]);
   });
 
   it('leaves out key fields without a value, and other types have none', () => {
-    expect(keyFields(entry('character', { voice }))).toEqual([
+    expect(keyFields(entry('character', { voice }), [], {})).toEqual([
       ['Voice traits', 'Clipped.'],
     ]);
-    expect(keyFields(entry('place', {}))).toEqual([]);
-    expect(keyFields(entry('item', {}))).toEqual([]);
+    expect(keyFields(entry('place', {}), [], {})).toEqual([]);
+    expect(keyFields(entry('item', {}), [], {})).toEqual([]);
   });
 
   it('lists every field with a value, in the Entry view’s order', () => {
@@ -79,7 +79,7 @@ describe('the fields a Peek shows', () => {
     ]);
   });
 
-  it('lists the Custom fields with a value after the type’s own, in their order, never as key fields', () => {
+  it('lists the Custom fields with a value after the type’s own, in their order, not key fields until chosen', () => {
     const place = {
       ...entry('place', { senses }),
       custom: { climate: 'Wet.', ruler: '', gone: 'Never shown.' },
@@ -95,9 +95,59 @@ describe('the fields a Peek shows', () => {
       ['Atmosphere', 'Watchful.'],
       ['Climate', 'Wet.'],
     ]);
-    expect(keyFields(place)).toEqual([
+    expect(keyFields(place, [...fields], {})).toEqual([
       ['Atmosphere', 'Watchful.'],
       ['Sight', 'A white tower.'],
+    ]);
+  });
+
+  it('shows the chosen key fields, as many as are chosen, in the Entry view’s order', () => {
+    const place = {
+      ...entry('place', { senses }),
+      custom: { climate: 'Wet.', ruler: 'The Duke.' },
+    };
+    const fields = [
+      { id: 'ruler', type: 'place', label: 'Ruler' },
+      { id: 'climate', type: 'place', label: 'Climate' },
+    ] as const;
+    const choices = {
+      place: {
+        'senses.smells': true,
+        'senses.atmosphere': false,
+        'custom:climate': true,
+        'custom:ruler': true,
+      },
+      // Another type's choice changes nothing here.
+      character: { 'senses.touch': true },
+    };
+
+    expect(keyFields(place, [...fields], choices)).toEqual([
+      ['Sight', 'A white tower.'],
+      ['Smells', 'Tar.'],
+      ['Ruler', 'The Duke.'],
+      ['Climate', 'Wet.'],
+    ]);
+  });
+
+  it('never shows a chosen Custom field that isn’t live, as one in Trash', () => {
+    const item = { ...entry('item', {}), custom: { gone: 'Hidden.' } };
+    expect(keyFields(item, [], { item: { 'custom:gone': true } })).toEqual([]);
+  });
+
+  it('shows a Character’s Role and Voice lines when chosen, never the Role note alone', () => {
+    const anna = entry('character', {
+      role: 'protagonist',
+      roleNote: 'the keeper’s daughter',
+      voice: { ...voice, says: ['Aye', 'Nay'] },
+    });
+    // The Role shows under the name, not among the fields.
+    expect(
+      keyFields(anna, [], {
+        character: { 'voice.says': true, role: true },
+      }),
+    ).toEqual([
+      ['Voice traits', 'Clipped.'],
+      ['Says', 'Aye, Nay'],
     ]);
   });
 });

@@ -57,6 +57,14 @@ export class Switches {
     );
   }
 
+  /** Each id set in `<of>.json`, on or off; one never set isn't in it. */
+  states(of: string): Record<string, boolean> {
+    const switches = this.files.get(fileName(of))?.file?.switches ?? {};
+    return Object.fromEntries(
+      Object.entries(switches).map(([id, s]) => [id, s.on]),
+    );
+  }
+
   /**
    * Reads the files that changed since they were last read or written here,
    * as on another computer, and merges each copy into its own file; resolves
@@ -99,10 +107,16 @@ export class Switches {
 
   /**
    * Switches `id` on or off in `<of>.json`, merged first with the file as it
-   * is now; nothing is written if it is so already. The edit is stamped
-   * after the latest one it was made over, whatever the clock says.
+   * is now; nothing is written if it is so already, a switch never set
+   * being as `whenNeverSet` says. The edit is stamped after the latest one it was
+   * made over, whatever the clock says.
    */
-  async set(of: string, id: string, on: boolean): Promise<void> {
+  async set(
+    of: string,
+    id: string,
+    on: boolean,
+    whenNeverSet = false,
+  ): Promise<void> {
     if (!NAME.test(of)) throw new Error(`No switches can be named ${of}`);
     const known = this.files.get(fileName(of))?.file ?? null;
     const onDisk = await this.readOwn(of);
@@ -111,9 +125,8 @@ export class Switches {
     const base =
       known && onDisk ? merged(known, onDisk) : (known ?? onDisk ?? none);
     const was = base.switches[id];
-    // A switch never set is off.
     const next: SwitchFile =
-      (was?.on ?? false) === on
+      (was?.on ?? whenNeverSet) === on
         ? base
         : {
             ...base,

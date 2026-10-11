@@ -389,6 +389,66 @@ test('a Pinned note shows its Entry’s image instead of its text, after a resta
   await second.close();
 });
 
+test('the Author chooses what the notes and Peeks of one Entry type show, for every Entry of it', async () => {
+  const projectPath = path.join(tempDir(), 'My Novel');
+  const { app, page } = await newProject(projectPath);
+  await newEntry(
+    page,
+    'Character',
+    'Anna',
+    'A pilot who never flies at night.',
+  );
+  await page
+    .getByRole('button', { name: '+ Add a field to all Characters' })
+    .click();
+  await page.keyboard.type('Allegiance');
+  await page.keyboard.press('Enter');
+  await fill(page, 'Allegiance', 'The Crown');
+  await fill(page, 'Appearance', 'Tall, wind-red cheeks.');
+  await fill(page, 'Says', 'Aye');
+
+  // As they always were, until the Author chooses.
+  const description = page.getByRole('checkbox', {
+    name: 'Show Description in Peek for all Characters',
+  });
+  const allegiance = page.getByRole('checkbox', {
+    name: 'Show Allegiance in Peek for all Characters',
+  });
+  await expect(description).toBeChecked();
+  await expect(allegiance).not.toBeChecked();
+  await description.uncheck();
+  await allegiance.check();
+  await page
+    .getByRole('checkbox', { name: 'Show Says in Peek for all Characters' })
+    .check();
+  await expect(description).not.toBeChecked();
+
+  await newEntry(page, 'Place', 'Harbour', 'Grey water, three piers.');
+  await writeScene(page, 'Anna walked to the Harbour.');
+  await pin(page, 'Anna');
+  const anna = note(page, 'Anna');
+  await expect(anna.locator('dt')).toHaveText([
+    'Appearance',
+    'Says',
+    'Allegiance',
+  ]);
+  await expect(anna).toContainText('The Crown');
+  await expect(anna).not.toContainText('A pilot who never flies at night.');
+  // Read more still shows it all.
+  await anna.getByRole('button', { name: 'Read more' }).click();
+  await expect(anna).toContainText('A pilot who never flies at night.');
+
+  // Another type's Peek is as it was.
+  await page.locator('.mention').filter({ hasText: 'Harbour' }).click();
+  await expect(peek(page)).toContainText('Grey water, three piers.');
+
+  // Kept in the Project, by type.
+  expect(await readdir(path.join(projectPath, 'key-fields'))).toEqual([
+    'character.json',
+  ]);
+  await app.close();
+});
+
 for (const theme of ['light', 'dark'] as const) {
   test(`a Pinned note is a sheet over the page, ${theme}`, async () => {
     const { app, page } = await newProject(path.join(tempDir(), 'My Novel'));

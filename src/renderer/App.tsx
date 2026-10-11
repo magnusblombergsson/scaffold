@@ -326,6 +326,7 @@ function ProjectView({
     trash,
     todos,
     customFields,
+    keyFields,
     conflicts,
     statuses,
     language,
@@ -1127,6 +1128,7 @@ function ProjectView({
     <ProjectContexts
       readOnly={readOnly !== null}
       customFields={customFields}
+      keyFields={keyFields}
       statusAndTags={{
         statuses,
         setStatus: (unitId, statusId) => void setStatus(unitId, statusId),

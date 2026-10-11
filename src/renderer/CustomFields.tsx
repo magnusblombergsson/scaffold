@@ -6,7 +6,9 @@ import {
   ENTRY_TYPE_LABELS,
   type EntryType,
 } from '../shared/project-types';
+import { customFieldKey } from '../shared/proposal';
 import { Menu } from './Binder';
+import { ShowInPeek } from './ShowInPeek';
 import { ReadOnlyContext } from './read-only';
 
 /**
@@ -49,6 +51,11 @@ export function CustomFieldHeading({
   return (
     <div className="custom-field-heading">
       <h3>{field.label}</h3>
+      <ShowInPeek
+        type={field.type}
+        item={customFieldKey(field.id)}
+        label={field.label}
+      />
       <Menu
         label={`Field actions: ${field.label}`}
         disabled={readOnly}

@@ -2311,6 +2311,44 @@ header.entry-header {
   gap: 0.5rem;
 }
 
+/* A field's label in the Entry view, and beside it whether a Peek shows it. */
+.field-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  column-gap: 0.75rem;
+}
+
+.show-in-peek {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  font-size: 0.7rem;
+  font-weight: normal;
+  text-transform: none;
+  letter-spacing: normal;
+  color: var(--muted);
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.show-in-peek input {
+  margin: 0;
+}
+
+legend .show-in-peek {
+  margin-left: 0.75rem;
+}
+
+.custom-field-heading .show-in-peek {
+  margin-right: auto;
+}
+
+.entry-aliases .show-in-peek {
+  grid-column: 2;
+  justify-self: start;
+}
+
 .custom-field-heading .menu-button {
   opacity: 0;
 }

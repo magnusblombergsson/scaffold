@@ -20,6 +20,7 @@ import type { Status } from './status';
 import type { TagChange, TagUse } from './tags';
 import type { Todo, TodoChange, TodoLink } from './todo';
 import type { CustomField } from './custom-field';
+import type { KeyFieldChoices, KeyFieldItem } from './key-fields';
 import type { ImportBlock, ImportConvention } from './manuscript-import';
 import type { Cut } from './prose-split';
 import type { ListedModel, Model, ProviderId, ProviderStatus } from './models';
@@ -200,6 +201,15 @@ export type CustomFieldsChanged = {
   fields: CustomField[];
 };
 
+/**
+ * The Key fields changed, here or on another computer: `choices` is what
+ * the Author has chosen for each Entry type now.
+ */
+export type KeyFieldsChanged = {
+  type: 'keyFieldsChanged';
+  choices: KeyFieldChoices;
+};
+
 /** A newer app upgraded the Project; `host` is the computer it did so on, when known. */
 export type Upgrade = { host?: string };
 
@@ -230,6 +240,7 @@ export type ProjectEvent =
   | StatusesChanged
   | TodosChanged
   | CustomFieldsChanged
+  | KeyFieldsChanged
   | ConflictsChanged
   | EntriesChanged
   | ImageChanged
@@ -474,6 +485,16 @@ export interface ProjectApi {
    * told how many Entries hold one; false when they cancelled.
    */
   trashCustomField(id: string): Promise<boolean>;
+  /**
+   * What the Author has chosen as each Entry type's Key fields, item by
+   * item; an item not in it is as its type's defaults have it.
+   */
+  listKeyFields(): Promise<KeyFieldChoices>;
+  /**
+   * Makes `item` a Key field of every Entry of `type`, or not; refused for
+   * an item the type can't show. Follows as a `keyFieldsChanged`.
+   */
+  setKeyField(type: EntryType, item: KeyFieldItem, on: boolean): Promise<void>;
 }
 
 /**
@@ -982,6 +1003,8 @@ export const projectMethods = {
   renameCustomField: 'invoke',
   moveCustomField: 'invoke',
   trashCustomField: 'invoke',
+  listKeyFields: 'invoke',
+  setKeyField: 'invoke',
 } as const satisfies MethodTable<ProjectApi>;
 
 export const assistantMethods = {
