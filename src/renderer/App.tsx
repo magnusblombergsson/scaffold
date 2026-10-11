@@ -48,7 +48,12 @@ import { Binder, type Selection } from './Binder';
 import { BrainstormRoom } from './BrainstormRoom';
 import { WINDOW_MODES, type ShowProposal } from './Conversation';
 import { ConflictList, ConflictResolver } from './Conflicts';
-import { ChapterCorkboard, PartCorkboard, ProjectCorkboard } from './Corkboard';
+import {
+  ChapterCorkboard,
+  PartCorkboard,
+  ProjectCorkboard,
+  useCorkboardView,
+} from './Corkboard';
 import { EntryTypePicker } from './EntryTypePicker';
 import { EntryView } from './EntryView';
 import { ExportManuscriptDialog } from './ExportManuscriptDialog';
@@ -634,6 +639,7 @@ function ProjectView({
   const writingRoom = useRef<HTMLDivElement>(null);
   usePaneCycle(writingRoom, mode === 'writing');
   useEffect(() => setMentionEntries(entries), [entries]);
+  const [corkboardView, setCorkboardView] = useCorkboardView();
   const [highlight, setHighlight] = useState(true);
   useEffect(() => {
     void window.shell.highlightMentions().then(setHighlight);
@@ -1467,6 +1473,8 @@ function ProjectView({
                     manuscript={manuscript}
                     language={language}
                     reveal={revealIn(PROJECT_OUTLINE)}
+                    view={corkboardView}
+                    onView={setCorkboardView}
                     onOpenScene={(id) => select({ kind: 'scene', id })}
                     onOpenChapter={(id) => select({ kind: 'chapter', id })}
                     onOpenPart={(id) => select({ kind: 'part', id })}
@@ -1521,6 +1529,8 @@ function ProjectView({
                     chapter={openChapter}
                     language={language}
                     reveal={revealIn(openChapter.id)}
+                    view={corkboardView}
+                    onView={setCorkboardView}
                     onOpenScene={(id) => select({ kind: 'scene', id })}
                     onAddTodo={startTodo}
                   />
@@ -1532,6 +1542,8 @@ function ProjectView({
                     manuscript={manuscript}
                     language={language}
                     reveal={revealIn(openPart.id)}
+                    view={corkboardView}
+                    onView={setCorkboardView}
                     onOpenChapter={(id) => select({ kind: 'chapter', id })}
                     onAddTodo={startTodo}
                   />
