@@ -244,6 +244,11 @@ const FIELDS_OF: Record<EntryType, BuiltInField[]> = {
   other: ['description', 'aliases'],
 };
 
+/** The built-in fields of an Entry of `type` a Proposal may change, in order. */
+export function builtInFields(type: EntryType): readonly BuiltInField[] {
+  return FIELDS_OF[type];
+}
+
 /** Whether `field` names a field a Proposal may change, a Custom field's by any id. */
 export function isProposalField(field: unknown): field is ProposalField {
   if (typeof field !== 'string') return false;

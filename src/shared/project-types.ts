@@ -67,6 +67,11 @@ export const VISIBILITIES: readonly Visibility[] = [
   'never',
 ];
 export const DEFAULT_VISIBILITY: Visibility = 'mentioned';
+export const VISIBILITY_LABELS: Record<Visibility, string> = {
+  always: 'Always',
+  mentioned: 'When mentioned',
+  never: 'Never',
+};
 
 /** A Character's part in the story; `null` until the Author says. */
 export type Role = 'protagonist' | 'supporting' | 'mentioned';

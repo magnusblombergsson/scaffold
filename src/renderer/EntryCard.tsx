@@ -1,7 +1,10 @@
 import type { CustomField } from '../shared/custom-field';
 import { entryTitle, roleText } from '../shared/entry';
-import { ENTRY_TYPE_LABELS, type EntryValue } from '../shared/project-types';
-import { VISIBILITY_LABELS } from './EntryView';
+import {
+  ENTRY_TYPE_LABELS,
+  VISIBILITY_LABELS,
+  type EntryValue,
+} from '../shared/project-types';
 import { entryFields, type CardField } from './card-fields';
 import { EntryThumbnail } from './UnitImage';
 import { TagChips } from './TagsDialog';

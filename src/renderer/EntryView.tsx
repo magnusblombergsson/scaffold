@@ -23,6 +23,7 @@ import {
   THREAD_STATUSES,
   unitKey,
   VISIBILITIES,
+  VISIBILITY_LABELS,
   type EntryFields,
   type EntrySummary,
   type EntryType,
@@ -48,12 +49,6 @@ import {
 import { TagInput } from './TagsDialog';
 import { UnitEditor } from './UnitEditor';
 import { tellEntryWritten } from './entry-written';
-
-export const VISIBILITY_LABELS: Record<Visibility, string> = {
-  always: 'Always',
-  mentioned: 'When mentioned',
-  never: 'Never',
-};
 
 /** One item per line; blank lines and surrounding spaces don't count. */
 export function textToLines(text: string): string[] {
