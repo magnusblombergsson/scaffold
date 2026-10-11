@@ -156,7 +156,7 @@ A copy written outside the Project for others to read, of either the Manuscript'
 _Avoid_: Compile, publish, backup
 
 **Import**:
-Making a new Project from a Word or Markdown manuscript, the mirror of an Export: a Heading 1 starts a Chapter and a break such as `***` starts a Scene, unless the Author chooses another split after seeing it. When the file also has Heading 2s, the Author may choose that a Heading 1 starts a Part and a Heading 2 a Chapter; it is never chosen for them. An Import never adds to an existing Project.
+Reading a Word or Markdown file into the Project, the mirror of an Export, of either a manuscript or a Story Bible. A Manuscript Import makes a new Project and never adds to an existing one: a Heading 1 starts a Chapter and a break such as `***` starts a Scene, unless the Author chooses another split after seeing it. When the file also has Heading 2s, the Author may choose that a Heading 1 starts a Part and a Heading 2 a Chapter; it is never chosen for them. A Story Bible Import adds the Entries the Author ticks after seeing them to the open Project's Story Bible, beside those already there, and changes none of them; undoing it moves them all to Trash.
 _Avoid_: Open (when meaning a manuscript file), convert
 
 **Conflict**:
