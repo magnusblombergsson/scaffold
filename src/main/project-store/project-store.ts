@@ -56,7 +56,11 @@ import {
   newEntryValue,
   revertEntryType,
 } from '../../shared/entry';
-import { type PendingProposal, type Proposal } from '../../shared/proposal';
+import {
+  type Orphaned,
+  type PendingProposal,
+  type Proposal,
+} from '../../shared/proposal';
 import { joinProse, type Cut } from '../../shared/prose-split';
 import {
   DEFAULT_STATUSES,
@@ -139,6 +143,9 @@ export type { VocabularyChange } from './vocabulary';
 import { parseUnitFile, type UnitFile } from './unit-file';
 import { Conversations } from './conversations';
 import {
+  inPlace,
+  orphanedIn,
+  placeName,
   Trash,
   trashedChapter,
   trashedEntry,
@@ -147,6 +154,7 @@ import {
   trashedVersion,
   UNPLACED_TITLE,
   type ChapterFile,
+  type MovableKind,
   type PartFile,
   type Trashed,
   type TrashedChapter,
@@ -191,10 +199,12 @@ import {
   outlineRef,
   PART_FILE,
   partTrashPath,
+  placeDir,
   scenePath,
   sceneRef,
   trashDir,
   VERSION_FILE,
+  type Place,
 } from './layout';
 export { ProjectError };
 import { baseOf, UnitWriter, type Loaded, type Pending } from './unit-writer';
@@ -560,7 +570,7 @@ function withStatusesOf(winner: Manifest, loser: Manifest): Manifest {
 }
 
 /**
- * What `loser` had that `winner` hasn't: Chapters not in Trash, and Scenes
+ * What `loser` had that `winner` hasn't: Chapters not in Trash or the Drawer, and Scenes
  * it placed whose files are here, so are Unplaced now.
  */
 async function lostWith(
@@ -574,10 +584,12 @@ async function lostWith(
   const chapters: string[] = [];
   const scenes: string[] = [];
   const parts: string[] = [];
+  const kept = async (file: (place: Place) => string) =>
+    (await fs.exists(file('trash'))) || (await fs.exists(file('drawer')));
   for (const part of loser.parts ?? []) {
     if (
       !isPart(winner, part.id) &&
-      !(await fs.exists(partTrashPath(projectPath, part.id)))
+      !(await kept((place) => partTrashPath(projectPath, part.id, place)))
     ) {
       parts.push(part.title);
     }
@@ -585,7 +597,7 @@ async function lostWith(
   for (const chapter of loser.chapters) {
     if (
       !chapterIds.has(chapter.id) &&
-      !(await fs.exists(chapterTrashPath(projectPath, chapter.id)))
+      !(await kept((place) => chapterTrashPath(projectPath, chapter.id, place)))
     ) {
       chapters.push(chapter.title);
     }
@@ -606,6 +618,7 @@ async function sweepTempFiles(projectPath: string, fs: FileSystem) {
   const dirs = [
     ...Object.values(UNIT_DIRS),
     'trash',
+    'drawer',
     IMAGES,
     SESSIONS,
     CONVERSATIONS,
@@ -626,11 +639,13 @@ type Units = {
   files: Set<string>;
   /** The Entries whose file is in `bible/`, by id. */
   entries: Map<string, EntrySummary>;
+  /** What is in Trash and, marked so, in the Drawer. */
   trash: Map<string, Trashed>;
 };
 
 /**
- * Compares the tree with the files in `scenes/` and `trash/`. With
+ * Compares the tree with the files in `scenes/`, `trash/` and `drawer/`,
+ * the Drawer being kept as Trash is. With
  * `repair`, as on open, it also finishes any structure operation that a
  * crash cut off. Without, as while the Project is open, it deletes nothing:
  * another computer's operation may still be arriving one file at a time.
@@ -647,7 +662,9 @@ type Units = {
  * that is still arriving from another computer, is neither listed nor
  * deleted.
  *
- * Only `<id>` names count; anything else is left alone.
+ * Only `<id>` names count; anything else is left alone. An item in both
+ * Trash and the Drawer, as when copies arrive from two computers, is in the
+ * Drawer, which emptying never takes.
  */
 async function scanUnits(
   projectPath: string,
@@ -661,6 +678,32 @@ async function scanUnits(
       .filter((id) => id !== undefined),
   );
   const entries = await scanEntries(projectPath, fs);
+  const scanned = { tree, files, entries, repair };
+  const trash = await scanPlace(projectPath, 'trash', scanned, fs);
+  for (const [id, item] of await scanPlace(
+    projectPath,
+    'drawer',
+    scanned,
+    fs,
+  )) {
+    trash.set(id, item);
+  }
+  return { files, entries, trash };
+}
+
+/** What is kept in `place`, as `scanUnits`; a Scene file it holds too may leave `files`. */
+async function scanPlace(
+  projectPath: string,
+  place: Place,
+  {
+    tree,
+    files,
+    entries,
+    repair,
+  }: Omit<Units, 'trash'> & { tree: ProjectTree; repair: boolean },
+  fs: FileSystem,
+): Promise<Map<string, Trashed>> {
+  const dir = placeDir(projectPath, place);
   const trashedEntries: TrashedEntry[] = [];
   const placed = new Set(sceneIds(tree));
   const chapterIds = new Set(tree.chapters.map((c) => c.id));
@@ -671,21 +714,22 @@ async function scanUnits(
   const conversations: TrashedConversation[] = [];
   const withChapter = new Map<string, string>();
 
-  for (const name of await fs.readdir(trashDir(projectPath))) {
-    const file = path.join(trashDir(projectPath), name);
+  for (const name of await fs.readdir(dir)) {
+    const file = path.join(dir, name);
     const conversationId = CONVERSATION_FILE.exec(name)?.[1];
     if (conversationId) {
       const trashed = await trashedConversation(
         projectPath,
         conversationId,
         fs,
-        { repair },
+        { repair, place },
       );
       if (trashed) conversations.push(trashed);
       continue;
     }
     const versionId = VERSION_FILE.exec(name)?.[1];
-    if (versionId) {
+    // A set-aside version is only ever in Trash.
+    if (versionId && place === 'trash') {
       const { frontmatter } = parseUnitFile(await fs.readFile(file));
       const info = frontmatter.trashedVersion as TrashedVersionInfo | undefined;
       if (info) versions.push(trashedVersion(versionId, info));
@@ -743,41 +787,41 @@ async function scanUnits(
     scenes.push(trashedScene(id, info));
   }
 
-  const trash = new Map<string, Trashed>();
+  const kept = new Map<string, Trashed>();
+  const keep = (item: Exclude<Trashed, TrashedVersion>) =>
+    kept.set(item.id, inPlace(item, place));
   // A Chapter deleted with its Part is restored with it, unless the Part's
   // record isn't here.
   const parts = new Set(partFiles.map((part) => part.id));
-  for (const [id, chapter] of chapters) {
-    if (!chapter.withPart || !parts.has(chapter.part ?? '')) {
-      trash.set(id, chapter);
-    }
+  for (const chapter of chapters.values()) {
+    if (!chapter.withPart || !parts.has(chapter.part ?? '')) keep(chapter);
   }
-  for (const part of partFiles) trash.set(part.id, trashedPart(part, chapters));
-  for (const version of versions) trash.set(version.id, version);
-  for (const item of trashedEntries) trash.set(item.id, item);
-  for (const item of conversations) trash.set(item.id, item);
+  for (const part of partFiles) keep(trashedPart(part, chapters));
+  for (const version of versions) kept.set(version.id, version);
+  for (const item of trashedEntries) keep(item);
+  for (const item of conversations) keep(item);
   for (const scene of scenes) {
     // A Scene deleted with its Chapter is restored with it, unless the
     // Chapter's record isn't here, such as when it hasn't synced yet.
     const chapterId = withChapter.get(scene.id);
-    if (!chapterId || !chapters.has(chapterId)) trash.set(scene.id, scene);
+    if (!chapterId || !chapters.has(chapterId)) keep(scene);
   }
-  return { files, entries, trash };
+  return kept;
 }
 
 /**
- * The Conversation whose log is in Trash, unless its log is also in
- * `conversations/`, which wins: a crash cut off its move to Trash or back.
- * With `repair`, that Trash copy is deleted when one log only adds to the
+ * The Conversation whose log is in Trash or the Drawer, unless its log is
+ * also in `conversations/`, which wins: a crash cut off its move there or
+ * back. With `repair`, that copy is deleted when one log only adds to the
  * other, as such a crash leaves them; else both are left alone.
  */
 async function trashedConversation(
   projectPath: string,
   id: string,
   fs: FileSystem,
-  { repair }: { repair: boolean },
+  { repair, place }: { repair: boolean; place: Place },
 ): Promise<TrashedConversation | null> {
-  const file = conversationTrashPath(projectPath, id);
+  const file = conversationTrashPath(projectPath, id, place);
   const text = await fs.readFile(file);
   const live = conversationPath(projectPath, id);
   if (await fs.exists(live)) {
@@ -1196,6 +1240,7 @@ export class ProjectStore {
         },
         this.manuscript(),
         this.listTrash(),
+        this.listDrawer(),
       ]);
     const before = structure();
     const { language, foldedNoteImage } = this;
@@ -2400,6 +2445,11 @@ export class ProjectStore {
     };
   }
 
+  /** What is in the Drawer, latest first. */
+  listDrawer(): TrashItem[] {
+    return this.trash.list('drawer');
+  }
+
   /** Latest first. */
   listTrash(): TrashItem[] {
     const fields = this.customFields.trashed().map(
@@ -2992,7 +3042,20 @@ export class ProjectStore {
   }
 
   /**
-   * Puts a Trash item back. A Scene goes back to its place in its Chapter, or
+   * Moves a Scene, Chapter, Part, Entry or Conversation to the Drawer, as
+   * Trash would take it, with what goes with it there.
+   */
+  moveToDrawer(kind: MovableKind, id: string): Promise<Changed> {
+    return this.step(() => this.trash.move(kind, id, 'drawer'));
+  }
+
+  /** Moves an item from Trash to the Drawer, or back, as one step. */
+  moveBetweenTrashAndDrawer(id: string, to: Place): Promise<Changed> {
+    return this.step(() => this.trash.moveBetween(id, to));
+  }
+
+  /**
+   * Puts a Trash or Drawer item back. A Scene goes back to its place in its Chapter, or
    * to the end of the Manuscript if that Chapter is gone, or to the Unplaced
    * Scenes if it came from there. A Chapter goes back to its place with its
    * Scenes.
@@ -3176,10 +3239,10 @@ export class ProjectStore {
     );
   }
 
-  /** Whether an Outline's Chapter or Scene is in Trash or gone; the Project Outline never is. */
-  private outlineOrphaned(id: string): 'trashed' | 'gone' | null {
+  /** Whether an Outline's Chapter or Scene is in Trash, the Drawer or gone; the Project Outline never is. */
+  private outlineOrphaned(id: string): Exclude<Orphaned, 'field'> | null {
     if (id === PROJECT_OUTLINE || this.isLive(id)) return null;
-    return this.trash.has(id) ? 'trashed' : 'gone';
+    return orphanedIn(this.trash.where(id));
   }
 
   private async deleteOutlineAndNotes(id: string): Promise<void> {
@@ -3348,30 +3411,32 @@ export class ProjectStore {
   }
 
   /**
-   * Refuses a Missing Scene, and a Scene or Entry in Trash or on its way
-   * there. An Outline or Notes needs its Chapter or Scene in the Manuscript
+   * Refuses a Missing Scene, and a Scene or Entry in Trash or the Drawer, or
+   * on its way there. An Outline or Notes needs its Chapter or Scene in the Manuscript
    * or Unplaced; only the Project Outline has none. Private notes need their
    * Entry in the Story Bible.
    */
   private refuseUnavailable(ref: UnitRef): void {
+    // Where it is kept, or, on its way there, Trash as far as the window knows.
+    const kept = () => placeName(this.trash.where(ref.id) ?? 'trash');
     if (ref.kind === 'entry' || ref.kind === 'private') {
       if (this.entries.has(ref.id) && !this.closing.has(ref.id)) return;
       if (this.entries.has(ref.id) || this.trash.kindOf(ref.id) !== undefined) {
-        throw new ProjectError('trashed', `Entry ${ref.id} is in Trash`);
+        throw new ProjectError('trashed', `Entry ${ref.id} is ${kept()}`);
       }
       throw new Error(`No Entry ${ref.id}`);
     }
     if (ref.kind === 'scene') {
       this.refuseMissing(ref);
       if (!this.files.has(ref.id) || this.closing.has(ref.id)) {
-        throw new ProjectError('trashed', `Scene ${ref.id} is in Trash`);
+        throw new ProjectError('trashed', `Scene ${ref.id} is ${kept()}`);
       }
       return;
     }
     if (ref.kind === 'outline' && ref.id === PROJECT_OUTLINE) return;
     if (this.isLive(ref.id)) return;
     if (this.trash.has(ref.id)) {
-      throw new ProjectError('trashed', `${ref.id} is in Trash`);
+      throw new ProjectError('trashed', `${ref.id} is ${kept()}`);
     }
     throw new Error(`No Chapter or Scene ${ref.id}`);
   }

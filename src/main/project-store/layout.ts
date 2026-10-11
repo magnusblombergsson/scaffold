@@ -2,19 +2,30 @@ import path from 'node:path';
 import type {
   EntryRef,
   OutlineRef,
+  Place,
   SceneRef,
 } from '../../shared/project-types';
+export type { Place };
 export const UUID =
   '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}';
 export const ID_FILE = new RegExp(`^(${UUID})\\.md$`);
 export const ID = new RegExp(`^${UUID}$`);
 
-export function trashDir(projectPath: string): string {
-  return path.join(projectPath, 'trash');
+/** Trash's folder or the Drawer's, of the same files; an older app never lists `drawer/`. */
+export function placeDir(projectPath: string, place: Place): string {
+  return path.join(projectPath, place);
 }
 
-export function entryTrashPath(projectPath: string, id: string): string {
-  return path.join(trashDir(projectPath), `${id}.entry.md`);
+export function trashDir(projectPath: string): string {
+  return placeDir(projectPath, 'trash');
+}
+
+export function entryTrashPath(
+  projectPath: string,
+  id: string,
+  place: Place = 'trash',
+): string {
+  return path.join(placeDir(projectPath, place), `${id}.entry.md`);
 }
 
 export const CONVERSATIONS = 'conversations';
@@ -24,8 +35,12 @@ export function conversationPath(projectPath: string, id: string): string {
   return path.join(projectPath, CONVERSATIONS, `${id}.jsonl`);
 }
 
-export function conversationTrashPath(projectPath: string, id: string): string {
-  return path.join(trashDir(projectPath), `${id}.jsonl`);
+export function conversationTrashPath(
+  projectPath: string,
+  id: string,
+  place: Place = 'trash',
+): string {
+  return path.join(placeDir(projectPath, place), `${id}.jsonl`);
 }
 
 export function outlineRef(id: string): OutlineRef {
@@ -84,24 +99,36 @@ export function imagePath(projectPath: string, name: string): string {
   return path.join(projectPath, IMAGES, name);
 }
 
-export function sceneTrashPath(projectPath: string, id: string): string {
-  return path.join(trashDir(projectPath), `${id}.md`);
+export function sceneTrashPath(
+  projectPath: string,
+  id: string,
+  place: Place = 'trash',
+): string {
+  return path.join(placeDir(projectPath, place), `${id}.md`);
 }
 
 export function versionTrashPath(projectPath: string, id: string): string {
   return path.join(trashDir(projectPath), `${id}.version.md`);
 }
 
-export function chapterTrashPath(projectPath: string, id: string): string {
-  return path.join(trashDir(projectPath), `${id}.json`);
+export function chapterTrashPath(
+  projectPath: string,
+  id: string,
+  place: Place = 'trash',
+): string {
+  return path.join(placeDir(projectPath, place), `${id}.json`);
 }
 
 export function isChapterFile(name: string): boolean {
   return CHAPTER_FILE.test(name);
 }
 
-export function partTrashPath(projectPath: string, id: string): string {
-  return path.join(trashDir(projectPath), `${id}.part.json`);
+export function partTrashPath(
+  projectPath: string,
+  id: string,
+  place: Place = 'trash',
+): string {
+  return path.join(placeDir(projectPath, place), `${id}.part.json`);
 }
 
 export function isPartFile(name: string): boolean {

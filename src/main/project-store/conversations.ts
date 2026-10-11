@@ -1,5 +1,5 @@
 import path from 'node:path';
-import type { Trashed } from './trash';
+import { inPlace, orphanedIn, placeOf, type Trashed } from './trash';
 import { randomUUID } from 'node:crypto';
 import {
   partName,
@@ -33,6 +33,7 @@ import {
   type WithFieldLabel,
   type NewEntry,
   type NewEntryPlace,
+  type Orphaned,
   type OutlineChange,
   type PendingProposal,
   type Proposal,
@@ -80,7 +81,9 @@ import {
   ID,
   logOnce,
   outlineRef,
+  placeDir,
   trashDir,
+  type Place,
 } from './layout';
 import { ProjectError } from './project-error';
 import { safeWrite } from './safe-write';
@@ -98,11 +101,11 @@ export type ConversationsDeps = {
   markerHosts: () => Promise<string[]>;
   /** Files left alone, logged once while the Project is open. */
   unrecognised: Set<string>;
-  /** The Entries in the Story Bible, and what is in Trash; the store keeps them. */
+  /** The Entries in the Story Bible, and what is in Trash or the Drawer; the store keeps them. */
   entries: ReadonlyMap<string, EntrySummary>;
   trash: Map<string, Trashed>;
-  /** Whether an Outline's Chapter or Scene is in Trash or gone; the Project Outline never is. */
-  outlineOrphaned: (id: string) => 'trashed' | 'gone' | null;
+  /** Whether an Outline's Chapter or Scene is in Trash, the Drawer or gone; the Project Outline never is. */
+  outlineOrphaned: (id: string) => Orphaned | null;
   manuscript: () => Manuscript;
   /** Reads a unit, a value accepted but not yet on disk included. */
   read: <R extends UnitRef>(ref: R) => Promise<ValueOf<R>>;
@@ -133,12 +136,12 @@ export class Conversations {
 
   constructor(private readonly deps: ConversationsDeps) {}
 
-  /** Moves a Conversation to Trash with its pending Proposals, as one of the log's turns. */
-  moveToTrash(id: string): Promise<void> {
-    return this.inLog(id, () => this.moveConversationToTrash(id));
+  /** Moves a Conversation to Trash or the Drawer with its pending Proposals, as one of the log's turns. */
+  moveToTrash(id: string, place: Place = 'trash'): Promise<void> {
+    return this.inLog(id, () => this.moveConversationToTrash(id, place));
   }
 
-  /** Puts a trashed Conversation back, as one of the log's turns. */
+  /** Puts a Conversation back from Trash or the Drawer, as one of the log's turns. */
   restore(id: string): Promise<void> {
     return this.inLog(id, () => this.restoreConversation(id));
   }
@@ -243,10 +246,13 @@ export class Conversations {
   }
 
   /**
-   * Writes the log to Trash, with `trashed` appended, then removes it from
-   * `conversations/`: a crash between leaves it where it was.
+   * Writes the log to Trash or the Drawer, with `trashed` appended, then
+   * removes it from `conversations/`: a crash between leaves it where it was.
    */
-  private async moveConversationToTrash(id: string): Promise<void> {
+  private async moveConversationToTrash(
+    id: string,
+    place: Place,
+  ): Promise<void> {
     const text = await this.readLog(id);
     const at = this.deps.clock.now();
     const trashed = `${text}${eventLine(text, { type: 'trashed', at })}`;
@@ -257,33 +263,31 @@ export class Conversations {
         `Conversation ${id} can't be read: its first line is damaged`,
       );
     }
-    await this.deps.fs.mkdir(trashDir(this.deps.path));
+    await this.deps.fs.mkdir(placeDir(this.deps.path, place));
     await safeWrite(
       this.deps.fs,
       this.deps.clock,
-      conversationTrashPath(this.deps.path, id),
+      conversationTrashPath(this.deps.path, id, place),
       trashed,
     );
     await this.deps.fs.unlink(conversationPath(this.deps.path, id));
     const { title, mode } = log;
-    this.deps.trash.set(id, {
-      kind: 'conversation',
+    this.deps.trash.set(
       id,
-      title,
-      mode,
-      trashedAt: at,
-    });
+      inPlace({ kind: 'conversation', id, title, mode, trashedAt: at }, place),
+    );
     this.deps.emit({ type: 'conversationsChanged' });
     this.deps.emit({ type: 'proposalsChanged' });
   }
 
   /** Puts a Conversation's log back, with `restored` appended, then its Trash copy goes. */
   private async restoreConversation(id: string): Promise<void> {
-    const file = conversationTrashPath(this.deps.path, id);
-    const live = conversationPath(this.deps.path, id);
-    if (this.deps.trash.get(id)?.kind !== 'conversation') {
-      throw new Error(`Conversation ${id} is not in Trash`);
+    const item = this.deps.trash.get(id);
+    if (item?.kind !== 'conversation') {
+      throw new Error(`Conversation ${id} is not in Trash or the Drawer`);
     }
+    const file = conversationTrashPath(this.deps.path, id, placeOf(item));
+    const live = conversationPath(this.deps.path, id);
     if (await this.deps.fs.exists(live)) {
       throw new Error(`Conversation ${id} is already in conversations/`);
     }
@@ -690,7 +694,7 @@ ${text}`);
 
   /**
    * Where an Entry of a new Entry's id is now, as it is there with its
-   * private notes: in the Story Bible, in Trash, or nowhere.
+   * private notes: in the Story Bible, in Trash, in the Drawer, or nowhere.
    */
   private async newEntryPlace(entryId: string): Promise<NewEntryPlace> {
     if (this.deps.entries.has(entryId)) {
@@ -701,19 +705,22 @@ ${text}`);
           .body,
       };
     }
-    if (this.deps.trash.get(entryId)?.kind !== 'entry')
-      return { where: 'gone' };
+    const item = this.deps.trash.get(entryId);
+    if (item?.kind !== 'entry') return { where: 'gone' };
+    const place = placeOf(item);
     const { frontmatter, body } = parseUnitFile(
-      await this.deps.fs.readFile(entryTrashPath(this.deps.path, entryId)),
+      await this.deps.fs.readFile(
+        entryTrashPath(this.deps.path, entryId, place),
+      ),
     );
     const { trashedEntry: _, ...own } = frontmatter;
-    // Its private notes stay in place while it is in Trash.
+    // Its private notes stay in place while it is in Trash or the Drawer.
     const notes = unitPath(this.deps.path, { kind: 'private', id: entryId });
     const privateNotes = (await this.deps.fs.exists(notes))
       ? parseUnitFile(await this.deps.fs.readFile(notes)).body
       : '';
     return {
-      where: 'trash',
+      where: place,
       entry: entryValue(entryId, { frontmatter: own, body }),
       privateNotes,
     };
@@ -721,8 +728,8 @@ ${text}`);
 
   /**
    * What a Proposal's target holds now: an Entry's field or an Outline's
-   * body; or why it holds nothing, being in Trash or gone, or an Entry
-   * without the field.
+   * body; or why it holds nothing, being in Trash, the Drawer or gone, or an
+   * Entry without the field.
    */
   private async target(
     proposal: EntryFieldChange | OutlineChange,
@@ -730,11 +737,7 @@ ${text}`);
     const orphaned =
       proposal.kind === 'outline'
         ? this.deps.outlineOrphaned(proposal.outlineId)
-        : this.deps.entries.has(proposal.entryId)
-          ? null
-          : this.deps.trash.has(proposal.entryId)
-            ? 'trashed'
-            : 'gone';
+        : this.entryOrphaned(proposal.entryId);
     if (orphaned) return { orphaned };
     return targetIn(
       proposal,
@@ -785,7 +788,14 @@ ${text}`);
     return scene ? `Scene “${scene.title}”` : 'An Outline';
   }
 
-  /** An Entry's name, in the Story Bible or in Trash. */
+  /** Whether an Entry is in Trash, the Drawer or gone; null while in the Story Bible. */
+  private entryOrphaned(entryId: string): Orphaned | null {
+    if (this.deps.entries.has(entryId)) return null;
+    const kept = this.deps.trash.get(entryId);
+    return orphanedIn(kept && placeOf(kept));
+  }
+
+  /** An Entry's name, in the Story Bible or in Trash or the Drawer. */
   private entryName(entryId: string): string | undefined {
     const trashed = this.deps.trash.get(entryId);
     return (

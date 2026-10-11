@@ -35,7 +35,10 @@ const trash: TrashItem[] = [
   },
   { kind: 'entry', id: 'e9', title: 'Mira', trashedAt: 3, type: 'character' },
 ];
-const names = { manuscript, entries, trash };
+const drawer: TrashItem[] = [
+  { kind: 'scene', id: 's7', title: 'Sequel', trashedAt: 4 },
+];
+const names = { manuscript, entries, trash, drawer };
 
 describe('a Todo’s link', () => {
   it('names the Scene, Chapter or Entry it links to', () => {
@@ -78,6 +81,14 @@ describe('a Todo’s link', () => {
     expect(linkView({ kind: 'scene', id: 's8' }, names)).toEqual({
       title: 'Night',
       trashId: 'c9',
+    });
+  });
+
+  it('to a unit in the Drawer, names the Drawer item that holds it', () => {
+    expect(linkView({ kind: 'scene', id: 's7' }, names)).toEqual({
+      title: 'Sequel',
+      trashId: 's7',
+      drawer: true,
     });
   });
 

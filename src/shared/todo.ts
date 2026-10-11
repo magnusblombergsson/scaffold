@@ -15,11 +15,12 @@ export function isTodoLink(value: unknown): value is TodoLink {
   return LINK_KINDS.includes(kind) && typeof id === 'string';
 }
 
-/** What a link is looked up in: the units in the Project, and those in Trash. */
+/** What a link is looked up in: the units in the Project, and those in Trash or the Drawer. */
 export type LinkNames = {
   manuscript: Manuscript;
   entries: EntrySummary[];
   trash: TrashItem[];
+  drawer: TrashItem[];
 };
 
 /** One Todo, as the window shows it. */
@@ -71,19 +72,19 @@ export type TodoChange = {
 
 /**
  * A link as the Todo shows it: the unit's title, and while the unit is in
- * Trash, the id of the Trash item that holds it (a Scene's Chapter's, if the
- * Scene went with it, or the Part's, if the Chapter did).
+ * Trash, or `drawer`, the id of the item that holds it (a Scene's Chapter's,
+ * if the Scene went with it, or the Part's, if the Chapter did).
  */
-export type LinkView = { title: string; trashId?: string };
+export type LinkView = { title: string; trashId?: string; drawer?: true };
 
 /**
  * How a Todo shows its link; null once the unit is neither in the Project
- * nor in Trash, as after Trash is emptied on another computer, when the Todo
- * shows as plain text.
+ * nor in Trash or the Drawer, as after Trash is emptied on another computer,
+ * when the Todo shows as plain text.
  */
 export function linkView(
   link: TodoLink,
-  { manuscript, entries, trash }: LinkNames,
+  { manuscript, entries, trash, drawer }: LinkNames,
 ): LinkView | null {
   const { kind, id } = link;
   if (kind === 'entry') {
@@ -102,7 +103,15 @@ export function linkView(
     ].find((s) => s.id === id);
     if (scene) return { title: scene.title };
   }
-  for (const item of trash) {
+  const kept = keptView(link, trash);
+  if (kept) return kept;
+  const drawered = keptView(link, drawer);
+  return drawered && { ...drawered, drawer: true };
+}
+
+/** A link to a unit in one of `items`, Trash's or the Drawer's, as `linkView`. */
+function keptView({ kind, id }: TodoLink, items: TrashItem[]): LinkView | null {
+  for (const item of items) {
     if (item.kind === kind && item.id === id) {
       return { title: item.title, trashId: item.id };
     }

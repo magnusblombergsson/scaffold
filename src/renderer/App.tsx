@@ -107,7 +107,7 @@ import { TagsDialog } from './TagsDialog';
 import { WordTargetDialog } from './WordTarget';
 import { TodoDockPane, useTodoDock } from './TodoDock';
 import { TodoList, type TodoDraft } from './TodoList';
-import { trashTitle, TrashView } from './TrashView';
+import { movedText, trashTitle, TrashView } from './TrashView';
 import { Toast } from './Toast';
 import { forgetUnitEditors } from './unit-editors';
 import { Welcome } from './Welcome';
@@ -330,6 +330,7 @@ function ProjectView({
     entries,
     entriesLoaded,
     trash,
+    drawer,
     todos,
     customFields,
     keyFields,
@@ -738,18 +739,18 @@ function ProjectView({
     if (undoable.current !== undefined) await undo(undoable.current);
   }
 
-  /** The Trash item a Todo's link went to; `count` goes to it again. */
+  /** The Trash or Drawer item a Todo's link went to; `count` goes to it again. */
   const [trashReveal, setTrashReveal] = useState<{
     id: string;
     count: number;
   }>();
   const trashReveals = useRef(0);
   useEffect(() => {
-    if (tab !== 'trash') setTrashReveal(undefined);
+    if (tab !== 'trash' && tab !== 'drawer') setTrashReveal(undefined);
   }, [tab]);
-  /** Shows a Trash item in Writing's Trash tab, as a Todo's link to it does. */
+  /** Shows a Trash or Drawer item in Writing's tab for it, as a Todo's link to it does. */
   function openTrashItem(id: string) {
-    setTab('trash');
+    setTab(drawer.some((item) => item.id === id) ? 'drawer' : 'trash');
     dockLeftPane();
     setTrashReveal({ id, count: ++trashReveals.current });
   }
@@ -799,6 +800,7 @@ function ProjectView({
       ? (['conflicts'] as const)
       : []),
     'trash',
+    'drawer',
   ];
   const [projectSettingsOpen, setProjectSettingsOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
@@ -1278,7 +1280,7 @@ function ProjectView({
                   todos={
                     <TodoList
                       todos={todos}
-                      names={{ manuscript, entries, trash }}
+                      names={{ manuscript, entries, trash, drawer }}
                       prelink={null}
                       onOpen={openInWriting}
                       onOpenTrash={(id) => {
@@ -1379,6 +1381,15 @@ function ProjectView({
                     >
                       Trash{trash.length > 0 && ` (${trash.length})`}
                     </button>
+                    <button
+                      role="tab"
+                      aria-selected={tab === 'drawer'}
+                      tabIndex={tab === 'drawer' ? 0 : -1}
+                      id="drawer-tab"
+                      onClick={() => setTab('drawer')}
+                    >
+                      Drawer{drawer.length > 0 && ` (${drawer.length})`}
+                    </button>
                   </div>
                   <button
                     className="collapse-pane"
@@ -1445,7 +1456,9 @@ function ProjectView({
                     />
                   ) : (
                     <TrashView
-                      items={trash}
+                      key={tab}
+                      place={tab === 'drawer' ? 'drawer' : 'trash'}
+                      items={tab === 'drawer' ? drawer : trash}
                       partLabel={manuscript.partLabel}
                       reveal={trashReveal}
                       onRestore={(item) =>
@@ -1456,7 +1469,18 @@ function ProjectView({
                             : `Restored “${item.title}”`,
                         )
                       }
-                      onEmpty={emptyTrash}
+                      onMove={(item) => {
+                        const to = tab === 'drawer' ? 'trash' : 'drawer';
+                        return change(
+                          () =>
+                            window.project.moveBetweenTrashAndDrawer(
+                              item.id,
+                              to,
+                            ),
+                          movedText(item, to),
+                        );
+                      }}
+                      {...(tab === 'trash' && { onEmpty: emptyTrash })}
                     />
                   )}
                 </div>
@@ -1464,7 +1488,7 @@ function ProjectView({
                   dock={todoDock}
                   onDock={changeTodoDock}
                   todos={todos}
-                  names={{ manuscript, entries, trash }}
+                  names={{ manuscript, entries, trash, drawer }}
                   prelink={prelink}
                   draft={todoDraft}
                   onOpen={select}
@@ -1876,7 +1900,7 @@ function ProjectView({
 type PanesBeforeZen = { docked: DockedPanes; overviewOpen: boolean };
 
 /** The left pane's tabs in Writing. */
-type Tab = 'manuscript' | 'bible' | 'conflicts' | 'trash';
+type Tab = 'manuscript' | 'bible' | 'conflicts' | 'trash' | 'drawer';
 
 /** The tab ← / →, Home or End switches to from `tab`, round the ends; null for other keys. */
 function tabAfter(key: string, tab: Tab, tabs: Tab[]): Tab | null {

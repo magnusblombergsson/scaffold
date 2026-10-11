@@ -143,6 +143,12 @@ export type Proposal = ProposalChange & { id: string };
 export type ProposedValue = FieldValue | NewEntry;
 
 /**
+ * Why a Proposal's target is out of reach: its Entry, Chapter or Scene is in
+ * Trash, in the Drawer or gone, or its Entry hasn't the field.
+ */
+export type Orphaned = 'trashed' | 'drawered' | 'gone' | 'field';
+
+/**
  * Where a Proposal stands. A pending one is `stale` when its target no
  * longer holds the base, and `orphaned` when its Entry, Chapter or Scene is
  * in Trash or gone, or the Entry is no longer of a type with the field; then
@@ -156,7 +162,7 @@ export type ProposedValue = FieldValue | NewEntry;
  */
 export type ProposalState =
   | { kind: 'pending'; current: FieldValue; stale: boolean }
-  | { kind: 'pending'; orphaned: 'trashed' | 'gone' | 'field' }
+  | { kind: 'pending'; orphaned: Orphaned }
   | {
       kind: 'accepted';
       edited: boolean;
@@ -194,13 +200,14 @@ export function fieldLabel(
     : (change.fieldLabel ?? 'Custom field');
 }
 
-/** Why a Proposal's target is out of reach: in Trash, gone, or its Entry without the field. */
+/** Why a Proposal's target is out of reach, in words for the Author. */
 export function orphanedText(
   proposal: Proposal & WithFieldLabel & { name: string },
-  orphaned: 'trashed' | 'gone' | 'field',
+  orphaned: Orphaned,
 ): string {
   const { name } = proposal;
   if (orphaned === 'trashed') return `${name} is in Trash.`;
+  if (orphaned === 'drawered') return `${name} is in the Drawer.`;
   if (orphaned === 'field' && proposal.kind === 'field') {
     return proposal.fieldLabel || customFieldId(proposal.field) === null
       ? `${name} has no ${fieldLabel(proposal)} now.`
@@ -670,18 +677,21 @@ export type DecidedProposal = Proposal &
 
 /**
  * What the field of an Entry or the Outline a Proposal changes holds now; or
- * why it holds nothing: in Trash, gone, or an Entry without the field.
+ * why it holds nothing: in Trash or the Drawer, gone, or an Entry without
+ * the field.
  */
-export type Target =
-  | { current: FieldValue }
-  | { orphaned: 'trashed' | 'gone' | 'field' };
+export type Target = { current: FieldValue } | { orphaned: Orphaned };
 
 /**
- * Where an Entry of a new Entry's id is now: in the Story Bible or in Trash,
- * as it is there with its private notes, or nowhere.
+ * Where an Entry of a new Entry's id is now: in the Story Bible, in Trash or
+ * in the Drawer, as it is there with its private notes, or nowhere.
  */
 export type NewEntryPlace =
-  | { where: 'bible' | 'trash'; entry: EntryValue; privateNotes: string }
+  | {
+      where: 'bible' | 'trash' | 'drawer';
+      entry: EntryValue;
+      privateNotes: string;
+    }
   | { where: 'gone' };
 
 /** A Proposal's target as the store read it: a Target, or where a new Entry is. */
@@ -760,7 +770,10 @@ export function accept(
       const { name } = place.where === 'gone' ? entry : place.entry;
       return {
         refused: 'orphaned',
-        text: `${name} is in Trash, changed since it was created.`,
+        text:
+          place.where === 'drawer'
+            ? `${name} is in the Drawer.`
+            : `${name} is in Trash, changed since it was created.`,
       };
     }
     // The Author's edit too: a name, and a description on one line.
@@ -904,6 +917,10 @@ function undecidedState(
     };
     if (place.where === 'gone') return pending;
     if (undid === undefined) return applied;
+    // The Author put it away: it stays theirs until they restore it.
+    if (place.where === 'drawer') {
+      return { kind: 'pending', orphaned: 'drawered' };
+    }
     return asCreated(place, undid as NewEntry)
       ? pending
       : { kind: 'pending', orphaned: 'trashed' };
@@ -935,6 +952,7 @@ function newEntryUndoBlocked(
   }
   const { name } = place.entry;
   if (place.where === 'trash') return `${name} is in Trash.`;
+  if (place.where === 'drawer') return `${name} is in the Drawer.`;
   return asCreated(place, wrote)
     ? null
     : `${name} has changed since it was created.`;

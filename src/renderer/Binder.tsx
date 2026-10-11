@@ -239,6 +239,26 @@ export function Binder({
     );
   }
 
+  /** Move to Trash, and beside it Move to Drawer, which takes the same with it. */
+  function outOfStoryItems(
+    node: { id: string; title: string },
+    kind: 'scene' | 'chapter' | 'part',
+    disabled: boolean,
+  ): MenuItem[] {
+    return [
+      { label: 'Move to Trash', disabled, run: () => trash(node, kind) },
+      {
+        label: 'Move to Drawer',
+        disabled,
+        run: () =>
+          onChange(
+            () => project.moveToDrawer(kind, node.id),
+            `“${node.title}” moved to the Drawer`,
+          ),
+      },
+    ];
+  }
+
   /** Drops a Scene before or after `target`, or at the end of a Chapter. */
   function dropScene(
     sceneId: string,
@@ -319,12 +339,8 @@ export function Binder({
       label: `Move to ${c.title}`,
       run: () => moveScene(scene.id, c.id, c.scenes.length),
     }));
-    const toTrash = {
-      label: 'Move to Trash',
-      // A Missing Scene has no Prose here to keep.
-      disabled: scene.missing,
-      run: () => trash(scene, 'scene'),
-    };
+    // A Missing Scene has no Prose here to keep.
+    const toTrash = outOfStoryItems(scene, 'scene', scene.missing === true);
     if (!chapter) {
       return [
         statusItem(scene),
@@ -333,7 +349,7 @@ export function Binder({
         ...unitImageItems(scene, readOnly),
         addTodoItem(readOnly, () => onAddTodo({ kind: 'scene', id: scene.id })),
         ...moves,
-        toTrash,
+        ...toTrash,
       ];
     }
     const index = chapter.scenes.indexOf(scene);
@@ -370,7 +386,7 @@ export function Binder({
       wordTargetItem(scene),
       ...unitImageItems(scene, readOnly),
       addTodoItem(readOnly, () => onAddTodo({ kind: 'scene', id: scene.id })),
-      toTrash,
+      ...toTrash,
     ];
   }
 
@@ -463,14 +479,13 @@ export function Binder({
       addTodoItem(readOnly, () =>
         onAddTodo({ kind: 'chapter', id: chapter.id }),
       ),
-      {
-        label: 'Move to Trash',
-        // The Manuscript keeps at least one Chapter, and a Missing Scene has
-        // no Prose here to keep.
-        disabled:
-          chapters.length === 1 || chapter.scenes.some((s) => s.missing),
-        run: () => trash(chapter, 'chapter'),
-      },
+      // The Manuscript keeps at least one Chapter, and a Missing Scene has
+      // no Prose here to keep.
+      ...outOfStoryItems(
+        chapter,
+        'chapter',
+        chapters.length === 1 || chapter.scenes.some((s) => s.missing),
+      ),
     ];
   }
 
@@ -505,15 +520,14 @@ export function Binder({
       wordTargetItem(part),
       ...unitImageItems(part, readOnly),
       addTodoItem(readOnly, () => onAddTodo({ kind: 'part', id: part.id })),
-      {
-        label: 'Move to Trash',
-        // Its Chapters and their Scenes go with it: the Manuscript keeps at
-        // least one Chapter, and a Missing Scene has no Prose here to keep.
-        disabled:
-          inPart.length === chapters.length ||
+      // Its Chapters and their Scenes go with it: the Manuscript keeps at
+      // least one Chapter, and a Missing Scene has no Prose here to keep.
+      ...outOfStoryItems(
+        part,
+        'part',
+        inPart.length === chapters.length ||
           inPart.some((c) => c.scenes.some((s) => s.missing)),
-        run: () => trash(part, 'part'),
-      },
+      ),
     ];
   }
 

@@ -405,6 +405,16 @@ export function useConversation({
     );
   }
 
+  /** Moves a whole Conversation to the Drawer, its pending Proposals with it, with Undo offered. */
+  async function toDrawer(id: string) {
+    const title = list.find((c) => c.id === id)?.title ?? 'Conversation';
+    setError(null);
+    await onChange(
+      () => window.project.moveToDrawer('conversation', id),
+      `“${title}” moved to the Drawer`,
+    );
+  }
+
   /** Runs `ask` while the Assistant answers, its reply streaming in meanwhile. */
   async function asking(ask: () => Promise<void>) {
     // What the Author typed last reaches main before the request is built.
@@ -476,6 +486,7 @@ export function useConversation({
     rename,
     star,
     trash,
+    toDrawer,
   };
 }
 
@@ -483,12 +494,13 @@ export type ConversationState = ReturnType<typeof useConversation>;
 
 /**
  * What can be done to a listed Conversation: rename it in place, which
- * `startRename` begins, star or unstar it, or move it to Trash. Never while
+ * `startRename` begins, star or unstar it, or move it to Trash or the
+ * Drawer. Never while
  * the Project is read-only, nor, but for the star, which isn't in its log,
  * while the Assistant answers.
  */
 export function conversationActions(
-  { list, streaming, star, trash }: ConversationState,
+  { list, streaming, star, trash, toDrawer }: ConversationState,
   id: string,
   startRename: () => void,
   readOnly: boolean,
@@ -503,6 +515,7 @@ export function conversationActions(
       disabled: readOnly,
     },
     { label: 'Move to Trash…', run: () => trash(id), disabled },
+    { label: 'Move to Drawer', run: () => toDrawer(id), disabled },
   ];
 }
 

@@ -164,6 +164,14 @@ export function StoryBible({
                   `“${entryTitle(entry)}” moved to Trash`,
                 ),
             },
+            {
+              label: 'Move to Drawer',
+              run: () =>
+                onChange(
+                  () => window.project.moveToDrawer('entry', entry.id),
+                  `“${entryTitle(entry)}” moved to the Drawer`,
+                ),
+            },
           ]}
         />
       </li>

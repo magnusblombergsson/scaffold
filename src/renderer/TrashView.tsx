@@ -3,22 +3,34 @@ import {
   ENTRY_TYPE_LABELS,
   partName,
   type PartLabel,
+  type Place,
   type TrashItem,
 } from '../shared/project-types';
 import { MODE_LABELS } from '../shared/conversation';
 import { versionLabel } from './conflict-labels';
 
+/** What the Trash and Drawer tabs call their place. */
+const PLACE_NAMES: Record<Place, string> = {
+  trash: 'Trash',
+  drawer: 'the Drawer',
+};
+
 /**
  * The Trash tab: deleted Scenes, Chapters, Parts, Entries and
- * Conversations, and set-aside versions, latest first.
+ * Conversations, and set-aside versions, latest first; or, as `drawer`, the
+ * Drawer tab, laid out the same, which is never emptied. Each item that can
+ * be in both moves straight to the other.
  */
 export function TrashView({
+  place = 'trash',
   items,
   partLabel,
   reveal,
   onRestore,
+  onMove,
   onEmpty,
 }: {
+  place?: Place;
   items: TrashItem[];
   /** What the Project calls its Parts. */
   partLabel?: PartLabel;
@@ -28,8 +40,13 @@ export function TrashView({
    */
   reveal?: { id: string; count: number };
   onRestore(item: TrashItem): void;
-  onEmpty(): void;
+  /** Moves an item to the other place: from Trash to the Drawer, or back. */
+  onMove(item: TrashItem): void;
+  /** Trash only: the Drawer is never emptied. */
+  onEmpty?(): void;
 }) {
+  const other = place === 'trash' ? 'drawer' : 'trash';
+  const name = place === 'trash' ? 'Trash' : 'Drawer';
   const list = useRef<HTMLOListElement>(null);
   useEffect(() => {
     if (!reveal) return;
@@ -41,10 +58,14 @@ export function TrashView({
   }, [reveal]);
 
   if (items.length === 0) {
-    return <p className="trash-empty">Trash is empty</p>;
+    return (
+      <p className="trash-empty">
+        {place === 'trash' ? 'Trash is empty' : 'The Drawer is empty'}
+      </p>
+    );
   }
   return (
-    <section className="trash" aria-label="Trash">
+    <section className="trash" aria-label={name}>
       <ol ref={list}>
         {items.map((item) => (
           <li
@@ -63,14 +84,34 @@ export function TrashView({
             >
               Restore
             </button>
+            {movable(item) && (
+              <button
+                aria-label={`Move ${trashTitle(item)} to ${PLACE_NAMES[other]}`}
+                onClick={() => onMove(item)}
+              >
+                {other === 'drawer' ? 'Move to Drawer' : 'Move to Trash'}
+              </button>
+            )}
           </li>
         ))}
       </ol>
-      <button className="trash-empty-button" onClick={onEmpty}>
-        Empty Trash…
-      </button>
+      {onEmpty && (
+        <button className="trash-empty-button" onClick={onEmpty}>
+          Empty Trash…
+        </button>
+      )}
     </section>
   );
+}
+
+/** Whether an item can be in both Trash and the Drawer: not a set-aside version or a Custom field. */
+function movable(item: TrashItem): boolean {
+  return item.kind !== 'version' && item.kind !== 'custom-field';
+}
+
+/** What the toast says once an item has moved to `place`. */
+export function movedText(item: TrashItem, place: Place): string {
+  return `“${item.title}” moved to ${PLACE_NAMES[place]}`;
 }
 
 /** How a Trash item is named, as in its row and the toast that restores it. */

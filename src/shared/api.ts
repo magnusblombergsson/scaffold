@@ -5,6 +5,8 @@ import type {
   Manuscript,
   PartLabel,
   ProseLanguage,
+  MovableKind,
+  Place,
   TrashItem,
   UnitRef,
   UnitValue,
@@ -340,6 +342,13 @@ export interface ProjectApi {
   /** Moves an Entry to Trash; its private notes stay until Trash is emptied. */
   trashEntry(entryId: string): Promise<Changed>;
   /**
+   * Moves a Scene, Chapter, Part, Entry or Conversation to the Drawer, with
+   * what would go with it to Trash; never the last Chapter.
+   */
+  moveToDrawer(kind: MovableKind, id: string): Promise<Changed>;
+  /** Moves an item from Trash to the Drawer, or from the Drawer to Trash. */
+  moveBetweenTrashAndDrawer(id: string, to: Place): Promise<Changed>;
+  /**
    * Adds the Entries of a Story Bible Import beside those already there,
    * changing none, as one step: `undo` moves them all to Trash.
    */
@@ -361,13 +370,15 @@ export interface ProjectApi {
   removeImage(ref: ImageRef): Promise<void>;
   /** A Scene's, Chapter's or Entry's image as a `data:` URL; null without one, or before it syncs. */
   image(ref: ImageRef): Promise<string | null>;
-  /** Puts a Trash item back where it was, as near as the Manuscript allows. */
+  /** Puts a Trash or Drawer item back where it was, as near as the Manuscript allows. */
   restore(id: string): Promise<Changed>;
   /** Reverts `step` if it is still the latest structure operation. */
   undo(step: number): Promise<Manuscript>;
 
   /** Latest first. */
   listTrash(): Promise<TrashItem[]>;
+  /** What is in the Drawer, latest first. */
+  listDrawer(): Promise<TrashItem[]>;
 
   /** Each unit in Conflict, with its versions, the original first. */
   listConflicts(): Promise<Conflict[]>;
@@ -996,6 +1007,8 @@ export const projectMethods = {
   listEntries: 'invoke',
   createEntry: 'invoke',
   trashEntry: 'invoke',
+  moveToDrawer: 'invoke',
+  moveBetweenTrashAndDrawer: 'invoke',
   importEntries: 'invoke',
   setEntryVisibility: 'invoke',
   setEntryType: 'invoke',
@@ -1005,6 +1018,7 @@ export const projectMethods = {
   restore: 'invoke',
   undo: 'invoke',
   listTrash: 'invoke',
+  listDrawer: 'invoke',
   listConflicts: 'invoke',
   readConflictVersion: 'invoke',
   resolveConflict: 'invoke',
