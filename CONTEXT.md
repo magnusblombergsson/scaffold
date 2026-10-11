@@ -72,7 +72,7 @@ The story text itself — narration and dialogue — as written by the Author. T
 _Avoid_: Text, draft (when meaning the words themselves)
 
 **Story Bible**:
-The Author-visible, Author-editable body of knowledge about a story: characters, places, world rules, themes, plot structure. The Assistant draws on it; it is not the Assistant's conversation history.
+The Author-visible, Author-editable body of knowledge about a story: characters, places, world rules, themes, plot structure. The Assistant draws on it; it is not the Assistant's conversation history. The Room where the Author browses and edits its Entries shares its name.
 _Avoid_: Memory, knowledge base, lore, wiki
 
 **Entry**:
@@ -202,6 +202,10 @@ Said of a Model that hasn't been checked against the rule that the Assistant nev
 _Avoid_: Unsupported, unsafe
 
 ### Modes
+
+**Room**:
+One of the four places the Author switches between at the top of the window: Writing, Story Bible, Brainstorm and Interview. Each fills the window; all but the Story Bible are also Modes.
+_Avoid_: Place, view, tab, workspace
 
 **Mode**:
 One of the tool's working states, each giving the Assistant a different role: Brainstorm, Interview, or Writing.
