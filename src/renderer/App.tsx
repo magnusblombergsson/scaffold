@@ -28,7 +28,7 @@ import { MODE_LABELS, type Mode } from '../shared/conversation';
 import { ProjectMirror } from './project-mirror';
 import { useProject } from './use-project';
 import type { Cut } from '../shared/prose-split';
-import { entryTitle } from '../shared/entry';
+import { entryCount, entryTitle } from '../shared/entry';
 import type { ProposalTarget, ProposalView } from '../shared/proposal';
 import type { ImportConvention } from '../shared/manuscript-import';
 import { upgradedMessage } from '../shared/format-gate';
@@ -57,7 +57,9 @@ import {
 import { EntryTypePicker } from './EntryTypePicker';
 import { EntryView } from './EntryView';
 import { ExportManuscriptDialog } from './ExportManuscriptDialog';
+import type { NewEntry, StoryBibleFile } from '../shared/story-bible-import';
 import { ExportStoryBibleDialog } from './ExportStoryBibleDialog';
+import { ImportStoryBibleDialog } from './ImportStoryBibleDialog';
 import { ImportDialog } from './ImportDialog';
 import { chapterInsertion, sceneInsertion, type Current } from './insertion';
 import { InterviewRoom } from './InterviewRoom';
@@ -773,6 +775,9 @@ function ProjectView({
   const [projectSettingsOpen, setProjectSettingsOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [storyBibleExportOpen, setStoryBibleExportOpen] = useState(false);
+  /** The Story Bible being imported, while the Author ticks its Entries. */
+  const [storyBibleImport, setStoryBibleImport] =
+    useState<StoryBibleFile | null>(null);
   /** The Part, Chapter or Scene whose Tags… is open, by id. */
   const [tagging, setTagging] = useState<string | null>(null);
   /** It, as the Manuscript has it now; gone if it is no longer there. */
@@ -938,6 +943,28 @@ function ProjectView({
     return null;
   }
 
+  async function chooseStoryBibleImport() {
+    const choice = await window.shell.chooseStoryBibleImport();
+    if (!choice) return;
+    if (!choice.ok) {
+      onError(choice.message);
+      return;
+    }
+    onError(null);
+    const { ok: _, ...file } = choice;
+    setStoryBibleImport(file);
+  }
+
+  /** Adds the Entries the Author ticked, as one step they can undo. */
+  async function importEntries(added: NewEntry[], leftOut: number) {
+    setTab('bible');
+    await change(
+      () => window.project.importEntries(added),
+      `Imported ${entryCount(added.length)}` +
+        (leftOut > 0 ? `, ${leftOut} left out` : ''),
+    );
+  }
+
   async function createEntry(type: EntryType) {
     const label = ENTRY_TYPE_LABELS[type];
     const id = await create(
@@ -970,6 +997,10 @@ function ProjectView({
     }
     if (command.type === 'exportStoryBible') {
       setStoryBibleExportOpen(true);
+      return true;
+    }
+    if (command.type === 'importStoryBible') {
+      void chooseStoryBibleImport();
       return true;
     }
     if (command.type === 'zen') {
@@ -1734,6 +1765,15 @@ function ProjectView({
           <ExportManuscriptDialog
             manuscript={manuscript}
             onClose={() => setExportOpen(false)}
+          />
+        )}
+        {storyBibleImport && (
+          <ImportStoryBibleDialog
+            file={storyBibleImport}
+            entries={entries}
+            customFields={customFields}
+            onImport={(added, leftOut) => void importEntries(added, leftOut)}
+            onClose={() => setStoryBibleImport(null)}
           />
         )}
         {storyBibleExportOpen && (

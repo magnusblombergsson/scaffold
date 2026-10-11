@@ -4,6 +4,7 @@ import {
   dialog,
   ipcMain,
   Menu,
+  nativeImage,
   nativeTheme,
   screen,
   shell,
@@ -61,6 +62,12 @@ import {
   newManuscript,
   readImportFile,
 } from './import/manuscript-import';
+import {
+  keepJpegOrPng,
+  readStoryBibleFile,
+  type ImageConverter,
+} from './import/story-bible-import';
+import { entryImageOf, IMAGE_SIZE, imageSize } from './entry-image';
 import { connectProvider } from './assistant/connect-provider';
 import type { Provider } from './assistant/provider';
 import { safeStorageEncryption } from './key-store/safe-storage';
@@ -436,22 +443,14 @@ const shellHandlers: Handlers<ShellApi, typeof shellMethods, WindowContext> = {
     return chosen ? openPath(ctx, chosen) : null;
   },
   chooseImport: async (ctx): Promise<ImportChoice> => {
-    const { canceled, filePaths } = await dialog.showOpenDialog(windowOf(ctx), {
-      title: 'Import',
-      buttonLabel: 'Import',
-      filters: [
-        {
-          name: 'Word or Markdown',
-          extensions: [
-            ...IMPORT_FORMATS.docx.extensions,
-            ...IMPORT_FORMATS.markdown.extensions,
-          ],
-        },
-      ],
-      properties: ['openFile'],
-    });
-    if (canceled || filePaths.length === 0) return null;
-    return readImportFile(filePaths[0]);
+    const filePath = await chooseImportFile(ctx, 'Import Manuscript');
+    return filePath ? readImportFile(filePath) : null;
+  },
+  chooseStoryBibleImport: async (ctx) => {
+    // Only ever into the window's Project.
+    projectWindows.of(ctx.sender);
+    const filePath = await chooseImportFile(ctx, 'Import Story Bible');
+    return filePath ? readStoryBibleFile(filePath, storedImage) : null;
   },
   // An Import always makes a new Project.
   importProject: async (ctx, file, convention) => {
@@ -748,6 +747,42 @@ function manuscriptExport(
     write: (format) => exportManuscript(store, format, unticked),
   };
 }
+
+/** Asks for a Word or Markdown file to import; null when the Author cancels. */
+async function chooseImportFile(
+  ctx: WindowContext,
+  title: string,
+): Promise<string | null> {
+  const { canceled, filePaths } = await dialog.showOpenDialog(windowOf(ctx), {
+    title,
+    buttonLabel: 'Import',
+    filters: [
+      {
+        name: 'Word or Markdown',
+        extensions: [
+          ...IMPORT_FORMATS.docx.extensions,
+          ...IMPORT_FORMATS.markdown.extensions,
+        ],
+      },
+    ],
+    properties: ['openFile'],
+  });
+  return canceled || filePaths.length === 0 ? null : filePaths[0];
+}
+
+/**
+ * An image in a Story Bible being imported as an Entry stores it: a JPEG or
+ * PNG small enough as it is, any other scaled down as one the Author
+ * chooses is.
+ */
+const storedImage: ImageConverter = (data, contentType) => {
+  const kept = keepJpegOrPng(data, contentType);
+  const size = kept && imageSize(kept);
+  if (kept && size && Math.max(size.width, size.height) <= IMAGE_SIZE) {
+    return kept;
+  }
+  return entryImageOf(nativeImage.createFromBuffer(Buffer.from(data)));
+};
 
 /** The chosen Entries of the Story Bible, as an Export. */
 function storyBibleExport(

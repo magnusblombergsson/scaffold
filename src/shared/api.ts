@@ -17,6 +17,7 @@ import type { CorkboardView } from './corkboard-view';
 import type { Filter, FilterPlace, Filters } from './filter';
 import type { ReviewCommand } from './finding';
 import type { Status } from './status';
+import type { NewEntry, StoryBibleImportChoice } from './story-bible-import';
 import type { TagChange, TagUse } from './tags';
 import type { Todo, TodoChange, TodoLink } from './todo';
 import type { TodoDock } from './todo-dock';
@@ -338,6 +339,11 @@ export interface ProjectApi {
   createEntry(type: EntryType, name: string): Promise<Created>;
   /** Moves an Entry to Trash; its private notes stay until Trash is emptied. */
   trashEntry(entryId: string): Promise<Changed>;
+  /**
+   * Adds the Entries of a Story Bible Import beside those already there,
+   * changing none, as one step: `undo` moves them all to Trash.
+   */
+  importEntries(entries: NewEntry[]): Promise<Changed & { ids: string[] }>;
   /** Sets when the Assistant sees an Entry, as a step that `undo` reverts. */
   setEntryVisibility(entryId: string, visibility: Visibility): Promise<Changed>;
   /**
@@ -710,6 +716,11 @@ export interface ShellApi {
   /** Asks for a Word or Markdown file and reads it, for the Author to preview its split. */
   chooseImport(): Promise<ImportChoice>;
   /**
+   * Asks for a Story Bible as Word or Markdown and reads its Entries, for the
+   * Author to tick those to add to this window's Project.
+   */
+  chooseStoryBibleImport(): Promise<StoryBibleImportChoice>;
+  /**
    * Asks for a new folder and creates a Project in it holding `file` split
    * by `convention`; 'canceled' when the Author chose no folder.
    */
@@ -971,6 +982,7 @@ export const projectMethods = {
   listEntries: 'invoke',
   createEntry: 'invoke',
   trashEntry: 'invoke',
+  importEntries: 'invoke',
   setEntryVisibility: 'invoke',
   setEntryType: 'invoke',
   chooseImage: 'invoke',
@@ -1050,6 +1062,7 @@ export const shellMethods = {
   createProject: 'invoke',
   openProject: 'invoke',
   chooseImport: 'invoke',
+  chooseStoryBibleImport: 'invoke',
   importProject: 'invoke',
   onCommand: 'event',
   showDocked: 'send',

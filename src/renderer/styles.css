@@ -3260,6 +3260,17 @@ legend .show-in-peek {
   font-weight: 700;
 }
 
+.import-preview .import-entry {
+  margin-bottom: 0.35rem;
+}
+
+.import-warnings {
+  margin: 0.15rem 0 0.5rem;
+  padding-left: 1.5rem;
+  color: var(--warning);
+  font-size: 0.85rem;
+}
+
 .import-opening {
   display: block;
   overflow: hidden;

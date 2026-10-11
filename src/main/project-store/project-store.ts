@@ -25,6 +25,7 @@ import {
   type ManuscriptScene,
   type NotesRef,
   type OutlineRef,
+  type PrivateRef,
   type ProjectTree,
   type ProseLanguage,
   type SceneNode,
@@ -35,6 +36,7 @@ import {
   type ValueOf,
   type Visibility,
 } from '../../shared/project-types';
+import type { NewEntry } from '../../shared/story-bible-import';
 import type {
   Changed,
   Conflict,
@@ -2440,6 +2442,61 @@ export class ProjectStore {
     return { id, ...changed };
   }
 
+  /**
+   * Adds Entries, as a Story Bible Import does, beside those already there,
+   * changing none of them: each seen when mentioned, with its Tags spelt as
+   * those in use, its private notes and image. Undo moves every one to
+   * Trash, its image and private notes with it.
+   */
+  async importEntries(
+    entries: readonly NewEntry[],
+  ): Promise<Changed & { ids: string[] }> {
+    const ids = entries.map(() => randomUUID());
+    const changed = await this.step(async () => {
+      const trashAdded = async () => {
+        for (const id of ids) {
+          if (this.entries.has(id)) await this.trash.move('entry', id);
+        }
+      };
+      try {
+        await this.addEntries(ids, entries);
+      } catch (error) {
+        // All or none: what it added before failing goes to Trash.
+        await trashAdded();
+        throw error;
+      }
+      return trashAdded;
+    });
+    return { ...changed, ids };
+  }
+
+  /** Adds each of `entries` as `importEntries` does, by `ids`. */
+  private async addEntries(
+    ids: readonly string[],
+    entries: readonly NewEntry[],
+  ): Promise<void> {
+    for (const [i, entry] of entries.entries()) {
+      const id = ids[i];
+      await this.addEntry({
+        ...newEntryValue(id, entry.type, entry.name, entry.description),
+        aliases: [...entry.aliases],
+        fields: structuredClone(entry.fields),
+        ...(entry.custom && { custom: { ...entry.custom } }),
+      });
+      if (entry.tags.length > 0) {
+        await this.setDetail({ kind: 'entry', id }, 'tags', entry.tags);
+      }
+      if (entry.image) {
+        await this.writeImage({ kind: 'entry', id }, entry.image);
+      }
+      if (entry.privateNotes) {
+        const ref: PrivateRef = { kind: 'private', id };
+        await this.write(ref, { id, body: entry.privateNotes });
+        await this.unitWriter.settled(unitKey(ref));
+      }
+    }
+  }
+
   /** Writes a new Entry's file, then lists it in the Story Bible. */
   private async addEntry(value: EntryValue): Promise<void> {
     await this.deps.fs.mkdir(path.join(this.path, UNIT_DIRS.entry));
@@ -2527,20 +2584,23 @@ export class ProjectStore {
    * image it replaced.
    */
   setImage(ref: ImageRef, image: EntryImage): Promise<void> {
-    return this.enqueueWrite(async () => {
-      const name = `${ref.id}.${image.extension}`;
-      // Refused before any file is written.
-      validateDetail(ref.kind, ref.id, 'image', name, this.vocabulary(ref.id));
-      this.refuseUnavailable(this.detailUnit(ref));
-      await this.deps.fs.mkdir(path.join(this.path, IMAGES));
-      await safeWrite(
-        this.deps.fs,
-        this.deps.clock,
-        imagePath(this.path, name),
-        image.data,
-      );
-      await this.changeImage(ref, name);
-    });
+    return this.enqueueWrite(() => this.writeImage(ref, image));
+  }
+
+  /** `setImage`, within a write already enqueued. */
+  private async writeImage(ref: ImageRef, image: EntryImage): Promise<void> {
+    const name = `${ref.id}.${image.extension}`;
+    // Refused before any file is written.
+    validateDetail(ref.kind, ref.id, 'image', name, this.vocabulary(ref.id));
+    this.refuseUnavailable(this.detailUnit(ref));
+    await this.deps.fs.mkdir(path.join(this.path, IMAGES));
+    await safeWrite(
+      this.deps.fs,
+      this.deps.clock,
+      imagePath(this.path, name),
+      image.data,
+    );
+    await this.changeImage(ref, name);
   }
 
   /** Removes the image of a Scene, Chapter or Entry, deleting its file. Not a step either. */

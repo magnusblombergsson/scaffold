@@ -69,6 +69,7 @@ const projectHandlers: Handlers<
   listEntries: async ({ store }) => store.listEntries(),
   createEntry: ({ store }, type, name) => store.createEntry(type, name),
   trashEntry: ({ store }, entryId) => store.trashEntry(entryId),
+  importEntries: ({ store }, entries) => store.importEntries(entries),
   setEntryVisibility: ({ store }, entryId, visibility) =>
     store.setEntryVisibility(entryId, visibility),
   setEntryType: ({ store }, entryId, type) => store.setEntryType(entryId, type),

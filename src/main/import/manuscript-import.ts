@@ -447,7 +447,8 @@ function remove(marks: Mark[], mark: Mark): void {
   if (index !== -1) marks.splice(index, 1);
 }
 
-function decodeEntities(text: string): string {
+/** HTML text with its character references decoded. */
+export function decodeEntities(text: string): string {
   return text.replace(
     /&(#x[0-9a-f]+|#\d+|[a-z]+);/gi,
     (entity, name: string) => {
