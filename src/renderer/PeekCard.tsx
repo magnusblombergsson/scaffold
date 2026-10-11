@@ -1,9 +1,12 @@
 import { useRef, useState } from 'react';
 import { entryTitle, roleText } from '../shared/entry';
-import { ENTRY_TYPE_LABELS, type EntryValue } from '../shared/project-types';
+import {
+  ENTRY_TYPE_LABELS,
+  VISIBILITY_LABELS,
+  type EntryValue,
+} from '../shared/project-types';
 import { useUnitImage } from './UnitImage';
 import { ViewableImage } from './ImageView';
-import { VISIBILITY_LABELS } from './EntryView';
 import { entryFields, keyFields } from './card-fields';
 import { useCustomFields } from './StatusAndTags';
 

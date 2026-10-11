@@ -15,6 +15,7 @@ import {
   partName,
   PROJECT_OUTLINE,
   unitKey,
+  VISIBILITY_LABELS,
   type EntryType,
   type Manuscript,
   type ManuscriptChapter,
@@ -49,7 +50,7 @@ import { WINDOW_MODES, type ShowProposal } from './Conversation';
 import { ConflictList, ConflictResolver } from './Conflicts';
 import { ChapterCorkboard, PartCorkboard, ProjectCorkboard } from './Corkboard';
 import { EntryTypePicker } from './EntryTypePicker';
-import { EntryView, VISIBILITY_LABELS } from './EntryView';
+import { EntryView } from './EntryView';
 import { ExportManuscriptDialog } from './ExportManuscriptDialog';
 import { ExportStoryBibleDialog } from './ExportStoryBibleDialog';
 import { ImportDialog } from './ImportDialog';
@@ -1457,6 +1458,7 @@ function ProjectView({
                   conflict={resolvingConflict}
                   manuscript={manuscript}
                   entries={entries}
+                  customFields={customFields}
                   onResolve={(kept) => resolve(resolvingConflict.ref, kept)}
                 />
               ) : selected?.kind === 'project' ? (
