@@ -9,19 +9,31 @@ import {
 } from '../../shared/conversation';
 import { findingBlock, type ReviewCommand } from '../../shared/finding';
 import { roleText } from '../../shared/entry';
+import {
+  customValues,
+  fieldsOfType,
+  type CustomField,
+} from '../../shared/custom-field';
 import { mentionMatcher } from '../../shared/mentions';
 import { statusOf } from '../../shared/status';
 import { partOf, topLevel } from '../../shared/manuscript-order';
 import { hasTag, tagged, tagSpelling } from '../../shared/tags';
-import { proposalBlock, type ProposalView } from '../../shared/proposal';
 import {
+  customFieldKey,
+  proposalBlock,
+  type ProposalView,
+} from '../../shared/proposal';
+import {
+  ENTRY_GROUP_TITLES,
   ENTRY_TYPE_LABELS,
+  ENTRY_TYPES,
   partName,
   PROJECT_OUTLINE,
   STATUS_LABELS,
   unitKey,
   unitText,
   type EntrySummary,
+  type EntryType,
   type EntryValue,
   type Manuscript,
   type ManuscriptChapter,
@@ -195,15 +207,41 @@ async function storyBible(
   const entries = await Promise.all(
     seen.map((e) => view.read({ kind: 'entry', id: e.id })),
   );
+  const fields = view.customFields();
   const heading =
     'The Story Bible: what the Author has written down about the story, as far as it concerns this turn.';
   return {
-    text:
-      entries.length === 0
-        ? `${heading}\n\n(No Entries for this turn.)`
-        : [heading, ...entries.map(entryText)].join('\n\n'),
+    text: [
+      heading,
+      ...customFieldsText(fields),
+      ...(entries.length === 0
+        ? ['(No Entries for this turn.)']
+        : entries.map((entry) => entryText(entry, fields))),
+    ].join('\n\n'),
     ids: seen.map((e) => e.id),
   };
+}
+
+/**
+ * The Custom fields the Author added, by type, with the field name a
+ * Proposal gives each; nothing for a Project without any.
+ */
+function customFieldsText(fields: readonly CustomField[]): string[] {
+  const types = ENTRY_TYPES.filter((type) =>
+    fields.some((field) => field.type === type),
+  );
+  if (types.length === 0) return [];
+  return [
+    [
+      'Fields the Author added to every Entry of a type. Each is free text, shown by its label in an Entry that has it. To propose a change to one, give its field name as "field": "append" a line, or "value" to replace it all.',
+      ...types.map(
+        (type) =>
+          `- ${ENTRY_GROUP_TITLES[type]}: ${fieldsOfType(fields, type)
+            .map((f) => `${f.label} ("${customFieldKey(f.id)}")`)
+            .join(', ')}`,
+      ),
+    ].join('\n'),
+  ];
 }
 
 /**
@@ -223,7 +261,7 @@ function proposalText(proposal: ProposalView): string {
   return `${proposalBlock(proposal)}\n(${decided})`;
 }
 
-function entryText(entry: EntryValue): string {
+function entryText(entry: EntryValue, fields: readonly CustomField[]): string {
   const lines = [
     `## ${entry.name} (${ENTRY_TYPE_LABELS[entry.type]})`,
     `Id: ${entry.id}`,
@@ -267,6 +305,9 @@ function entryText(entry: EntryValue): string {
     for (const [label, value] of sensed) {
       if (value.trim()) lines.push(`${label}: ${value.trim()}`);
     }
+  }
+  for (const { field, value } of customValues(entry, fields)) {
+    lines.push(`${field.label}: ${value.trim()}`);
   }
   return lines.join('\n');
 }
@@ -461,6 +502,16 @@ async function inFocus(
 }
 
 /**
+ * That the Interview asks about the Custom fields of `type` too, those left
+ * empty; nothing when the type has none.
+ */
+function customFieldsAsk(view: AssistantView, type: EntryType): string {
+  const labels = fieldsOfType(view.customFields(), type).map((f) => f.label);
+  if (labels.length === 0) return '';
+  return ` The Author added ${labels.length === 1 ? 'a field' : 'fields'} to every ${ENTRY_TYPE_LABELS[type]}: ${labels.join(', ')}; ask about ${labels.length === 1 ? 'it' : 'those'} when empty too, as about any field.`;
+}
+
+/**
  * What an Interview is about, by name and id as the Project has it now. An
  * Entry the Assistant never sees isn't named, nor one no longer there.
  */
@@ -482,10 +533,10 @@ function interviewFocusText(
       if (entry.visibility === 'never') {
         return `${heading} an Entry the Author has kept from you. Say you can't see it, and suggest the Author lets you see it or picks another focus.`;
       }
-      return `${heading} the Entry “${entry.name}” (${ENTRY_TYPE_LABELS[entry.type]}), Id: ${entry.id}. Ask about what it lacks.`;
+      return `${heading} the Entry “${entry.name}” (${ENTRY_TYPE_LABELS[entry.type]}), Id: ${entry.id}. Ask about what it lacks.${customFieldsAsk(view, entry.type)}`;
     }
     case 'entry-type':
-      return `${heading} every ${ENTRY_TYPE_LABELS[focus.type]} in the Story Bible, and any the story names that has no Entry yet. Ask about what they lack.`;
+      return `${heading} every ${ENTRY_TYPE_LABELS[focus.type]} in the Story Bible, and any the story names that has no Entry yet. Ask about what they lack.${customFieldsAsk(view, focus.type)}`;
     case 'tag': {
       // An Entry the Assistant never sees doesn't count as having it.
       const spelling = tagSpelling(focus.tag, [

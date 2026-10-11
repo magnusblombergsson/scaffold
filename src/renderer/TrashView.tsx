@@ -81,6 +81,9 @@ export function trashTitle(item: TrashItem): string {
 function detail(item: TrashItem, partLabel?: PartLabel): string {
   if (item.kind === 'version') return versionLabel(item);
   if (item.kind === 'entry') return ENTRY_TYPE_LABELS[item.type];
+  if (item.kind === 'custom-field') {
+    return `Field of every ${ENTRY_TYPE_LABELS[item.type]}, with its values`;
+  }
   if (item.kind === 'conversation') {
     return `${MODE_LABELS[item.mode]} Conversation`;
   }

@@ -1,4 +1,5 @@
 import type { Conflict } from '../../shared/api';
+import { customValues, type CustomField } from '../../shared/custom-field';
 import { entryTitle, roleText } from '../../shared/entry';
 import type { StoryBibleChoice } from '../../shared/export-choice';
 import { matchesFilter, type Filter } from '../../shared/filter';
@@ -31,7 +32,8 @@ import {
 
 // The Story Bible Export: the chosen Entries, for others to read, under a
 // heading per type. Each has its name, type, aliases, Tags, description and
-// type's fields, those with something in them; its image in Word, if asked;
+// type's fields, then its Custom fields, those with something in them; its
+// image in Word, if asked;
 // and its private notes, if asked. Visibility plays no part: it concerns
 // only the Assistant.
 
@@ -39,6 +41,7 @@ import {
 export type StoryBibleSource = {
   language: ProseLanguage;
   listEntries(): EntrySummary[];
+  listCustomFields(): CustomField[];
   read<R extends EntryRef | PrivateRef>(ref: R): Promise<ValueOf<R>>;
   readImage(ref: ImageRef): Promise<EntryImage | null>;
 };
@@ -83,6 +86,7 @@ export async function exportStoryBible(
   choice: StoryBibleChoice,
 ): Promise<Uint8Array> {
   const withImages = choice.images && format === 'docx';
+  const customFields = source.listCustomFields();
   const entries = await Promise.all(
     includedEntries(source.listEntries(), choice.filter).map(
       async ({ id }): Promise<[EntryValue, ExportedEntry]> => {
@@ -99,7 +103,7 @@ export async function exportStoryBible(
           {
             name: entryTitle(value),
             image,
-            blocks: entryBlocks(value, privateNotes),
+            blocks: entryBlocks(value, customFields, privateNotes),
           },
         ];
       },
@@ -124,9 +128,13 @@ export async function exportStoryBible(
 /**
  * An Entry's paragraphs, those with something in them: its type, aliases and
  * Tags, then its description and fields in the order the Entry view shows
- * them, then `privateNotes`.
+ * them, its Custom fields among `customFields` last, then `privateNotes`.
  */
-function entryBlocks(value: EntryValue, privateNotes: string): Block[] {
+function entryBlocks(
+  value: EntryValue,
+  customFields: readonly CustomField[],
+  privateNotes: string,
+): Block[] {
   const { role, roleNote, appearance, voice, senses, status } = value.fields;
   const description = value.description
     .split(/\n[ \t]*\n/)
@@ -162,6 +170,9 @@ function entryBlocks(value: EntryValue, privateNotes: string): Block[] {
     { label: 'Aliases', text: value.aliases.join(', ') },
     { label: 'Tags', text: (value.tags ?? []).join(', ') },
     ...fields,
+    ...customValues(value, customFields).map(
+      ({ field, value }): Block => ({ label: field.label, text: value }),
+    ),
     { label: 'Private notes', text: privateNotes },
   ]
     .map((block) => ({ ...block, text: block.text.trim() }))

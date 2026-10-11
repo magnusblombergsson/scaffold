@@ -16,9 +16,11 @@ import {
   type ValueOf,
 } from '../../shared/project-types';
 import { type AcceptOptions, type ProjectEvent } from '../../shared/api';
+import type { CustomField } from '../../shared/custom-field';
 import { newEntryValue } from '../../shared/entry';
 import {
   accept,
+  customFieldId,
   fieldOf,
   reject,
   stateOf,
@@ -28,6 +30,7 @@ import {
   type EntryCreation,
   type EntryFieldChange,
   type FieldValue,
+  type WithFieldLabel,
   type NewEntry,
   type NewEntryPlace,
   type OutlineChange,
@@ -111,6 +114,8 @@ export type ConversationsDeps = {
   /** The value accepted for a unit that isn't on disk yet. */
   pendingUnit: (key: string) => unknown;
   addEntry: (value: EntryValue) => Promise<void>;
+  /** The Custom fields not in Trash, which a Proposal may change. */
+  customFields: () => CustomField[];
   moveEntryToTrash: (entryId: string) => Promise<void>;
   /** Runs a structure operation, past the format gate. */
   enqueueWrite: <T>(operation: () => Promise<T>) => Promise<T>;
@@ -502,7 +507,7 @@ ${text}`);
     let wrote = value;
     const ref = targetRef(proposal);
     const { after } = await this.deps.changeUnit(ref, (unit) => {
-      const target = targetIn(proposal, unit);
+      const target = targetIn(proposal, unit, this.deps.customFields());
       ({ wrote } = granted(accept(proposal, target, value, how)));
       replaced = (target as { current: FieldValue }).current;
       return withTarget(proposal, unit, wrote as FieldValue);
@@ -596,7 +601,9 @@ ${text}`);
     granted(undo(proposal, await this.target(proposal)));
     const ref = targetRef(proposal);
     const { after } = await this.deps.changeUnit(ref, (unit) => {
-      const undone = granted(undo(proposal, targetIn(proposal, unit)));
+      const undone = granted(
+        undo(proposal, targetIn(proposal, unit, this.deps.customFields())),
+      );
       const { restore } = undone as { restore: FieldValue };
       return withTarget(proposal, unit, restore);
     });
@@ -646,16 +653,32 @@ ${text}`);
     const logged = proposals.find((p) => p.id === proposalId);
     if (!logged) throw new Error(`No Proposal ${proposalId}`);
     const { message: _, ...proposal } = logged;
-    return { ...proposal, name: this.proposalName(proposal) };
+    return {
+      ...proposal,
+      name: this.proposalName(proposal),
+      ...this.labelled(proposal),
+    };
+  }
+
+  /** The label of the Custom field a Proposal changes, as the Project names it now. */
+  private labelled(proposal: Proposal): WithFieldLabel {
+    if (proposal.kind !== 'field') return {};
+    const id = customFieldId(proposal.field);
+    const label = this.deps.customFields().find((f) => f.id === id)?.label;
+    return label ? { fieldLabel: label } : {};
   }
 
   /** Where a Proposal stands now, against its target as it is. */
   private async proposalView(logged: LoggedProposal): Promise<ProposalView> {
     const { message: _, decision, ...proposal } = logged;
     const name = this.proposalName(proposal);
+    const labelled = this.labelled(proposal);
     const snapshot = await this.snapshot(proposal);
-    const state = stateOf({ ...proposal, decision, name }, snapshot);
-    return { ...proposal, name, state };
+    const state = stateOf(
+      { ...proposal, ...labelled, decision, name },
+      snapshot,
+    );
+    return { ...proposal, ...labelled, name, state };
   }
 
   /** A Proposal's target as it is now, for `stateOf`. */
@@ -713,7 +736,11 @@ ${text}`);
             ? 'trashed'
             : 'gone';
     if (orphaned) return { orphaned };
-    return targetIn(proposal, await this.deps.read(targetRef(proposal)));
+    return targetIn(
+      proposal,
+      await this.deps.read(targetRef(proposal)),
+      this.deps.customFields(),
+    );
   }
 
   /**
@@ -849,15 +876,19 @@ function targetRef(
     : outlineRef(proposal.outlineId);
 }
 
-/** What the field or the Outline a Proposal changes holds in `unit`. */
+/**
+ * What the field or the Outline a Proposal changes holds in `unit`; a
+ * Custom field must be among `customFields`.
+ */
 function targetIn(
   proposal: EntryFieldChange | OutlineChange,
   unit: EntryValue | OutlineValue,
+  customFields: readonly CustomField[],
 ): Target {
   if (proposal.kind === 'outline') {
     return { current: (unit as OutlineValue).body };
   }
-  const current = fieldOf(unit as EntryValue, proposal.field);
+  const current = fieldOf(unit as EntryValue, proposal.field, customFields);
   return current === undefined ? { orphaned: 'field' } : { current };
 }
 

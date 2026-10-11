@@ -18,6 +18,7 @@ import type { ReviewCommand } from './finding';
 import type { Status } from './status';
 import type { TagChange, TagUse } from './tags';
 import type { Todo, TodoChange, TodoLink } from './todo';
+import type { CustomField } from './custom-field';
 import type { ImportBlock, ImportConvention } from './manuscript-import';
 import type { Cut } from './prose-split';
 import type { ListedModel, Model, ProviderId, ProviderStatus } from './models';
@@ -189,6 +190,15 @@ export type StatusesChanged = { type: 'statusesChanged'; statuses: Status[] };
 /** The Todos changed, here or on another computer: `todos` is the list now. */
 export type TodosChanged = { type: 'todosChanged'; todos: Todo[] };
 
+/**
+ * The Custom fields changed, here or on another computer: `fields` is the
+ * list now, those in Trash left out.
+ */
+export type CustomFieldsChanged = {
+  type: 'customFieldsChanged';
+  fields: CustomField[];
+};
+
 /** A newer app upgraded the Project; `host` is the computer it did so on, when known. */
 export type Upgrade = { host?: string };
 
@@ -218,6 +228,7 @@ export type ProjectEvent =
   | UnitDetailsChanged
   | StatusesChanged
   | TodosChanged
+  | CustomFieldsChanged
   | ConflictsChanged
   | EntriesChanged
   | ImageChanged
@@ -445,6 +456,23 @@ export interface ProjectApi {
   deleteTodo(id: string): Promise<void>;
   /** Deletes every Todo that is done. */
   clearDoneTodos(): Promise<void>;
+  /** The Custom fields, by Entry type, each type's in their order; none in Trash. */
+  listCustomFields(): Promise<CustomField[]>;
+  /**
+   * Adds a Custom field to every Entry of `type`; resolves with its id.
+   * Refused with a label the type has already, built in or not, ignoring
+   * case. Each change follows as a `customFieldsChanged`.
+   */
+  addCustomField(type: EntryType, label: string): Promise<string>;
+  /** Renames a Custom field, refused as `addCustomField` is. */
+  renameCustomField(id: string, label: string): Promise<void>;
+  /** Moves a Custom field to `index` among its type's. */
+  moveCustomField(id: string, index: number): Promise<void>;
+  /**
+   * Moves a Custom field to Trash with its values once the Author confirms,
+   * told how many Entries hold one; false when they cancelled.
+   */
+  trashCustomField(id: string): Promise<boolean>;
 }
 
 /**
@@ -944,6 +972,11 @@ export const projectMethods = {
   moveTodo: 'invoke',
   deleteTodo: 'invoke',
   clearDoneTodos: 'invoke',
+  listCustomFields: 'invoke',
+  addCustomField: 'invoke',
+  renameCustomField: 'invoke',
+  moveCustomField: 'invoke',
+  trashCustomField: 'invoke',
 } as const satisfies MethodTable<ProjectApi>;
 
 export const assistantMethods = {

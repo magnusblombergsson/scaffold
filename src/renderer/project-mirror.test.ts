@@ -12,6 +12,7 @@ import type {
   Manuscript,
   TrashItem,
 } from '../shared/project-types';
+import type { CustomField } from '../shared/custom-field';
 import type { Todo } from '../shared/todo';
 import { ProjectMirror, type MirrorEvent } from './project-mirror';
 
@@ -36,6 +37,11 @@ const trashed = (id: string): TrashItem => ({
   savedAt: 1,
 });
 const todo = (id: string): Todo => ({ id, text: id, done: false });
+const field = (id: string): CustomField => ({
+  id,
+  type: 'character',
+  label: id,
+});
 const conflict = (id: string): Conflict => ({
   ref: { kind: 'scene', id },
   versions: [],
@@ -58,6 +64,7 @@ type Held = {
   entries: EntrySummary[];
   trash: TrashItem[];
   todos: Todo[];
+  customFields: CustomField[];
   conflicts: Conflict[];
   calls: string[];
   failWith?: string;
@@ -70,6 +77,7 @@ function setUp(held: Partial<Held> = {}) {
     entries: [],
     trash: [],
     todos: [],
+    customFields: [],
     conflicts: [],
     calls: [],
     undone: emptyManuscript,
@@ -87,6 +95,7 @@ function setUp(held: Partial<Held> = {}) {
       listEntries: async () => main.entries,
       listTrash: async () => main.trash,
       listTodos: async () => main.todos,
+      listCustomFields: async () => main.customFields,
       listConflicts: async () => main.conflicts,
       setStatus: async (_ctx: unknown, unitId: string) => {
         main.calls.push(`setStatus ${unitId}`);
@@ -126,6 +135,7 @@ describe('ProjectMirror', () => {
       entries: [entry('a')],
       trash: [trashed('t')],
       todos: [todo('x')],
+      customFields: [field('f')],
       conflicts: [conflict('s')],
     });
     expect(main).toBeDefined();
@@ -143,12 +153,28 @@ describe('ProjectMirror', () => {
       entriesLoaded: true,
       trash: [trashed('t')],
       todos: [todo('x')],
+      customFields: [field('f')],
       conflicts: [conflict('s')],
       statuses: opened.statuses,
       language: 'en-US',
       readOnly: null,
       dropped: [],
       foldedNoteImage: false,
+    });
+  });
+
+  it('takes the Custom fields main tells of, and reads the Trash again', async () => {
+    const { mirror, main, tell, settle } = setUp();
+    mirror.start();
+    await settle();
+    main.trash = [trashed('f')];
+
+    tell({ type: 'customFieldsChanged', fields: [field('g')] });
+    await settle();
+
+    expect(mirror.getSnapshot()).toMatchObject({
+      customFields: [field('g')],
+      trash: [trashed('f')],
     });
   });
 

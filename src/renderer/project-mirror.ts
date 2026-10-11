@@ -8,6 +8,7 @@ import type {
   ProjectEvent,
   Upgrade,
 } from '../shared/api';
+import type { CustomField } from '../shared/custom-field';
 import type { Status } from '../shared/status';
 import type { Todo } from '../shared/todo';
 import type {
@@ -27,6 +28,8 @@ export type ProjectSnapshot = {
   entriesLoaded: boolean;
   trash: TrashItem[];
   todos: Todo[];
+  /** The Custom fields, by Entry type, each type's in their order. */
+  customFields: CustomField[];
   conflicts: Conflict[];
   /** The Project's Status list, which Project Settings or another computer may change. */
   statuses: Status[];
@@ -69,7 +72,7 @@ export class ProjectMirror {
   private readonly listeners = new Set<Listener>();
   private readonly eventListeners = new Set<(event: MirrorEvent) => void>();
   /** The slices main has told us of since the load began, which a load leaves be. */
-  private told = new Set<'entries' | 'todos' | 'conflicts'>();
+  private told = new Set<'entries' | 'todos' | 'customFields' | 'conflicts'>();
 
   constructor(
     private readonly api: ProjectApi,
@@ -81,6 +84,7 @@ export class ProjectMirror {
       entriesLoaded: false,
       trash: [],
       todos: [],
+      customFields: [],
       conflicts: [],
       statuses: opened.statuses,
       language: opened.language,
@@ -112,15 +116,17 @@ export class ProjectMirror {
   }
 
   private async load(): Promise<void> {
-    const [entries, todos, conflicts] = await Promise.all([
+    const [entries, todos, customFields, conflicts] = await Promise.all([
       this.api.listEntries(),
       this.api.listTodos(),
+      this.api.listCustomFields(),
       this.api.listConflicts(),
       this.refreshTrash(),
     ]);
     // What an event said while the lists were coming is newer than they are.
     if (!this.told.has('entries')) this.set({ entries, entriesLoaded: true });
     if (!this.told.has('todos')) this.set({ todos });
+    if (!this.told.has('customFields')) this.set({ customFields });
     if (!this.told.has('conflicts')) this.set({ conflicts });
   }
 
@@ -186,6 +192,12 @@ export class ProjectMirror {
       case 'todosChanged':
         this.told.add('todos');
         this.set({ todos: event.todos });
+        break;
+      case 'customFieldsChanged':
+        this.told.add('customFields');
+        this.set({ customFields: event.fields });
+        // A Custom field may have gone to Trash, or come out.
+        void this.refreshTrash();
         break;
       case 'readOnly':
         this.emit({ type: 'readOnlyStarted' });

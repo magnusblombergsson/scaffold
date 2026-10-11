@@ -1,6 +1,7 @@
 import { inflateRawSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import type { Conflict } from '../../shared/api';
+import type { CustomField } from '../../shared/custom-field';
 import type { StoryBibleChoice } from '../../shared/export-choice';
 import { newEntryValue } from '../../shared/entry';
 import type {
@@ -96,9 +97,11 @@ function source(
   entries: EntryValue[],
   privateNotes: Record<string, string> = {},
   images: Record<string, EntryImage> = {},
+  customFields: CustomField[] = [],
 ): StoryBibleSource {
   return {
     language: 'sv-SE',
+    listCustomFields: () => customFields,
     listEntries: () =>
       entries.map(({ id, type, name, aliases, visibility, image, tags }) => ({
         id,
@@ -417,6 +420,45 @@ describe('Exporting the Story Bible while Entries are in Conflict', () => {
     });
     expect(storyBibleConflictQuestion(['Mara', 'Harbour']).message).toBe(
       '2 Entries have unresolved Conflicts',
+    );
+  });
+});
+
+describe('Exporting Custom fields', () => {
+  const fields: CustomField[] = [
+    { id: 'f-debt', type: 'character', label: 'Debt' },
+    { id: 'f-allegiance', type: 'character', label: 'Allegiance' },
+    { id: 'f-climate', type: 'place', label: 'Climate' },
+  ];
+  const withValues = entry('e5', 'character', 'Olle', {
+    description: 'A fisherman.',
+    fields: { ...mara.fields, appearance: 'Short.', voice: undefined },
+    custom: {
+      'f-allegiance': 'The Crown',
+      'f-debt': '  ',
+      'f-gone': 'Never shown.',
+    },
+  });
+
+  it('writes those with a value after the type’s own fields, in their order, in Markdown and Word', async () => {
+    const markdown = Buffer.from(
+      await exportStoryBible(
+        source([withValues], { e5: 'Secret.' }, {}, fields),
+        'markdown',
+        { ...ALL, privateNotes: true },
+      ),
+    ).toString('utf8');
+    expect(markdown).toContain(
+      '**Appearance:** Short.\n\n**Allegiance:** The Crown\n\n**Private notes:** Secret.',
+    );
+    expect(markdown).not.toContain('Debt');
+    expect(markdown).not.toContain('Never shown.');
+
+    const files = unzip(
+      await exportStoryBible(source([withValues], {}, {}, fields), 'docx', ALL),
+    );
+    expect(paragraphs(files['word/document.xml'].toString('utf8'))).toContain(
+      'Allegiance: The Crown',
     );
   });
 });

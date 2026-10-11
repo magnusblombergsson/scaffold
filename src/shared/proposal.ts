@@ -14,6 +14,12 @@ import {
   type Voice,
 } from './project-types';
 import { newEntryValue } from './entry';
+import {
+  customValue,
+  fieldsOfType,
+  withCustom,
+  type CustomField,
+} from './custom-field';
 
 // Proposals (MVP spec §7): changes to the Story Bible or an Outline the
 // Assistant suggests in a reply, which take effect only when the Author
@@ -41,9 +47,29 @@ export const PROPOSAL_FIELDS = [
   'senses.touch',
   'senses.atmosphere',
 ] as const;
-export type ProposalField = (typeof PROPOSAL_FIELDS)[number];
+/** A field every Entry of a type has, which `PROPOSAL_FIELDS` lists. */
+export type BuiltInField = (typeof PROPOSAL_FIELDS)[number];
 
-export const FIELD_LABELS: Record<ProposalField, string> = {
+/**
+ * A Custom field as a Proposal names it: by its id, so that a rename
+ * between proposing and accepting changes nothing (ADR 0009).
+ */
+export type CustomFieldKey = `custom:${string}`;
+
+/** A field of an Entry a Proposal may change: built in, or a Custom field. */
+export type ProposalField = BuiltInField | CustomFieldKey;
+
+/** How a Proposal names the Custom field of `id`. */
+export function customFieldKey(id: string): CustomFieldKey {
+  return `custom:${id}`;
+}
+
+/** The id of the Custom field `field` names; null for a built-in field. */
+export function customFieldId(field: ProposalField): string | null {
+  return field.startsWith('custom:') ? field.slice('custom:'.length) : null;
+}
+
+export const FIELD_LABELS: Record<BuiltInField, string> = {
   description: 'Description',
   aliases: 'Aliases',
   role: 'Role',
@@ -143,20 +169,42 @@ export type ProposalState =
  * A Proposal as a card shows it: with the `name` of its target now, as in
  * `Anna` or `Scene “Harbour”`, and where it stands.
  */
-export type ProposalView = Proposal & {
-  name: string;
-  state: ProposalState;
-};
+export type ProposalView = Proposal &
+  WithFieldLabel & {
+    name: string;
+    state: ProposalState;
+  };
+
+/**
+ * The label of the Custom field a Proposal changes, as the Project names it
+ * now; absent for a built-in field, or a Custom field the Project no longer
+ * has.
+ */
+export type WithFieldLabel = { fieldLabel?: string };
+
+/**
+ * What the Author calls the field a Proposal changes: a built-in field's
+ * label, or a Custom field's as the Project names it now.
+ */
+export function fieldLabel(
+  change: { field: ProposalField } & WithFieldLabel,
+): string {
+  return customFieldId(change.field) === null
+    ? FIELD_LABELS[change.field as BuiltInField]
+    : (change.fieldLabel ?? 'Custom field');
+}
 
 /** Why a Proposal's target is out of reach: in Trash, gone, or its Entry without the field. */
 export function orphanedText(
-  proposal: Proposal & { name: string },
+  proposal: Proposal & WithFieldLabel & { name: string },
   orphaned: 'trashed' | 'gone' | 'field',
 ): string {
   const { name } = proposal;
   if (orphaned === 'trashed') return `${name} is in Trash.`;
   if (orphaned === 'field' && proposal.kind === 'field') {
-    return `${name} has no ${FIELD_LABELS[proposal.field]} now.`;
+    return proposal.fieldLabel || customFieldId(proposal.field) === null
+      ? `${name} has no ${fieldLabel(proposal)} now.`
+      : `${name} no longer has that field.`;
   }
   return proposal.kind === 'outline'
     ? `${name} is no longer in the Manuscript.`
@@ -169,7 +217,7 @@ export type PendingProposal = {
   proposal: Extract<ProposalView, { kind: 'field' }>;
 };
 
-const FIELDS_OF: Record<EntryType, ProposalField[]> = {
+const FIELDS_OF: Record<EntryType, BuiltInField[]> = {
   character: [
     'description',
     'aliases',
@@ -196,8 +244,13 @@ const FIELDS_OF: Record<EntryType, ProposalField[]> = {
   other: ['description', 'aliases'],
 };
 
+/** Whether `field` names a field a Proposal may change, a Custom field's by any id. */
 export function isProposalField(field: unknown): field is ProposalField {
-  return PROPOSAL_FIELDS.includes(field as ProposalField);
+  if (typeof field !== 'string') return false;
+  return (
+    PROPOSAL_FIELDS.includes(field as BuiltInField) ||
+    /^custom:\S+$/.test(field)
+  );
 }
 
 /** Whether `field` holds a list, one item per line when edited. */
@@ -212,12 +265,22 @@ export function isChoiceField(field: ProposalField): boolean {
   return field === 'role' || field === 'status';
 }
 
-/** The value of `field` in an Entry; undefined when its type has no such field. */
+/**
+ * The value of `field` in an Entry; undefined when its type has no such
+ * field: a Custom field must be among `customFields`, as one of its type.
+ */
 export function fieldOf(
   entry: EntryValue,
   field: ProposalField,
+  customFields: readonly CustomField[] = [],
 ): FieldValue | undefined {
-  if (!FIELDS_OF[entry.type].includes(field)) return undefined;
+  const customId = customFieldId(field);
+  if (customId !== null) {
+    return fieldsOfType(customFields, entry.type).some((f) => f.id === customId)
+      ? customValue(entry, customId)
+      : undefined;
+  }
+  if (!FIELDS_OF[entry.type].includes(field as BuiltInField)) return undefined;
   const { fields } = entry;
   if (field === 'description') return entry.description;
   if (field === 'aliases') return entry.aliases;
@@ -236,6 +299,8 @@ export function withField(
   field: ProposalField,
   value: FieldValue,
 ): EntryValue {
+  const customId = customFieldId(field);
+  if (customId !== null) return withCustom(entry, customId, value as string);
   if (field === 'description')
     return { ...entry, description: value as string };
   if (field === 'aliases') return { ...entry, aliases: value as string[] };
@@ -303,10 +368,12 @@ export function textValue(field: ProposalField, text: string): FieldValue {
  * A block names the Entry by id and the field, and either a `value` to set,
  * text to `append` to a text field that isn't a choice, or an item to `add`
  * to a list; an Append or an Add the field holds already changes nothing.
+ * A Custom field is one of `customFields` of the Entry's type, by its key.
  */
 export function proposalOf(
   block: unknown,
   entry: EntryValue,
+  customFields: readonly CustomField[] = [],
 ): EntryFieldChange | 'unchanged' | null {
   if (typeof block !== 'object' || block === null) return null;
   const {
@@ -317,7 +384,7 @@ export function proposalOf(
     add,
   } = block as Record<string, unknown>;
   if (entryId !== entry.id || !isProposalField(field)) return null;
-  const base = fieldOf(entry, field);
+  const base = fieldOf(entry, field, customFields);
   if (base === undefined) return null;
   const target = { kind: 'field', entryId: entry.id, field } as const;
   if (field === 'roleNote' && !isLabel(append ?? value)) return null;
@@ -450,7 +517,10 @@ function appended(
   if (!text) return current;
   if (!current?.trim()) return text;
   const separator =
-    target === 'description' || target === 'appearance' || target === 'outline'
+    target === 'description' ||
+    target === 'appearance' ||
+    target === 'outline' ||
+    customFieldId(target as ProposalField) !== null
       ? '\n'
       : ', ';
   return `${current.trimEnd()}${separator}${text}`;
@@ -590,7 +660,8 @@ export function decided(decision: Decision, event: DecisionEvent): Decision {
 }
 
 /** A Proposal as logged, the latest decision on it, and the `name` of its target now. */
-export type DecidedProposal = Proposal & { decision: Decision; name: string };
+export type DecidedProposal = Proposal &
+  WithFieldLabel & { decision: Decision; name: string };
 
 /**
  * What the field of an Entry or the Outline a Proposal changes holds now; or
@@ -705,7 +776,7 @@ export function accept(
       refused: 'cannot-hold',
       text:
         logged.kind === 'field'
-          ? `${FIELD_LABELS[logged.field]} can't hold that value`
+          ? `${capitalized(fieldLabel(logged))} can't hold that value`
           : "An Outline can't hold that value",
     };
   }
@@ -905,8 +976,16 @@ function sameJson(a: unknown, b: unknown): boolean {
 }
 
 /** What a refusal calls the field or Outline a Proposal changes. */
-function targetLabel(change: EntryFieldChange | OutlineChange): string {
-  return change.kind === 'field' ? FIELD_LABELS[change.field] : 'The Outline';
+function targetLabel(
+  change: (EntryFieldChange & WithFieldLabel) | OutlineChange,
+): string {
+  return change.kind === 'field'
+    ? capitalized(fieldLabel(change))
+    : 'The Outline';
+}
+
+function capitalized(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 /** The field a Proposal changes, or `'outline'`, as `appended` takes it. */

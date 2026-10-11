@@ -18,6 +18,7 @@ export class ProjectError extends Error {
       | 'unsaved'
       | 'newer-format'
       | 'read-only'
+      | 'label-taken'
       // Why a Proposal can't be accepted or undone.
       | Refusal['refused'],
     message: string,

@@ -14,7 +14,7 @@ import {
   PROJECT_OUTLINE,
   type EntryValue,
 } from '../../shared/project-types';
-import { FIELD_LABELS, isProposalField } from '../../shared/proposal';
+import { fieldLabel, isProposalField } from '../../shared/proposal';
 import { withoutThinking } from '../../shared/reply';
 import { instantClock } from '../project-store/clock';
 import { nodeFileSystem } from '../project-store/file-system';
@@ -565,7 +565,9 @@ export function proposalLine(
     };
   }
   if (entry !== undefined) {
-    const label = isProposalField(field) ? FIELD_LABELS[field] : String(field);
+    const label = isProposalField(field)
+      ? fieldLabel({ field })
+      : String(field);
     return {
       line: `${nameOf(entry)} · ${label} · ${op} · ${said}`,
       forbidden:

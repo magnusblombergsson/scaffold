@@ -1,3 +1,4 @@
+import { customValues, type CustomField } from './custom-field';
 import {
   DEFAULT_VISIBILITY,
   ROLE_LABELS,
@@ -56,20 +57,39 @@ export function newEntryValue(
 /**
  * The Entry as one of `type`. No two types share a field, so the fields it
  * had are written out at the end of the description, one per line, those
- * with a value only; it starts with the new type's fields empty.
+ * with a value only: its type's own, then its Custom fields among
+ * `customFields`, in their order. It starts with the new type's fields
+ * empty; a value of a Custom field not among them is kept.
  */
 export function changeEntryType(
   value: EntryValue,
   type: EntryType,
+  customFields: readonly CustomField[] = [],
 ): EntryValue {
   if (value.type === type) return value;
-  const lines = fieldLines(value.fields);
+  const moved = customValues(value, customFields);
+  const lines = [
+    ...fieldLines(value.fields),
+    ...moved.map(({ field, value }) => `${field.label}: ${value}`),
+  ];
   const kept = value.description.replace(/\n+$/, '');
   const description =
     lines.length === 0
       ? value.description
       : [...(kept ? [kept, ''] : []), ...lines].join('\n');
-  return { ...value, type, description, fields: emptyFields(type) };
+  const { custom: _, ...rest } = value;
+  const custom = Object.fromEntries(
+    Object.entries(value.custom ?? {}).filter(
+      ([id]) => !moved.some(({ field }) => field.id === id),
+    ),
+  );
+  return {
+    ...rest,
+    type,
+    description,
+    fields: emptyFields(type),
+    ...(Object.keys(custom).length > 0 && { custom }),
+  };
 }
 
 /**
@@ -82,6 +102,7 @@ export function revertEntryType(
   value: EntryValue,
   before: EntryValue,
   after: EntryValue,
+  customFields: readonly CustomField[] = [],
 ): EntryValue {
   const kept = before.description.replace(/\n+$/, '');
   const appended = after.description.startsWith(kept)
@@ -92,9 +113,16 @@ export function revertEntryType(
       ? value.description.slice(0, -appended.length) +
         before.description.slice(kept.length)
       : value.description;
+  const reverted = changeEntryType(
+    { ...value, description },
+    before.type,
+    customFields,
+  );
+  const custom = { ...reverted.custom, ...before.custom };
   return {
-    ...changeEntryType({ ...value, description }, before.type),
+    ...reverted,
     fields: before.fields,
+    ...(Object.keys(custom).length > 0 && { custom }),
   };
 }
 

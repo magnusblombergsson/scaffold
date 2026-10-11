@@ -12,7 +12,7 @@ import {
 import {
   appendedOnto,
   canAppend,
-  FIELD_LABELS,
+  fieldLabel,
   fieldText,
   isAppending,
   isChoiceField,
@@ -38,7 +38,7 @@ export function proposalCardId(proposalId: string): string {
 /** A Proposal's header: `Entry › Field`, `New <type> · <name>`, or `Scene “…” › Outline`. */
 export function proposalTitle(proposal: ProposalView): string {
   if (proposal.kind === 'field') {
-    return `${proposal.name} › ${FIELD_LABELS[proposal.field]}`;
+    return `${proposal.name} › ${fieldLabel(proposal)}`;
   }
   if (proposal.kind === 'new-entry') {
     return `New ${ENTRY_TYPE_LABELS[proposal.proposed.type]} · ${proposal.name}`;
@@ -228,9 +228,7 @@ export function ProposalCard({
         <>
           {stale && (
             <p className="proposal-warning">
-              {proposal.kind === 'field'
-                ? FIELD_LABELS[proposal.field]
-                : 'The Outline'}{' '}
+              {proposal.kind === 'field' ? fieldLabel(proposal) : 'The Outline'}{' '}
               has changed since this was proposed.
             </p>
           )}

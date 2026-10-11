@@ -319,6 +319,7 @@ function ProjectView({
     entriesLoaded,
     trash,
     todos,
+    customFields,
     conflicts,
     statuses,
     language,
@@ -1118,6 +1119,7 @@ function ProjectView({
   return (
     <ProjectContexts
       readOnly={readOnly !== null}
+      customFields={customFields}
       statusAndTags={{
         statuses,
         setStatus: (unitId, statusId) => void setStatus(unitId, statusId),

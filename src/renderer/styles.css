@@ -2215,6 +2215,52 @@ header.entry-header {
   font-size: 0.85rem;
 }
 
+/* A Custom field's label, with the menu that renames, moves or deletes it. */
+.custom-field-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+}
+
+.custom-field-heading .menu-button {
+  opacity: 0;
+}
+
+.custom-field:is(:hover, :focus-within) .custom-field-heading .menu-button,
+.custom-field-heading .menu-button[aria-expanded='true'] {
+  opacity: 1;
+}
+
+.custom-field-add {
+  align-self: flex-start;
+  color: var(--muted);
+  text-decoration: none;
+}
+
+.custom-field-add:hover:not(:disabled) {
+  color: inherit;
+  text-decoration: underline;
+}
+
+.custom-field-label-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.custom-field-label-row input {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+}
+
+.field-error {
+  color: var(--danger);
+  font-size: 0.8rem;
+  margin: 0.25rem 0 0;
+}
+
 /* Two fields side by side: Role and its note, Says and Never says, senses. */
 .entry-pair {
   display: grid;

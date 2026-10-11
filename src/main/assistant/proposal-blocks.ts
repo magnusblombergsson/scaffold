@@ -64,5 +64,5 @@ async function changeOf(
   }
   if (!view.listEntries().some((e) => e.id === entryId)) return null;
   const entry = await view.read({ kind: 'entry', id: entryId as string });
-  return proposalOf(block, entry);
+  return proposalOf(block, entry, view.customFields());
 }

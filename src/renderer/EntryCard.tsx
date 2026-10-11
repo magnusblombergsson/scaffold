@@ -1,9 +1,11 @@
+import type { CustomField } from '../shared/custom-field';
 import { entryTitle, roleText } from '../shared/entry';
 import { ENTRY_TYPE_LABELS, type EntryValue } from '../shared/project-types';
 import { VISIBILITY_LABELS } from './EntryView';
 import { entryFields, type CardField } from './card-fields';
 import { EntryThumbnail } from './UnitImage';
 import { TagChips } from './TagsDialog';
+import { useCustomFields } from './StatusAndTags';
 
 /**
  * An Entry's fields at a glance, read-only, as the Brainstorm and Interview
@@ -16,6 +18,7 @@ export function EntryCard({
   entry: EntryValue;
   onOpen(entryId: string): void;
 }) {
+  const customFields = useCustomFields();
   return (
     <article className="entry-card" aria-label={entryTitle(entry)}>
       <header>
@@ -41,7 +44,7 @@ export function EntryCard({
         <p className="entry-card-description">{entry.description}</p>
       )}
       <dl>
-        {cardFields(entry).map(([label, text]) => (
+        {cardFields(entry, customFields).map(([label, text]) => (
           <div key={label}>
             <dt>{label}</dt>
             <dd>{text}</dd>
@@ -56,11 +59,14 @@ export function EntryCard({
   );
 }
 
-/** An Entry's Role and type-specific fields that have a value, labelled. */
-function cardFields(entry: EntryValue): CardField[] {
+/** An Entry's Role, type-specific fields and Custom fields that have a value, labelled. */
+function cardFields(
+  entry: EntryValue,
+  customFields: readonly CustomField[],
+): CardField[] {
   const role = roleText(entry.fields.role, entry.fields.roleNote);
   return [
     ...(role ? [['Role', role] satisfies CardField] : []),
-    ...entryFields(entry),
+    ...entryFields(entry, customFields),
   ];
 }

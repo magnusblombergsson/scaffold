@@ -9,6 +9,8 @@ import {
 } from '../shared/api';
 import type { Handlers } from '../shared/bridge';
 import {
+  ENTRY_GROUP_TITLES,
+  ENTRY_TYPE_LABELS,
   PROSE_LANGUAGES,
   partLabel,
   type EntryImage,
@@ -129,6 +131,13 @@ const projectHandlers: Handlers<
   moveTodo: ({ store }, id, index) => store.moveTodo(id, index),
   deleteTodo: ({ store }, id) => store.deleteTodo(id),
   clearDoneTodos: ({ store }) => store.clearDoneTodos(),
+  listCustomFields: async ({ store }) => store.listCustomFields(),
+  addCustomField: ({ store }, type, label) => store.addCustomField(type, label),
+  renameCustomField: ({ store }, id, label) =>
+    store.renameCustomField(id, label),
+  moveCustomField: ({ store }, id, index) => store.moveCustomField(id, index),
+  trashCustomField: ({ store, sender }, id) =>
+    trashCustomField(sender, store, id),
   setFoldedNoteImage: ({ store, sender }, on) =>
     saveProjectSetting(
       sender,
@@ -260,6 +269,48 @@ async function trashConversation(
     : await dialog.showMessageBox(options);
   if (response !== 0) return null;
   return store.trashConversation(conversationId);
+}
+
+/**
+ * Moves a Custom field to Trash once the Author confirms it, told how many
+ * Entries hold a value in it; false when they cancelled.
+ */
+async function trashCustomField(
+  sender: WebContents,
+  store: ProjectStore,
+  id: string,
+): Promise<boolean> {
+  const field = store.listCustomFields().find((f) => f.id === id);
+  if (!field) throw new Error(`No Custom field ${id}`);
+  const uses = await store.customFieldUses(id);
+  const plural = ENTRY_GROUP_TITLES[field.type];
+  const singular = ENTRY_TYPE_LABELS[field.type];
+  const options = {
+    type: 'warning' as const,
+    buttons: ['Delete', 'Cancel'],
+    defaultId: 1,
+    cancelId: 1,
+    message: `Delete the field “${field.label}” from every ${singular}?`,
+    detail: `${
+      uses === 0
+        ? `No ${plural} have ${withArticle(field.label)}.`
+        : uses === 1
+          ? `1 ${singular} has ${withArticle(field.label)}.`
+          : `${uses} ${plural} have ${withArticle(field.label)}.`
+    } The field goes to Trash with its values, which come back if it is restored.`,
+  };
+  const window = BrowserWindow.fromWebContents(sender);
+  const { response } = window
+    ? await dialog.showMessageBox(window, options)
+    : await dialog.showMessageBox(options);
+  if (response !== 0) return false;
+  await store.trashCustomField(id);
+  return true;
+}
+
+/** A label with “a” or “an” before it, as in “an Allegiance”. */
+function withArticle(label: string): string {
+  return `${/^[aeiou]/i.test(label) ? 'an' : 'a'} ${label}`;
 }
 
 /** Empties Trash once the Author confirms it; there is no undo. */

@@ -123,6 +123,8 @@ import {
 } from './unit-details-catalogue';
 import { Switches } from './switches';
 import { TODOS, Todos } from './todos';
+import { CUSTOM_FIELDS, CustomFields } from './custom-fields';
+import { labelRefusal, type CustomField } from '../../shared/custom-field';
 import { tagChanges, type VocabularyChange } from './vocabulary';
 export type { VocabularyChange } from './vocabulary';
 import { parseUnitFile, type UnitFile } from './unit-file';
@@ -242,6 +244,8 @@ export interface AssistantView {
   /** The Status list, to name the Status of each Chapter and Scene. */
   statuses(): Status[];
   listEntries(): EntrySummary[];
+  /** The Project's Custom fields, which the Assistant sees like any other field. */
+  customFields(): CustomField[];
   read<R extends AssistantRef>(ref: R): Promise<ValueOf<R>>;
 }
 
@@ -401,6 +405,7 @@ export async function openProject(
   await store.readUnitDetails();
   await store.readTodos();
   await store.readStars();
+  await store.readCustomFields();
   return store;
 }
 
@@ -583,6 +588,7 @@ async function sweepTempFiles(projectPath: string, fs: FileSystem) {
     CONVERSATIONS,
     TODOS,
     STARS,
+    CUSTOM_FIELDS,
   ].map((d) => path.join(projectPath, d));
   for (const dir of [projectPath, ...dirs]) {
     for (const name of await fs.readdir(dir)) {
@@ -876,6 +882,8 @@ export class ProjectStore {
   private readonly todos: Todos;
   /** The Starred Conversations, in `stars/`, as last read or written. */
   private readonly stars: Switches;
+  /** The Custom fields in `custom-fields/`, as last read or written. */
+  private readonly customFields: CustomFields;
   /** What versions of `project.json` that met as the Project opened lost, until told. */
   private dropped: Dropped[];
   /**
@@ -935,6 +943,7 @@ export class ProjectStore {
     this.entries = units.entries;
     this.todos = todosOf(path, this.deps);
     this.stars = starsOf(path, this.deps);
+    this.customFields = customFieldsOf(path, this.deps);
     this.host = hostOf(this.deps);
     this.trash = new Trash(
       {
@@ -985,6 +994,7 @@ export class ProjectStore {
       changeUnit: (ref, change) => this.changeUnit(ref, change),
       pendingUnit: (key) => this.unitWriter.pending(key),
       addEntry: (value) => this.addEntry(value),
+      customFields: () => this.customFields.list(),
       moveEntryToTrash: async (id) => {
         await this.trash.move('entry', id);
       },
@@ -1099,6 +1109,7 @@ export class ProjectStore {
         if (await this.stars.read()) {
           this.emit({ type: 'conversationsChanged' });
         }
+        if (await this.customFields.read()) this.emitCustomFields();
         for (const change of tagChanges(tagsBefore, this.tagsByUnit())) {
           this.emitVocabulary(change);
         }
@@ -2153,6 +2164,106 @@ export class ProjectStore {
     this.emit({ type: 'todosChanged', todos: this.todos.list() });
   }
 
+  /** The Custom fields, by Entry type, each type's in their order; none in Trash. */
+  listCustomFields(): CustomField[] {
+    return this.customFields.list();
+  }
+
+  /**
+   * Reads the Custom fields as the Project opens, merging their copies, and
+   * sweeps the markers of those deleted longer ago than a delete is kept.
+   */
+  async readCustomFields(): Promise<void> {
+    await this.customFields.read();
+    await this.customFields.sweep();
+  }
+
+  /**
+   * Adds a Custom field to every Entry of `type`, after its others;
+   * resolves with its id. Refused with a label the type has already.
+   */
+  async addCustomField(type: EntryType, label: string): Promise<string> {
+    let id = '';
+    await this.changeCustomFields(async () => {
+      this.refuseLabel(label, type);
+      id = await this.customFields.add(type, label.trim());
+    });
+    return id;
+  }
+
+  /** Renames a Custom field; Entries hold its values by id, so none changes. */
+  renameCustomField(id: string, label: string): Promise<void> {
+    return this.changeCustomFields(async () => {
+      this.refuseLabel(label, this.customField(id).type, id);
+      await this.customFields.rename(id, label.trim());
+    });
+  }
+
+  /** Moves a Custom field to `index` among its type's. */
+  moveCustomField(id: string, index: number): Promise<void> {
+    return this.changeCustomFields(() => this.customFields.move(id, index));
+  }
+
+  /** How many Entries in the Story Bible hold a value in a Custom field. */
+  async customFieldUses(id: string): Promise<number> {
+    const { type } = this.customField(id);
+    let uses = 0;
+    for (const entry of this.entries.values()) {
+      if (entry.type !== type) continue;
+      const value = await this.read(entryRef(entry.id));
+      if (value.custom?.[id]?.trim()) uses++;
+    }
+    return uses;
+  }
+
+  /**
+   * Moves a Custom field to Trash; the Entries keep its values, which show
+   * again if it is restored, until Trash is emptied.
+   */
+  trashCustomField(id: string): Promise<void> {
+    return this.changeCustomFields(async () => {
+      this.customField(id);
+      await this.customFields.trash(id, this.deps.clock.now());
+    });
+  }
+
+  /** A Custom field not in Trash; refused if there is none. */
+  private customField(id: string): CustomField {
+    const field = this.customFields.list().find((f) => f.id === id);
+    if (!field) throw new Error(`No Custom field ${id}`);
+    return field;
+  }
+
+  /** Refuses a label `type` has already, but `exceptId`'s. */
+  private refuseLabel(label: string, type: EntryType, exceptId?: string): void {
+    const refusal = labelRefusal(
+      label,
+      type,
+      this.customFields.list(),
+      exceptId,
+    );
+    if (refusal) throw new ProjectError('label-taken', refusal);
+  }
+
+  /**
+   * Changes the Custom fields, then tells the window. They aren't in the
+   * tree, so another computer's tree is no reason to wait.
+   */
+  private changeCustomFields(change: () => Promise<void>): Promise<void> {
+    return this.enqueueStructure(async () => {
+      await this.passFormatGate();
+      await change();
+      this.emitCustomFields();
+    });
+  }
+
+  private emitCustomFields(): void {
+    this.emit({
+      type: 'customFieldsChanged',
+      fields: this.customFields.list(),
+    });
+  }
+
   tree(): ProjectTree {
     return structuredClone(this.manifest.tree);
   }
@@ -2220,7 +2331,18 @@ export class ProjectStore {
 
   /** Latest first. */
   listTrash(): TrashItem[] {
-    return this.trash.list();
+    const fields = this.customFields.trashed().map(
+      ({ id, type, label, trashedAt }): TrashItem => ({
+        kind: 'custom-field',
+        id,
+        title: label,
+        trashedAt,
+        type,
+      }),
+    );
+    return [...this.trash.list(), ...fields].sort(
+      (a, b) => b.trashedAt - a.trashedAt,
+    );
   }
 
   /** The Entries in the Story Bible, by type in the order of `ENTRY_TYPES`, then by name. */
@@ -2295,11 +2417,11 @@ export class ProjectStore {
   setEntryType(entryId: string, type: EntryType): Promise<Changed> {
     return this.step(async () => {
       const { before, after } = await this.changeEntry(entryId, (value) =>
-        changeEntryType(value, type),
+        changeEntryType(value, type, this.customFields.list()),
       );
       return async () => {
         await this.changeEntry(entryId, (value) =>
-          revertEntryType(value, before, after),
+          revertEntryType(value, before, after, this.customFields.list()),
         );
       };
     });
@@ -2747,7 +2869,26 @@ export class ProjectStore {
    * Scenes.
    */
   restore(id: string): Promise<Changed> {
+    if (this.customFields.trashed().some((field) => field.id === id)) {
+      return this.step(() => this.restoreCustomField(id));
+    }
     return this.step(() => this.trash.restore(id));
+  }
+
+  /**
+   * Brings a Custom field back from Trash, its values showing again in the
+   * Entries that kept them; refused while its type has another field of its
+   * label. Undo moves it to Trash again.
+   */
+  private async restoreCustomField(id: string): Promise<() => Promise<void>> {
+    const field = this.customFields.trashed().find((f) => f.id === id)!;
+    this.refuseLabel(field.label, field.type, id);
+    await this.customFields.restore(id);
+    this.emitCustomFields();
+    return async () => {
+      await this.customFields.trash(id, this.deps.clock.now());
+      this.emitCustomFields();
+    };
   }
 
   /**
@@ -2887,6 +3028,11 @@ export class ProjectStore {
     return this.enqueueWrite(async () => {
       this.latest = null;
       await this.trash.empty();
+      // Their values stay in the Entries, never shown.
+      if (this.customFields.trashed().length > 0) {
+        await this.customFields.empty();
+        this.emitCustomFields();
+      }
     });
   }
 
@@ -3108,6 +3254,7 @@ export class ProjectStore {
       manuscript: () => manuscriptForAssistant(this.manuscript()),
       statuses: () => this.statuses(),
       listEntries: () => this.listEntries().map(forAssistant),
+      customFields: () => this.customFields.list(),
       read: async (ref) => {
         // Refused at run time too, whatever a caller's types say.
         if ((ref as UnitRef).kind === 'private') {
@@ -3435,6 +3582,14 @@ function starsOf(projectPath: string, deps: StoreDeps): Switches {
 
 function todosOf(projectPath: string, deps: StoreDeps): Todos {
   return new Todos(path.join(projectPath, TODOS), deps.fs, deps.clock);
+}
+
+function customFieldsOf(projectPath: string, deps: StoreDeps): CustomFields {
+  return new CustomFields(
+    path.join(projectPath, CUSTOM_FIELDS),
+    deps.fs,
+    deps.clock,
+  );
 }
 
 /** A Todo's text as one line; there must be some. */

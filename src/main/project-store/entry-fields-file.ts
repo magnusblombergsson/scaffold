@@ -29,6 +29,12 @@ const FIELD_KEYS: Record<EntryType, readonly (keyof EntryFields)[]> = {
   other: [],
 };
 
+/**
+ * The frontmatter key of an Entry's Custom field values, by field id (ADR
+ * 0009): Entry text, as its type's fields are.
+ */
+export const CUSTOM = 'custom';
+
 /** The frontmatter keys an Entry's fields may be stored under, of any type. */
 export const ENTRY_FIELD_KEYS: readonly string[] = [
   ...new Set(Object.values(FIELD_KEYS).flat()),

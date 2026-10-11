@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { EntrySummary, EntryValue } from './project-types';
-import { changeEntryType, entryCollisions } from './entry';
+import type { CustomField } from './custom-field';
+import { changeEntryType, entryCollisions, revertEntryType } from './entry';
 
 const anna: EntryValue = {
   id: 'anna',
@@ -109,6 +110,71 @@ describe('changing an Entry’s type', () => {
     expect(changeEntryType(extra, 'other').description).toContain(
       '\nRole: Mentioned only\n',
     );
+  });
+});
+
+describe('changing the type of an Entry with Custom fields', () => {
+  const fields: CustomField[] = [
+    { id: 'f-rank', type: 'character', label: 'Rank' },
+    { id: 'f-debt', type: 'character', label: 'Debt' },
+    { id: 'f-allegiance', type: 'character', label: 'Allegiance' },
+    { id: 'f-climate', type: 'place', label: 'Climate' },
+  ];
+  const mira: EntryValue = {
+    id: 'mira',
+    type: 'character',
+    name: 'Mira',
+    aliases: [],
+    visibility: 'mentioned',
+    description: 'Her sister.',
+    fields: {
+      role: 'supporting',
+      roleNote: '',
+      appearance: '',
+      voice: { traits: '', says: [], neverSays: [], examples: [] },
+    },
+    custom: {
+      'f-allegiance': 'The Crown',
+      'f-rank': 'Captain',
+      'f-gone': 'kept, never shown',
+    },
+  };
+
+  it('appends the old type’s non-empty ones after the built-in fields, in their order, keeping undefined ones', () => {
+    expect(changeEntryType(mira, 'place', fields)).toEqual({
+      ...mira,
+      type: 'place',
+      description:
+        'Her sister.\n\nRole: Supporting\nRank: Captain\nAllegiance: The Crown',
+      fields: {
+        senses: { smells: '', sight: '', sound: '', touch: '', atmosphere: '' },
+      },
+      custom: { 'f-gone': 'kept, never shown' },
+    });
+  });
+
+  it('reverts: the values come back and the appended lines go, the new type’s written out in turn', () => {
+    const after = changeEntryType(mira, 'place', fields);
+    const edited = {
+      ...after,
+      custom: { ...after.custom, 'f-climate': 'Wet' },
+    };
+
+    expect(revertEntryType(edited, mira, after, fields)).toEqual({
+      ...mira,
+      description: 'Her sister.\n\nClimate: Wet',
+    });
+  });
+
+  it('changes nothing for a Project without Custom fields', () => {
+    const plain = { ...mira, custom: undefined };
+    const { custom: _, ...rest } = plain;
+    expect(changeEntryType(rest, 'item', [])).toEqual({
+      ...rest,
+      type: 'item',
+      description: 'Her sister.\n\nRole: Supporting',
+      fields: {},
+    });
   });
 });
 
