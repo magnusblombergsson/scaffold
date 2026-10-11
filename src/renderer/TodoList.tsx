@@ -9,16 +9,32 @@ import {
 } from 'react';
 import type { CallFailure } from '../shared/bridge';
 import {
-  linkedTo,
+  inContext,
   linkView,
   type LinkNames,
   type Todo,
   type TodoLink,
 } from '../shared/todo';
+import type { TodoScope } from '../shared/todo-dock';
 import { inLowerHalf } from './Binder';
 import { ReadOnlyContext } from './read-only';
 
 const TODO = 'application/x-scaffold-todo';
+
+/**
+ * The Todos a list shows: all of them, or with This context, those linked to
+ * the unit open, `prelink`, and to the units containing it.
+ */
+export function shownTodos(
+  todos: Todo[],
+  scope: TodoScope,
+  prelink: TodoLink | null,
+  names: LinkNames,
+): Todo[] {
+  return scope === 'context'
+    ? inContext(todos, prelink, names.manuscript)
+    : todos;
+}
 
 /**
  * A Todo the Author started from elsewhere, as by Add Todo… or Ctrl+T: the
@@ -32,10 +48,10 @@ export type TodoDraft = {
 };
 
 /**
- * The Todos tab: a New Todo field, pre-linked to the open unit, over the
+ * A list of Todos: a New Todo field, pre-linked to the open unit, over the
  * Todos not done, in the Author's order, and a folded Done section. Each
  * Todo's link opens its unit, or its Trash item while the unit is in Trash.
- * In Writing, a toggle shows only the open unit's Todos.
+ * In Writing's dock, a switch shows All the Todos or This context's.
  * A read-only Project shows the list and changes nothing.
  */
 export function TodoList({
@@ -43,8 +59,8 @@ export function TodoList({
   names,
   prelink,
   draft,
-  onlyOpen,
-  onOnlyOpen,
+  scope = 'all',
+  onScope,
   onOpen,
   onOpenTrash,
   onError,
@@ -54,16 +70,16 @@ export function TodoList({
   /** What a new Todo links to unless the Author unlinks it: the open unit. */
   prelink: TodoLink | null;
   draft?: TodoDraft;
-  /** Whether only the Todos linked to `prelink` show. */
-  onlyOpen?: boolean;
-  /** Sets `onlyOpen`; without it, there is no toggle. */
-  onOnlyOpen?(on: boolean): void;
+  /** Which Todos show: All, or This context's, for `prelink`. */
+  scope?: TodoScope;
+  /** Sets `scope`; without it, there is no switch. */
+  onScope?(scope: TodoScope): void;
   onOpen(link: TodoLink): void;
   onOpenTrash(trashId: string): void;
   onError(message: string | null): void;
 }) {
   const readOnly = useContext(ReadOnlyContext);
-  const shown = onlyOpen ? linkedTo(todos, prelink) : todos;
+  const shown = shownTodos(todos, scope, prelink, names);
   const open = shown.filter((todo) => !todo.done);
   const done = shown.filter((todo) => todo.done);
 
@@ -132,20 +148,27 @@ export function TodoList({
           run(() => window.project.addTodo(text, link), 'add the Todo')
         }
       />
-      {onOnlyOpen && (
-        <label className="todos-only-open">
-          <input
-            type="checkbox"
-            checked={!!onlyOpen}
-            onChange={(event) => onOnlyOpen(event.target.checked)}
-          />
-          Only the open unit’s Todos
-        </label>
+      {onScope && (
+        <div role="group" aria-label="Show" className="mode-switch todos-scope">
+          <button aria-pressed={scope === 'all'} onClick={() => onScope('all')}>
+            All
+          </button>
+          <button
+            aria-pressed={scope === 'context'}
+            onClick={() => onScope('context')}
+          >
+            This context
+          </button>
+        </div>
       )}
       {open.length > 0 ? (
         <ol className="todo-list" aria-label="To do">
           {open.map(row)}
         </ol>
+      ) : scope === 'context' && !prelink ? (
+        <p className="todos-empty">
+          Nothing is open. Switch to All to see every Todo.
+        </p>
       ) : (
         <p className="todos-empty">Nothing to do</p>
       )}
@@ -162,7 +185,7 @@ export function TodoList({
               void run(
                 // Only those shown: the Author doesn't see the others go.
                 async () => {
-                  if (!onlyOpen) return window.project.clearDoneTodos();
+                  if (scope === 'all') return window.project.clearDoneTodos();
                   for (const todo of done) {
                     await window.project.deleteTodo(todo.id);
                   }

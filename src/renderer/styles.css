@@ -1194,6 +1194,26 @@ button.counts.reached:hover {
   display: none;
 }
 
+/*
+ * Writing's left pane: its tab scrolls above the Todos dock, which keeps its
+ * height until the tab is at its least.
+ */
+.left-pane.with-todo-dock {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+
+  > [role='tabpanel'] {
+    flex: 1 1 auto;
+    min-height: 0;
+    overflow-y: auto;
+  }
+}
+
+.left-pane.with-todo-dock[hidden] {
+  display: none;
+}
+
 /* An invisible gap between panes that shows a bar on hover. */
 .panel-resizer {
   flex-shrink: 0;
@@ -1203,6 +1223,14 @@ button.counts.reached:hover {
   background-clip: content-box;
   cursor: col-resize;
   touch-action: none;
+}
+
+/* Between a panel above and one below. */
+.panel-resizer.panel-resizer-across {
+  width: auto;
+  height: 3px;
+  padding: 3px 0;
+  cursor: row-resize;
 }
 
 .panel-resizer:hover,
@@ -1886,13 +1914,42 @@ h2.binder-title > button:hover::after {
   visibility: visible;
 }
 
-.todos-only-open {
+.todos-scope {
+  margin: 0 0.5rem 0.5rem;
+}
+
+/* Writing's Todos dock, at the bottom of the left pane. */
+.todo-dock {
+  flex-shrink: 0;
   display: flex;
-  align-items: center;
-  gap: 0.35rem;
+  flex-direction: column;
+  border-top: 1px solid var(--line);
+}
+
+.todo-dock-header {
+  flex-shrink: 0;
+  text-align: left;
+  background: none;
+  border: none;
+  font: inherit;
+  font-weight: 600;
   color: var(--muted);
-  font-size: 0.85rem;
-  padding: 0 0.5rem 0.5rem;
+  padding: 0.35rem 0.5rem;
+  cursor: pointer;
+}
+
+.todo-dock-header:hover {
+  color: var(--fg);
+}
+
+.todo-dock-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+
+  .todos {
+    padding-top: 0;
+  }
 }
 
 .todos-empty {

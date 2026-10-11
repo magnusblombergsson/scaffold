@@ -27,6 +27,11 @@ import {
   type ProviderId,
 } from '../../shared/models';
 import {
+  DEFAULT_TODO_DOCK,
+  readTodoDock,
+  type TodoDock,
+} from '../../shared/todo-dock';
+import {
   DEFAULT_VIEW_SETTINGS,
   parseViewSettings,
   type ViewSettings,
@@ -99,6 +104,7 @@ type SettingsFile = {
     /** Set once the Author has added a Provider or skipped the welcome. */
     welcomed?: boolean;
     providers?: ProvidersSettings;
+    todoDock?: Partial<TodoDock>;
   } & Partial<ViewSettings> &
     Record<string, unknown>;
   projects: Record<string, ProjectSettings & Record<string, unknown>>;
@@ -159,6 +165,12 @@ function parseSettings(text: string): SettingsFile | null {
     delete global.highlightMentions;
   }
   if (typeof global.welcomed !== 'boolean') delete global.welcomed;
+  const todoDock = readTodoDock(global.todoDock);
+  if (Object.keys(todoDock).length > 0) {
+    global.todoDock = todoDock;
+  } else {
+    delete global.todoDock;
+  }
   const view = parseViewSettings(global);
   delete global.writingWidth;
   delete global.theme;
@@ -526,6 +538,20 @@ export class AppSettings {
 
   setHighlightMentions(on: boolean): void {
     this.data.global.highlightMentions = on;
+    this.changed();
+  }
+
+  /** How Writing's Todos dock shows, in every Project. */
+  todoDock(): TodoDock {
+    return { ...DEFAULT_TODO_DOCK, ...this.data.global.todoDock };
+  }
+
+  /** Keeps the valid fields of `change`, as a window may send anything. */
+  setTodoDock(change: Partial<TodoDock>): void {
+    this.data.global.todoDock = {
+      ...this.data.global.todoDock,
+      ...readTodoDock(change),
+    };
     this.changed();
   }
 

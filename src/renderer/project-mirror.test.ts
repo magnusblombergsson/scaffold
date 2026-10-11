@@ -7,6 +7,7 @@ import {
   type ProjectEvent,
 } from '../shared/api';
 import { memoryTransport } from '../shared/memory-transport';
+import { DEFAULT_TODO_DOCK } from '../shared/todo-dock';
 import type {
   EntrySummary,
   Manuscript,
@@ -55,6 +56,7 @@ const opened: OpenedProject = {
   statuses: [{ id: 'idea', name: 'Idea', colour: 'purple' }],
   manuscript: emptyManuscript,
   view: {},
+  todoDock: DEFAULT_TODO_DOCK,
   sessions: { alsoOpen: [] },
   dropped: [],
   readOnly: null,

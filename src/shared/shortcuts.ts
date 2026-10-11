@@ -49,7 +49,7 @@ export type Command = (
    * becomes a new Scene right after, or first in the next Chapter.
    */
   | { type: 'splitScene'; toNextChapter: boolean }
-  /** Focuses the Todos tab's New Todo field, docking the left pane if collapsed. */
+  /** Raises the Todos dock and focuses its New Todo field, docking the left pane if collapsed. */
   | { type: 'newTodo' }
   /** Collapses the pane, or docks it back at the tab it last showed. */
   | { type: 'togglePane'; pane: SidePane }

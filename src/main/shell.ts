@@ -329,6 +329,7 @@ function openedProject(store: ProjectStore): OpenedProject {
       overviewOpen,
       pinnedNotes,
     },
+    todoDock: settings.todoDock(),
     sessions: store.sessionNotice(),
     dropped: store.takeDropped(),
     readOnly: store.readOnly(),
@@ -589,6 +590,7 @@ const shellHandlers: Handlers<ShellApi, typeof shellMethods, WindowContext> = {
   setCorkboardView: ({ sender }, view) => {
     settings.setCorkboardView(projectWindows.of(sender).id, view);
   },
+  setTodoDock: (_ctx, change) => settings.setTodoDock(change),
   highlightMentions: () => settings.highlightMentions(),
   setHighlightMentions: (_ctx, on) => {
     settings.setHighlightMentions(on);

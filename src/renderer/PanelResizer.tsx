@@ -2,30 +2,34 @@ import type { KeyboardEvent, PointerEvent } from 'react';
 
 type Props = {
   label: string;
-  /** The width of the panel it resizes, in CSS pixels. */
-  width: number;
-  /** Which side of the handle that panel is on; the left by default. */
-  panel?: 'left' | 'right';
+  /** The size of the panel it resizes, its width or its height, in CSS pixels. */
+  size: number;
+  /**
+   * Which side of the handle that panel is on; the left by default. A panel
+   * above or below is resized by its height.
+   */
+  panel?: 'left' | 'right' | 'above' | 'below';
   min: number;
   max: number;
   /** While dragging, and on each arrow key. */
-  onResize(width: number): void;
-  /** Once the Author lets go, with the width to remember. */
-  onResized(width: number): void;
+  onResize(size: number): void;
+  /** Once the Author lets go, with the size to remember. */
+  onResized(size: number): void;
 };
 
-/** A pane's width, and what to call as the Author resizes it. */
-export type PaneSize = Pick<Props, 'width' | 'onResize' | 'onResized'>;
+/** A pane's size, and what to call as the Author resizes it. */
+export type PaneSize = Pick<Props, 'size' | 'onResize' | 'onResized'>;
 
 const KEY_STEP = 16;
 
 /**
- * A handle on the edge of a panel, its right edge for one on the left and its
- * left edge for one on the right; drag it, or use the arrow keys.
+ * A handle on the edge of a panel, the edge facing the rest of the window:
+ * drag it, or use the arrow keys, ←/→ beside a panel and ↑/↓ above or below
+ * one.
  */
 export function PanelResizer({
   label,
-  width,
+  size,
   panel = 'left',
   min,
   max,
@@ -34,16 +38,19 @@ export function PanelResizer({
 }: Props) {
   const clamp = (value: number) =>
     Math.round(Math.min(max, Math.max(min, value)));
-  /** A panel on the right grows as the handle moves left. */
-  const sign = panel === 'left' ? 1 : -1;
+  const across = panel === 'above' || panel === 'below';
+  /** A panel on the right or below grows as the handle moves towards it. */
+  const sign = panel === 'left' || panel === 'above' ? 1 : -1;
+  const at = (event: { clientX: number; clientY: number }) =>
+    across ? event.clientY : event.clientX;
 
   function startDrag(event: PointerEvent<HTMLDivElement>) {
     const handle = event.currentTarget;
-    const startX = event.clientX;
-    let current = width;
+    const start = at(event);
+    let current = size;
     handle.setPointerCapture(event.pointerId);
     const move = (e: globalThis.PointerEvent) => {
-      current = clamp(width + sign * (e.clientX - startX));
+      current = clamp(size + sign * (at(e) - start));
       onResize(current);
     };
     const end = () => {
@@ -58,21 +65,24 @@ export function PanelResizer({
   }
 
   function nudge(event: KeyboardEvent<HTMLDivElement>) {
-    const step = { ArrowLeft: -KEY_STEP, ArrowRight: KEY_STEP }[event.key];
+    const steps: Record<string, number> = across
+      ? { ArrowUp: -KEY_STEP, ArrowDown: KEY_STEP }
+      : { ArrowLeft: -KEY_STEP, ArrowRight: KEY_STEP };
+    const step = steps[event.key];
     if (!step) return;
     event.preventDefault();
-    const next = clamp(width + sign * step);
+    const next = clamp(size + sign * step);
     onResize(next);
     onResized(next);
   }
 
   return (
     <div
-      className="panel-resizer"
+      className={`panel-resizer${across ? ' panel-resizer-across' : ''}`}
       role="separator"
-      aria-orientation="vertical"
+      aria-orientation={across ? 'horizontal' : 'vertical'}
       aria-label={label}
-      aria-valuenow={width}
+      aria-valuenow={size}
       aria-valuemin={min}
       aria-valuemax={max}
       tabIndex={0}

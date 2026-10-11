@@ -19,6 +19,7 @@ import type { ReviewCommand } from './finding';
 import type { Status } from './status';
 import type { TagChange, TagUse } from './tags';
 import type { Todo, TodoChange, TodoLink } from './todo';
+import type { TodoDock } from './todo-dock';
 import type { CustomField } from './custom-field';
 import type { KeyFieldChoices, KeyFieldItem } from './key-fields';
 import type { ImportBlock, ImportConvention } from './manuscript-import';
@@ -560,6 +561,8 @@ export type OpenedProject = {
   statuses: Status[];
   manuscript: Manuscript;
   view: ProjectView;
+  /** How Writing's Todos dock shows, on this computer, in every Project. */
+  todoDock: TodoDock;
   sessions: SessionNotice;
   /** What versions of `project.json` that met as it opened lost; told once. */
   dropped: Dropped[];
@@ -795,6 +798,8 @@ export interface ShellApi {
   corkboardView(): Promise<CorkboardView>;
   /** Remembers what every Corkboard shows. */
   setCorkboardView(view: CorkboardView): void;
+  /** Remembers how Writing's Todos dock shows, in every Project. */
+  setTodoDock(change: Partial<TodoDock>): void;
   /** Whether Entry names and aliases are highlighted where mentioned, on this computer. */
   highlightMentions(): Promise<boolean>;
   /** Turns the highlighting on or off, in every window. */
@@ -1069,6 +1074,7 @@ export const shellMethods = {
   setBibleView: 'send',
   corkboardView: 'invoke',
   setCorkboardView: 'send',
+  setTodoDock: 'send',
   highlightMentions: 'invoke',
   setHighlightMentions: 'send',
   onHighlightMentions: 'event',

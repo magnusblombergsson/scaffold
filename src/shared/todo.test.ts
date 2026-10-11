@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { EntrySummary, Manuscript, TrashItem } from './project-types';
-import { linkedTo, linkView, type Todo } from './todo';
+import { inContext, linkView, type Todo, type TodoLink } from './todo';
 
 const manuscript: Manuscript = {
   chapters: [
@@ -89,21 +89,60 @@ describe('a Todo’s link', () => {
   });
 });
 
-describe('linkedTo', () => {
+describe('inContext', () => {
+  const book: Manuscript = {
+    chapters: [
+      {
+        id: 'c1',
+        title: 'Arrival',
+        part: 'p1',
+        scenes: [
+          { id: 's1', title: 'Harbour' },
+          { id: 's2', title: 'Letter' },
+        ],
+      },
+      { id: 'c2', title: 'Loose', scenes: [{ id: 's4', title: 'Inn' }] },
+    ],
+    parts: [{ id: 'p1', title: 'One', chapters: ['c1'] }],
+    top: ['p1', 'c2'],
+    unplaced: [{ id: 's3', title: 'Untitled Scene' }],
+  };
   const todos: Todo[] = [
     { id: 'a', text: 'A', done: false, link: { kind: 'scene', id: 's1' } },
     { id: 'b', text: 'B', done: true, link: { kind: 'scene', id: 's1' } },
-    { id: 'c', text: 'C', done: false, link: { kind: 'chapter', id: 's1' } },
-    { id: 'd', text: 'D', done: false },
+    { id: 'c', text: 'C', done: false, link: { kind: 'chapter', id: 'c1' } },
+    { id: 'd', text: 'D', done: false, link: { kind: 'part', id: 'p1' } },
+    { id: 'e', text: 'E', done: false, link: { kind: 'scene', id: 's2' } },
+    { id: 'f', text: 'F', done: false, link: { kind: 'entry', id: 'e1' } },
+    { id: 'g', text: 'G', done: false, link: { kind: 'chapter', id: 's1' } },
+    { id: 'h', text: 'H', done: false, link: { kind: 'chapter', id: 'c2' } },
+    { id: 'i', text: 'I', done: false },
   ];
+  const ids = (link: TodoLink | null) =>
+    inContext(todos, link, book).map((t) => t.id);
 
-  it('keeps the Todos linked to the unit, done or not', () => {
-    expect(
-      linkedTo(todos, { kind: 'scene', id: 's1' }).map((t) => t.id),
-    ).toEqual(['a', 'b']);
+  it('for a Scene, keeps its Todos, done or not, its Chapter’s and its Part’s, in order', () => {
+    expect(ids({ kind: 'scene', id: 's1' })).toEqual(['a', 'b', 'c', 'd']);
   });
 
-  it('keeps none without a unit', () => {
-    expect(linkedTo(todos, null)).toEqual([]);
+  it('for a Scene in a Loose Chapter, keeps its own and its Chapter’s', () => {
+    expect(ids({ kind: 'scene', id: 's4' })).toEqual(['h']);
+  });
+
+  it('for an Unplaced Scene, keeps its own only', () => {
+    expect(ids({ kind: 'scene', id: 's3' })).toEqual([]);
+  });
+
+  it('for a Chapter, keeps its own and its Part’s, not its Scenes’', () => {
+    expect(ids({ kind: 'chapter', id: 'c1' })).toEqual(['c', 'd']);
+  });
+
+  it('for a Part or an Entry, keeps its own only', () => {
+    expect(ids({ kind: 'part', id: 'p1' })).toEqual(['d']);
+    expect(ids({ kind: 'entry', id: 'e1' })).toEqual(['f']);
+  });
+
+  it('keeps none with nothing open', () => {
+    expect(ids(null)).toEqual([]);
   });
 });
