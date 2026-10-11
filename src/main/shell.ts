@@ -582,6 +582,13 @@ const shellHandlers: Handlers<ShellApi, typeof shellMethods, WindowContext> = {
   setBibleView: ({ sender }, view) => {
     settings.setBibleView(projectWindows.of(sender).id, view);
   },
+  corkboardView: ({ sender }) => {
+    const store = projectWindows.find(sender);
+    return store ? settings.corkboardView(store.id) : 'text';
+  },
+  setCorkboardView: ({ sender }, view) => {
+    settings.setCorkboardView(projectWindows.of(sender).id, view);
+  },
   highlightMentions: () => settings.highlightMentions(),
   setHighlightMentions: (_ctx, on) => {
     settings.setHighlightMentions(on);

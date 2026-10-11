@@ -5,6 +5,10 @@ import type { ProjectLookup } from '../project-store/project-store';
 import { safeWrite, setAside } from '../project-store/safe-write';
 import type { PanelWidths, PinnedNote, Tip } from '../../shared/api';
 import { readBibleView, type BibleView } from '../../shared/bible-view';
+import {
+  readCorkboardView,
+  type CorkboardView,
+} from '../../shared/corkboard-view';
 import type { ExportUnticked } from '../../shared/export-choice';
 import {
   readFilters,
@@ -68,6 +72,8 @@ export type ProjectSettings = {
   filters?: Filters;
   /** How the Story Bible list shows, unless as by default. */
   bibleView?: BibleView;
+  /** What the Corkboards show, unless text, as by default. */
+  corkboardView?: 'images';
 };
 
 /**
@@ -261,6 +267,9 @@ function parseProjectSettings(raw: JsonObject): ProjectSettings & JsonObject {
     settings.filters = filters;
   } else {
     delete settings.filters;
+  }
+  if (readCorkboardView(settings.corkboardView) === 'text') {
+    delete settings.corkboardView;
   }
   const bibleView = readBibleView(settings.bibleView);
   if (Object.keys(bibleView).length > 0) {
@@ -459,6 +468,22 @@ export class AppSettings {
     const { bibleView: _, ...rest } = this.data.projects[id] ?? {};
     this.data.projects[id] =
       Object.keys(kept).length > 0 ? { ...rest, bibleView: kept } : rest;
+    this.changed();
+  }
+
+  /** What every Corkboard of a Project shows; text when it has none. */
+  corkboardView(id: string): CorkboardView {
+    return readCorkboardView(this.data.projects[id]?.corkboardView);
+  }
+
+  /** Remembers what every Corkboard shows; text for anything else a window sends. */
+  setCorkboardView(id: string, view: CorkboardView): void {
+    // Not `updateProject`, which can't take the key away.
+    const { corkboardView: _, ...rest } = this.data.projects[id] ?? {};
+    this.data.projects[id] =
+      readCorkboardView(view) === 'images'
+        ? { ...rest, corkboardView: 'images' }
+        : rest;
     this.changed();
   }
 

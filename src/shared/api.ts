@@ -13,6 +13,7 @@ import type {
 } from './project-types';
 import type { ExportUnticked, StoryBibleChoice } from './export-choice';
 import type { BibleView } from './bible-view';
+import type { CorkboardView } from './corkboard-view';
 import type { Filter, FilterPlace, Filters } from './filter';
 import type { ReviewCommand } from './finding';
 import type { Status } from './status';
@@ -769,6 +770,10 @@ export interface ShellApi {
   bibleView(): Promise<BibleView>;
   /** Remembers how the Story Bible list shows. */
   setBibleView(view: BibleView): void;
+  /** What every Corkboard of this window's Project shows, on this computer. */
+  corkboardView(): Promise<CorkboardView>;
+  /** Remembers what every Corkboard shows. */
+  setCorkboardView(view: CorkboardView): void;
   /** Whether Entry names and aliases are highlighted where mentioned, on this computer. */
   highlightMentions(): Promise<boolean>;
   /** Turns the highlighting on or off, in every window. */
@@ -1039,6 +1044,8 @@ export const shellMethods = {
   onFilter: 'event',
   bibleView: 'invoke',
   setBibleView: 'send',
+  corkboardView: 'invoke',
+  setCorkboardView: 'send',
   highlightMentions: 'invoke',
   setHighlightMentions: 'send',
   onHighlightMentions: 'event',

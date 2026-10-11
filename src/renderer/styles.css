@@ -655,6 +655,94 @@ span.card-title {
   writing-mode: vertical-rl;
 }
 
+/* Text or Images, at the far end of a Corkboard's title. */
+.corkboard-title > .mode-switch {
+  /* No taller than the title. */
+  margin: -0.25rem 0 -0.25rem auto;
+  padding: 2px;
+  font-size: 0.85rem;
+  background: var(--hover);
+  border-radius: 999px;
+}
+
+/* As the Corkboard shows images: smaller cards, closer together. */
+.corkboard.images {
+  .scene-cards {
+    grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  }
+
+  .lane > .card,
+  .lane > .card.own {
+    flex-basis: 11rem;
+  }
+}
+
+/* An image card: its image filling its top, edge to edge. */
+.card.image-card {
+  padding-top: 0;
+}
+
+.card-figure {
+  position: relative;
+  margin: 0 -0.8rem 0.2rem;
+}
+
+.card-image {
+  display: block;
+  box-sizing: border-box;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 5px 5px 0 0;
+}
+
+/* Without an image, an empty frame keeps the grid even. */
+.card-image.empty {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem;
+  background: color-mix(in srgb, var(--line) 35%, transparent);
+  border-bottom: 1px dashed var(--line);
+
+  button {
+    font-size: 0.75rem;
+    padding: 0.1rem 0.5rem;
+  }
+}
+
+/* The beginning of the card's Outline, over its image, as the card is
+   hovered or holds the focus; a long one reaches down over the title.
+   Clicks go through to what is under it. */
+.card-outline {
+  position: absolute;
+  z-index: 1;
+  top: 0.4rem;
+  left: 0.4rem;
+  right: 0.4rem;
+  min-height: calc(100% - 0.8rem);
+  box-sizing: border-box;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.75rem;
+  line-height: 1.3;
+  white-space: pre-line;
+  background: var(--sheet);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  box-shadow: var(--raised-shadow);
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.image-card:is(:hover, :focus-within) .card-outline {
+  visibility: visible;
+}
+
+/* Not over Add image… as the pointer is on it. */
+.image-card:has(.card-image button:hover) .card-outline {
+  visibility: hidden;
+}
+
 /* The bar above the Prose: Outline & Notes, then the Overview pane's switch. */
 .outline-notes-bar {
   display: flex;

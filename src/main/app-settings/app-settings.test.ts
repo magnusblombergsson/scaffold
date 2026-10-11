@@ -335,6 +335,36 @@ describe('saving', () => {
     });
   });
 
+  it('remembers what the Corkboards show, per Project', async () => {
+    const settings = await load();
+    expect(settings.corkboardView('a')).toBe('text');
+
+    settings.setCorkboardView('a', 'images');
+    await settings.flush();
+
+    const reloaded = await load();
+    expect(reloaded.corkboardView('a')).toBe('images');
+    expect(reloaded.corkboardView('b')).toBe('text');
+  });
+
+  it('forgets the Corkboards showing text, as by default', async () => {
+    const settings = await load();
+    settings.setCorkboardView('a', 'images');
+
+    settings.setCorkboardView('a', 'text');
+
+    expect(settings.project('a')).not.toHaveProperty('corkboardView');
+  });
+
+  it('shows text on the Corkboards for a mode a window sends that is none', async () => {
+    const settings = await load();
+    settings.setCorkboardView('a', 'images');
+
+    settings.setCorkboardView('a', 'pictures' as never);
+
+    expect(settings.corkboardView('a')).toBe('text');
+  });
+
   it('forgets a Story Bible view as it shows by default', async () => {
     const settings = await load();
     settings.setBibleView('a', { groupByTag: true });
@@ -630,6 +660,25 @@ describe('a bad or newer settings file', () => {
     const settings = await load();
 
     expect(settings.bibleView('a')).toEqual({ groupByTag: true });
+    expect(settings.project('b')).toEqual({});
+  });
+
+  it('reads what the Corkboards show for a Project, text for a mode that is none', async () => {
+    await writeFile(
+      file,
+      JSON.stringify({
+        version: 1,
+        global: {},
+        projects: {
+          a: { corkboardView: 'images' },
+          b: { corkboardView: 'pictures' },
+        },
+        recent: [],
+      }),
+    );
+    const settings = await load();
+
+    expect(settings.corkboardView('a')).toBe('images');
     expect(settings.project('b')).toEqual({});
   });
 

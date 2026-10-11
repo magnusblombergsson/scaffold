@@ -242,3 +242,142 @@ for (const theme of ['light', 'dark'] as const) {
     );
   });
 }
+
+/** Writes a small grey PNG and has the next Open dialog choose it. */
+async function offerImage(app: ElectronApplication) {
+  const imagePath = path.join(tempDir(), 'harbour.png');
+  const png = await app.evaluate(({ nativeImage }) =>
+    nativeImage
+      .createFromBitmap(Buffer.alloc(64 * 48 * 4, 0x80), {
+        width: 64,
+        height: 48,
+      })
+      .toPNG()
+      .toString('base64'),
+  );
+  await writeFile(imagePath, Buffer.from(png, 'base64'));
+  await app.evaluate(({ dialog }, file) => {
+    dialog.showOpenDialog = async () => ({
+      canceled: false,
+      filePaths: [file],
+    });
+  }, imagePath);
+}
+
+test('every Corkboard shows its cards as images, as this computer remembers', async () => {
+  const projectPath = path.join(tempDir(), 'My Novel');
+  await twoChaptersAndAnUnplacedScene(projectPath);
+  const lines = [
+    '- Anna reaches the harbour at dawn and finds the ferry gone',
+    '- She bargains with a fisherman who knew her father, and loses',
+    '- The letter in her coat is not hers',
+    '- Mara watches from the customs house, and says nothing',
+  ];
+  let app = await launch(tempDir());
+  try {
+    const page = await app.firstWindow();
+    await setUp(app, page, 'light');
+    await button(page, 'Chapter 1').click();
+    const scene1 = card(page, 'Scene 1');
+    await field(scene1, 'Outline').click();
+    // Enter carries the bullet.
+    await page.keyboard.type(
+      [lines[0], ...lines.slice(1).map((line) => line.slice(2))].join('\n'),
+    );
+
+    // Images: the Scenes' cards show no Outline or Notes, the Chapter's own still does.
+    const images = button(page, 'Images');
+    await images.click();
+    await expect(images).toHaveAttribute('aria-pressed', 'true');
+    await expect(button(page, 'Text')).toHaveAttribute('aria-pressed', 'false');
+    await expect(field(scene1, 'Outline')).toHaveCount(0);
+    await expect(field(scene1, 'Notes')).toHaveCount(0);
+    const chapter = card(page, 'Chapter 1');
+    await field(chapter, 'Notes').click();
+    await page.keyboard.type('Too slow?');
+    await expect(field(chapter, 'Notes')).toHaveText('Too slow?');
+
+    // An image card keeps its number, title, ⋯ menu, Status and Tags.
+    await expect(scene1).toContainText('1Scene 1');
+    await expect(button(scene1, 'Card actions: Scene 1')).toBeVisible();
+    await button(scene1, 'Status of Scene 1').click();
+    await page.getByRole('menuitemradio', { name: 'Drafted' }).click();
+    await expect(scene1.getByLabel('Add a Tag')).toBeVisible();
+
+    // Without an image, Add image… sets it; the image opens the large view.
+    await offerImage(app);
+    await button(scene1, 'Add image…').click();
+    const image = scene1.getByRole('img', { name: 'Image of Scene 1' });
+    await expect(image).toBeVisible();
+    await expect(button(scene1, 'Add image…')).toHaveCount(0);
+    await image.click();
+    const view = page.getByRole('dialog', { name: 'Scene 1' });
+    await expect(view).toBeVisible();
+    await page.keyboard.press('Escape');
+    await expect(view).toBeHidden();
+    await expect(button(card(page, 'Scene 2'), 'Add image…')).toBeVisible();
+
+    // Hovered or focused, a card shows its Outline's beginning; none without one.
+    const tip = scene1.getByRole('tooltip');
+    // The pointer and the focus away from the card.
+    await page.locator('.centre-title').click();
+    await expect(tip).toBeHidden();
+    await scene1.hover();
+    await expect(tip).toBeVisible();
+    await expect(tip).toHaveText(
+      [...lines.slice(0, 3), '- Mara watches from the customs house,…'].join(
+        '\n',
+      ),
+      { useInnerText: true },
+    );
+    await expect(page).toHaveScreenshot('chapter-corkboard-images-light.png', {
+      mask: changing(page),
+    });
+    await card(page, 'Scene 2').hover();
+    await expect(tip).toBeHidden();
+    await expect(card(page, 'Scene 2').getByRole('tooltip')).toHaveCount(0);
+    await button(page, 'Open Scene 1').focus();
+    await expect(tip).toBeVisible();
+    await expect(button(page, 'Open Scene 1')).toHaveAccessibleDescription(
+      /^- Anna reaches the harbour/,
+    );
+
+    // The Project's Corkboard shows images too, in its lanes.
+    await button(page, 'Project Outline').click();
+    await expect(button(page, 'Images')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await expect(field(card(page, 'Project Outline'), 'Outline')).toBeVisible();
+    await expect(field(card(page, 'Chapter 1'), 'Outline')).toHaveCount(0);
+    await button(page, 'Scenes of Chapter 1').click();
+    await expect(
+      card(page, 'Scene 1').getByRole('img', { name: 'Image of Scene 1' }),
+    ).toBeVisible();
+  } finally {
+    await app.close();
+  }
+
+  // Reopened, the Corkboards still show images; a title opens its unit.
+  app = await launch(tempDir());
+  try {
+    const page = await app.firstWindow();
+    await button(page, 'Chapter 1').click();
+    await expect(button(page, 'Images')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await expect(field(card(page, 'Scene 1'), 'Outline')).toHaveCount(0);
+    await button(page, 'Open Scene 2').click();
+    await expect(page.getByLabel('Prose')).toBeVisible();
+
+    // Text again: the cards edit their Outline and Notes in place.
+    await button(page, 'Chapter 1').click();
+    await button(page, 'Text').click();
+    await expect(field(card(page, 'Scene 1'), 'Outline')).toHaveText(
+      lines.join(''),
+    );
+  } finally {
+    await app.close();
+  }
+});

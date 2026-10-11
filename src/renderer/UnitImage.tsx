@@ -122,6 +122,41 @@ export function UnitThumbnail({ unit }: { unit: Unit }) {
   ) : null;
 }
 
+/**
+ * A Scene's, Chapter's or Part's image filling the top of its card; clicked,
+ * the large view. Without one, an empty frame keeps its place, with Add
+ * image….
+ */
+export function UnitCardImage({ unit }: { unit: Unit }) {
+  const readOnly = useContext(ReadOnlyContext);
+  const url = useUnitImage(unitRef(unit), unit.image);
+  if (url) {
+    return (
+      <ViewableImage
+        className="card-image"
+        src={url}
+        alt={`Image of ${unit.title}`}
+        caption={unit.title}
+      />
+    );
+  }
+  const [add] = unitImageItems(unit, readOnly);
+  return (
+    <div className="card-image empty">
+      {/* One being read shows once it is. */}
+      {!unit.image && (
+        <button
+          type="button"
+          disabled={add.disabled}
+          onClick={() => 'run' in add && void add.run()}
+        >
+          {add.label}
+        </button>
+      )}
+    </div>
+  );
+}
+
 /** Add image… or Replace image…, and Remove image, as buttons. */
 export function UnitImageButtons({ unit }: { unit: Unit }) {
   const readOnly = useContext(ReadOnlyContext);

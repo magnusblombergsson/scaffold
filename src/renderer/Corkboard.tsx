@@ -1,4 +1,13 @@
-import { useContext, useState, type ReactNode } from 'react';
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+import type { CorkboardView } from '../shared/corkboard-view';
 import {
   partName,
   PROJECT_OUTLINE,
@@ -6,6 +15,7 @@ import {
   type ManuscriptChapter,
   type ManuscriptPart,
   type ManuscriptScene,
+  type OutlineValue,
   type ProseLanguage,
 } from '../shared/project-types';
 import type { TodoLink } from '../shared/todo';
@@ -15,12 +25,90 @@ import {
   topItems,
   unplacedChapters,
 } from '../shared/manuscript-order';
+import { outlineBeginning } from './outline-beginning';
 import { OutlineNotes } from './OutlineNotes';
 import { ReadOnlyContext } from './read-only';
 import type { Reveal } from './reveal';
 import { UNPLACED } from './overview';
 import { StatusAndTagsEditor } from './StatusAndTags';
-import { UnitImageButtons, unitImageItems, UnitThumbnail } from './UnitImage';
+import {
+  UnitCardImage,
+  UnitImageButtons,
+  unitImageItems,
+  UnitThumbnail,
+} from './UnitImage';
+
+/** Whether the cards show their images large, not their Outline and Notes. */
+const ImagesContext = createContext(false);
+
+/** What the Corkboards show, and the switch between text and images. */
+type ViewProps = {
+  view: CorkboardView;
+  onView(view: CorkboardView): void;
+};
+
+/**
+ * What every Corkboard shows, as this computer remembers it for the
+ * Project; text until it is read. A change made before then wins.
+ */
+export function useCorkboardView(): [
+  CorkboardView,
+  (view: CorkboardView) => void,
+] {
+  const [view, setView] = useState<CorkboardView>('text');
+  const changed = useRef(false);
+  useEffect(() => {
+    let current = true;
+    void window.shell.corkboardView().then((stored) => {
+      if (current && !changed.current) setView(stored);
+    });
+    return () => {
+      current = false;
+    };
+  }, []);
+  return [
+    view,
+    (next) => {
+      changed.current = true;
+      setView(next);
+      window.shell.setCorkboardView(next);
+    },
+  ];
+}
+
+/** Text or Images, for every Corkboard of the Project. */
+function ViewSwitch({ view, onView }: ViewProps) {
+  return (
+    <div role="group" aria-label="Cards show" className="mode-switch">
+      <button aria-pressed={view === 'text'} onClick={() => onView('text')}>
+        Text
+      </button>
+      <button aria-pressed={view === 'images'} onClick={() => onView('images')}>
+        Images
+      </button>
+    </div>
+  );
+}
+
+/**
+ * A Corkboard's sheet, its cards showing what `view` says; the wide card of
+ * the unit it is of shows text either way.
+ */
+function CorkboardSheet({
+  view,
+  children,
+}: {
+  view: CorkboardView;
+  children: ReactNode;
+}) {
+  return (
+    <ImagesContext.Provider value={view === 'images'}>
+      <div className={view === 'images' ? 'corkboard images' : 'corkboard'}>
+        {children}
+      </div>
+    </ImagesContext.Provider>
+  );
+}
 
 /**
  * A Chapter as index cards: its own Outline and Notes in a wide card, then
@@ -32,9 +120,11 @@ export function ChapterCorkboard({
   chapter,
   language,
   reveal,
+  view,
+  onView,
   onOpenScene,
   onAddTodo,
-}: {
+}: ViewProps & {
   chapter: ManuscriptChapter;
   language: ProseLanguage;
   reveal?: Reveal;
@@ -43,8 +133,14 @@ export function ChapterCorkboard({
   onAddTodo(link: TodoLink): void;
 }) {
   return (
-    <div className="corkboard">
-      <OwnCard unit={chapter} language={language} reveal={reveal} />
+    <CorkboardSheet view={view}>
+      <OwnCard
+        unit={chapter}
+        language={language}
+        reveal={reveal}
+        view={view}
+        onView={onView}
+      />
       <div className="scene-cards">
         <SceneCards
           scenes={chapter.scenes}
@@ -53,7 +149,7 @@ export function ChapterCorkboard({
           onAddTodo={onAddTodo}
         />
       </div>
-    </div>
+    </CorkboardSheet>
   );
 }
 
@@ -68,9 +164,11 @@ export function PartCorkboard({
   manuscript,
   language,
   reveal,
+  view,
+  onView,
   onOpenChapter,
   onAddTodo,
-}: {
+}: ViewProps & {
   part: ManuscriptPart;
   manuscript: Manuscript;
   language: ProseLanguage;
@@ -84,8 +182,14 @@ export function PartCorkboard({
   );
   const chapters = item?.kind === 'part' ? item.chapters : [];
   return (
-    <div className="corkboard">
-      <OwnCard unit={part} language={language} reveal={reveal} />
+    <CorkboardSheet view={view}>
+      <OwnCard
+        unit={part}
+        language={language}
+        reveal={reveal}
+        view={view}
+        onView={onView}
+      />
       <div className="scene-cards">
         <ChapterCards
           chapters={chapters}
@@ -95,19 +199,22 @@ export function PartCorkboard({
           onAddTodo={onAddTodo}
         />
       </div>
-    </div>
+    </CorkboardSheet>
   );
 }
 
 /**
- * The title of the unit a Corkboard is of, its image beside it, then its
- * Outline and Notes in a wide card, with its Status, Tags and image.
+ * The title of the unit a Corkboard is of, its image beside it and the
+ * switch between text and images, then its Outline and Notes in a wide
+ * card, with its Status, Tags and image.
  */
 function OwnCard({
   unit,
   language,
   reveal,
-}: {
+  view,
+  onView,
+}: ViewProps & {
   unit: ManuscriptPart | ManuscriptChapter;
   language: ProseLanguage;
   reveal?: Reveal;
@@ -117,6 +224,7 @@ function OwnCard({
       <div className="corkboard-title">
         <h2 className="centre-title">{unit.title}</h2>
         <UnitThumbnail unit={unit} />
+        <ViewSwitch view={view} onView={onView} />
       </div>
       <article className="card wide own" aria-label={unit.title}>
         <OutlineNotes
@@ -143,11 +251,13 @@ export function ProjectCorkboard({
   manuscript,
   language,
   reveal,
+  view,
+  onView,
   onOpenScene,
   onOpenChapter,
   onOpenPart,
   onAddTodo,
-}: {
+}: ViewProps & {
   manuscript: Manuscript;
   language: ProseLanguage;
   reveal?: Reveal;
@@ -205,8 +315,11 @@ export function ProjectCorkboard({
   );
 
   return (
-    <div className="corkboard">
-      <h2 className="centre-title">Project Outline</h2>
+    <CorkboardSheet view={view}>
+      <div className="corkboard-title">
+        <h2 className="centre-title">Project Outline</h2>
+        <ViewSwitch view={view} onView={onView} />
+      </div>
       <article className="card wide own" aria-label="Project Outline">
         <OutlineNotes
           unitId={PROJECT_OUTLINE}
@@ -262,15 +375,13 @@ export function ProjectCorkboard({
               />
             }
           >
-            <article className="card own part" aria-label={part.title}>
-              <CardTitle
-                unit={part}
-                onOpen={() => onOpenPart(part.id)}
-                onAddTodo={() => onAddTodo({ kind: 'part', id: part.id })}
-              />
-              <OutlineNotes unitId={part.id} language={language} withNotes />
-              <StatusAndTagsEditor unit={part} />
-            </article>
+            <UnitCard
+              unit={part}
+              className="card own part"
+              language={language}
+              onOpen={() => onOpenPart(part.id)}
+              onAddTodo={() => onAddTodo({ kind: 'part', id: part.id })}
+            />
           </Lane>
         );
       })}
@@ -303,7 +414,7 @@ export function ProjectCorkboard({
           </div>
         </Lane>
       )}
-    </div>
+    </CorkboardSheet>
   );
 }
 
@@ -395,16 +506,14 @@ function ChapterCard({
   onAddTodo(): void;
 }) {
   return (
-    <article className={own ? 'card own' : 'card'} aria-label={chapter.title}>
-      <CardTitle
-        unit={chapter}
-        number={number}
-        onOpen={onOpen}
-        onAddTodo={onAddTodo}
-      />
-      <OutlineNotes unitId={chapter.id} language={language} withNotes />
-      <StatusAndTagsEditor unit={chapter} />
-    </article>
+    <UnitCard
+      unit={chapter}
+      number={number}
+      className={own ? 'card own' : 'card'}
+      language={language}
+      onOpen={onOpen}
+      onAddTodo={onAddTodo}
+    />
   );
 }
 
@@ -449,19 +558,55 @@ function SceneCard({
   onAddTodo(): void;
 }) {
   return (
-    <article className="card" aria-label={scene.title}>
+    <UnitCard
+      unit={scene}
+      number={number}
+      className="card"
+      missing={scene.missing}
+      language={language}
+      onOpen={onOpen}
+      onAddTodo={onAddTodo}
+    />
+  );
+}
+
+const MISSING_TEXT = 'Missing, possibly not synced yet.';
+
+type UnitCardProps = {
+  unit: ManuscriptPart | ManuscriptChapter | ManuscriptScene;
+  number?: number;
+  className: string;
+  /** Set for a Scene whose file hasn't arrived. */
+  missing?: boolean;
+  language: ProseLanguage;
+  onOpen(): void;
+  onAddTodo(): void;
+};
+
+/**
+ * A Scene's, Chapter's or Part's card: its Outline and Notes editable in
+ * place, then its Status and Tags; or, as the Corkboard shows images, an
+ * image card.
+ */
+function UnitCard(props: UnitCardProps) {
+  const images = useContext(ImagesContext);
+  if (images) return <ImageCard {...props} />;
+  const { unit, number, className, missing, language, onOpen, onAddTodo } =
+    props;
+  return (
+    <article className={className} aria-label={unit.title}>
       <CardTitle
-        unit={scene}
+        unit={unit}
         number={number}
         onOpen={onOpen}
         onAddTodo={onAddTodo}
       />
-      {scene.missing ? (
-        <p className="corkboard-empty">Missing, possibly not synced yet.</p>
+      {missing ? (
+        <p className="corkboard-empty">{MISSING_TEXT}</p>
       ) : (
         <>
-          <OutlineNotes unitId={scene.id} language={language} withNotes />
-          <StatusAndTagsEditor unit={scene} />
+          <OutlineNotes unitId={unit.id} language={language} withNotes />
+          <StatusAndTagsEditor unit={unit} />
         </>
       )}
     </article>
@@ -469,21 +614,94 @@ function SceneCard({
 }
 
 /**
- * A card's number, if it has one, title, image and ⋯ menu, which a
- * right-click on it opens too; the title opens the unit.
+ * A card as the Corkboard shows images: the unit's image filling its top,
+ * Add image… without one, its title beneath, then its Status and Tags.
+ * Hovered or focused, it shows its Outline's beginning, as there is one.
+ */
+function ImageCard({
+  unit,
+  number,
+  className,
+  missing,
+  onOpen,
+  onAddTodo,
+}: UnitCardProps) {
+  const outlineId = useId();
+  const outline = outlineBeginning(useOutline(unit.id));
+  return (
+    <article className={`${className} image-card`} aria-label={unit.title}>
+      <div className="card-figure">
+        {missing ? (
+          <div className="card-image empty">
+            <p className="corkboard-empty">{MISSING_TEXT}</p>
+          </div>
+        ) : (
+          <UnitCardImage unit={unit} />
+        )}
+        {outline && (
+          <div role="tooltip" id={outlineId} className="card-outline">
+            {outline}
+          </div>
+        )}
+      </div>
+      <CardTitle
+        unit={unit}
+        number={number}
+        describedBy={outline ? outlineId : undefined}
+        onOpen={onOpen}
+        onAddTodo={onAddTodo}
+      />
+      {!missing && <StatusAndTagsEditor unit={unit} />}
+    </article>
+  );
+}
+
+/** A unit's Outline, read again as another computer or a Proposal changes it. */
+function useOutline(unitId: string): string {
+  const [body, setBody] = useState('');
+  useEffect(() => {
+    let current = true;
+    window.project.read({ kind: 'outline', id: unitId }).then(
+      (outline) => current && setBody(outline.body),
+      () => {},
+    );
+    const unsubscribe = window.project.subscribe((event) => {
+      if (
+        event.type === 'unitReloaded' &&
+        event.ref.kind === 'outline' &&
+        event.ref.id === unitId
+      ) {
+        setBody((event.value as OutlineValue).body);
+      }
+    });
+    return () => {
+      current = false;
+      unsubscribe();
+    };
+  }, [unitId]);
+  return body;
+}
+
+/**
+ * A card's number, if it has one, title, image, unless the card shows it
+ * large, and ⋯ menu, which a right-click on it opens too; the title opens
+ * the unit, and is described by `describedBy`.
  */
 function CardTitle({
   unit,
   number,
+  describedBy,
   onOpen,
   onAddTodo,
 }: {
   unit: ManuscriptPart | ManuscriptChapter | ManuscriptScene;
   number?: number;
+  describedBy?: string;
   onOpen(): void;
   onAddTodo(): void;
 }) {
   const readOnly = useContext(ReadOnlyContext);
+  const images = useContext(ImagesContext);
   const [menuOpen, setMenuOpen] = useState(false);
   const { title } = unit;
   return (
@@ -497,11 +715,12 @@ function CardTitle({
       <button
         className="card-title"
         aria-label={`Open ${title}`}
+        aria-describedby={describedBy}
         onClick={onOpen}
       >
         {title}
       </button>
-      <UnitThumbnail unit={unit} />
+      {!images && <UnitThumbnail unit={unit} />}
       <Menu
         label={`Card actions: ${title}`}
         open={menuOpen}
