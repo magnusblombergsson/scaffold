@@ -57,6 +57,7 @@ const opened: OpenedProject = {
   manuscript: emptyManuscript,
   view: {},
   todoDock: DEFAULT_TODO_DOCK,
+  composerHeight: null,
   sessions: { alsoOpen: [] },
   dropped: [],
   readOnly: null,

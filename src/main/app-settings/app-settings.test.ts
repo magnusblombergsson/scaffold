@@ -138,6 +138,39 @@ describe('saving', () => {
     });
   });
 
+  it('keeps the message box at 3 rows until the Author drags it, and remembers the height until reset', async () => {
+    const settings = await load();
+    expect(settings.composerHeight()).toBeNull();
+
+    settings.setComposerHeight(240);
+    await settings.flush();
+    const reloaded = await load();
+    expect(reloaded.composerHeight()).toBe(240);
+
+    reloaded.setComposerHeight(null);
+    await reloaded.flush();
+    expect((await load()).composerHeight()).toBeNull();
+  });
+
+  it('keeps only a valid message box height a window sends or the file holds', async () => {
+    await writeFile(
+      file,
+      JSON.stringify({
+        version: 1,
+        global: { composerHeight: 'tall' },
+        projects: {},
+        recent: [],
+      }),
+    );
+    const settings = await load();
+    expect(settings.composerHeight()).toBeNull();
+
+    settings.setComposerHeight(180);
+    settings.setComposerHeight(Infinity);
+    settings.setComposerHeight('taller' as never);
+    expect(settings.composerHeight()).toBe(180);
+  });
+
   it('looks as today until the Author changes the writing width, theme or spell check, and remembers them', async () => {
     const settings = await load();
     expect(settings.viewSettings()).toEqual({

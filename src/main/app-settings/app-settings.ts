@@ -112,6 +112,8 @@ type SettingsFile = {
     welcomed?: boolean;
     providers?: ProvidersSettings;
     todoDock?: Partial<TodoDock>;
+    /** The height the Author dragged the Assistant's message box to. */
+    composerHeight?: number;
   } & Partial<ViewSettings> &
     Record<string, unknown>;
   projects: Record<string, ProjectSettings & Record<string, unknown>>;
@@ -178,6 +180,7 @@ function parseSettings(text: string): SettingsFile | null {
   } else {
     delete global.todoDock;
   }
+  if (!isFiniteNumber(global.composerHeight)) delete global.composerHeight;
   const view = parseViewSettings(global);
   delete global.writingWidth;
   delete global.theme;
@@ -571,6 +574,22 @@ export class AppSettings {
       ...this.data.global.todoDock,
       ...readTodoDock(change),
     };
+    this.changed();
+  }
+
+  /**
+   * The height the Author dragged the Assistant's message box to, in every
+   * Mode and Project; null until then, or once reset to 3 rows.
+   */
+  composerHeight(): number | null {
+    return this.data.global.composerHeight ?? null;
+  }
+
+  /** Keeps a valid height, as a window may send anything; null resets it. */
+  setComposerHeight(height: number | null): void {
+    if (height === null) delete this.data.global.composerHeight;
+    else if (isFiniteNumber(height)) this.data.global.composerHeight = height;
+    else return;
     this.changed();
   }
 

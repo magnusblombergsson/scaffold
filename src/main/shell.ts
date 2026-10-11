@@ -339,6 +339,7 @@ function openedProject(store: ProjectStore): OpenedProject {
       floatingImage,
     },
     todoDock: settings.todoDock(),
+    composerHeight: settings.composerHeight(),
     sessions: store.sessionNotice(),
     dropped: store.takeDropped(),
     readOnly: store.readOnly(),
@@ -592,6 +593,7 @@ const shellHandlers: Handlers<ShellApi, typeof shellMethods, WindowContext> = {
     settings.setCorkboardView(projectWindows.of(sender).id, view);
   },
   setTodoDock: (_ctx, change) => settings.setTodoDock(change),
+  setComposerHeight: (_ctx, height) => settings.setComposerHeight(height),
   highlightMentions: () => settings.highlightMentions(),
   setHighlightMentions: (_ctx, on) => {
     settings.setHighlightMentions(on);
