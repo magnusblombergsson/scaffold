@@ -244,7 +244,10 @@ ${JSON.stringify({ type: 'message', role: 'assistant', text: 'Odd.', focus: [], 
       clock: instantClock(),
     });
 
-    expect(await reopened.listConversations()).toEqual([second, first]);
+    expect(await reopened.listConversations()).toEqual([
+      { ...second, starred: false },
+      { ...first, starred: false },
+    ]);
   });
 
   it('skips lines it cannot read and events it does not know, and keeps them', async () => {

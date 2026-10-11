@@ -190,6 +190,8 @@ const assistantHandlers: Handlers<
   },
   renameConversation: ({ store }, conversationId, title) =>
     store.renameConversation(conversationId, title),
+  starConversation: ({ store }, conversationId, starred) =>
+    store.starConversation(conversationId, starred === true),
   trashConversation: ({ store, sender }, conversationId) =>
     trashConversation(sender, store, conversationId),
   setInterviewFocus: ({ store }, conversationId, focus) =>

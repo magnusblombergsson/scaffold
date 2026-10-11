@@ -121,6 +121,7 @@ import {
   type DetailKey,
   type HeldDetails,
 } from './unit-details-catalogue';
+import { Switches } from './switches';
 import { TODOS, Todos } from './todos';
 import { tagChanges, type VocabularyChange } from './vocabulary';
 export type { VocabularyChange } from './vocabulary';
@@ -399,6 +400,7 @@ export async function openProject(
   await store.forkConversationCopies();
   await store.readUnitDetails();
   await store.readTodos();
+  await store.readStars();
   return store;
 }
 
@@ -580,6 +582,7 @@ async function sweepTempFiles(projectPath: string, fs: FileSystem) {
     SESSIONS,
     CONVERSATIONS,
     TODOS,
+    STARS,
   ].map((d) => path.join(projectPath, d));
   for (const dir of [projectPath, ...dirs]) {
     for (const name of await fs.readdir(dir)) {
@@ -871,6 +874,8 @@ export class ProjectStore {
   private readonly outlineFingerprints = new Map<string, Fingerprint>();
   /** The Todos in `todos/`, as last read or written. */
   private readonly todos: Todos;
+  /** The Starred Conversations, in `stars/`, as last read or written. */
+  private readonly stars: Switches;
   /** What versions of `project.json` that met as the Project opened lost, until told. */
   private dropped: Dropped[];
   /**
@@ -929,6 +934,7 @@ export class ProjectStore {
     this.files = units.files;
     this.entries = units.entries;
     this.todos = todosOf(path, this.deps);
+    this.stars = starsOf(path, this.deps);
     this.host = hostOf(this.deps);
     this.trash = new Trash(
       {
@@ -1090,6 +1096,9 @@ export class ProjectStore {
           });
         }
         if (await this.todos.read()) this.emitTodos();
+        if (await this.stars.read()) {
+          this.emit({ type: 'conversationsChanged' });
+        }
         for (const change of tagChanges(tagsBefore, this.tagsByUnit())) {
           this.emitVocabulary(change);
         }
@@ -3188,8 +3197,30 @@ export class ProjectStore {
    * The Conversations in `conversations/`, latest first; `project.json`
    * doesn't list them. A log whose header can't be read is logged and left out.
    */
-  listConversations(): Promise<ConversationSummary[]> {
-    return this.conversations.listConversations();
+  async listConversations(): Promise<ConversationSummary[]> {
+    const starred = this.stars.on(STARRED_CONVERSATIONS);
+    return (await this.conversations.listConversations()).map((c) => ({
+      ...c,
+      starred: starred.has(c.id),
+    }));
+  }
+
+  /** Reads the Starred Conversations as the Project opens, merging their copies. */
+  async readStars(): Promise<void> {
+    await this.stars.read();
+  }
+
+  /**
+   * Stars or unstars a Conversation, kept in `stars/` and never in its log,
+   * so that every computer sees it and the log never forks over it. A
+   * Conversation in Trash keeps its star; a star on one that is gone is
+   * ignored.
+   */
+  starConversation(id: string, starred: boolean): Promise<void> {
+    return this.enqueueStructure(async () => {
+      await this.stars.set(STARRED_CONVERSATIONS, id, starred);
+      this.emit({ type: 'conversationsChanged' });
+    });
   }
 
   /**
@@ -3391,6 +3422,15 @@ export class ProjectStore {
       listener(structuredClone(change));
     }
   }
+}
+
+/** The folder of switch files, which older apps never look in (ADR 0006). */
+const STARS = 'stars';
+/** The file in `stars/` holding the Starred Conversations. */
+const STARRED_CONVERSATIONS = 'conversations';
+
+function starsOf(projectPath: string, deps: StoreDeps): Switches {
+  return new Switches(path.join(projectPath, STARS), deps.fs, deps.clock);
 }
 
 function todosOf(projectPath: string, deps: StoreDeps): Todos {

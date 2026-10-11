@@ -19,6 +19,7 @@ import { Menu, TitleInput } from './Binder';
 import { ModelPicker } from './ModelPicker';
 import { MAC } from './platform';
 import { ReadOnlyContext } from './read-only';
+import { starredFirst } from './starred';
 
 /**
  * The Assistant beside the editor. Without an API key it only asks for one;
@@ -141,6 +142,7 @@ function Conversations({
   const [chosen, setChosen] = useState<Mode>('writing');
   const mode = current?.mode ?? chosen;
   const listed = list.filter((c) => c.mode === mode);
+  const { starred, rest } = starredFirst(listed);
 
   function choose(next: Mode) {
     setChosen(next);
@@ -190,7 +192,16 @@ function Conversations({
                   Choose a Conversation
                 </option>
               )}
-              {listed.map((c) => (
+              {starred.length > 0 && (
+                <optgroup label="Starred">
+                  {starred.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.title}
+                    </option>
+                  ))}
+                </optgroup>
+              )}
+              {rest.map((c) => (
                 <option key={c.id} value={c.id}>
                   {c.title}
                 </option>
