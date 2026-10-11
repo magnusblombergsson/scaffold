@@ -3218,7 +3218,7 @@ export class ProjectStore {
    */
   starConversation(id: string, starred: boolean): Promise<void> {
     return this.enqueueStructure(async () => {
-      await this.stars.set(STARRED_CONVERSATIONS, id, starred === true);
+      await this.stars.set(STARRED_CONVERSATIONS, id, starred);
       this.emit({ type: 'conversationsChanged' });
     });
   }
