@@ -1,14 +1,16 @@
 import type { Manuscript } from '../shared/project-types';
+import { partOf, placedChapters, topLength } from '../shared/manuscript-order';
 
 /**
- * The Scene or Chapter a create chord works from: the open one when focus is
- * in the editor, the highlighted one when it is in the Binder.
+ * The Part, Chapter or Scene a create chord works from: the open one when
+ * focus is in the editor, the highlighted one when it is in the Binder.
  */
-export type Current = { kind: 'scene' | 'chapter'; id: string } | null;
+export type Current = { kind: 'scene' | 'chapter' | 'part'; id: string } | null;
 
 /**
  * Where a new Scene goes: below the current Scene, or `above` it; at the end
- * of the current Chapter, or its start. Without either, as for an Unplaced
+ * of the current Chapter, or its start; at the end of the current Part's
+ * last Chapter, or the start of its first. Without any, as for an Unplaced
  * Scene, at the end of the Manuscript, or its start. Null with no Chapters.
  */
 export function sceneInsertion(
@@ -17,6 +19,18 @@ export function sceneInsertion(
   above: boolean,
 ): { chapterId: string; index: number } | null {
   const { chapters } = manuscript;
+  const edge = (list: Manuscript['chapters']) => {
+    const chapter = above ? list[0] : list.at(-1);
+    return chapter
+      ? { chapterId: chapter.id, index: above ? 0 : chapter.scenes.length }
+      : null;
+  };
+  if (current?.kind === 'part') {
+    const part = manuscript.parts?.find((p) => p.id === current.id);
+    const inPart = chapters.filter((c) => part?.chapters.includes(c.id));
+    const at = edge(inPart);
+    if (at) return at;
+  }
   for (const chapter of chapters) {
     if (current?.kind === 'chapter' && current.id === chapter.id) {
       return {
@@ -29,26 +43,41 @@ export function sceneInsertion(
       return { chapterId: chapter.id, index: above ? index : index + 1 };
     }
   }
-  const chapter = above ? chapters[0] : chapters.at(-1);
-  if (!chapter) return null;
-  return { chapterId: chapter.id, index: above ? 0 : chapter.scenes.length };
+  return edge(placedChapters(manuscript));
 }
 
 /**
- * Where a new Chapter goes: below the current Chapter, or the current Scene's,
- * or `above` it. Without either, at the end, or the start.
+ * Where a new Chapter goes, as `createChapter` takes it: below the current
+ * Chapter, or the current Scene's, or `above` it, in its Part if it has
+ * one; last in the current Part, or first when `above`. Without any, as for
+ * an Unplaced Chapter, at the end, or the start.
  */
 export function chapterInsertion(
   manuscript: Manuscript,
   current: Current,
   above: boolean,
-): number {
-  const { chapters } = manuscript;
-  const index = chapters.findIndex((chapter) =>
+): { index: number; partId?: string } {
+  if (current?.kind === 'part') {
+    const part = manuscript.parts?.find((p) => p.id === current.id);
+    if (part) {
+      return { index: above ? 0 : part.chapters.length, partId: part.id };
+    }
+  }
+  const chapter = manuscript.chapters.find((chapter) =>
     current?.kind === 'chapter'
       ? chapter.id === current.id
       : chapter.scenes.some((s) => s.id === current?.id),
   );
-  if (index < 0) return above ? 0 : chapters.length;
-  return above ? index : index + 1;
+  if (!chapter || chapter.unplaced) {
+    return { index: above ? 0 : topLength(manuscript) };
+  }
+  const part = partOf(manuscript, chapter.id);
+  const index = part
+    ? part.chapters.indexOf(chapter.id)
+    : (manuscript.top?.indexOf(chapter.id) ??
+      placedChapters(manuscript).indexOf(chapter));
+  return {
+    index: above ? index : index + 1,
+    ...(part && { partId: part.id }),
+  };
 }

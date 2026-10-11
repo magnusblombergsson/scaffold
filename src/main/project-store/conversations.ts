@@ -2,6 +2,7 @@ import path from 'node:path';
 import type { Trashed } from './trash';
 import { randomUUID } from 'node:crypto';
 import {
+  partName,
   PROJECT_OUTLINE,
   unitKey,
   type EntryRef,
@@ -726,21 +727,34 @@ ${text}`);
     }
     const { outlineId } = proposal;
     if (outlineId === PROJECT_OUTLINE) return 'The story';
-    const { chapters, unplaced } = this.deps.manuscript();
+    const {
+      chapters,
+      unplaced,
+      parts = [],
+      partLabel,
+    } = this.deps.manuscript();
     const trashed = [...this.deps.trash.values()];
+    const part =
+      parts.find((p) => p.id === outlineId) ??
+      trashed.find((t) => t.kind === 'part' && t.id === outlineId);
+    if (part && 'title' in part) {
+      return `${partName(partLabel)} “${part.title}”`;
+    }
+    const trashedChapters = trashed.flatMap((t) =>
+      t.kind === 'chapter' ? [t] : t.kind === 'part' ? t.chapters : [],
+    );
     const chapter =
       chapters.find((c) => c.id === outlineId) ??
-      trashed.find((t) => t.kind === 'chapter' && t.id === outlineId);
+      trashedChapters.find((t) => t.id === outlineId);
     if (chapter && 'title' in chapter) return `Chapter “${chapter.title}”`;
     const scene =
       [...chapters.flatMap((c) => c.scenes), ...unplaced].find(
         (s) => s.id === outlineId,
       ) ??
-      trashed
-        .flatMap((t) =>
-          t.kind === 'scene' ? [t] : t.kind === 'chapter' ? t.scenes : [],
-        )
-        .find((s) => s.id === outlineId);
+      [
+        ...trashed.flatMap((t) => (t.kind === 'scene' ? [t] : [])),
+        ...trashedChapters.flatMap((c) => c.scenes),
+      ].find((s) => s.id === outlineId);
     return scene ? `Scene “${scene.title}”` : 'An Outline';
   }
 

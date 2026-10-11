@@ -1,8 +1,10 @@
 import {
   PROJECT_OUTLINE,
   type Manuscript,
+  type ManuscriptChapter,
   type ManuscriptScene,
 } from '../shared/project-types';
+import { partOf, topItems, unplacedChapters } from '../shared/manuscript-order';
 
 /** What the Overview pane beside the Prose lists: the Chapter being written, or the whole Project. */
 export type OverviewScope = 'chapter' | 'project';
@@ -19,23 +21,29 @@ export function defaultScope(writing: Writing): OverviewScope {
 }
 
 /**
- * The rows that list their Scenes as the pane shows a scope, every row's
- * Outline and Notes closed: in Project scope, the Chapter being written, or
- * the Unplaced Scenes. In Chapter scope its Scenes are always listed.
+ * The rows that list their Scenes, or a Part's its Chapters, as the pane
+ * shows a scope, every row's Outline and Notes closed: in Project scope,
+ * the Chapter being written and its Part, or the Unplaced Scenes. In
+ * Chapter scope its Scenes are always listed.
  */
 export function startListed(
   scope: OverviewScope,
   writing: Writing,
+  manuscript?: Manuscript,
 ): ReadonlySet<string> {
-  return new Set(scope === 'chapter' ? [] : [writing.chapterId ?? UNPLACED]);
+  if (scope === 'chapter') return new Set();
+  const part =
+    manuscript && writing.chapterId
+      ? partOf(manuscript, writing.chapterId)
+      : undefined;
+  return new Set([writing.chapterId ?? UNPLACED, ...(part ? [part.id] : [])]);
 }
 
 /**
  * The rows Expand all opens, in order: in Chapter scope that Chapter's, in
- * Project scope every one, and each Chapter and the Unplaced Scenes list
- * their Scenes. Never the
- * Scene being written, whose Outline & Notes are above the Prose, nor a
- * missing Scene.
+ * Project scope every one, and each Part lists its Chapters, and each
+ * Chapter and the Unplaced Scenes their Scenes. Never the Scene being
+ * written, whose Outline & Notes are above the Prose, nor a missing Scene.
  */
 export function expandable(
   manuscript: Manuscript,
@@ -44,14 +52,19 @@ export function expandable(
 ): string[] {
   const scenes = (list: ManuscriptScene[]) =>
     list.filter((s) => s.id !== writing.sceneId && !s.missing).map((s) => s.id);
-  const chapters = manuscript.chapters.filter(
-    (c) => scope === 'project' || c.id === writing.chapterId,
-  );
-  const ids = chapters.flatMap((c) => [c.id, ...scenes(c.scenes)]);
-  if (scope === 'chapter') return ids;
+  const chapterIds = (c: ManuscriptChapter) => [c.id, ...scenes(c.scenes)];
+  if (scope === 'chapter') {
+    const chapter = manuscript.chapters.find((c) => c.id === writing.chapterId);
+    return chapter ? chapterIds(chapter) : [];
+  }
   return [
     PROJECT_OUTLINE,
-    ...ids,
+    ...topItems(manuscript).flatMap((item) =>
+      item.kind === 'part'
+        ? [item.part.id, ...item.chapters.flatMap(chapterIds)]
+        : chapterIds(item.chapter),
+    ),
+    ...unplacedChapters(manuscript).flatMap(chapterIds),
     ...(manuscript.unplaced.length > 0
       ? [UNPLACED, ...scenes(manuscript.unplaced)]
       : []),

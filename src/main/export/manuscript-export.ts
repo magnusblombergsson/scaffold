@@ -26,8 +26,9 @@ import {
 import { docx, type DocxParagraph, type DocxRun } from './docx';
 
 // The Manuscript Export: the Prose of the Scenes the Author ticked, for others
-// to read. Chapter titles are headings and Scenes are separated by a break;
-// nothing else from the Project goes in, not even Scene titles.
+// to read. Chapter titles are headings, a Part's title a heading one level
+// above them, and Scenes are separated by a break; nothing else from the
+// Project goes in, not even Scene titles.
 
 export type ExportFormat = 'docx' | 'markdown';
 
@@ -50,34 +51,44 @@ export type ExportSource = {
 /** The break between Scenes. */
 const SCENE_BREAK = '***';
 
-/** A Chapter's title, and the Prose paragraphs of each of its Scenes that has any. */
-type ExportedChapter = { title: string; scenes: Paragraph[][] };
+/**
+ * A Chapter's title, and the Prose paragraphs of each of its Scenes that has
+ * any; `part`, the title of the Part it starts.
+ */
+type ExportedChapter = { title: string; scenes: Paragraph[][]; part?: string };
+
+/**
+ * The Chapters as exported: a Chapter heading is level 1, or 2 when the
+ * Export holds a Part, whose heading is then level 1.
+ */
+type Exported = { chapters: ExportedChapter[]; level: 1 | 2 };
 
 /**
  * The Prose of the ticked part of the Manuscript as a file of `format`.
- * Empty, Missing and Unplaced Scenes are left out; a Chapter that goes in
- * has its heading even with no Prose.
+ * Empty, Missing and Unplaced Scenes are left out, as are Unplaced
+ * Chapters; a Chapter that goes in has its heading even with no Prose.
  */
 export async function exportManuscript(
   source: ExportSource,
   format: ExportFormat,
   unticked: ExportUnticked,
 ): Promise<Uint8Array> {
-  const chapters = await readChapters(
+  const exported = await readChapters(
     source,
     pickedManuscript(source.manuscript(), unticked),
   );
   return format === 'markdown'
-    ? Buffer.from(markdownOf(chapters), 'utf8')
-    : docx(docxParagraphs(chapters), source.language);
+    ? Buffer.from(markdownOf(exported), 'utf8')
+    : docx(docxParagraphs(exported), source.language);
 }
 
 async function readChapters(
   source: ExportSource,
   manuscript: Manuscript,
-): Promise<ExportedChapter[]> {
-  return Promise.all(
-    manuscript.chapters.map(async (chapter) => {
+): Promise<Exported> {
+  const parts = new Map(manuscript.parts?.map((p) => [p.id, p]));
+  const chapters = await Promise.all(
+    manuscript.chapters.map(async (chapter, i) => {
       const scenes = await Promise.all(
         chapter.scenes
           .filter((scene) => !scene.missing)
@@ -89,19 +100,27 @@ async function readChapters(
             return readProse(markdown).filter(({ spans }) => spans.length > 0);
           }),
       );
+      // A Part's Chapters are in a row: its heading goes before the first.
+      const part =
+        chapter.part !== manuscript.chapters[i - 1]?.part
+          ? parts.get(chapter.part!)
+          : undefined;
       return {
         title: chapter.title,
         scenes: scenes.filter((paragraphs) => paragraphs.length > 0),
+        ...(part && { part: part.title }),
       };
     }),
   );
+  return { chapters, level: parts.size > 0 ? 2 : 1 };
 }
 
 // --- Markdown ---
 
-function markdownOf(chapters: ExportedChapter[]): string {
-  const blocks = chapters.flatMap(({ title, scenes }) => [
-    commonMarkHeading(1, title),
+function markdownOf({ chapters, level }: Exported): string {
+  const blocks = chapters.flatMap(({ title, scenes, part }) => [
+    ...(part !== undefined ? [commonMarkHeading(1, part)] : []),
+    commonMarkHeading(level, title),
     ...scenes.flatMap((paragraphs, i) => [
       ...(i > 0 ? [SCENE_BREAK] : []),
       ...markdownBlocks(paragraphs),
@@ -227,9 +246,12 @@ function lastsUntil(spans: Span[], start: number, mark: Mark): number {
 
 // --- .docx ---
 
-function docxParagraphs(chapters: ExportedChapter[]): DocxParagraph[] {
-  return chapters.flatMap(({ title, scenes }) => [
-    { style: 'heading1' as const, runs: [plain(title)] },
+function docxParagraphs({ chapters, level }: Exported): DocxParagraph[] {
+  return chapters.flatMap(({ title, scenes, part }) => [
+    ...(part !== undefined
+      ? [{ style: 'heading1' as const, runs: [plain(part)] }]
+      : []),
+    { style: `heading${level}` as const, runs: [plain(title)] },
     ...scenes.flatMap((paragraphs, i) => [
       ...(i > 0
         ? [{ align: 'centre' as const, runs: [plain(SCENE_BREAK)] }]

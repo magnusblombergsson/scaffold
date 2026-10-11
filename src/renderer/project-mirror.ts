@@ -219,21 +219,21 @@ export class ProjectMirror {
     });
   }
 
-  /** Gives a Chapter or Scene a Status; the Manuscript showing it follows from main. */
+  /** Gives a Part, Chapter or Scene a Status; the Manuscript showing it follows from main. */
   setStatus(unitId: string, statusId: string | null): Promise<boolean> {
     return this.attempt('set the Status', () =>
       this.api.setStatus(unitId, statusId),
     );
   }
 
-  /** Gives a Chapter, Scene or the Manuscript a Word target, or none. */
+  /** Gives a Part, Chapter, Scene or the Manuscript a Word target, or none. */
   setWordTarget(unitId: string, words: number | null): Promise<boolean> {
     return this.attempt('set the Word target', () =>
       this.api.setWordTarget(unitId, words),
     );
   }
 
-  /** Gives a Chapter, Scene or Entry Tags. */
+  /** Gives a Part, Chapter, Scene or Entry Tags. */
   setTags(unitId: string, tags: string[]): Promise<boolean> {
     return this.attempt('save the Tags', () => this.api.setTags(unitId, tags));
   }

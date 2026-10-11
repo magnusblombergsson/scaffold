@@ -1,6 +1,7 @@
 import { createContext, useContext, type ReactNode } from 'react';
 import type {
   ManuscriptChapter,
+  ManuscriptPart,
   ManuscriptScene,
 } from '../shared/project-types';
 import { statusOf, type Status } from '../shared/status';
@@ -9,7 +10,7 @@ import { ReadOnlyContext } from './read-only';
 import { TagInput } from './TagsDialog';
 
 /**
- * The Project's Status list, and how to give a Scene or Chapter a Status or
+ * The Project's Status list, and how to give a Scene, Chapter or Part a Status or
  * Tags, for wherever they are shown laid out: the Corkboard, the Overview
  * pane and the Outline skeleton. What shows them follows from main.
  */
@@ -55,7 +56,7 @@ export function useStatuses(): Status[] {
   return useStatusAndTags().statuses;
 }
 
-type Unit = ManuscriptChapter | ManuscriptScene;
+type Unit = ManuscriptPart | ManuscriptChapter | ManuscriptScene;
 
 /** A unit's Status dot, named; nothing without a Status. */
 export function UnitStatusDot({ unit }: { unit: Unit | undefined }) {

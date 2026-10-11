@@ -75,7 +75,7 @@ export function WordTargetForm({
   );
 }
 
-/** Set word target… on a Scene or Chapter, from the Binder. */
+/** Set word target… on a Scene, Chapter or Part, from the Binder. */
 export function WordTargetDialog({
   unitName,
   wordTarget,

@@ -3,11 +3,13 @@ import type { Manuscript } from './project-types';
 import type { Status } from './status';
 import {
   chapterTick,
+  partTick,
   pickedManuscript,
   sceneTicked,
   TICK_ALL,
   tickMatching,
   toggleChapter,
+  togglePart,
   toggleScene,
 } from './export-choice';
 
@@ -150,5 +152,62 @@ describe('Tick matching…', () => {
     const unticked = toggleScene(taggedOne, 's2', matched);
     expect(chapterTick(taggedOne, unticked)).toBe('ticked');
     expect(pickedManuscript(tagged, unticked).chapters).toHaveLength(1);
+  });
+});
+
+describe('Ticking a Manuscript with Parts', () => {
+  const withParts: Manuscript = {
+    chapters: [
+      { id: 'c0', title: 'Prologue', scenes: [{ id: 's0', title: 'P' }] },
+      { ...one, part: 'p1' },
+      { ...empty, part: 'p1' },
+      { ...three, part: 'p2' },
+      { id: 'c9', title: 'Unplaced', scenes: [], unplaced: true },
+    ],
+    parts: [
+      { id: 'p1', title: 'Act One', chapters: ['c1', 'c2'] },
+      { id: 'p2', title: 'Act Two', chapters: ['c3'] },
+      { id: 'p3', title: 'Act Three', chapters: [] },
+    ],
+    top: ['c0', 'p1', 'p2', 'p3'],
+    unplaced: [],
+  };
+  const [p1, p2] = withParts.parts!;
+
+  it('ticks a Part by its Chapters', () => {
+    expect(partTick(withParts, p1, TICK_ALL)).toBe('ticked');
+    const unticked = toggleScene(one, 's1', TICK_ALL);
+    expect(partTick(withParts, p1, unticked)).toBe('half');
+    expect(partTick(withParts, p2, unticked)).toBe('ticked');
+  });
+
+  it('ticks or unticks all of a Part’s Chapters and Scenes with it', () => {
+    const unticked = togglePart(withParts, p1, TICK_ALL);
+    expect(partTick(withParts, p1, unticked)).toBe('unticked');
+    expect(chapterTick(one, unticked)).toBe('unticked');
+    expect(chapterTick(empty, unticked)).toBe('unticked');
+    expect(chapterTick(three, unticked)).toBe('ticked');
+    expect(togglePart(withParts, p1, unticked)).toEqual(TICK_ALL);
+    const half = toggleScene(one, 's1', TICK_ALL);
+    expect(partTick(withParts, p1, togglePart(withParts, p1, half))).toBe(
+      'ticked',
+    );
+  });
+
+  it('keeps the Parts with any Chapter picked, and never an Unplaced Chapter', () => {
+    const unticked = togglePart(withParts, p2, TICK_ALL);
+    const picked = pickedManuscript(withParts, unticked);
+    expect(picked.chapters.map((c) => c.id)).toEqual(['c0', 'c1', 'c2']);
+    expect(picked.parts).toEqual([
+      { id: 'p1', title: 'Act One', chapters: ['c1', 'c2'] },
+    ]);
+    expect(picked.top).toEqual(['c0', 'p1']);
+  });
+
+  it('keeps in a Part only its picked Chapters', () => {
+    const unticked = toggleChapter(empty, TICK_ALL);
+    expect(pickedManuscript(withParts, unticked).parts![0].chapters).toEqual([
+      'c1',
+    ]);
   });
 });

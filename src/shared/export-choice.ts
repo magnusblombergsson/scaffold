@@ -1,5 +1,9 @@
 import { filterManuscript, type Filter } from './filter';
-import type { Manuscript, ManuscriptChapter } from './project-types';
+import type {
+  Manuscript,
+  ManuscriptChapter,
+  ManuscriptPart,
+} from './project-types';
 import type { Status } from './status';
 
 // What an Export holds, as the Author chooses it. For the Manuscript, the
@@ -103,25 +107,76 @@ function chaptersWith(
   ];
 }
 
+/** A Part's Chapters, in its order. */
+function chaptersOf(
+  manuscript: Manuscript,
+  part: ManuscriptPart,
+): ManuscriptChapter[] {
+  return manuscript.chapters.filter((c) => c.part === part.id);
+}
+
+/** A Part is ticked by its Chapters; one with none is unticked. */
+export function partTick(
+  manuscript: Manuscript,
+  part: ManuscriptPart,
+  unticked: ExportUnticked,
+): Tick {
+  const ticks = chaptersOf(manuscript, part).map((c) =>
+    chapterTick(c, unticked),
+  );
+  if (ticks.length > 0 && ticks.every((t) => t === 'ticked')) return 'ticked';
+  return ticks.every((t) => t === 'unticked') ? 'unticked' : 'half';
+}
+
+/** Unticks a ticked Part with all its Chapters and Scenes; ticks any other with all of them. */
+export function togglePart(
+  manuscript: Manuscript,
+  part: ManuscriptPart,
+  unticked: ExportUnticked,
+): ExportUnticked {
+  const tick = partTick(manuscript, part, unticked) !== 'ticked';
+  return chaptersOf(manuscript, part).reduce(
+    (next, chapter) =>
+      (chapterTick(chapter, next) === 'ticked') === tick
+        ? next
+        : toggleChapter(chapter, next),
+    unticked,
+  );
+}
+
 /**
  * The Manuscript as far as it is ticked: each Chapter with any ticked Scenes
  * holds only those, a Chapter with none is left out, and an empty Chapter
- * goes in only when its own box is ticked. Unplaced Scenes never go in.
+ * goes in only when its own box is ticked. A Part goes in with the Chapters
+ * of it that do, and is left out when none does. Unplaced Scenes and
+ * Unplaced Chapters never go in.
  */
 export function pickedManuscript(
   manuscript: Manuscript,
   unticked: ExportUnticked,
 ): Manuscript {
+  const chapters = manuscript.chapters.flatMap((chapter) => {
+    if (chapter.unplaced || chapterTick(chapter, unticked) === 'unticked') {
+      return [];
+    }
+    return [
+      {
+        ...chapter,
+        scenes: chapter.scenes.filter((s) => sceneTicked(s.id, unticked)),
+      },
+    ];
+  });
+  if (!manuscript.parts) return { chapters, unplaced: [] };
+  const picked = new Set(chapters.map((c) => c.id));
+  const parts = manuscript.parts.flatMap((part) => {
+    const kept = part.chapters.filter((id) => picked.has(id));
+    return kept.length > 0 ? [{ ...part, chapters: kept }] : [];
+  });
+  const kept = new Set([...picked, ...parts.map((p) => p.id)]);
   return {
-    chapters: manuscript.chapters.flatMap((chapter) => {
-      if (chapterTick(chapter, unticked) === 'unticked') return [];
-      return [
-        {
-          ...chapter,
-          scenes: chapter.scenes.filter((s) => sceneTicked(s.id, unticked)),
-        },
-      ];
-    }),
+    chapters,
+    parts,
+    top: (manuscript.top ?? []).filter((id) => kept.has(id)),
     unplaced: [],
   };
 }

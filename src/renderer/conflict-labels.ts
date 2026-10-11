@@ -1,4 +1,5 @@
 import type { Dropped } from '../shared/api';
+import { partName, type PartLabel } from '../shared/project-types';
 
 /**
  * How a version of a unit in Conflict, or in Trash, is labelled: by the
@@ -26,10 +27,18 @@ export function versionLabel({
 }
 
 /** What the Author is told, once, when one computer's `project.json` lost to another's. */
-export function droppedMessage({ host, chapters, scenes }: Dropped): string {
+export function droppedMessage(
+  { host, chapters, scenes, parts: droppedParts = [] }: Dropped,
+  label?: PartLabel,
+): string {
   const parts = [
     `The Manuscript was rearranged on two computers at once; the order from ${host ?? 'another computer'} was set aside.`,
   ];
+  if (droppedParts.length > 0) {
+    parts.push(
+      `Dropped: ${partName(label, droppedParts.length > 1)} ${quoted(droppedParts)}.`,
+    );
+  }
   if (chapters.length > 0) {
     parts.push(
       `Dropped: ${chapters.length === 1 ? 'Chapter' : 'Chapters'} ${quoted(chapters)}.`,

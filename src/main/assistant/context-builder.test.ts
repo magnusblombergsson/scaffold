@@ -2,7 +2,10 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { ConversationMessage } from '../../shared/conversation';
+import {
+  OPEN_FOCUS as OPEN,
+  type ConversationMessage,
+} from '../../shared/conversation';
 import { findingBlock } from '../../shared/finding';
 import { PROJECT_OUTLINE } from '../../shared/project-types';
 import { instantClock } from '../project-store/clock';
@@ -1084,5 +1087,214 @@ describe('Role note and Appearance', () => {
     );
 
     expect(text).toContain('\nRole: the one who stayed\n');
+  });
+});
+
+describe('Parts', () => {
+  /**
+   * The fixture with an Act “The Sea” holding Chapter “Storm”, with an
+   * Outline and Notes; Chapter “Arrival” stays loose before it.
+   */
+  async function withPart() {
+    const project = await fixture();
+    const { store, chapters } = project;
+    await store.setPartLabel('act');
+    const { id: sea } = await store.createPart(1, 'The Sea');
+    await store.moveChapter(chapters.storm, 0, sea);
+    await store.write(
+      { kind: 'outline', id: sea },
+      { id: sea, body: '- The crossing', meta: {} },
+    );
+    await store.write({ kind: 'notes', id: sea }, { id: sea, body: 'Grey.' });
+    return { ...project, sea };
+  }
+  const skeletonOf = async (
+    view: Awaited<ReturnType<typeof fixture>>['view'],
+  ) =>
+    (
+      await buildContext(view, {
+        mode: 'brainstorm',
+        messages: [message('author', 'Hm.')],
+      })
+    ).system[2].text;
+  const focusText = (context: Awaited<ReturnType<typeof buildContext>>) =>
+    context.system.find((b) => b.text.startsWith('The Interview’s focus'))
+      ?.text;
+
+  it('puts each Part in the skeleton by the Project’s label, its Chapters nested under it and Loose Chapters between', async () => {
+    const { store, view, chapters, scenes, sea } = await withPart();
+    await store.setStatus(sea, 'outlined');
+    await store.setTags(sea, ['Mara']);
+
+    const skeleton = await skeletonOf(view);
+
+    expect(skeleton).toContain(
+      `## Chapter “Arrival”\nId: ${chapters.arrival}\n- She arrives`,
+    );
+    expect(skeleton).toContain(
+      `### Scene “Harbour”\nId: ${scenes.harbour}\n- She waits`,
+    );
+    expect(skeleton).toContain(
+      `## Act “The Sea”\nId: ${sea}\nStatus: Outlined\nTags: Mara\n- The crossing`,
+    );
+    expect(skeleton).toContain(
+      `### Chapter “Storm”\nId: ${chapters.storm}\n- The storm breaks`,
+    );
+    expect(skeleton).toContain(
+      `#### Scene “Wreck”\nId: ${scenes.wreck}\n- The boat is lost`,
+    );
+    expect(skeleton.indexOf('Chapter “Arrival”')).toBeLessThan(
+      skeleton.indexOf('Act “The Sea”'),
+    );
+    expect(skeleton.indexOf('Act “The Sea”')).toBeLessThan(
+      skeleton.indexOf('Chapter “Storm”'),
+    );
+    expect(skeleton).toMatch(/each Act/);
+    expect(skeleton).not.toContain('Grey.');
+  });
+
+  it('puts a Part holding no Chapters in the skeleton', async () => {
+    const { store, view } = await withPart();
+    const { id: empty } = await store.createPart(0, 'Prelude');
+
+    const skeleton = await skeletonOf(view);
+
+    expect(skeleton).toContain(`## Act “Prelude”\nId: ${empty}\n(No Outline.)`);
+  });
+
+  it('never sends a Part’s Word target or image', async () => {
+    const { store, view, sea } = await withPart();
+    await store.setWordTarget(sea, 73519);
+    await store.setImage(
+      { kind: 'part', id: sea },
+      { data: new Uint8Array([0x89, 0x50, 0x4e, 0x47]), extension: 'png' },
+    );
+
+    const foci: InterviewFocus[] = [{ kind: 'part', id: sea }, OPEN];
+    for (const focus of foci) {
+      const text = sent(
+        await buildContext(view, {
+          mode: 'interview',
+          focus,
+          messages: [message('author', 'Hm.')],
+        }),
+      );
+      expect(text).toContain('The crossing');
+      expect(text).not.toMatch(/73,?519|target|\.png|images\/|PNG/i);
+    }
+  });
+
+  it('Writing: a Scene in a Part comes with its Part’s Outline, before its Chapter’s', async () => {
+    const { view, chapters, scenes, sea } = await withPart();
+
+    const context = await buildContext(view, {
+      mode: 'writing',
+      command: 'question',
+      sceneId: scenes.wreck,
+      messages: [message('author', 'Too fast?')],
+    });
+
+    expect(context.saw.units).toEqual([
+      { kind: 'outline', id: sea },
+      { kind: 'outline', id: chapters.storm },
+      { kind: 'outline', id: scenes.wreck },
+      { kind: 'notes', id: scenes.wreck },
+      { kind: 'scene', id: scenes.wreck },
+    ]);
+    const text = sent(context);
+    expect(text).toContain('## Outline of Act “The Sea”\n- The crossing');
+    expect(text).not.toContain('Grey.');
+  });
+
+  it('Writing · Review Chapter: a Chapter in a Part comes with its Part’s Outline', async () => {
+    const { view, chapters, scenes, sea } = await withPart();
+
+    const context = await buildContext(view, {
+      mode: 'writing',
+      command: 'review-chapter',
+      sceneId: scenes.wreck,
+      messages: [message('author', '')],
+    });
+
+    expect(context.saw.units.slice(0, 3)).toEqual([
+      { kind: 'outline', id: sea },
+      { kind: 'outline', id: chapters.storm },
+      { kind: 'notes', id: chapters.storm },
+    ]);
+  });
+
+  it('Writing · free question: an @-mentioned Part brings its Outline and Notes and its Chapters’ Outlines, never their Prose', async () => {
+    const { view, chapters, sea } = await withPart();
+
+    const context = await buildContext(view, {
+      mode: 'writing',
+      command: 'question',
+      sceneId: null,
+      messages: [message('author', 'Does @the sea hold together?')],
+    });
+
+    expect(context.saw.units).toEqual([
+      { kind: 'outline', id: sea },
+      { kind: 'notes', id: sea },
+      { kind: 'outline', id: chapters.storm },
+    ]);
+    const text = sent(context);
+    expect(text).toContain('## Notes on Act “The Sea”\nGrey.');
+    expect(text).not.toContain('Nothing was left of the boat.');
+  });
+
+  it('Interview: a Part in focus brings its Outline and Notes and its Chapters’ Outlines, never their Prose', async () => {
+    const { view, chapters, sea } = await withPart();
+
+    const context = await buildContext(view, {
+      mode: 'interview',
+      focus: { kind: 'part', id: sea },
+      messages: [message('author', 'Go on.')],
+    });
+
+    expect(context.saw.units).toEqual([
+      { kind: 'outline', id: sea },
+      { kind: 'notes', id: sea },
+      { kind: 'outline', id: chapters.storm },
+    ]);
+    const focus = focusText(context);
+    expect(focus).toContain(`the Act “The Sea”, Id: ${sea}`);
+    expect(focus).toContain('Chapter “Storm”');
+    expect(focus).toMatch(/Interview out its Outline/);
+    const text = sent(context);
+    expect(text).toContain('In focus: the Author’s own Outlines and Notes.');
+    expect(text).not.toContain('Nothing was left of the boat.');
+  });
+
+  it('Interview: names a Part in focus no longer there as gone, by the Project’s label', async () => {
+    const { store, view, sea } = await withPart();
+    await store.trashPart(sea);
+
+    const context = await buildContext(view, {
+      mode: 'interview',
+      focus: { kind: 'part', id: sea },
+      messages: [message('author', 'Go on.')],
+    });
+
+    expect(focusText(context)).toContain(
+      'an Act which is no longer in the Project',
+    );
+    expect(context.saw.units).toEqual([]);
+  });
+
+  it('Interview Tag focus: adds the Outline of a Part with the Tag', async () => {
+    const { store, view, sea } = await withPart();
+    await store.setTags(sea, ['Mara']);
+
+    const context = await buildContext(view, {
+      mode: 'interview',
+      focus: { kind: 'tag', tag: 'mara' },
+      messages: [message('author', 'Go on.')],
+    });
+
+    expect(context.saw.units).toEqual([{ kind: 'outline', id: sea }]);
+    expect(sent(context)).toContain(
+      '## Outline of Act “The Sea”\n- The crossing',
+    );
   });
 });

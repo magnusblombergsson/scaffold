@@ -12,11 +12,13 @@ import type {
 } from '../shared/api';
 import {
   ENTRY_TYPE_LABELS,
+  partName,
   PROJECT_OUTLINE,
   unitKey,
   type EntryType,
   type Manuscript,
   type ManuscriptChapter,
+  type ManuscriptPart,
   type ManuscriptScene,
   type UnitRef,
   type UnitValue,
@@ -45,7 +47,7 @@ import { Binder, type Selection } from './Binder';
 import { BrainstormRoom } from './BrainstormRoom';
 import { WINDOW_MODES, type ShowProposal } from './Conversation';
 import { ConflictList, ConflictResolver } from './Conflicts';
-import { ChapterCorkboard, ProjectCorkboard } from './Corkboard';
+import { ChapterCorkboard, PartCorkboard, ProjectCorkboard } from './Corkboard';
 import { EntryTypePicker } from './EntryTypePicker';
 import { EntryView, VISIBILITY_LABELS } from './EntryView';
 import { ExportManuscriptDialog } from './ExportManuscriptDialog';
@@ -336,6 +338,12 @@ function ProjectView({
     selected?.kind === 'chapter'
       ? manuscript.chapters.find((c) => c.id === selected.id)
       : undefined;
+  const openPart =
+    selected?.kind === 'part'
+      ? manuscript.parts?.find((p) => p.id === selected.id)
+      : undefined;
+  /** What the Project calls a Part, as in “Act”. */
+  const partNamed = partName(manuscript.partLabel);
   const [mode, setMode] = useState<Mode>('writing');
   /**
    * The Modes shown so far. Each stays mounted, hidden while another is
@@ -458,7 +466,7 @@ function ProjectView({
     showEntry(id);
   }
 
-  /** Opens a Todo's Scene, Chapter or Entry in Writing, from a room. */
+  /** Opens a Todo's Scene, Chapter, Part or Entry in Writing, from a room. */
   function openInWriting(link: TodoLink) {
     if (link.kind === 'entry') return openEntryInWriting(link.id);
     switchMode('writing');
@@ -515,6 +523,7 @@ function ProjectView({
     return (
       id === PROJECT_OUTLINE ||
       manuscript.chapters.some((chapter) => chapter.id === id) ||
+      !!manuscript.parts?.some((part) => part.id === id) ||
       allScenes(manuscript).some(({ scene }) => scene.id === id)
     );
   }
@@ -710,9 +719,11 @@ function ProjectView({
     ? { kind: 'scene', id: open.scene.id }
     : openChapter
       ? { kind: 'chapter', id: openChapter.id }
-      : openEntry
-        ? { kind: 'entry', id: openEntry.id }
-        : null;
+      : openPart
+        ? { kind: 'part', id: openPart.id }
+        : openEntry
+          ? { kind: 'entry', id: openEntry.id }
+          : null;
   /** Whether Writing's Todos tab shows only the open unit's. In memory for the window. */
   const [onlyOpenTodos, setOnlyOpenTodos] = useState(false);
   /** The Todo the Author started from elsewhere, while the Todos tab is open. */
@@ -753,12 +764,12 @@ function ProjectView({
   const [projectSettingsOpen, setProjectSettingsOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [storyBibleExportOpen, setStoryBibleExportOpen] = useState(false);
-  /** The Chapter or Scene whose Tags… is open, by id. */
+  /** The Part, Chapter or Scene whose Tags… is open, by id. */
   const [tagging, setTagging] = useState<string | null>(null);
   /** It, as the Manuscript has it now; gone if it is no longer there. */
   const taggingUnit =
     tagging === null ? undefined : unitOf(tagging, manuscript);
-  /** The Chapter or Scene whose Set word target… is open, by id. */
+  /** The Part, Chapter or Scene whose Set word target… is open, by id. */
   const [settingWordTarget, setSettingWordTarget] = useState<string | null>(
     null,
   );
@@ -877,7 +888,7 @@ function ProjectView({
     return () => clearTimeout(timer);
   }, [notice]);
 
-  /** The Chapter or Scene whose title the Binder is editing, if any. */
+  /** The Part, Chapter or Scene whose title the Binder is editing, if any. */
   const [renaming, setRenaming] = useState<string | null>(null);
   /**
    * The Entry whose Name gets focus as it opens, as one just made or by F2;
@@ -894,20 +905,25 @@ function ProjectView({
   const [pickingEntryType, setPickingEntryType] = useState(false);
 
   /**
-   * The Scene or Chapter a create chord works from: the highlighted one when
-   * focus is in the Binder, else the open one.
+   * The Scene, Chapter or Part a create chord works from: the highlighted
+   * one when focus is in the Binder, else the open one.
    */
   function current(): Current {
     const row = document.activeElement?.closest<HTMLElement>(
       '.binder [data-kind]',
     );
     if (row?.dataset.id) {
+      const { kind } = row.dataset;
       return {
-        kind: row.dataset.kind === 'chapter' ? 'chapter' : 'scene',
+        kind: kind === 'chapter' || kind === 'part' ? kind : 'scene',
         id: row.dataset.id,
       };
     }
-    if (selected?.kind === 'scene' || selected?.kind === 'chapter') {
+    if (
+      selected?.kind === 'scene' ||
+      selected?.kind === 'chapter' ||
+      selected?.kind === 'part'
+    ) {
       return { kind: selected.kind, id: selected.id };
     }
     return null;
@@ -1016,9 +1032,9 @@ function ProjectView({
         select({ kind: 'scene', id });
       });
     } else if (command.type === 'newChapter') {
-      const index = chapterInsertion(manuscript, current(), command.above);
+      const at = chapterInsertion(manuscript, current(), command.above);
       void create(
-        () => window.project.createChapter(index),
+        () => window.project.createChapter(at.index, undefined, at.partId),
         'Chapter created',
       ).then((id) => {
         if (!id) return;
@@ -1138,9 +1154,11 @@ function ProjectView({
                     )
                   : openChapter
                     ? openChapter.title
-                    : openEntry
-                      ? entryTitle(openEntry)
-                      : selected?.kind === 'project' && 'Project Outline'}
+                    : openPart
+                      ? openPart.title
+                      : openEntry
+                        ? entryTitle(openEntry)
+                        : selected?.kind === 'project' && 'Project Outline'}
           </span>
           {mode === 'writing' && (
             <button
@@ -1379,6 +1397,7 @@ function ProjectView({
                   ) : (
                     <TrashView
                       items={trash}
+                      partLabel={manuscript.partLabel}
                       reveal={trashReveal}
                       onRestore={(item) =>
                         change(
@@ -1416,6 +1435,7 @@ function ProjectView({
                       width={pane('overview').width}
                       onOpenScene={(id) => select({ kind: 'scene', id })}
                       onOpenChapter={(id) => select({ kind: 'chapter', id })}
+                      onOpenPart={(id) => select({ kind: 'part', id })}
                       onOpenProject={() => select({ kind: 'project' })}
                       onClose={toggleOverview}
                     />
@@ -1445,6 +1465,7 @@ function ProjectView({
                     reveal={revealIn(PROJECT_OUTLINE)}
                     onOpenScene={(id) => select({ kind: 'scene', id })}
                     onOpenChapter={(id) => select({ kind: 'chapter', id })}
+                    onOpenPart={(id) => select({ kind: 'part', id })}
                     onAddTodo={startTodo}
                   />
                 </main>
@@ -1497,6 +1518,17 @@ function ProjectView({
                     language={language}
                     reveal={revealIn(openChapter.id)}
                     onOpenScene={(id) => select({ kind: 'scene', id })}
+                    onAddTodo={startTodo}
+                  />
+                </main>
+              ) : openPart ? (
+                <main className="centre" key={openPart.id}>
+                  <PartCorkboard
+                    part={openPart}
+                    manuscript={manuscript}
+                    language={language}
+                    reveal={revealIn(openPart.id)}
+                    onOpenChapter={(id) => select({ kind: 'chapter', id })}
                     onAddTodo={startTodo}
                   />
                 </main>
@@ -1616,9 +1648,11 @@ function ProjectView({
                   ? { kind: 'scene', id: open.scene.id }
                   : openChapter
                     ? { kind: 'chapter', id: openChapter.id }
-                    : selected?.kind === 'project'
-                      ? { kind: 'project' }
-                      : null,
+                    : openPart
+                      ? { kind: 'part', id: openPart.id }
+                      : selected?.kind === 'project'
+                        ? { kind: 'project' }
+                        : null,
             selection: mode === 'writing' ? selectionCounts : null,
           })}
           onSetWordTarget={(unitId, words) => void setWordTarget(unitId, words)}
@@ -1672,7 +1706,7 @@ function ProjectView({
         )}
         {taggingUnit && (
           <TagsDialog
-            unitName={`${taggingUnit.kind === 'chapter' ? 'Chapter' : 'Scene'} “${taggingUnit.node.title}”`}
+            unitName={`${unitKindName(taggingUnit.kind, partNamed)} “${taggingUnit.node.title}”`}
             tags={taggingUnit.node.tags ?? NO_TAGS}
             onChange={(tags) => setTags(taggingUnit.node.id, tags)}
             onClose={() => setTagging(null)}
@@ -1680,7 +1714,7 @@ function ProjectView({
         )}
         {wordTargetUnit && (
           <WordTargetDialog
-            unitName={`${wordTargetUnit.kind === 'chapter' ? 'Chapter' : 'Scene'} “${wordTargetUnit.node.title}”`}
+            unitName={`${unitKindName(wordTargetUnit.kind, partNamed)} “${wordTargetUnit.node.title}”`}
             wordTarget={wordTargetUnit.node.wordTarget}
             onSave={(words) =>
               void setWordTarget(wordTargetUnit.node.id, words)
@@ -1705,6 +1739,7 @@ function ProjectView({
             displayName={project.displayName}
             language={language}
             foldedNoteImage={foldedNoteImage}
+            partLabel={manuscript.partLabel}
             statuses={statuses}
             readOnly={readOnly !== null}
             onClose={() => setProjectSettingsOpen(false)}
@@ -1764,18 +1799,29 @@ function allScenes(
 /** No Tags, the same each time. */
 const NO_TAGS: string[] = [];
 
-/** The Chapter or Scene of `id` in `manuscript`, if it is there. */
+/** The Part, Chapter or Scene of `id` in `manuscript`, if it is there. */
 function unitOf(
   id: string,
   manuscript: Manuscript,
 ):
+  | { kind: 'part'; node: ManuscriptPart }
   | { kind: 'chapter'; node: ManuscriptChapter }
   | { kind: 'scene'; node: ManuscriptScene }
   | undefined {
+  const part = manuscript.parts?.find((p) => p.id === id);
+  if (part) return { kind: 'part', node: part };
   const chapter = manuscript.chapters.find((c) => c.id === id);
   if (chapter) return { kind: 'chapter', node: chapter };
   const found = allScenes(manuscript).find(({ scene }) => scene.id === id);
   return found && { kind: 'scene', node: found.scene };
+}
+
+/** A Part, as the Project calls it, a Chapter or a Scene, as in a dialog's title. */
+function unitKindName(
+  kind: 'part' | 'chapter' | 'scene',
+  partNamed: string,
+): string {
+  return kind === 'part' ? partNamed : kind === 'chapter' ? 'Chapter' : 'Scene';
 }
 
 /** What to open once a unit's Conflict is resolved: the unit it belongs to. */
@@ -1784,6 +1830,9 @@ function selectionOf(ref: UnitRef, manuscript: Manuscript): Selection {
     return { kind: 'entry', id: ref.id };
   }
   if (ref.id === PROJECT_OUTLINE) return { kind: 'project' };
+  if (manuscript.parts?.some((p) => p.id === ref.id)) {
+    return { kind: 'part', id: ref.id };
+  }
   return manuscript.chapters.some((c) => c.id === ref.id)
     ? { kind: 'chapter', id: ref.id }
     : { kind: 'scene', id: ref.id };

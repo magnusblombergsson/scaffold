@@ -55,6 +55,7 @@ type Units = {
   store: ProjectStore;
   sceneId: string;
   chapterId: string;
+  partId: string;
   entryId: string;
 };
 
@@ -68,10 +69,12 @@ async function newProject(): Promise<Units> {
   opened.push(store);
   const chapter = store.tree().chapters[0];
   const { id: entryId } = await store.createEntry('character', 'Anna');
+  const { id: partId } = await store.createPart(1, 'Act One');
   return {
     store,
     sceneId: chapter.scenes[0].id,
     chapterId: chapter.id,
+    partId,
     entryId,
   };
 }
@@ -111,10 +114,11 @@ describe('the Assistant’s view of unit details', () => {
   it.each(DETAILS.map((row) => [row.key, row] as const))(
     'shows %s only if its row says so',
     async (key, row) => {
-      const { store, sceneId, chapterId, entryId } = await newProject();
+      const { store, sceneId, chapterId, partId, entryId } = await newProject();
       const targets: (ImageRef | { kind: 'manuscript' })[] = [
         { kind: 'scene', id: sceneId },
         { kind: 'chapter', id: chapterId },
+        { kind: 'part', id: partId },
         { kind: 'entry', id: entryId },
         { kind: 'manuscript' },
       ].filter((ref) => row.kinds.includes(ref.kind as DetailKind)) as never;
@@ -192,7 +196,7 @@ describe('a Split', () => {
 });
 
 describe('Trash', () => {
-  const kinds = ['scene', 'chapter', 'entry'] as const;
+  const kinds = ['scene', 'chapter', 'part', 'entry'] as const;
   it.each(
     DETAILS.filter((row) => row.trash === 'moves').flatMap((row) =>
       kinds.map((kind) => [row.key, kind] as const),
@@ -200,9 +204,14 @@ describe('Trash', () => {
   )(
     'moves the %s file of a %s to Trash and back on restore',
     async (key, kind) => {
-      const { store, sceneId, chapterId, entryId } = await newProject();
+      const { store, sceneId, chapterId, partId, entryId } = await newProject();
       await store.createChapter(1, 'Later');
-      const id = { scene: sceneId, chapter: chapterId, entry: entryId }[kind];
+      const id = {
+        scene: sceneId,
+        chapter: chapterId,
+        part: partId,
+        entry: entryId,
+      }[kind];
       await SAMPLES[key](store, { kind, id });
       const name = `${id}.jpg`;
       const images = () => readdir(path.join(projectPath, 'images'));
@@ -212,6 +221,7 @@ describe('Trash', () => {
 
       if (kind === 'entry') await store.trashEntry(id);
       else if (kind === 'scene') await store.trashScene(id);
+      else if (kind === 'part') await store.trashPart(id);
       else await store.trashChapter(id);
 
       expect(await images()).not.toContain(name);
@@ -237,11 +247,12 @@ describe('writing one detail', () => {
     'changes only %s and keysSavedAt in the header of a %s',
     async (key, kind) => {
       const row = { key };
-      const { store, sceneId, chapterId, entryId } = await newProject();
+      const { store, sceneId, chapterId, partId, entryId } = await newProject();
       await store.close();
       const ids = {
         scene: sceneId,
         chapter: chapterId,
+        part: partId,
         entry: entryId,
         manuscript: PROJECT_OUTLINE,
       };
