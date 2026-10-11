@@ -28,6 +28,8 @@ export type ProjectSnapshot = {
   /** Set once `entries` holds the Story Bible, not the empty list before it. */
   entriesLoaded: boolean;
   trash: TrashItem[];
+  /** What is in the Drawer, kept as Trash keeps things but never emptied. */
+  drawer: TrashItem[];
   todos: Todo[];
   /** The Custom fields, by Entry type, each type's in their order. */
   customFields: CustomField[];
@@ -88,6 +90,7 @@ export class ProjectMirror {
       entries: [],
       entriesLoaded: false,
       trash: [],
+      drawer: [],
       todos: [],
       customFields: [],
       keyFields: {},
@@ -148,9 +151,16 @@ export class ProjectMirror {
     for (const listener of this.eventListeners) listener(event);
   }
 
-  /** Reads the Trash again, as it changes with the structure, Entries and Conversations. */
+  /**
+   * Reads the Trash and the Drawer again, as they change with the
+   * structure, Entries and Conversations.
+   */
   private refreshTrash = async (): Promise<void> => {
-    this.set({ trash: await this.api.listTrash() });
+    const [trash, drawer] = await Promise.all([
+      this.api.listTrash(),
+      this.api.listDrawer(),
+    ]);
+    this.set({ trash, drawer });
   };
 
   private apply(event: ProjectEvent): void {

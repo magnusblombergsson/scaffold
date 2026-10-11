@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { ProjectEvent } from '../../shared/api';
 import type { Mode } from '../../shared/conversation';
+import type { Orphaned } from '../../shared/proposal';
 import { readTags } from '../../shared/tags';
 import { unitName } from '../../shared/unit-name';
 import {
@@ -13,6 +14,7 @@ import {
   type EntryValue,
   type ImageRef,
   type Manuscript,
+  type MovableKind,
   type ProjectTree,
   type SceneNode,
   type TrashItem,
@@ -25,6 +27,8 @@ import {
   CHAPTER_FILE,
   chapterTrashPath,
   isPartFile,
+  placeDir,
+  type Place,
   PART_FILE,
   partTrashPath,
   ENTRY_TRASH_FILE,
@@ -88,6 +92,7 @@ export type TrashedScene = {
   index?: number;
   /** The keys of its place in the tree that this app doesn't know. */
   node?: UnknownKeys;
+  drawer?: true;
 };
 
 /**
@@ -106,6 +111,7 @@ export type TrashedChapter = {
   scenes: SceneNode[];
   /** The keys of its place in the tree that this app doesn't know. */
   node: UnknownKeys;
+  drawer?: true;
 };
 
 /** A Part in Trash, with the Chapters deleted along with it. */
@@ -119,6 +125,7 @@ export type TrashedPart = {
   chapters: TrashedChapter[];
   /** The keys of its place in the tree that this app doesn't know. */
   node: UnknownKeys;
+  drawer?: true;
 };
 
 /** A version of a unit set aside when its Conflict was resolved; `id` is its own. */
@@ -140,17 +147,24 @@ export type TrashedEntry = {
   trashedAt: number;
   /** Its Tags, still in use while it is in Trash. */
   tags?: string[];
+  drawer?: true;
 };
 
-/** A Conversation in Trash: its whole log, at `trash/<id>.jsonl`. */
+/** A Conversation in Trash: its whole log, at `trash/<id>.jsonl`, or `drawer/<id>.jsonl` in the Drawer. */
 export type TrashedConversation = {
   kind: 'conversation';
   id: string;
   title: string;
   mode: Mode;
   trashedAt: number;
+  drawer?: true;
 };
 
+/**
+ * What is in Trash or, marked `drawer`, in the Drawer: kept the same way in
+ * `drawer/`, and treated everywhere as in Trash, but never emptied. A version
+ * is only ever in Trash.
+ */
 export type Trashed =
   | TrashedScene
   | TrashedChapter
@@ -158,6 +172,32 @@ export type Trashed =
   | TrashedVersion
   | TrashedEntry
   | TrashedConversation;
+
+/** Where an item is kept. */
+export function placeOf(item: Trashed): Place {
+  return item.kind !== 'version' && item.drawer ? 'drawer' : 'trash';
+}
+
+/** Why a unit kept in `place`, or in neither, is out of reach. */
+export function orphanedIn(
+  place: Place | undefined,
+): Exclude<Orphaned, 'field'> {
+  return !place ? 'gone' : place === 'drawer' ? 'drawered' : 'trashed';
+}
+
+/** Where a unit kept in `place` is, in words for an error. */
+export function placeName(place: Place): string {
+  return place === 'drawer' ? 'in the Drawer' : 'in Trash';
+}
+
+/** An item as kept in `place`. */
+export function inPlace<T extends Exclude<Trashed, TrashedVersion>>(
+  item: T,
+  place: Place,
+): T {
+  const { drawer: _, ...rest } = item;
+  return (place === 'drawer' ? { ...rest, drawer: true } : rest) as T;
+}
 
 /** What `trash/<id>.entry.md` records beside the Entry's own frontmatter and description. */
 export type TrashedEntryInfo = { at: number };
@@ -364,21 +404,16 @@ export type TrashDeps = {
 /** Reverts a move to Trash or a restore, while it is the latest change. */
 export type Undo = () => Promise<void>;
 
-/** The kinds that can be moved to Trash by id; a version is set aside by a Conflict. */
-export type MovableKind =
-  | 'scene'
-  | 'chapter'
-  | 'part'
-  | 'entry'
-  | 'conversation';
+/** A version can't be moved by id: it is set aside by a Conflict. */
+export type { MovableKind };
 
 /** How one kind of Trashed item is described, moved, restored and emptied. */
 type Row<T extends Trashed> = {
   /** The ids whose images go with the item. */
   ids: (item: T) => string[];
   describe: (item: T) => TrashItem;
-  /** Moves what is live under `id` to Trash; a version has none. */
-  move?: (id: string) => Promise<void>;
+  /** Moves what is live under `id` to Trash or the Drawer; a version has none. */
+  move?: (id: string, place: Place) => Promise<void>;
   /** Puts the item back, and says how to undo that. */
   restore: (item: T) => Promise<Undo>;
 };
@@ -388,7 +423,8 @@ type Rows = { [K in Trashed['kind']]: Row<Extract<Trashed, { kind: K }>> };
 /**
  * Trash: the Scenes, Chapters, Entries, Conversations and Conflict versions
  * that were deleted, and are kept until it is emptied. Each kind is a row of
- * one table; listing, restoring and emptying work from it.
+ * one table; listing, restoring and emptying work from it. The Drawer is its
+ * second place, in `drawer/`, which emptying never touches.
  */
 export class Trash {
   readonly items: Map<string, Trashed>;
@@ -403,10 +439,10 @@ export class Trash {
         trashedAt: item.trashedAt,
         ...(item.chapter && { chapterTitle: item.chapter.title }),
       }),
-      move: (id) => this.moveScene(id),
+      move: (id, place) => this.moveScene(id, place),
       restore: async (item) => {
         await this.restoreProse(item);
-        return this.again('scene', item.id);
+        return this.again('scene', item);
       },
     },
     chapter: {
@@ -418,10 +454,10 @@ export class Trash {
         trashedAt: item.trashedAt,
         scenes: item.scenes.map((s) => ({ ...s })),
       }),
-      move: (id) => this.moveChapter(id),
+      move: (id, place) => this.moveChapter(id, place),
       restore: async (item) => {
         await this.restoreProse(item);
-        return this.again('chapter', item.id);
+        return this.again('chapter', item);
       },
     },
     part: {
@@ -440,10 +476,10 @@ export class Trash {
           scenes: c.scenes.map((s) => ({ ...s })),
         })),
       }),
-      move: (id) => this.movePart(id),
+      move: (id, place) => this.movePart(id, place),
       restore: async (item) => {
         await this.restorePart(item);
-        return this.again('part', item.id);
+        return this.again('part', item);
       },
     },
     entry: {
@@ -455,19 +491,25 @@ export class Trash {
         trashedAt: item.trashedAt,
         type: item.type,
       }),
-      move: (id) => this.moveEntry(id),
+      move: (id, place) => this.moveEntry(id, place),
       restore: async (item) => {
         await this.restoreEntry(item);
-        return this.again('entry', item.id);
+        return this.again('entry', item);
       },
     },
     conversation: {
       ids: (item) => [item.id],
-      describe: (item) => ({ ...item }),
-      move: (id) => this.deps.conversations().moveToTrash(id),
+      describe: (item) => ({
+        kind: 'conversation',
+        id: item.id,
+        title: item.title,
+        mode: item.mode,
+        trashedAt: item.trashedAt,
+      }),
+      move: (id, place) => this.deps.conversations().moveToTrash(id, place),
       restore: async (item) => {
         await this.deps.conversations().restore(item.id);
-        return this.again('conversation', item.id);
+        return this.again('conversation', item);
       },
     },
     version: {
@@ -498,9 +540,10 @@ export class Trash {
     this.items = items;
   }
 
-  /** Latest first. */
-  list(): TrashItem[] {
+  /** What is kept in `place`, latest first. */
+  list(place: Place = 'trash'): TrashItem[] {
     return [...this.items.values()]
+      .filter((item) => placeOf(item) === place)
       .sort((a, b) => b.trashedAt - a.trashedAt)
       .map((item) => this.row(item).describe(item));
   }
@@ -523,21 +566,59 @@ export class Trash {
     for (const [id, item] of items) this.items.set(id, item);
   }
 
-  /** Whether a Part, Chapter or Scene is in Trash, on its own or with what held it. */
+  /** Whether a Part, Chapter or Scene is in Trash or the Drawer, on its own or with what held it. */
   has(id: string): boolean {
-    return [...this.items.values()].some(
+    return this.where(id) !== undefined;
+  }
+
+  /** Where a Part, Chapter or Scene is kept, on its own or with what held it; undefined if in neither. */
+  where(id: string): Place | undefined {
+    const item = [...this.items.values()].find(
       (item) =>
         item.id === id ||
         ((item.kind === 'chapter' || item.kind === 'part') &&
           this.row(item).ids(item).includes(id)),
     );
+    return item && placeOf(item);
   }
 
-  /** Moves what is live under `id` to Trash, and says how to put it back. */
-  async move(kind: MovableKind, id: string): Promise<Undo> {
-    await this.rows[kind].move!(id);
+  /** Moves what is live under `id` to Trash or the Drawer, and says how to put it back. */
+  async move(
+    kind: MovableKind,
+    id: string,
+    place: Place = 'trash',
+  ): Promise<Undo> {
+    const move = this.rows[kind]?.move;
+    if (!move) throw new Error(`A ${kind} can't be moved by id`);
+    await move(id, place);
     return async () => {
       await this.restore(id);
+    };
+  }
+
+  /**
+   * Moves an item from Trash to the Drawer or back, as restoring it and
+   * moving it again, each of which is safe from a crash. Should the move
+   * fail, the item goes back where it was. Says how to move it back.
+   */
+  async moveBetween(id: string, to: Place): Promise<Undo> {
+    const item = this.items.get(id);
+    if (!item) throw new Error(`Nothing in Trash or the Drawer has id ${id}`);
+    if (item.kind === 'version') {
+      throw new Error('A set-aside version is only ever in Trash');
+    }
+    const from = placeOf(item);
+    if (from !== to) {
+      await this.restore(id);
+      try {
+        await this.rows[item.kind].move!(id, to);
+      } catch (error) {
+        await this.rows[item.kind].move!(id, from);
+        throw error;
+      }
+    }
+    return async () => {
+      await this.moveBetween(id, from);
     };
   }
 
@@ -553,9 +634,13 @@ export class Trash {
     return this.rows[item.kind] as unknown as Row<T>;
   }
 
-  /** Moves the item of `id` to Trash again, which undoes its restore. */
-  private again(kind: MovableKind, id: string): Undo {
-    return () => this.rows[kind].move!(id);
+  /** Moves a restored item to where it was kept again, which undoes its restore. */
+  private again(
+    kind: MovableKind,
+    item: Exclude<Trashed, TrashedVersion>,
+  ): Undo {
+    const place = placeOf(item);
+    return () => this.rows[kind].move!(item.id, place);
   }
 
   /** Writes a version of a unit to Trash, as `trash/<id>.version.md`. */
@@ -636,7 +721,7 @@ export class Trash {
     item: TrashedEntry,
     change: (tags: string[]) => string[],
   ): Promise<void> {
-    const file = entryTrashPath(this.deps.path, item.id);
+    const file = entryTrashPath(this.deps.path, item.id, placeOf(item));
     const { frontmatter, body } = parseUnitFile(
       await this.deps.fs.readFile(file),
     );
@@ -654,7 +739,7 @@ export class Trash {
     this.items.set(item.id, withTags(item, tags));
   }
 
-  private async moveScene(sceneId: string): Promise<void> {
+  private async moveScene(sceneId: string, place: Place): Promise<void> {
     const { files, closeScenes } = this.deps;
     const tree = this.deps.tree();
     const found = tryFindScene(tree, sceneId);
@@ -662,12 +747,15 @@ export class Trash {
       if (found) this.deps.refuseMissing(sceneRef(sceneId));
       throw new Error(`No Scene ${sceneId}`);
     }
-    if (this.items.has(sceneId)) {
-      // Another version of it is in Trash, such as one deleted on another
+    const kept = this.items.get(sceneId);
+    if (kept) {
+      // Another version of it is kept, such as one deleted on another
       // computer while this one was written to. Both are kept.
       throw new ProjectError(
         'in-trash',
-        'Another version of this Scene is in Trash; restore or empty it first',
+        placeOf(kept) === 'drawer'
+          ? 'Another version of this Scene is in the Drawer; restore it first'
+          : 'Another version of this Scene is in Trash; restore or empty it first',
       );
     }
     await closeScenes([sceneId], async (prose) => {
@@ -682,15 +770,15 @@ export class Trash {
         if (node) info.node = node;
         found.chapter.scenes.splice(info.index, 1);
       }
-      await this.writeScene(sceneId, prose.get(sceneId)!, info);
+      await this.writeScene(sceneId, prose.get(sceneId)!, info, place);
       if (found) await this.deps.saveTree(tree);
-      this.items.set(sceneId, trashedScene(sceneId, info));
+      this.items.set(sceneId, inPlace(trashedScene(sceneId, info), place));
     });
     // Last: a crash before leaves it in images/, where restoring finds it.
-    await this.moveImages([sceneId], 'trash');
+    await this.moveImages([sceneId], place, 'away');
   }
 
-  private async moveChapter(chapterId: string): Promise<void> {
+  private async moveChapter(chapterId: string, place: Place): Promise<void> {
     const tree = expanded(this.deps.tree());
     const chapter = findChapter(tree, chapterId);
     if (tree.chapters.length === 1) {
@@ -706,33 +794,45 @@ export class Trash {
     await this.deps.closeScenes(ids, async (prose) => {
       const at = this.deps.clock.now();
       const where = unplace(tree, chapterId);
-      const record = await this.writeChapter(chapter, prose, at, {
-        index: where?.index ?? tree.top.length,
-        ...(where?.part !== undefined && { inPart: where.part }),
-      });
+      const record = await this.writeChapter(
+        chapter,
+        prose,
+        at,
+        {
+          index: where?.index ?? tree.top.length,
+          ...(where?.part !== undefined && { inPart: where.part }),
+        },
+        place,
+      );
       tree.chapters = tree.chapters.filter((c) => c.id !== chapterId);
       await this.deps.saveTree(settled(tree));
-      this.items.set(chapter.id, trashedChapter(record));
+      this.items.set(chapter.id, inPlace(trashedChapter(record), place));
     });
     // Its Scenes' images go with its own.
-    await this.moveImages([chapterId, ...ids], 'trash');
+    await this.moveImages([chapterId, ...ids], place, 'away');
   }
 
-  /** Writes a Chapter's Scenes and its record to Trash, which the tree still places. */
+  /** Writes a Chapter's Scenes and its record to `place`, which the tree still places. */
   private async writeChapter(
     chapter: ChapterNode,
     prose: Map<string, UnitFile>,
     at: number,
-    place: Pick<ChapterFile, 'index' | 'inPart' | 'withPart'>,
+    where: Pick<ChapterFile, 'index' | 'inPart' | 'withPart'>,
+    place: Place,
   ): Promise<ChapterFile> {
     for (const [i, scene] of chapter.scenes.entries()) {
-      await this.writeScene(scene.id, prose.get(scene.id)!, {
-        at,
-        title: scene.title,
-        chapter: { id: chapter.id, title: chapter.title },
-        index: i,
-        withChapter: true,
-      });
+      await this.writeScene(
+        scene.id,
+        prose.get(scene.id)!,
+        {
+          at,
+          title: scene.title,
+          chapter: { id: chapter.id, title: chapter.title },
+          index: i,
+          withChapter: true,
+        },
+        place,
+      );
     }
     const record: ChapterFile = {
       ...unknownKeys(chapter),
@@ -741,13 +841,13 @@ export class Trash {
       title: chapter.title,
       trashedAt: at,
       scenes: chapter.scenes,
-      ...place,
+      ...where,
     };
-    await this.deps.fs.mkdir(trashDir(this.deps.path));
+    await this.deps.fs.mkdir(placeDir(this.deps.path, place));
     await safeWrite(
       this.deps.fs,
       this.deps.clock,
-      chapterTrashPath(this.deps.path, chapter.id),
+      chapterTrashPath(this.deps.path, chapter.id, place),
       `${JSON.stringify(record, null, 2)}\n`,
     );
     return record;
@@ -758,7 +858,7 @@ export class Trash {
    * as when deleted on its own, marked as deleted with the Part, then the
    * Part's record, then the tree.
    */
-  private async movePart(partId: string): Promise<void> {
+  private async movePart(partId: string, place: Place): Promise<void> {
     const tree = expanded(this.deps.tree());
     const part = findPart(tree, partId);
     const chapters = part.chapters.map((id) => findChapter(tree, id));
@@ -774,11 +874,13 @@ export class Trash {
       const at = this.deps.clock.now();
       const records = new Map<string, TrashedChapter>();
       for (const [index, chapter] of chapters.entries()) {
-        const record = await this.writeChapter(chapter, prose, at, {
-          index,
-          inPart: partId,
-          withPart: true,
-        });
+        const record = await this.writeChapter(
+          chapter,
+          prose,
+          at,
+          { index, inPart: partId, withPart: true },
+          place,
+        );
         records.set(chapter.id, trashedChapter(record));
       }
       const index = tree.top.indexOf(partId);
@@ -791,22 +893,23 @@ export class Trash {
         trashedAt: at,
         chapters: [...part.chapters],
       };
-      await this.deps.fs.mkdir(trashDir(this.deps.path));
+      await this.deps.fs.mkdir(placeDir(this.deps.path, place));
       await safeWrite(
         this.deps.fs,
         this.deps.clock,
-        partTrashPath(this.deps.path, partId),
+        partTrashPath(this.deps.path, partId, place),
         `${JSON.stringify(record, null, 2)}\n`,
       );
       tree.top.splice(index, 1);
       tree.parts = tree.parts.filter((p) => p.id !== partId);
       tree.chapters = tree.chapters.filter((c) => !records.has(c.id));
       await this.deps.saveTree(settled(tree));
-      this.items.set(partId, trashedPart(record, records));
+      this.items.set(partId, inPlace(trashedPart(record, records), place));
     });
     await this.moveImages(
       [partId, ...chapters.map((c) => c.id), ...ids],
-      'trash',
+      place,
+      'away',
     );
   }
 
@@ -814,12 +917,13 @@ export class Trash {
     id: string,
     { frontmatter, body }: UnitFile,
     trashed: TrashedSceneInfo,
+    place: Place,
   ): Promise<void> {
-    await this.deps.fs.mkdir(trashDir(this.deps.path));
+    await this.deps.fs.mkdir(placeDir(this.deps.path, place));
     await safeWrite(
       this.deps.fs,
       this.deps.clock,
-      sceneTrashPath(this.deps.path, id),
+      sceneTrashPath(this.deps.path, id, place),
       formatUnitFile({
         frontmatter: { ...frontmatterOf(id, frontmatter), trashed },
         body,
@@ -827,7 +931,7 @@ export class Trash {
     );
   }
 
-  private async moveEntry(entryId: string): Promise<void> {
+  private async moveEntry(entryId: string, place: Place): Promise<void> {
     const { path: projectPath, fs, clock, unitWriter } = this.deps;
     const ref = entryRef(entryId);
     this.deps.refuseUnavailable(ref);
@@ -844,14 +948,14 @@ export class Trash {
       const { frontmatter: own, body } = parseUnitFile(
         entryFile(latest, file.frontmatter),
       );
-      await fs.mkdir(trashDir(projectPath));
+      await fs.mkdir(placeDir(projectPath, place));
       await safeWrite(
         fs,
         clock,
-        entryTrashPath(projectPath, entryId),
+        entryTrashPath(projectPath, entryId, place),
         formatUnitFile({ frontmatter: { ...own, trashedEntry: info }, body }),
       );
-      this.items.set(entryId, trashedEntry(latest, info));
+      this.items.set(entryId, inPlace(trashedEntry(latest, info), place));
       // Its description is in Trash now.
       unitWriter.settle(key);
       this.deps.setEntries(() => this.deps.entries.delete(entryId));
@@ -860,7 +964,7 @@ export class Trash {
       for (const name of filesMovingWithTrash(latest)) {
         await this.moveFile(
           imagePath(projectPath, name),
-          path.join(trashDir(projectPath), name),
+          path.join(placeDir(projectPath, place), name),
         );
       }
     } finally {
@@ -877,7 +981,8 @@ export class Trash {
         `${item.name} is already in the Story Bible`,
       );
     }
-    const trashed = entryTrashPath(projectPath, item.id);
+    const place = placeOf(item);
+    const trashed = entryTrashPath(projectPath, item.id, place);
     const { frontmatter, body } = parseUnitFile(await fs.readFile(trashed));
     const { trashedEntry: _, ...own } = frontmatter;
     const file = { frontmatter: own, body };
@@ -886,7 +991,7 @@ export class Trash {
       parseDetails('entry', item.id, own),
     )) {
       await this.moveFile(
-        path.join(trashDir(projectPath), name),
+        path.join(placeDir(projectPath, place), name),
         imagePath(projectPath, name),
       );
     }
@@ -907,6 +1012,7 @@ export class Trash {
   private async restoreProse(item: TrashedScene | TrashedChapter) {
     const { id } = item;
     const { path: projectPath, fs, files } = this.deps;
+    const keptIn = placeOf(item);
     const tree = this.deps.tree();
     const placed = new Set(sceneIds(tree));
     const live = (sceneId: string) => placed.has(sceneId) || files.has(sceneId);
@@ -923,11 +1029,11 @@ export class Trash {
 
     // Images first: a crash after leaves them in images/, where restoring
     // finds them.
-    await this.moveImages(this.row(item).ids(item), 'images');
+    await this.moveImages(this.row(item).ids(item), keptIn, 'back');
     // Scene files first, the tree next, the Trash copies last.
     const restored: string[] = [];
     const restoreFile = async (sceneId: string) => {
-      if (await this.restoreSceneFile(sceneId)) restored.push(sceneId);
+      if (await this.restoreSceneFile(sceneId, keptIn)) restored.push(sceneId);
     };
 
     if (item.kind === 'chapter') {
@@ -961,10 +1067,10 @@ export class Trash {
     this.items.delete(id);
 
     for (const sceneId of restored) {
-      await fs.unlink(sceneTrashPath(projectPath, sceneId));
+      await fs.unlink(sceneTrashPath(projectPath, sceneId, keptIn));
     }
     if (item.kind === 'chapter') {
-      await fs.unlink(chapterTrashPath(projectPath, id));
+      await fs.unlink(chapterTrashPath(projectPath, id, keptIn));
     }
   }
 
@@ -972,9 +1078,12 @@ export class Trash {
    * Writes a Scene's Trash copy back to `scenes/`, if it is here; its Trash
    * copy stays until the tree places it. Resolves with whether it was.
    */
-  private async restoreSceneFile(sceneId: string): Promise<boolean> {
+  private async restoreSceneFile(
+    sceneId: string,
+    place: Place,
+  ): Promise<boolean> {
     const { path: projectPath, fs, clock } = this.deps;
-    const file = sceneTrashPath(projectPath, sceneId);
+    const file = sceneTrashPath(projectPath, sceneId, place);
     if (!(await fs.exists(file))) return false;
     const { frontmatter, body } = parseUnitFile(await fs.readFile(file));
     const { trashed: _, ...previous } = frontmatter;
@@ -994,6 +1103,7 @@ export class Trash {
    */
   private async restorePart(item: TrashedPart): Promise<void> {
     const { path: projectPath, fs, files } = this.deps;
+    const place = placeOf(item);
     const full = expanded(this.deps.tree());
     if (isPart(full, item.id)) {
       throw new ProjectError(
@@ -1001,7 +1111,7 @@ export class Trash {
         `${item.title} is already in the Manuscript`,
       );
     }
-    await this.moveImages(this.row(item).ids(item), 'images');
+    await this.moveImages(this.row(item).ids(item), place, 'back');
     const placed = new Set(sceneIds(full));
     const chapterIds = new Set(full.chapters.map((c) => c.id));
     const chapters = item.chapters.filter((c) => !chapterIds.has(c.id));
@@ -1011,7 +1121,9 @@ export class Trash {
         (s) => !placed.has(s.id) && !files.has(s.id),
       );
       for (const scene of scenes) {
-        if (await this.restoreSceneFile(scene.id)) restored.push(scene.id);
+        if (await this.restoreSceneFile(scene.id, place)) {
+          restored.push(scene.id);
+        }
       }
       full.chapters.push({
         ...chapter.node,
@@ -1032,26 +1144,30 @@ export class Trash {
     this.items.delete(item.id);
 
     for (const sceneId of restored) {
-      await fs.unlink(sceneTrashPath(projectPath, sceneId));
+      await fs.unlink(sceneTrashPath(projectPath, sceneId, place));
     }
     for (const chapter of item.chapters) {
-      const file = chapterTrashPath(projectPath, chapter.id);
+      const file = chapterTrashPath(projectPath, chapter.id, place);
       if (await fs.exists(file)) await fs.unlink(file);
     }
-    await fs.unlink(partTrashPath(projectPath, item.id));
+    await fs.unlink(partTrashPath(projectPath, item.id, place));
   }
 
-  /** Moves the files the Parts, Chapters and Scenes of `ids` have in Trash's keeping, to Trash or back. */
+  /**
+   * Moves the files the Parts, Chapters and Scenes of `ids` have in Trash's
+   * keeping `away` to `place`, or `back` from it to `images/`.
+   */
   private async moveImages(
     ids: readonly string[],
-    to: 'trash' | 'images',
+    place: Place,
+    direction: 'away' | 'back',
   ): Promise<void> {
     for (const id of ids) {
       for (const name of filesMovingWithTrash(this.deps.unitDetails(id))) {
-        const inTrash = path.join(trashDir(this.deps.path), name);
+        const kept = path.join(placeDir(this.deps.path, place), name);
         const inImages = imagePath(this.deps.path, name);
-        if (to === 'trash') await this.moveFile(inImages, inTrash);
-        else await this.moveFile(inTrash, inImages);
+        if (direction === 'away') await this.moveFile(inImages, kept);
+        else await this.moveFile(kept, inImages);
       }
     }
   }
@@ -1066,9 +1182,15 @@ export class Trash {
     await renameWithRetry(this.deps.fs, this.deps.clock, from, to);
   }
 
-  /** Deletes everything in Trash for good. Nothing done before can be undone. */
+  /**
+   * Deletes everything in Trash for good; the Drawer is untouched. Nothing
+   * done before can be undone.
+   */
   async empty(): Promise<void> {
     const { path: projectPath, fs, entries } = this.deps;
+    // What is in the Drawer keeps its Outline, Notes, private notes and
+    // Todo links, should another copy of it be in Trash.
+    const drawered = (id: string) => this.where(id) === 'drawer';
     const dir = trashDir(projectPath);
     // Part records first, then Chapter records: a crash then leaves their
     // Chapters and Scenes in Trash on their own, still restorable.
@@ -1081,11 +1203,11 @@ export class Trash {
       const id = (ID_FILE.exec(name) ??
         CHAPTER_FILE.exec(name) ??
         PART_FILE.exec(name))?.[1];
-      if (id && !this.deps.isLive(id))
+      if (id && !this.deps.isLive(id) && !drawered(id))
         await this.deps.deleteOutlineAndNotes(id);
       // So do an Entry's private notes.
       const entryId = ENTRY_TRASH_FILE.exec(name)?.[1];
-      if (entryId && !entries.has(entryId)) {
+      if (entryId && !entries.has(entryId) && !drawered(entryId)) {
         await this.deps.deleteUnitFile({ kind: 'private', id: entryId });
       }
     }
@@ -1113,12 +1235,19 @@ export class Trash {
       }
     }
     // A Todo linked to what was in Trash stays, as plain text.
-    const emptied = new Set(
-      [...this.items.values()].flatMap((item) => this.row(item).ids(item)),
+    const inTrash = [...this.items.values()].filter(
+      (item) => placeOf(item) === 'trash',
     );
-    this.items.clear();
+    const emptied = new Set(
+      inTrash.flatMap((item) => this.row(item).ids(item)),
+    );
+    for (const item of inTrash) this.items.delete(item.id);
     await this.deps.dropTodoLinks(
-      (id) => emptied.has(id) && !this.deps.isLive(id) && !entries.has(id),
+      (id) =>
+        emptied.has(id) &&
+        !this.deps.isLive(id) &&
+        !entries.has(id) &&
+        !drawered(id),
     );
   }
 }

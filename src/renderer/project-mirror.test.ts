@@ -66,6 +66,7 @@ const opened: OpenedProject = {
 type Held = {
   entries: EntrySummary[];
   trash: TrashItem[];
+  drawer: TrashItem[];
   todos: Todo[];
   customFields: CustomField[];
   keyFields: KeyFieldChoices;
@@ -80,6 +81,7 @@ function setUp(held: Partial<Held> = {}) {
   const main: Held = {
     entries: [],
     trash: [],
+    drawer: [],
     todos: [],
     customFields: [],
     keyFields: {},
@@ -99,6 +101,7 @@ function setUp(held: Partial<Held> = {}) {
     {
       listEntries: async () => main.entries,
       listTrash: async () => main.trash,
+      listDrawer: async () => main.drawer,
       listTodos: async () => main.todos,
       listCustomFields: async () => main.customFields,
       listKeyFields: async () => main.keyFields,
@@ -140,6 +143,7 @@ describe('ProjectMirror', () => {
     const { mirror, main, settle } = setUp({
       entries: [entry('a')],
       trash: [trashed('t')],
+      drawer: [trashed('d')],
       todos: [todo('x')],
       customFields: [field('f')],
       keyFields: { item: { description: false } },
@@ -159,6 +163,7 @@ describe('ProjectMirror', () => {
       entries: [entry('a')],
       entriesLoaded: true,
       trash: [trashed('t')],
+      drawer: [trashed('d')],
       todos: [todo('x')],
       customFields: [field('f')],
       keyFields: { item: { description: false } },
@@ -184,6 +189,18 @@ describe('ProjectMirror', () => {
       customFields: [field('g')],
       trash: [trashed('f')],
     });
+  });
+
+  it('reads the Drawer again with the Trash, as when a Conversation goes there', async () => {
+    const { mirror, main, tell, settle } = setUp();
+    mirror.start();
+    await settle();
+    main.drawer = [trashed('c')];
+
+    tell({ type: 'conversationsChanged' });
+    await settle();
+
+    expect(mirror.getSnapshot().drawer).toEqual([trashed('c')]);
   });
 
   it('takes the Key fields main tells of, over those it was loading', async () => {

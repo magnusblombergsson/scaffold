@@ -69,6 +69,9 @@ const projectHandlers: Handlers<
   listEntries: async ({ store }) => store.listEntries(),
   createEntry: ({ store }, type, name) => store.createEntry(type, name),
   trashEntry: ({ store }, entryId) => store.trashEntry(entryId),
+  moveToDrawer: ({ store }, kind, id) => store.moveToDrawer(kind, id),
+  moveBetweenTrashAndDrawer: ({ store }, id, to) =>
+    store.moveBetweenTrashAndDrawer(id, to),
   importEntries: ({ store }, entries) => store.importEntries(entries),
   setEntryVisibility: ({ store }, entryId, visibility) =>
     store.setEntryVisibility(entryId, visibility),
@@ -83,6 +86,7 @@ const projectHandlers: Handlers<
   restore: ({ store }, id) => store.restore(id),
   undo: ({ store }, step) => store.undo(step),
   listTrash: async ({ store }) => store.listTrash(),
+  listDrawer: async ({ store }) => store.listDrawer(),
   listConflicts: async ({ store }) => store.listConflicts(),
   readConflictVersion: ({ store }, ref, versionId) =>
     store.readConflictVersion(ref, versionId),

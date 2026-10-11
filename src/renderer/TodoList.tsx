@@ -391,7 +391,7 @@ function TodoRow({
             }}
           >
             {view.title}
-            {view.trashId && ' (in Trash)'}
+            {view.trashId && (view.drawer ? ' (in the Drawer)' : ' (in Trash)')}
           </button>
         )}
       </span>

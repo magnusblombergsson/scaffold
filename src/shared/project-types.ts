@@ -324,6 +324,20 @@ export type ManuscriptScene = SceneNode & {
 };
 
 /**
+ * Where units taken out of the story are kept: Trash, until the Author
+ * empties it, or the Drawer, which is never emptied.
+ */
+export type Place = 'trash' | 'drawer';
+
+/** The kinds that can be moved to Trash or the Drawer by id. */
+export type MovableKind =
+  | 'scene'
+  | 'chapter'
+  | 'part'
+  | 'entry'
+  | 'conversation';
+
+/**
  * A deleted Scene or Chapter, or a version of a unit set aside when its
  * Conflict was resolved, recoverable until Trash is emptied. A Scene names the
  * Chapter it was deleted from, if it had one; a Chapter lists the Scenes
