@@ -37,6 +37,7 @@ import {
   unitImageItems,
   UnitThumbnail,
 } from './UnitImage';
+import { useImagePicker } from './ImagePicker';
 
 /** Whether the cards show their images large, not their Outline and Notes. */
 const ImagesContext = createContext(false);
@@ -701,6 +702,7 @@ function CardTitle({
   onAddTodo(): void;
 }) {
   const readOnly = useContext(ReadOnlyContext);
+  const imagePicker = useImagePicker();
   const images = useContext(ImagesContext);
   const [menuOpen, setMenuOpen] = useState(false);
   const { title } = unit;
@@ -726,7 +728,7 @@ function CardTitle({
         open={menuOpen}
         onOpenChange={setMenuOpen}
         items={[
-          ...unitImageItems(unit, readOnly),
+          ...unitImageItems(unit, readOnly, imagePicker),
           addTodoItem(readOnly, onAddTodo),
         ]}
       />

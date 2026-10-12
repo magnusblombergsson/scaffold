@@ -32,6 +32,7 @@ import { ReadOnlyContext } from './read-only';
 import { statusOf, type Status } from '../shared/status';
 import type { TodoLink } from '../shared/todo';
 import { unitImageItems } from './UnitImage';
+import { useImagePicker } from './ImagePicker';
 import {
   partName,
   PROJECT_OUTLINE,
@@ -104,6 +105,7 @@ export function Binder({
 }: Props) {
   const project = window.project;
   const readOnly = useContext(ReadOnlyContext);
+  const imagePicker = useImagePicker();
   const { chapters, parts = [] } = manuscript;
   /** What the Project calls a Part, as in “Act”. */
   const name = partName(manuscript.partLabel);
@@ -346,7 +348,7 @@ export function Binder({
         statusItem(scene),
         tagsItem(scene),
         wordTargetItem(scene),
-        ...unitImageItems(scene, readOnly),
+        ...unitImageItems(scene, readOnly, imagePicker),
         addTodoItem(readOnly, () => onAddTodo({ kind: 'scene', id: scene.id })),
         ...moves,
         ...toTrash,
@@ -384,7 +386,7 @@ export function Binder({
       statusItem(scene),
       tagsItem(scene),
       wordTargetItem(scene),
-      ...unitImageItems(scene, readOnly),
+      ...unitImageItems(scene, readOnly, imagePicker),
       addTodoItem(readOnly, () => onAddTodo({ kind: 'scene', id: scene.id })),
       ...toTrash,
     ];
@@ -475,7 +477,7 @@ export function Binder({
       statusItem(chapter),
       tagsItem(chapter),
       wordTargetItem(chapter),
-      ...unitImageItems(chapter, readOnly),
+      ...unitImageItems(chapter, readOnly, imagePicker),
       addTodoItem(readOnly, () =>
         onAddTodo({ kind: 'chapter', id: chapter.id }),
       ),
@@ -518,7 +520,7 @@ export function Binder({
       statusItem(part),
       tagsItem(part),
       wordTargetItem(part),
-      ...unitImageItems(part, readOnly),
+      ...unitImageItems(part, readOnly, imagePicker),
       addTodoItem(readOnly, () => onAddTodo({ kind: 'part', id: part.id })),
       // Its Chapters and their Scenes go with it: the Manuscript keeps at
       // least one Chapter, and a Missing Scene has no Prose here to keep.

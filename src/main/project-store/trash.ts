@@ -3,6 +3,7 @@ import path from 'node:path';
 import type { ProjectEvent } from '../../shared/api';
 import type { Mode } from '../../shared/conversation';
 import type { Orphaned } from '../../shared/proposal';
+import { entryTitle } from '../../shared/entry';
 import { readTags } from '../../shared/tags';
 import { unitName } from '../../shared/unit-name';
 import {
@@ -12,6 +13,7 @@ import {
   type EntrySummary,
   type EntryType,
   type EntryValue,
+  type ImageHolder,
   type ImageRef,
   type Manuscript,
   type MovableKind,
@@ -402,6 +404,9 @@ export type TrashDeps = {
 };
 
 /** Reverts a move to Trash or a restore, while it is the latest change. */
+/** A unit holding an image, and where that image's file would be. */
+export type HeldImageFile = { holder: ImageHolder; file: string };
+
 export type Undo = () => Promise<void>;
 
 /** A version can't be moved by id: it is set aside by a Conflict. */
@@ -580,6 +585,54 @@ export class Trash {
           this.row(item).ids(item).includes(id)),
     );
     return item && placeOf(item);
+  }
+
+  /**
+   * The Parts, Chapters, Scenes and Entries kept in `place`, those deleted
+   * with another too, each with the file in `place` its image would be, if
+   * it names one. An Entry whose file isn't here yet names none.
+   */
+  async imagesIn(place: Place): Promise<HeldImageFile[]> {
+    const dir = placeDir(this.deps.path, place);
+    const held = (holder: ImageHolder, image?: string): HeldImageFile[] =>
+      image ? [{ holder, file: path.join(dir, image) }] : [];
+    const outline =
+      (kind: 'part' | 'chapter' | 'scene') =>
+      ({ id, title }: { id: string; title: string }) =>
+        held({ kind, id, title }, this.deps.unitDetails(id)?.image);
+    const chapter = (node: ChapterNode) => [
+      ...outline('chapter')(node),
+      ...node.scenes.flatMap(outline('scene')),
+    ];
+    const files: HeldImageFile[] = [];
+    for (const item of this.items.values()) {
+      if (item.kind === 'version' || placeOf(item) !== place) continue;
+      if (item.kind === 'scene') files.push(...outline('scene')(item));
+      if (item.kind === 'chapter') files.push(...chapter(item));
+      if (item.kind === 'part') {
+        files.push(...outline('part')(item), ...item.chapters.flatMap(chapter));
+      }
+      if (item.kind === 'entry') {
+        const holder = {
+          kind: 'entry' as const,
+          id: item.id,
+          title: entryTitle(item),
+        };
+        files.push(...held(holder, await this.keptEntryImage(item.id, place)));
+      }
+    }
+    return files;
+  }
+
+  /** The image file an Entry kept in `place` names; none while its file isn't here. */
+  private async keptEntryImage(
+    id: string,
+    place: Place,
+  ): Promise<string | undefined> {
+    const file = entryTrashPath(this.deps.path, id, place);
+    if (!(await this.deps.fs.exists(file))) return undefined;
+    const { frontmatter } = parseUnitFile(await this.deps.fs.readFile(file));
+    return parseDetails('entry', id, frontmatter).image;
   }
 
   /** Moves what is live under `id` to Trash or the Drawer, and says how to put it back. */

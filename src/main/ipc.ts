@@ -81,6 +81,13 @@ const projectHandlers: Handlers<
   setEntryType: ({ store }, entryId, type) => store.setEntryType(entryId, type),
   chooseImage: ({ store, sender }, ref) =>
     chooseImage(sender, (image) => store.setImage(ref, image)),
+  projectImages: async ({ store }, except) => store.projectImages(except),
+  projectImage: async ({ store }, ref) => {
+    const image = await store.readProjectImage(ref);
+    return image && imageDataUrl(image);
+  },
+  copyImage: ({ store, sender }, ref, source) =>
+    takeImage(sender, () => store.copyImage(ref, source)),
   removeImage: ({ store }, ref) => store.removeImage(ref),
   image: async ({ store }, ref) => {
     const image = await store.readImage(ref);
@@ -369,9 +376,22 @@ async function chooseImage(
     : await dialog.showOpenDialog(options);
   if (canceled || filePaths.length === 0) return false;
   rememberFolder('images', path.dirname(filePaths[0]));
+  return takeImage(sender, () =>
+    use(entryImageOf(nativeImage.createFromPath(filePaths[0]))),
+  );
+}
+
+/**
+ * Makes an image a unit's with `use`; tells the Author when it can't be
+ * read or stored.
+ */
+async function takeImage(
+  sender: WebContents,
+  use: () => Promise<void>,
+): Promise<boolean> {
+  const window = BrowserWindow.fromWebContents(sender);
   try {
-    const image = entryImageOf(nativeImage.createFromPath(filePaths[0]));
-    await use(image);
+    await use();
     return true;
   } catch (error) {
     console.error(`Can't set the image:`, error);
