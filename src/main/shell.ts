@@ -84,6 +84,13 @@ import {
   projectLookup,
   type ProjectStore,
 } from './project-store/project-store';
+import {
+  backupName,
+  checkBackup,
+  insideFolder,
+  restoreBackup,
+} from './project-store/backup';
+import { writeFailureReason } from './project-store/safe-write';
 import { menuTemplate, proseMenuTemplate, type MenuState } from './menu';
 import { menuWindow } from './menu-window';
 import { ProjectWindows } from './project-windows';
@@ -495,6 +502,86 @@ const shellHandlers: Handlers<ShellApi, typeof shellMethods, WindowContext> = {
         storyBibleExportImages: choice.images,
       }),
     );
+  },
+  backUpProject: async (ctx) => {
+    const store = projectWindows.of(ctx.sender);
+    const window = windowOf(ctx);
+    const tell = (message: string, detail?: string) =>
+      dialog.showMessageBox(window, {
+        type: 'warning',
+        buttons: ['OK'],
+        message,
+        detail,
+      });
+    // The window's edits first; the store has them written.
+    await requestRendererFlush(ctx.sender);
+    const { canceled, filePath } = await dialog.showSaveDialog(window, {
+      title: 'Back Up Project',
+      buttonLabel: 'Back Up',
+      defaultPath: path.join(
+        app.getPath('documents'),
+        backupName(store.displayName, new Date()),
+      ),
+      filters: [{ name: 'Backup', extensions: ['zip'] }],
+      properties: ['createDirectory', 'showOverwriteConfirmation'],
+    });
+    if (canceled || !filePath) return null;
+    // Real paths, so that a link into the Project folder is seen as inside it.
+    const real = (target: string) => realpath(target).catch(() => target);
+    const target = path.join(
+      await real(path.dirname(filePath)),
+      path.basename(filePath),
+    );
+    if (insideFolder(target, await real(store.path))) {
+      await tell(
+        'Choose a place outside the Project folder',
+        `A Backup is never saved inside ${store.displayName}, where it would be synced and backed up again.`,
+      );
+      return null;
+    }
+    try {
+      await store.backUp(target);
+    } catch (error) {
+      await tell(
+        error instanceof ProjectError
+          ? error.message
+          : `Can't back up ${store.displayName}: ${writeFailureReason(error)}.`,
+      );
+      return null;
+    }
+    return path.basename(target);
+  },
+  restoreBackup: async (ctx) => {
+    const window = windowOf(ctx);
+    const chosen = await dialog.showOpenDialog(window, {
+      title: 'Restore Project from Backup',
+      buttonLabel: 'Restore',
+      filters: [{ name: 'Backup', extensions: ['zip'] }],
+      properties: ['openFile'],
+    });
+    if (chosen.canceled || chosen.filePaths.length === 0) return null;
+    const zipPath = chosen.filePaths[0];
+    let folderName: string;
+    try {
+      ({ folderName } = await checkBackup(zipPath));
+    } catch (error) {
+      return openFailure(zipPath, error);
+    }
+    // Never over a Project: always a new folder.
+    const { canceled, filePath } = await dialog.showSaveDialog(window, {
+      title: 'Restore into a New Project',
+      buttonLabel: 'Restore',
+      nameFieldLabel: 'Project name',
+      defaultPath: path.join(app.getPath('documents'), folderName),
+      properties: ['createDirectory'],
+    });
+    if (canceled || !filePath) return null;
+    try {
+      await restoreBackup(zipPath, filePath);
+    } catch (error) {
+      return openFailure(filePath, error);
+    }
+    return openPath(ctx, filePath);
   },
   openRecent: (ctx, projectPath) => openPath(ctx, projectPath),
   locateProject: async (ctx, oldPath) => {

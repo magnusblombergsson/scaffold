@@ -181,6 +181,20 @@ export function menuTemplate(
           ...sending({ type: 'exportStoryBible' }),
         },
         { type: 'separator' },
+        // The window's edits are written first.
+        {
+          id: 'backUpProject',
+          label: 'Back Up Project…',
+          enabled: !!project,
+          ...sending({ type: 'backUp' }),
+        },
+        // Always into a new folder, as a new Project.
+        {
+          id: 'restoreBackup',
+          label: 'Restore Project from Backup…',
+          ...sending({ type: 'restoreBackup' }),
+        },
+        { type: 'separator' },
         mac ? { role: 'close' } : { role: 'quit' },
       ],
     },

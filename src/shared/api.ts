@@ -800,6 +800,17 @@ export interface ShellApi {
    * version of those in Conflict. Resolves when done or cancelled.
    */
   exportStoryBible(choice: StoryBibleChoice): Promise<void>;
+  /**
+   * Has this window's edits written, then writes a Backup of its Project
+   * where the Author chooses. Resolves with the file's name once written;
+   * null when cancelled, or refused, as the Author is then told.
+   */
+  backUpProject(): Promise<string | null>;
+  /**
+   * Asks for a Backup and checks it, then asks for a new folder, restores
+   * the Project there and opens it, as Open Project does.
+   */
+  restoreBackup(): Promise<OpenResult>;
   /** Opens a Project from the recent list. */
   openRecent(path: string): Promise<OpenResult>;
   /** Asks where a recent Project that wasn't found is now, and opens it. */
@@ -1101,6 +1112,8 @@ export const shellMethods = {
   exportManuscript: 'invoke',
   storyBibleExportImages: 'invoke',
   exportStoryBible: 'invoke',
+  backUpProject: 'invoke',
+  restoreBackup: 'invoke',
   openRecent: 'invoke',
   locateProject: 'invoke',
   recentProjects: 'invoke',

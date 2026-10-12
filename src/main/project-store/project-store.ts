@@ -105,6 +105,7 @@ import {
   type Fingerprint,
 } from './file-system';
 import { FormatUpgraded, GatedFileSystem } from './gated-file-system';
+import { backUpProject } from './backup';
 import { freeName, safeWrite } from './safe-write';
 import {
   markerHosts,
@@ -1140,6 +1141,21 @@ export class ProjectStore {
       );
       return false;
     }
+  }
+
+  /**
+   * Writes a Backup of the Project at `target` once every edit is on disk;
+   * refuses while any isn't, or while any file is online-only.
+   */
+  async backUp(target: string): Promise<void> {
+    await this.flush();
+    if (this.hasUnsaved()) {
+      throw new ProjectError(
+        'unsaved',
+        `${this.displayName} can't be backed up yet: some changes aren't saved. Back Up again once they are, so that the Backup holds them.`,
+      );
+    }
+    await backUpProject(this.path, target, this.deps.fs);
   }
 
   /** A watcher event: checks the files once the burst it belongs to is over. */

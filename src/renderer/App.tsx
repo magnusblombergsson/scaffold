@@ -137,6 +137,8 @@ export function App() {
         else if (command.type === 'openRecent')
           void open(() => window.shell.openRecent(command.path));
         else if (command.type === 'import') void chooseImport();
+        else if (command.type === 'restoreBackup')
+          void open(window.shell.restoreBackup);
         else if (command.type === 'settings') openSettings();
         else if (command.type === 'shortcuts') setShortcutsOpen(true);
         else if (command.type === 'format') {
@@ -254,6 +256,12 @@ export function App() {
         Open Project…
       </button>
       <button onClick={() => void chooseImport()}>Import…</button>
+      <button
+        title="Restore Project from Backup"
+        onClick={() => open(window.shell.restoreBackup)}
+      >
+        Restore from Backup…
+      </button>
       <button
         title={withShortcut('Settings', SHORTCUTS.settings, MAC)}
         onClick={openSettings}
@@ -1031,6 +1039,12 @@ function ProjectView({
     }
     if (command.type === 'importStoryBible') {
       void chooseStoryBibleImport();
+      return true;
+    }
+    if (command.type === 'backUp') {
+      void window.shell.backUpProject().then((name) => {
+        if (name) showNotice(`Backed up as ${name}`);
+      });
       return true;
     }
     if (command.type === 'zen') {
