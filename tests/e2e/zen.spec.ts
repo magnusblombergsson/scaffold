@@ -5,7 +5,13 @@ import {
   type Page,
 } from '@playwright/test';
 import path from 'node:path';
-import { answerDialogs, chooseMenu, launch, useTempDir } from './app';
+import {
+  answerDialogs,
+  chooseMenu,
+  launch,
+  useTempDir,
+  roomButton,
+} from './app';
 
 const tempDir = useTempDir();
 
@@ -122,11 +128,12 @@ test('in zen, an edge tab still docks its pane; Escape leaves zen and gives the 
     await page.keyboard.press('Control+Shift+F');
     await expectZen(app, page);
 
-    await leftEdge(page).getByRole('button', { name: 'Story Bible' }).click();
+    await leftEdge(page).getByRole('button', { name: 'Manuscript' }).click();
     await expect(leftPane(page)).toBeVisible();
-    await expect(
-      page.getByRole('tab', { name: 'Story Bible' }),
-    ).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('tab', { name: 'Manuscript' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
     await rightEdge(page).getByRole('button', { name: 'Assistant' }).click();
     await expect(assistant(page)).toBeVisible();
 
@@ -183,10 +190,7 @@ test('switching Mode in zen leaves it there, and zen resumes on the return to Wr
     // The header slides in to switch Mode.
     const width = await page.evaluate(() => window.innerWidth);
     await page.mouse.move(width / 2, 1);
-    await page
-      .getByRole('group', { name: 'Mode' })
-      .getByRole('button', { name: 'Brainstorm' })
-      .click();
+    await roomButton(page, 'Brainstorm').click();
     await expectNoZen(app, page);
 
     await page.keyboard.press('Control+1');
@@ -204,7 +208,7 @@ test('switching Mode in zen leaves it there, and zen resumes on the return to Wr
 test('Pinned notes stay in zen', async () => {
   const { app, page } = await newProject();
   try {
-    await page.getByRole('tab', { name: 'Story Bible' }).click();
+    await roomButton(page, 'Story Bible').click();
     await page.getByRole('button', { name: 'New Entry' }).click();
     await page
       .getByRole('menuitem', { name: 'Character', exact: true })
@@ -212,7 +216,7 @@ test('Pinned notes stay in zen', async () => {
     await page.getByLabel('Name', { exact: true }).click();
     await page.keyboard.press('ControlOrMeta+a');
     await page.keyboard.type('Anna');
-    await page.getByRole('tab', { name: 'Manuscript' }).click();
+    await roomButton(page, 'Writing').click();
     await page.getByRole('button', { name: 'Scene 1', exact: true }).click();
     await page.getByLabel('Prose').click();
     await page.keyboard.type('Anna walked to the Harbour.');

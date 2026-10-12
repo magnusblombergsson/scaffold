@@ -2,7 +2,13 @@ import { expect, test, type Page } from '@playwright/test';
 import { existsSync } from 'node:fs';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { answerDialogs, chooseExport, launch, useTempDir } from './app';
+import {
+  answerDialogs,
+  chooseExport,
+  launch,
+  useTempDir,
+  roomButton,
+} from './app';
 import { useFakeAnthropic } from './fake-anthropic';
 
 const tempDir = useTempDir();
@@ -50,7 +56,7 @@ test('the MVP hangs together: welcome, key, Project, Prose, Review Scene, a Prop
   const sceneId = path.basename(sceneFile, '.md');
 
   // An Entry for the Assistant to propose to.
-  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(page, 'Story Bible').click();
   await page.getByRole('button', { name: 'New Entry' }).click();
   await page.getByRole('menuitem', { name: 'Character', exact: true }).click();
   await fill(page, 'Name', 'Anna');
@@ -61,7 +67,7 @@ test('the MVP hangs together: welcome, key, Project, Prose, Review Scene, a Prop
   const annaId = path.basename(entryFile, '.md');
 
   // Back to the Scene, and a Review of it.
-  await page.getByRole('tab', { name: 'Manuscript' }).click();
+  await roomButton(page, 'Writing').click();
   await page.getByRole('button', { name: 'Scene 1', exact: true }).click();
   await expect(page.getByLabel('Prose')).toHaveText(
     'Anna packed in the rain. Mira watched.',
@@ -112,7 +118,7 @@ test('the MVP hangs together: welcome, key, Project, Prose, Review Scene, a Prop
   await expect(proposal).toContainText('✓ Appended');
 
   // The Entry changed, on screen and on disk.
-  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(page, 'Story Bible').click();
   await page.getByRole('button', { name: 'Anna', exact: true }).click();
   await expect(page.getByLabel('Description', { exact: true })).toHaveText(
     /Leaves the island\.\s*Fears her sister\./,

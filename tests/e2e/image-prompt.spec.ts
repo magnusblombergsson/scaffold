@@ -1,7 +1,13 @@
 import { expect, test, type Page } from '@playwright/test';
 import { existsSync, readdirSync } from 'node:fs';
 import path from 'node:path';
-import { addAnthropicKey, answerDialogs, launch, useTempDir } from './app';
+import {
+  addAnthropicKey,
+  answerDialogs,
+  launch,
+  roomButton,
+  useTempDir,
+} from './app';
 import { useFakeAnthropic } from './fake-anthropic';
 
 const tempDir = useTempDir();
@@ -22,7 +28,7 @@ async function withAnna(projectPath: string) {
   await page.getByRole('button', { name: 'New Project…' }).click();
   await expect(page.getByLabel('Prose')).toBeFocused();
   await addAnthropicKey(page);
-  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(page, 'Story Bible').click();
   await page.getByRole('button', { name: 'New Entry' }).click();
   await page.getByRole('menuitem', { name: 'Character', exact: true }).click();
   await fill(page, 'Name', 'Anna');

@@ -55,7 +55,7 @@ export function BrainstormRoom({
   /** The width of a side pane, and how to resize it. */
   pane(key: keyof PanelWidths): PaneSize;
   onAddProvider(): void;
-  /** Opens an Entry in the Writing Mode. */
+  /** Opens an Entry in the Story Bible Room. */
   onOpenEntry(entryId: string): void;
   onChange: OnChange;
   /** The Todos tab of the Reference pane. */

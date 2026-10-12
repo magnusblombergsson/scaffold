@@ -2,7 +2,7 @@ import { useEffect, type RefObject } from 'react';
 import type { ProposalField } from '../shared/proposal';
 
 /**
- * A field to go to in Writing, as a Proposal's title asks: an Entry's field,
+ * A field to go to, as a Proposal's title asks: an Entry's field,
  * or with none its Name, or an Outline; the ghost of `proposalId` there is
  * highlighted. `count` tells one ask from the next.
  */
@@ -32,8 +32,15 @@ export function useReveal(
   }, [view, reveal, ready, selector]);
 }
 
-/** In order: an editor, the choice as chosen, else the first option. */
-const FOCUSABLE = ['[contenteditable]', 'input:checked', 'input'];
+/**
+ * In order: an editor, the choice as chosen, else the first option; not a
+ * field's checkbox, as whether a Peek shows it.
+ */
+const FOCUSABLE = [
+  '[contenteditable]',
+  'input[type="radio"]:checked',
+  'input:not([type="checkbox"])',
+];
 
 /** Scrolls a field into view and puts focus in it. */
 function revealField(field: Element | null | undefined): void {

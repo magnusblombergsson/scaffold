@@ -308,12 +308,12 @@ test('F6 / Shift+F6 cycle the left pane, editor and Assistant; the tabs switch w
     const tab = (name: string) => page.getByRole('tab', { name });
     await tab('Manuscript').focus();
     await page.keyboard.press('ArrowRight');
-    await expect(tab('Story Bible')).toBeFocused();
-    await expect(tab('Story Bible')).toHaveAttribute('aria-selected', 'true');
-    await page.keyboard.press('ArrowLeft');
-    await page.keyboard.press('ArrowLeft');
     await expect(tab('Trash')).toBeFocused();
     await expect(tab('Trash')).toHaveAttribute('aria-selected', 'true');
+    await page.keyboard.press('ArrowLeft');
+    await page.keyboard.press('ArrowLeft');
+    await expect(tab('Drawer')).toBeFocused();
+    await expect(tab('Drawer')).toHaveAttribute('aria-selected', 'true');
 
     // Shift+F10 then F6: the menu closes behind focus.
     await tab('Manuscript').click();
@@ -377,6 +377,10 @@ test('the Story Bible list takes the same keys', async () => {
       menu.getByRole('menuitem', { name: 'Image prompt…' }),
     ).toBeFocused();
     await page.keyboard.press('End');
+    await expect(
+      menu.getByRole('menuitem', { name: 'Move to Drawer' }),
+    ).toBeFocused();
+    await page.keyboard.press('ArrowUp');
     await expect(
       menu.getByRole('menuitem', { name: 'Move to Trash' }),
     ).toBeFocused();

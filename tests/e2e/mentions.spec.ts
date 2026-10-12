@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { answerDialogs, launch, useTempDir } from './app';
+import { answerDialogs, launch, useTempDir, roomButton } from './app';
 
 const tempDir = useTempDir();
 
@@ -22,7 +22,7 @@ async function fill(page: Page, label: string, text: string) {
 }
 
 async function newCharacter(page: Page, name: string, description: string) {
-  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(page, 'Story Bible').click();
   await page.getByRole('button', { name: 'New Entry' }).click();
   await page.getByRole('menuitem', { name: 'Character', exact: true }).click();
   await fill(page, 'Name', name);
@@ -30,7 +30,7 @@ async function newCharacter(page: Page, name: string, description: string) {
 }
 
 async function openScene(page: Page) {
-  await page.getByRole('tab', { name: 'Manuscript' }).click();
+  await roomButton(page, 'Writing').click();
   await page.getByRole('button', { name: 'Scene 1', exact: true }).click();
 }
 
@@ -62,8 +62,8 @@ test('Entry names are highlighted as the Author types, and a click peeks at the 
   await peek(page).getByRole('button', { name: 'Open “Anna”' }).click();
   await expect(peek(page)).toBeHidden();
   await expect(page.getByLabel('Name', { exact: true })).toHaveText('Anna');
-  await expect(page.getByRole('tab', { name: 'Story Bible' })).toHaveAttribute(
-    'aria-selected',
+  await expect(roomButton(page, 'Story Bible')).toHaveAttribute(
+    'aria-pressed',
     'true',
   );
 
@@ -203,7 +203,7 @@ test('the Author can turn highlighting off, and it stays off', async () => {
   await page.keyboard.type('Anna');
   await expect(mentions(page)).toHaveText(['Anna']);
 
-  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(page, 'Story Bible').click();
   await page.getByLabel('Highlight Entry names').uncheck();
   await openScene(page);
   await expect(page.getByLabel('Prose')).toHaveText('Anna');
@@ -214,7 +214,7 @@ test('the Author can turn highlighting off, and it stays off', async () => {
   const reopened = await second.firstWindow();
   await expect(reopened.getByLabel('Prose')).toHaveText('Anna');
   await expect(mentions(reopened)).toHaveCount(0);
-  await reopened.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(reopened, 'Story Bible').click();
   await expect(reopened.getByLabel('Highlight Entry names')).not.toBeChecked();
   await reopened.getByLabel('Highlight Entry names').check();
   await openScene(reopened);

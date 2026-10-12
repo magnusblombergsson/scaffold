@@ -45,19 +45,14 @@ test('each pane collapses from its button and docks back from its edge tabs, at 
   try {
     await page.getByRole('button', { name: 'Collapse the left pane' }).click();
     await expect(leftPane(page)).toBeHidden();
-    await expect(leftEdge(page).getByRole('button')).toHaveText([
-      'Manuscript',
-      'Story Bible',
-    ]);
+    await expect(leftEdge(page).getByRole('button')).toHaveText(['Manuscript']);
     await expect.poll(() => checked(app, 'Left Pane')).toBe(false);
 
-    await leftEdge(page).getByRole('button', { name: 'Story Bible' }).click();
+    await leftEdge(page).getByRole('button', { name: 'Manuscript' }).click();
     await expect(leftEdge(page)).toBeHidden();
-    await expect(
-      page.getByRole('tab', { name: 'Story Bible' }),
-    ).toHaveAttribute('aria-selected', 'true');
     await expect.poll(() => checked(app, 'Left Pane')).toBe(true);
 
+    await page.getByRole('tab', { name: 'Trash' }).click();
     await page.getByRole('button', { name: 'Collapse the left pane' }).click();
     await leftEdge(page).getByRole('button', { name: 'Manuscript' }).click();
     await expect(page.getByRole('tab', { name: 'Manuscript' })).toHaveAttribute(
@@ -79,7 +74,7 @@ test('each pane collapses from its button and docks back from its edge tabs, at 
 test('Ctrl+Shift+M and Ctrl+Shift+A collapse the panes from the Prose, and dock them back at the last tab', async () => {
   const { app, page } = await newProject();
   try {
-    await page.getByRole('tab', { name: 'Story Bible' }).click();
+    await page.getByRole('tab', { name: 'Trash' }).click();
     await page.getByLabel('Prose').click();
 
     await page.keyboard.press('Control+Shift+M');
@@ -90,9 +85,10 @@ test('Ctrl+Shift+M and Ctrl+Shift+A collapse the panes from the Prose, and dock 
     await expect(rightEdge(page)).toBeVisible();
 
     await page.keyboard.press('Control+Shift+M');
-    await expect(
-      page.getByRole('tab', { name: 'Story Bible' }),
-    ).toHaveAttribute('aria-selected', 'true');
+    await expect(page.getByRole('tab', { name: 'Trash' })).toHaveAttribute(
+      'aria-selected',
+      'true',
+    );
     await page.keyboard.press('Control+Shift+A');
     await expect(assistant(page)).toBeVisible();
   } finally {

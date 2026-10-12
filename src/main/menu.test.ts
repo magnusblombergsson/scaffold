@@ -156,17 +156,21 @@ describe('menuTemplate', () => {
     ).toBe(true);
   });
 
-  it('switches Mode from View with Ctrl+1/2/3, taken by the window', () => {
+  it('switches Room from View with Ctrl+1/2/3/4, taken by the window', () => {
     const { template, sent } = build(writable);
     const view = menu(template, 'View');
     const brainstorm = item(view, 'Brainstorm');
     expect(brainstorm.accelerator).toBe('CmdOrCtrl+2');
     expect(brainstorm.registerAccelerator).toBe(false);
-    expect(labels(view)).toEqual(
-      expect.arrayContaining(['Writing', 'Brainstorm', 'Interview']),
-    );
+    const bible = item(view, 'Story Bible');
+    expect(bible.accelerator).toBe('CmdOrCtrl+4');
+    expect(bible.registerAccelerator).toBe(false);
     click(brainstorm);
-    expect(sent).toEqual([{ type: 'mode', mode: 'brainstorm' }]);
+    click(bible);
+    expect(sent).toEqual([
+      { type: 'room', room: 'brainstorm' },
+      { type: 'room', room: 'storyBible' },
+    ]);
   });
 
   it('collapses and docks the left pane and the Assistant from View, as check items, with keys taken by the window', () => {
@@ -246,10 +250,11 @@ describe('menuTemplate', () => {
     });
   });
 
-  it('has View in its order: Modes, zen and panes, width, theme and spell check, zoom, full screen', () => {
+  it('has View in its order: Rooms, zen and panes, width, theme and spell check, zoom, full screen', () => {
     const view = menu(build(writable).template, 'View');
     expect(view.map((i) => i.label ?? i.role ?? i.type)).toEqual([
       'Writing',
+      'Story Bible',
       'Brainstorm',
       'Interview',
       'separator',

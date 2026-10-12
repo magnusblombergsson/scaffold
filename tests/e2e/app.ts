@@ -213,3 +213,10 @@ export async function addAnthropicKey(page: Page) {
   await settings.getByRole('button', { name: 'Done' }).click();
   return assistant;
 }
+
+/** The header's button for a Room: Writing, Story Bible, Brainstorm or Interview. */
+export function roomButton(page: Page, name: string) {
+  return page
+    .getByRole('group', { name: 'Room' })
+    .getByRole('button', { name, exact: true });
+}

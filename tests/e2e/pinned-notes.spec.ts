@@ -1,7 +1,13 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { answerDialogs, chooseMenu, launch, useTempDir } from './app';
+import {
+  answerDialogs,
+  chooseMenu,
+  launch,
+  useTempDir,
+  roomButton,
+} from './app';
 
 const tempDir = useTempDir();
 
@@ -27,7 +33,7 @@ async function newEntry(
   name: string,
   description: string,
 ) {
-  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(page, 'Story Bible').click();
   await page.getByRole('button', { name: 'New Entry' }).click();
   await page.getByRole('menuitem', { name: type, exact: true }).click();
   await fill(page, 'Name', name);
@@ -36,7 +42,7 @@ async function newEntry(
 
 /** Opens Scene 1 with `text` as its Prose, and its names highlighted. */
 async function writeScene(page: Page, text: string) {
-  await page.getByRole('tab', { name: 'Manuscript' }).click();
+  await roomButton(page, 'Writing').click();
   await page.getByRole('button', { name: 'Scene 1', exact: true }).click();
   await page.getByLabel('Prose').click();
   await page.keyboard.type(text);
@@ -60,7 +66,7 @@ async function switchTo(
   mode: 'Writing' | 'Brainstorm' | 'Interview',
 ) {
   await page
-    .getByRole('group', { name: 'Mode' })
+    .getByRole('group', { name: 'Room' })
     .getByRole('button', { name: mode })
     .click();
 }
@@ -165,8 +171,14 @@ test('a pinned Entry floats as a Pinned note: dragged, folded, opened, unpinned,
   await drag(page, 'Anna', 150, 120);
 
   await harbour.getByRole('button', { name: 'Open “Harbour”' }).click();
+  await expect(roomButton(page, 'Story Bible')).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
   await expect(page.getByLabel('Name', { exact: true })).toHaveText('Harbour');
-  // Notes stay as the Author moves about.
+  // Notes are for Writing, and are there as left on the return.
+  await expect(harbour).toBeHidden();
+  await roomButton(page, 'Writing').click();
   await expect(harbour).toBeVisible();
   await expect(anna).toBeVisible();
   const annaAt = (await anna.boundingBox())!;
@@ -262,11 +274,12 @@ test('Pinned notes are only in Writing, stay inside a shrinking window, and go w
     })
     .toBe(true);
 
-  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(page, 'Story Bible').click();
   await page
     .getByRole('button', { name: 'Entry actions: Anna', exact: true })
     .click();
   await page.getByRole('menuitem', { name: 'Move to Trash' }).click();
+  await roomButton(page, 'Writing').click();
   await expect(note(page, 'Anna')).toBeHidden();
   await expect(note(page, 'Harbour')).toBeVisible();
   await app.close();
@@ -379,9 +392,10 @@ test('a Pinned note shows its Entry’s image instead of its text, after a resta
     restored.getByRole('button', { name: 'Show the image of “Harbour”' }),
   ).toHaveAttribute('aria-pressed', 'true');
 
-  await reopened.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(reopened, 'Story Bible').click();
   await reopened.getByRole('button', { name: 'Harbour', exact: true }).click();
   await reopened.getByRole('button', { name: 'Remove image' }).click();
+  await roomButton(reopened, 'Writing').click();
   await expect(restored).toContainText('Grey water, three piers.');
   await expect(
     restored.getByRole('button', { name: 'Show the image of “Harbour”' }),

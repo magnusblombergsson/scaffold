@@ -11,6 +11,7 @@ import {
   answerDialogs,
   chooseMenu,
   launch,
+  roomButton,
   useTempDir,
 } from './app';
 import { useFakeAnthropic } from './fake-anthropic';
@@ -111,7 +112,7 @@ for (const theme of ['light', 'dark'] as const) {
 
       // The current Mode is raised in the sheet colour.
       await expect(
-        page.getByRole('group', { name: 'Mode' }).getByRole('button', {
+        page.getByRole('group', { name: 'Room' }).getByRole('button', {
           name: 'Writing',
         }),
       ).toHaveCSS('background-color', look.sheet);
@@ -146,10 +147,7 @@ for (const theme of ['light', 'dark'] as const) {
       });
 
       // Brainstorm: the same desk and sheet.
-      await page
-        .getByRole('group', { name: 'Mode' })
-        .getByRole('button', { name: 'Brainstorm' })
-        .click();
+      await roomButton(page, 'Brainstorm').click();
       await expect(page.locator('.room:not([hidden]) .centre')).toHaveCSS(
         'background-color',
         look.sheet,

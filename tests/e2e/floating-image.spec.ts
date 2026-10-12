@@ -1,7 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { answerDialogs, launch, useTempDir } from './app';
+import { answerDialogs, launch, roomButton, useTempDir } from './app';
 
 const tempDir = useTempDir();
 
@@ -221,18 +221,12 @@ test('the Floating image is hidden in the other Modes and on an Entry, and back 
   ).toBeDisabled();
   await page.keyboard.press('Escape');
 
-  await page
-    .getByRole('group', { name: 'Mode' })
-    .getByRole('button', { name: 'Brainstorm' })
-    .click();
+  await roomButton(page, 'Brainstorm').click();
   await expect(floating(page)).toBeHidden();
-  await page
-    .getByRole('group', { name: 'Mode' })
-    .getByRole('button', { name: 'Writing' })
-    .click();
+  await roomButton(page, 'Writing').click();
   await expect(floating(page)).toBeVisible();
 
-  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(page, 'Story Bible').click();
   await page.getByRole('button', { name: 'New Entry' }).click();
   await page.getByRole('menuitem', { name: 'Character', exact: true }).click();
   await expect(floating(page)).toBeHidden();

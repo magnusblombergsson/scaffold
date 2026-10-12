@@ -1,7 +1,13 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { addAnthropicKey, answerDialogs, launch, useTempDir } from './app';
+import {
+  addAnthropicKey,
+  answerDialogs,
+  launch,
+  roomButton,
+  useTempDir,
+} from './app';
 import { useFakeAnthropic } from './fake-anthropic';
 
 // The never-Prose guard (MVP spec §4): no UI path puts what the Assistant
@@ -24,7 +30,7 @@ async function switchTo(
   mode: 'Writing' | 'Brainstorm' | 'Interview',
 ) {
   await page
-    .getByRole('group', { name: 'Mode' })
+    .getByRole('group', { name: 'Room' })
     .getByRole('button', { name: mode })
     .click();
 }
@@ -211,7 +217,7 @@ test('nothing the Assistant writes reaches the Manuscript, in any Mode or room',
   await expect(page.getByLabel('Prose')).toHaveText(AUTHORED);
 
   // An Entry for the other rooms to propose to.
-  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(page, 'Story Bible').click();
   await page.getByRole('button', { name: 'New Entry' }).click();
   await page.getByRole('menuitem', { name: 'Character', exact: true }).click();
   await fill(page, 'Name', 'Anna');
@@ -284,7 +290,7 @@ test('nothing the Assistant writes reaches the Manuscript, in any Mode or room',
 
   // The Prose is the Author's alone, in the editor and on disk.
   await switchTo(page, 'Writing');
-  await page.getByRole('tab', { name: 'Manuscript' }).click();
+  await roomButton(page, 'Writing').click();
   await page.getByRole('button', { name: 'Scene 1', exact: true }).click();
   await expect(page.getByLabel('Prose')).toHaveText(AUTHORED);
   await page.keyboard.press('ControlOrMeta+s');

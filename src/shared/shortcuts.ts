@@ -1,4 +1,4 @@
-import type { Mode } from './conversation';
+import type { Room } from './room';
 import type { EntryType } from './project-types';
 
 /** A side pane of Writing that collapses on its own: the left pane or the Assistant. */
@@ -22,7 +22,8 @@ export const ALL_DOCKED: DockedPanes = { left: true, assistant: true };
 /**
  * What the Author asked for from the menu bar or a shortcut, sent to the
  * window in front. `byKey` is set when a menu's shortcut sent it rather than
- * a click: shortcuts other than Ctrl+1/2/3 do nothing outside Writing.
+ * a click: shortcuts other than Ctrl+1/2/3/4 and Ctrl+E do nothing outside
+ * Writing, and Ctrl+T outside Writing and the Story Bible.
  */
 export type Command = (
   | { type: 'newProject' }
@@ -44,7 +45,7 @@ export type Command = (
   | { type: 'projectSettings' }
   /** The Keyboard Shortcuts cheat sheet. */
   | { type: 'shortcuts' }
-  | { type: 'mode'; mode: Mode }
+  | { type: 'room'; room: Room }
   /** Below, or `above`, the current Scene; or at the end, or start, of the current Chapter. */
   | { type: 'newScene'; above: boolean }
   /** Below, or `above`, the current Chapter, starting in rename. */
@@ -81,6 +82,7 @@ export const SHORTCUTS = {
   writing: 'CmdOrCtrl+1',
   brainstorm: 'CmdOrCtrl+2',
   interview: 'CmdOrCtrl+3',
+  storyBible: 'CmdOrCtrl+4',
   newScene: 'CmdOrCtrl+Enter',
   newSceneAbove: 'CmdOrCtrl+Alt+Enter',
   newChapter: 'CmdOrCtrl+Shift+Enter',
@@ -117,11 +119,12 @@ const SHIFT_LETTERS: Record<string, Command> = {
   k: { type: 'splitScene', toNextChapter: true },
 };
 
-/** The digit after Ctrl that switches to each Mode, as in `SHORTCUTS`. */
-const MODE_DIGITS: Record<string, Mode> = {
+/** The digit after Ctrl that switches to each Room, as in `SHORTCUTS`. */
+const ROOM_DIGITS: Record<string, Room> = {
   '1': 'writing',
   '2': 'brainstorm',
   '3': 'interview',
+  '4': 'storyBible',
 };
 
 type KeyPress = {
@@ -134,7 +137,7 @@ type KeyPress = {
 
 /**
  * The command a key press in a window asks for, if any: the create chords,
- * Ctrl+E, Ctrl+T, the split keys, Ctrl+1/2/3, zen, the pane keys and the
+ * Ctrl+E, Ctrl+T, the split keys, Ctrl+1/2/3/4, zen, the pane keys and the
  * width key, which apply where a Project is shown, and Ctrl+/.
  * Ctrl is ⌘ on macOS. The menus take the others.
  */
@@ -157,8 +160,8 @@ export function commandForKey(press: KeyPress, mac: boolean): Command | null {
   if (key.toLowerCase() === 'k') {
     return { type: 'splitScene', toNextChapter: false };
   }
-  const mode = MODE_DIGITS[key];
-  return mode ? { type: 'mode', mode } : null;
+  const room = ROOM_DIGITS[key];
+  return room ? { type: 'room', room } : null;
 }
 
 /** How the Author reads each key of an accelerator that isn't written as is. */
@@ -211,7 +214,10 @@ export const CHEAT_SHEET: {
         action: 'New Chapter below the current Chapter, starting in rename',
       },
       { keys: [SHORTCUTS.newChapterAbove], action: 'New Chapter above' },
-      { keys: [SHORTCUTS.newEntry], action: 'New Entry of a type' },
+      {
+        keys: [SHORTCUTS.newEntry],
+        action: 'New Entry of a type, opened in the Story Bible, from any Room',
+      },
       {
         keys: [SHORTCUTS.newTodo],
         action: 'New Todo, linked to the open Scene, Chapter or Entry',
@@ -287,11 +293,12 @@ export const CHEAT_SHEET: {
     ],
   },
   {
-    title: 'Panes and Modes',
+    title: 'Panes and Rooms',
     shortcuts: [
       { keys: [SHORTCUTS.writing], action: 'Writing' },
       { keys: [SHORTCUTS.brainstorm], action: 'Brainstorm' },
       { keys: [SHORTCUTS.interview], action: 'Interview' },
+      { keys: [SHORTCUTS.storyBible], action: 'Story Bible' },
       {
         keys: ['F6', 'Shift+F6'],
         action: 'Next or previous pane: left pane, editor, Assistant',

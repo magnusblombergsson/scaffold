@@ -1,7 +1,13 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { addAnthropicKey, answerDialogs, launch, useTempDir } from './app';
+import {
+  addAnthropicKey,
+  answerDialogs,
+  launch,
+  roomButton,
+  useTempDir,
+} from './app';
 import { useFakeAnthropic } from './fake-anthropic';
 
 const tempDir = useTempDir();
@@ -35,7 +41,7 @@ test('the Assistant proposes changes to an Entry, and the Author accepts, edits 
   await expect(page.getByLabel('Prose')).toBeFocused();
   const assistant = await addAnthropicKey(page);
 
-  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(page, 'Story Bible').click();
   await page.getByRole('button', { name: 'New Entry' }).click();
   await page.getByRole('menuitem', { name: 'Character', exact: true }).click();
   await fill(page, 'Name', 'Anna');
@@ -181,7 +187,7 @@ test('the Assistant proposes a new Entry and a Scene’s Outline, and the Author
     .fill('Anna’s younger sister, who stayed.');
   await mira.getByRole('button', { name: 'Accept edited' }).click();
   await expect(mira).toContainText('✓ Accepted (edited)');
-  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(page, 'Story Bible').click();
   await expect(
     page
       .getByRole('navigation', { name: 'Story Bible' })
@@ -217,7 +223,7 @@ test('the Author undoes accepted Proposals from their cards, while their targets
   await page.getByRole('button', { name: 'New Project…' }).click();
   await expect(page.getByLabel('Prose')).toBeFocused();
   const assistant = await addAnthropicKey(page);
-  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(page, 'Story Bible').click();
   await page.getByRole('button', { name: 'New Entry' }).click();
   await page.getByRole('menuitem', { name: 'Character', exact: true }).click();
   await fill(page, 'Name', 'Anna');
@@ -282,6 +288,7 @@ test('the Author undoes accepted Proposals from their cards, while their targets
   await expect(mira).toContainText('✓ Accepted');
   await mira.getByRole('button', { name: 'Undo' }).click();
   await expect(mira.getByRole('button', { name: 'Accept' })).toBeVisible();
+  await roomButton(page, 'Writing').click();
   await page.getByRole('tab', { name: 'Trash (1)' }).click();
   await expect(page.getByRole('region', { name: 'Trash' })).toContainText(
     'Mira',
@@ -297,7 +304,7 @@ test('the Author undoes accepted Proposals from their cards, while their targets
   ]);
 
   // A Role note and an Appearance, as Replace Proposals.
-  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(page, 'Story Bible').click();
   await page
     .getByRole('navigation', { name: 'Story Bible' })
     .getByRole('button', { name: 'Anna', exact: true })
@@ -328,7 +335,7 @@ test('the Author appends a Replace Proposal, stale or edited, and undoes it', as
   await page.getByRole('button', { name: 'New Project…' }).click();
   await expect(page.getByLabel('Prose')).toBeFocused();
   const assistant = await addAnthropicKey(page);
-  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(page, 'Story Bible').click();
   await page.getByRole('button', { name: 'New Entry' }).click();
   await page.getByRole('menuitem', { name: 'Character', exact: true }).click();
   await fill(page, 'Name', 'Anna');
@@ -397,7 +404,7 @@ test('a Proposal shown from an Entry opens at its card in the Conversation', asy
   await page.getByRole('button', { name: 'New Project…' }).click();
   await expect(page.getByLabel('Prose')).toBeFocused();
   const assistant = await addAnthropicKey(page);
-  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(page, 'Story Bible').click();
   await page.getByRole('button', { name: 'New Entry' }).click();
   await page.getByRole('menuitem', { name: 'Place', exact: true }).click();
   await fill(page, 'Name', 'The harbour');

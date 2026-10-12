@@ -6,6 +6,7 @@ import {
   answerDialogs,
   chooseMenu,
   launch,
+  roomButton,
   useTempDir,
 } from './app';
 import { useFakeAnthropic } from './fake-anthropic';
@@ -109,7 +110,7 @@ test('the Author tags an Entry in its header, from the Tags of Scenes, and sees 
   await page.keyboard.type('Mara,');
   await page.keyboard.press('Escape');
 
-  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(page, 'Story Bible').click();
   await page.getByRole('button', { name: 'New Entry' }).click();
   await page.getByRole('menuitem', { name: 'Character', exact: true }).click();
   // The Name has focus, as for any new Entry; the Tags wait below it.
@@ -133,10 +134,7 @@ test('the Author tags an Entry in its header, from the Tags of Scenes, and sees 
 
   // And under the name on its card in Brainstorm.
   await addAnthropicKey(page);
-  await page
-    .getByRole('group', { name: 'Mode' })
-    .getByRole('button', { name: 'Brainstorm' })
-    .click();
+  await roomButton(page, 'Brainstorm').click();
   const card = page
     .getByRole('complementary', { name: 'Reference' })
     .locator('.entry-card');
