@@ -609,6 +609,11 @@ export type OpenedProject = {
   view: ProjectView;
   /** How Writing's Todos dock shows, on this computer, in every Project. */
   todoDock: TodoDock;
+  /**
+   * The height the Author dragged the Assistant's message box to, on this
+   * computer, in every Mode and Project; null if never, or reset.
+   */
+  composerHeight: number | null;
   sessions: SessionNotice;
   /** What versions of `project.json` that met as it opened lost; told once. */
   dropped: Dropped[];
@@ -862,6 +867,8 @@ export interface ShellApi {
   setCorkboardView(view: CorkboardView): void;
   /** Remembers how Writing's Todos dock shows, in every Project. */
   setTodoDock(change: Partial<TodoDock>): void;
+  /** Remembers the message box's height, in every Project; null resets it. */
+  setComposerHeight(height: number | null): void;
   /** Whether Entry names and aliases are highlighted where mentioned, on this computer. */
   highlightMentions(): Promise<boolean>;
   /** Turns the highlighting on or off, in every window. */
@@ -1147,6 +1154,7 @@ export const shellMethods = {
   corkboardView: 'invoke',
   setCorkboardView: 'send',
   setTodoDock: 'send',
+  setComposerHeight: 'send',
   highlightMentions: 'invoke',
   setHighlightMentions: 'send',
   onHighlightMentions: 'event',

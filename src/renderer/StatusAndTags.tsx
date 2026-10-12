@@ -10,6 +10,7 @@ import { statusOf, type Status } from '../shared/status';
 import { Menu, statusChoices, StatusDot } from './Binder';
 import { ImagePickerProvider } from './ImagePicker';
 import { ReadOnlyContext } from './read-only';
+import { ComposerHeightContext, type ComposerHeight } from './composer-height';
 import { TagInput } from './TagsDialog';
 
 /**
@@ -39,19 +40,22 @@ const KeyFieldsContext = createContext<KeyFieldChoices>(NO_KEY_FIELDS);
 /**
  * What every view of an open Project reads: whether it is read-only, its
  * Status list with how to set Status and Tags, its Custom fields, the
- * Key fields chosen for each Entry type, and the images to choose from.
+ * Key fields chosen for each Entry type, the message box's height, and the
+ * images to choose from.
  */
 export function ProjectContexts({
   readOnly,
   statusAndTags,
   customFields,
   keyFields,
+  composerHeight,
   children,
 }: {
   readOnly: boolean;
   statusAndTags: StatusAndTags;
   customFields: CustomField[];
   keyFields: KeyFieldChoices;
+  composerHeight: ComposerHeight;
   children: ReactNode;
 }) {
   return (
@@ -59,7 +63,9 @@ export function ProjectContexts({
       <StatusAndTagsContext.Provider value={statusAndTags}>
         <CustomFieldsContext.Provider value={customFields}>
           <KeyFieldsContext.Provider value={keyFields}>
-            <ImagePickerProvider>{children}</ImagePickerProvider>
+            <ComposerHeightContext.Provider value={composerHeight}>
+              <ImagePickerProvider>{children}</ImagePickerProvider>
+            </ComposerHeightContext.Provider>
           </KeyFieldsContext.Provider>
         </CustomFieldsContext.Provider>
       </StatusAndTagsContext.Provider>

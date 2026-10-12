@@ -72,7 +72,7 @@ The story text itself — narration and dialogue — as written by the Author. T
 _Avoid_: Text, draft (when meaning the words themselves)
 
 **Story Bible**:
-The Author-visible, Author-editable body of knowledge about a story: characters, places, world rules, themes, plot structure. The Assistant draws on it; it is not the Assistant's conversation history.
+The Author-visible, Author-editable body of knowledge about a story: characters, places, world rules, themes, plot structure. The Assistant draws on it; it is not the Assistant's conversation history. The Room where the Author browses and edits its Entries shares its name.
 _Avoid_: Memory, knowledge base, lore, wiki
 
 **Entry**:
@@ -163,6 +163,10 @@ _Avoid_: Archive, bin, shelf, trunk, For Later
 A copy written outside the Project for others to read, of either the Manuscript's Prose or the Story Bible. A Manuscript Export holds the Prose of the Scenes the Author ticks, with Chapter titles as headings, a Part's title as a heading one level above them, and Scenes separated by a break, and nothing else from the Project. A Part with none of its Scenes ticked leaves no heading. A Story Bible Export holds the chosen Entries grouped by type, with their images, and their private notes only if the Author asks. Neither includes Outlines, Notes or Conversations.
 _Avoid_: Compile, publish, backup
 
+**Backup**:
+One file holding a whole Project as it was when the Author made it, Trash and Drawer included, from which the Author can restore it as a new Project.
+_Avoid_: Snapshot, archive, copy
+
 **Import**:
 Reading a Word or Markdown file into the Project, the mirror of an Export, of either a manuscript or a Story Bible. A Manuscript Import makes a new Project and never adds to an existing one: a Heading 1 starts a Chapter and a break such as `***` starts a Scene, unless the Author chooses another split after seeing it. When the file also has Heading 2s, the Author may choose that a Heading 1 starts a Part and a Heading 2 a Chapter; it is never chosen for them. A Story Bible Import adds the Entries the Author ticks after seeing them to the open Project's Story Bible, beside those already there, and changes none of them; undoing it moves them all to Trash.
 _Avoid_: Open (when meaning a manuscript file), convert
@@ -198,6 +202,10 @@ Said of a Model that hasn't been checked against the rule that the Assistant nev
 _Avoid_: Unsupported, unsafe
 
 ### Modes
+
+**Room**:
+One of the four places the Author switches between at the top of the window: Writing, Story Bible, Brainstorm and Interview. Each fills the window; all but the Story Bible are also Modes.
+_Avoid_: Place, view, tab, workspace
 
 **Mode**:
 One of the tool's working states, each giving the Assistant a different role: Brainstorm, Interview, or Writing.

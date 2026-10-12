@@ -15,6 +15,10 @@ type Props = {
   onResize(size: number): void;
   /** Once the Author lets go, with the size to remember. */
   onResized(size: number): void;
+  /** On a double-click, to put the panel back to its size by default. */
+  onReset?(): void;
+  /** Besides `panel-resizer`, for a handle that looks its own way. */
+  className?: string;
 };
 
 /** A pane's size, and what to call as the Author resizes it. */
@@ -35,6 +39,8 @@ export function PanelResizer({
   max,
   onResize,
   onResized,
+  onReset,
+  className,
 }: Props) {
   const clamp = (value: number) =>
     Math.round(Math.min(max, Math.max(min, value)));
@@ -78,7 +84,7 @@ export function PanelResizer({
 
   return (
     <div
-      className={`panel-resizer${across ? ' panel-resizer-across' : ''}`}
+      className={`panel-resizer${across ? ' panel-resizer-across' : ''}${className ? ` ${className}` : ''}`}
       role="separator"
       aria-orientation={across ? 'horizontal' : 'vertical'}
       aria-label={label}
@@ -88,6 +94,7 @@ export function PanelResizer({
       tabIndex={0}
       onPointerDown={startDrag}
       onKeyDown={nudge}
+      onDoubleClick={onReset}
     />
   );
 }
