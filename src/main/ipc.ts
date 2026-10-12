@@ -1,4 +1,5 @@
 import { BrowserWindow, dialog, nativeImage, type WebContents } from 'electron';
+import path from 'node:path';
 import {
   assistantMethods,
   projectMethods,
@@ -26,7 +27,9 @@ import { isModel } from '../shared/models';
 import {
   assistantProvider,
   defaultModel,
+  lastFolder,
   projectWindows,
+  rememberFolder,
   rememberModel,
 } from './shell';
 import { trashConversationQuestion } from './trash-question';
@@ -357,6 +360,7 @@ async function chooseImage(
   const options = {
     title: 'Choose Image',
     buttonLabel: 'Choose',
+    defaultPath: await lastFolder('images'),
     filters: [{ name: 'Images', extensions: ['jpg', 'jpeg', 'png'] }],
     properties: ['openFile' as const],
   };
@@ -364,6 +368,7 @@ async function chooseImage(
     ? await dialog.showOpenDialog(window, options)
     : await dialog.showOpenDialog(options);
   if (canceled || filePaths.length === 0) return false;
+  rememberFolder('images', path.dirname(filePaths[0]));
   try {
     const image = entryImageOf(nativeImage.createFromPath(filePaths[0]));
     await use(image);
