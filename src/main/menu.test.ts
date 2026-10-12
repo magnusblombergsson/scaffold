@@ -98,6 +98,8 @@ describe('menuTemplate', () => {
       'Import Story Bible…',
       'Export Manuscript…',
       'Export Story Bible…',
+      'Back Up Project…',
+      'Restore Project from Backup…',
       undefined,
     ]);
     expect(item(file, 'New Project…').accelerator).toBe('CmdOrCtrl+Shift+N');
@@ -108,6 +110,8 @@ describe('menuTemplate', () => {
     click(item(file, 'Import Story Bible…'));
     click(item(file, 'Export Manuscript…'));
     click(item(file, 'Export Story Bible…'));
+    click(item(file, 'Back Up Project…'));
+    click(item(file, 'Restore Project from Backup…'));
     expect(sent).toEqual([
       { type: 'newProject' },
       { type: 'openRecent', path: 'D:/Stories/Ferry' },
@@ -115,7 +119,23 @@ describe('menuTemplate', () => {
       { type: 'importStoryBible' },
       { type: 'exportManuscript' },
       { type: 'exportStoryBible' },
+      { type: 'backUp' },
+      { type: 'restoreBackup' },
     ]);
+  });
+
+  it('backs up only an open Project, read-only too, but restores from a Backup with none', () => {
+    const none = menu(build(noProject).template, 'File');
+    expect(item(none, 'Back Up Project…').enabled).toBe(false);
+    expect(item(none, 'Restore Project from Backup…').enabled).not.toBe(false);
+    const readOnly = menu(
+      build({
+        ...writable,
+        project: { ...writable.project!, readOnly: true },
+      }).template,
+      'File',
+    );
+    expect(item(readOnly, 'Back Up Project…').enabled).toBe(true);
   });
 
   it('imports a manuscript without a Project, but a Story Bible only into one that isn’t read-only', () => {

@@ -3,7 +3,8 @@ import type { FloatingImage } from '../shared/api';
 import type { ManuscriptScene } from '../shared/project-types';
 import { Menu } from './Binder';
 import { ViewableImage } from './ImageView';
-import { unitImageItems, useUnitImage } from './UnitImage';
+import { useImagePicker } from './ImagePicker';
+import { unitImageAddItems, useUnitImage } from './UnitImage';
 import { fitWidth, type ImageChange } from './floating-image';
 import { useDrag, useElementSize, useWindowSize } from './floating-panel';
 import { placeInside } from './pinned-notes';
@@ -63,7 +64,7 @@ export function OutlineBarImage({
  * over the page. It is dragged by its header, resized from its corner with
  * the image's proportions kept, folded to its title and closed; the window
  * shrinking never leaves it outside. A Scene without an image shows No image
- * and Add image… in its place.
+ * and Add image…, and Choose from Project…, in its place.
  */
 export function FloatingImagePanel({
   image,
@@ -81,6 +82,7 @@ export function FloatingImagePanel({
   onRaise(): void;
 }) {
   const readOnly = useContext(ReadOnlyContext);
+  const imagePicker = useImagePicker();
   const url = useUnitImage({ kind: 'scene', id: scene.id }, scene.image);
   const room = useWindowSize();
   const element = useRef<HTMLElement>(null);
@@ -107,7 +109,7 @@ export function FloatingImagePanel({
     resized.current = null;
     if (done !== null) onChange({ type: 'resize', width: done }, true);
   };
-  const [add] = unitImageItems(scene, readOnly);
+  const adds = unitImageAddItems(scene, readOnly, imagePicker);
 
   return (
     <section
@@ -172,13 +174,16 @@ export function FloatingImagePanel({
           ) : (
             <div className="pinned-note-body floating-image-empty">
               <p>No image</p>
-              <button
-                type="button"
-                disabled={add.disabled}
-                onClick={() => 'run' in add && void add.run()}
-              >
-                {add.label}
-              </button>
+              {adds.map((item) => (
+                <button
+                  key={item.label}
+                  type="button"
+                  disabled={item.disabled}
+                  onClick={() => 'run' in item && void item.run()}
+                >
+                  {item.label}
+                </button>
+              ))}
             </div>
           )}
           <div

@@ -8,6 +8,7 @@ import type {
   ManuscriptScene,
 } from '../shared/project-types';
 import type { MenuItem } from './Binder';
+import { useImagePicker, type ImagePicker } from './ImagePicker';
 import { ImagePromptDialog } from './ImagePromptDialog';
 import { useImageUrl, ViewableImage } from './ImageView';
 import { ReadOnlyContext } from './read-only';
@@ -57,14 +58,16 @@ export function EntryThumbnail({ entry }: { entry: EntrySummary }) {
 }
 
 /**
- * The Entry view's image as a portrait, which opens the large view, with Add,
- * Replace and Remove, and Image prompt…, which has the Assistant describe the
- * Entry for an image generator, stacked to its right. Without an image a dashed frame keeps the
- * portrait's place.
+ * The Entry view's image as a portrait, which opens the large view, with
+ * its image's actions, and Image prompt…, which has the Assistant describe
+ * the Entry for an image generator, stacked to its right. Without an image
+ * a dashed frame keeps the portrait's place.
  */
 export function EntryImageSection({ entry }: { entry: EntrySummary }) {
   const ref = entryRef(entry);
   const url = useUnitImage(ref, entry.image);
+  const readOnly = useContext(ReadOnlyContext);
+  const imagePicker = useImagePicker();
   const [imagePrompt, setImagePrompt] = useState(false);
   return (
     <section className="entry-image">
@@ -78,20 +81,9 @@ export function EntryImageSection({ entry }: { entry: EntrySummary }) {
         <div className="entry-image-empty" />
       )}
       <div className="entry-image-actions">
-        <button
-          type="button"
-          onClick={() => void window.project.chooseImage(ref)}
-        >
-          {entry.image ? 'Replace image…' : 'Add image…'}
-        </button>
-        {entry.image && (
-          <button
-            type="button"
-            onClick={() => void window.project.removeImage(ref)}
-          >
-            Remove image
-          </button>
-        )}
+        <ImageItemButtons
+          items={imageItems(ref, entry.image, readOnly, imagePicker)}
+        />
         <button type="button" onClick={() => setImagePrompt(true)}>
           Image prompt…
         </button>
@@ -129,6 +121,7 @@ export function UnitThumbnail({ unit }: { unit: Unit }) {
  */
 export function UnitCardImage({ unit }: { unit: Unit }) {
   const readOnly = useContext(ReadOnlyContext);
+  const imagePicker = useImagePicker();
   const url = useUnitImage(unitRef(unit), unit.image);
   if (url) {
     return (
@@ -140,56 +133,107 @@ export function UnitCardImage({ unit }: { unit: Unit }) {
       />
     );
   }
-  const [add] = unitImageItems(unit, readOnly);
   return (
     <div className="card-image empty">
       {/* One being read shows once it is. */}
       {!unit.image && (
-        <button
-          type="button"
-          disabled={add.disabled}
-          onClick={() => 'run' in add && void add.run()}
-        >
-          {add.label}
-        </button>
+        <ImageItemButtons
+          items={unitImageAddItems(unit, readOnly, imagePicker)}
+        />
       )}
     </div>
   );
 }
 
-/** Add image… or Replace image…, and Remove image, as buttons. */
+/** Add image… or Replace image…, Choose from Project… and Remove image, as buttons. */
 export function UnitImageButtons({ unit }: { unit: Unit }) {
   const readOnly = useContext(ReadOnlyContext);
+  const imagePicker = useImagePicker();
   return (
     <div className="unit-image-actions">
-      {unitImageItems(unit, readOnly).map((item) => (
-        <button
-          key={item.label}
-          type="button"
-          disabled={item.disabled}
-          onClick={() => 'run' in item && void item.run()}
-        >
-          {item.label}
-        </button>
-      ))}
+      <ImageItemButtons items={unitImageItems(unit, readOnly, imagePicker)} />
     </div>
   );
 }
 
-/** Add image… or Replace image…, and Remove image, in a unit's menu. */
-export function unitImageItems(unit: Unit, readOnly: boolean): MenuItem[] {
+/** Image actions as buttons, side by side or stacked as their parent lays them out. */
+function ImageItemButtons({ items }: { items: MenuItem[] }) {
+  return items.map((item) => (
+    <button
+      key={item.label}
+      type="button"
+      disabled={item.disabled}
+      onClick={() => 'run' in item && void item.run()}
+    >
+      {item.label}
+    </button>
+  ));
+}
+
+/** `imageItems` of a Scene, Chapter or Part, in its menu. */
+export function unitImageItems(
+  unit: Unit,
+  readOnly: boolean,
+  imagePicker: ImagePicker,
+): MenuItem[] {
+  return imageItems(unitRef(unit), unit.image, readOnly, imagePicker);
+}
+
+/** `imageAddItems` of a Scene, Chapter or Part. */
+export function unitImageAddItems(
+  unit: Unit,
+  readOnly: boolean,
+  imagePicker: ImagePicker,
+): MenuItem[] {
+  return imageAddItems(unitRef(unit), unit.image, readOnly, imagePicker);
+}
+
+/**
+ * A unit's image actions: `imageAddItems`, then Remove image when it
+ * names one.
+ */
+function imageItems(
+  ref: ImageRef,
+  image: string | undefined,
+  readOnly: boolean,
+  imagePicker: ImagePicker,
+): MenuItem[] {
   return [
-    {
-      label: unit.image ? 'Replace image…' : 'Add image…',
-      disabled: readOnly,
-      run: () => window.project.chooseImage(unitRef(unit)),
-    },
-    ...(unit.image
+    ...imageAddItems(ref, image, readOnly, imagePicker),
+    ...(image
       ? [
           {
             label: 'Remove image',
             disabled: readOnly,
-            run: () => window.project.removeImage(unitRef(unit)),
+            run: () => window.project.removeImage(ref),
+          },
+        ]
+      : []),
+  ];
+}
+
+/**
+ * Add image… or Replace image…, as the unit names an image or not, and
+ * Choose from Project… when another unit has an image it could copy.
+ */
+function imageAddItems(
+  ref: ImageRef,
+  image: string | undefined,
+  readOnly: boolean,
+  imagePicker: ImagePicker,
+): MenuItem[] {
+  return [
+    {
+      label: image ? 'Replace image…' : 'Add image…',
+      disabled: readOnly,
+      run: () => window.project.chooseImage(ref),
+    },
+    ...(imagePicker.offers(ref)
+      ? [
+          {
+            label: 'Choose from Project…',
+            disabled: readOnly,
+            run: () => imagePicker.choose(ref),
           },
         ]
       : []),

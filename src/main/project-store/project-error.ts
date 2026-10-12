@@ -19,6 +19,11 @@ export class ProjectError extends Error {
       | 'newer-format'
       | 'read-only'
       | 'label-taken'
+      // Why a Backup can't be made or restored.
+      | 'online-only'
+      | 'not-a-backup'
+      | 'not-empty'
+      | 'unwritable'
       // Why a Proposal can't be accepted or undone.
       | Refusal['refused'],
     message: string,

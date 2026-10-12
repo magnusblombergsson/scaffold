@@ -190,6 +190,36 @@ describe('saving', () => {
     });
   });
 
+  it('remembers the folder each kind of dialog last used, none before any', async () => {
+    const pics = path.join(dir, 'Pics');
+    const novels = path.join(dir, 'Novels');
+    await mkdir(pics);
+    await mkdir(novels);
+    const settings = await load();
+    expect(await settings.lastFolder('images')).toBeNull();
+
+    settings.setLastFolder('images', pics);
+    settings.setLastFolder('projects', novels);
+    await settings.flush();
+
+    const reloaded = await load();
+    expect(await reloaded.lastFolder('images')).toBe(pics);
+    expect(await reloaded.lastFolder('projects')).toBe(novels);
+    expect(await reloaded.lastFolder('import')).toBeNull();
+    expect(await reloaded.lastFolder('export')).toBeNull();
+    expect(await reloaded.lastFolder('backups')).toBeNull();
+  });
+
+  it('has no last folder once that folder is gone', async () => {
+    const gone = path.join(dir, 'Gone');
+    await mkdir(gone);
+    const settings = await load();
+    settings.setLastFolder('export', gone);
+    await rm(gone, { recursive: true });
+
+    expect(await settings.lastFolder('export')).toBeNull();
+  });
+
   it('remembers the Model used last, Sonnet 5.5 before any', async () => {
     const settings = await load();
     expect(settings.lastUsedModel()).toEqual({
@@ -653,6 +683,46 @@ describe('a bad or newer settings file', () => {
       floatingImage: { on: true, x: 5, y: 6, width: 240, folded: true },
     });
     expect(settings.project('f')).toEqual({});
+  });
+
+  it('reads the last folders kept, dropping a bad value or kind', async () => {
+    await writeFile(
+      file,
+      JSON.stringify({
+        version: 1,
+        global: {
+          lastFolders: { images: dir, import: 7, export: '', music: dir },
+        },
+        projects: {},
+        recent: [],
+      }),
+    );
+    const settings = await load();
+    expect(await settings.lastFolder('images')).toBe(dir);
+    expect(await settings.lastFolder('import')).toBeNull();
+    expect(await settings.lastFolder('export')).toBeNull();
+
+    settings.setLastFolder('backups', dir);
+    await settings.flush();
+    expect(JSON.parse(await readFile(file, 'utf8')).global.lastFolders).toEqual(
+      { images: dir, backups: dir },
+    );
+  });
+
+  it('reads last folders that are not an object as none', async () => {
+    await writeFile(
+      file,
+      JSON.stringify({
+        version: 1,
+        global: { lastFolders: [dir] },
+        projects: {},
+        recent: [],
+      }),
+    );
+    const settings = await load();
+    expect(await settings.lastFolder('images')).toBeNull();
+    settings.setLastFolder('images', dir);
+    expect(await settings.lastFolder('images')).toBe(dir);
   });
 
   it('reads the Export choice kept for a Project, or a bad one as everything ticked', async () => {

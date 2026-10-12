@@ -1,4 +1,4 @@
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
@@ -17,6 +17,7 @@ import {
   type EntryImage,
   type EntryRef,
   type ImageExtension,
+  type ImageHolder,
   type ImageRef,
   type EntrySummary,
   type EntryType,
@@ -26,6 +27,7 @@ import {
   type NotesRef,
   type OutlineRef,
   type PrivateRef,
+  type ProjectImage,
   type ProjectTree,
   type ProseLanguage,
   type SceneNode,
@@ -53,6 +55,7 @@ import type {
 import { newerFormatMessage, upgradedMessage } from '../../shared/format-gate';
 import {
   changeEntryType,
+  entryTitle,
   newEntryValue,
   revertEntryType,
 } from '../../shared/entry';
@@ -105,6 +108,7 @@ import {
   type Fingerprint,
 } from './file-system';
 import { FormatUpgraded, GatedFileSystem } from './gated-file-system';
+import { backUpProject } from './backup';
 import { freeName, safeWrite } from './safe-write';
 import {
   markerHosts,
@@ -162,6 +166,7 @@ import {
   type TrashedEntry,
   type TrashedEntryInfo,
   type TrashedScene,
+  type HeldImageFile,
   type TrashedSceneInfo,
   type TrashedVersion,
   type TrashedVersionInfo,
@@ -1140,6 +1145,21 @@ export class ProjectStore {
       );
       return false;
     }
+  }
+
+  /**
+   * Writes a Backup of the Project at `target` once every edit is on disk;
+   * refuses while any isn't, or while any file is online-only.
+   */
+  async backUp(target: string): Promise<void> {
+    await this.flush();
+    if (this.hasUnsaved()) {
+      throw new ProjectError(
+        'unsaved',
+        `${this.displayName} can't be backed up yet: some changes aren't saved. Back Up again once they are, so that the Backup holds them.`,
+      );
+    }
+    await backUpProject(this.path, target, this.deps.fs);
   }
 
   /** A watcher event: checks the files once the burst it belongs to is over. */
@@ -2673,18 +2693,88 @@ export class ProjectStore {
    * client's conflict copies, are never read.
    */
   readImage(ref: ImageRef): Promise<EntryImage | null> {
-    return this.readImageFile(this.heldDetails(ref)?.image);
+    const name = this.heldDetails(ref)?.image;
+    return this.readImageFile(name && imagePath(this.path, name));
   }
 
-  /** The image file `name` in `images/`; null without one, or while it isn't here. */
-  private async readImageFile(name?: string): Promise<EntryImage | null> {
-    if (!name) return null;
-    const file = imagePath(this.path, name);
-    if (!(await this.deps.fs.exists(file))) return null;
+  /** The image file at `file`; null without one, or while it isn't here. */
+  private async readImageFile(file?: string): Promise<EntryImage | null> {
+    if (!file || !(await this.deps.fs.exists(file))) return null;
     return {
       data: await this.deps.fs.readBytes(file),
-      extension: IMAGE_FILE.exec(name)![2] as ImageExtension,
+      extension: IMAGE_FILE.exec(path.basename(file))![2] as ImageExtension,
     };
+  }
+
+  /**
+   * The images a unit can take a copy of with `copyImage`: those of the
+   * Parts, Chapters, Scenes and Entries, live or in the Drawer, whose files
+   * are here, not those in Trash. Identical files are one image. Without
+   * `except`'s own, nor any identical to it.
+   */
+  async projectImages(except?: ImageRef): Promise<ProjectImage[]> {
+    const images = new Map<string, ImageHolder[]>();
+    for (const { holder, file } of await this.imageFiles()) {
+      if (!(await this.deps.fs.exists(file))) continue;
+      const data = await this.deps.fs.readBytes(file);
+      const key = `${path.extname(file)} ${createHash('sha256').update(data).digest('hex')}`;
+      images.set(key, [...(images.get(key) ?? []), holder]);
+    }
+    return [...images.values()]
+      .filter((holders) => !holders.some((h) => h.id === except?.id))
+      .map((holders) => ({ holders }));
+  }
+
+  /** The image of a unit `projectImages` offers, wherever it is kept; null without one. */
+  async readProjectImage(ref: ImageRef): Promise<EntryImage | null> {
+    const held = (await this.imageFiles()).find((h) => h.holder.id === ref.id);
+    return this.readImageFile(held?.file);
+  }
+
+  /**
+   * Gives a unit a copy of the image `source` holds, as `setImage` would
+   * with its bytes: the unit's own from then on. Refused for a unit in Trash
+   * or the Drawer, as `setImage` is, and from a unit whose image
+   * `projectImages` doesn't offer, as one in Trash.
+   */
+  copyImage(ref: ImageRef, source: ImageRef): Promise<void> {
+    return this.enqueueWrite(async () => {
+      const image = await this.readProjectImage(source);
+      if (!image) throw new Error(`No image of ${source.id} to copy`);
+      await this.writeImage(ref, image);
+    });
+  }
+
+  /**
+   * The image file each Part, Chapter, Scene and Entry names, in the
+   * Manuscript's order, then the Unplaced Scenes, the Entries and the
+   * Drawer's; whether or not it is here yet.
+   */
+  private async imageFiles(): Promise<HeldImageFile[]> {
+    const { parts = [], chapters, unplaced } = this.manuscript();
+    const named =
+      (kind: ImageHolder['kind']) =>
+      (unit: { id: string; title: string; image?: string }) =>
+        unit.image
+          ? [
+              {
+                holder: { kind, id: unit.id, title: unit.title },
+                file: imagePath(this.path, unit.image),
+              },
+            ]
+          : [];
+    return [
+      ...parts.flatMap(named('part')),
+      ...chapters.flatMap((chapter) => [
+        ...named('chapter')(chapter),
+        ...chapter.scenes.flatMap(named('scene')),
+      ]),
+      ...unplaced.flatMap(named('scene')),
+      ...this.listEntries().flatMap((entry) =>
+        named('entry')({ ...entry, title: entryTitle(entry) }),
+      ),
+      ...(await this.trash.imagesIn('drawer')),
+    ];
   }
 
   /** What the catalogue's validators read: the Statuses, and the Tags in use but for `except`'s. */

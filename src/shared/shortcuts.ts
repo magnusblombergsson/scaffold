@@ -36,6 +36,10 @@ export type Command = (
   | { type: 'exportManuscript' }
   /** File › Export Story Bible…, which asks which Entries, and with what. */
   | { type: 'exportStoryBible' }
+  /** File › Back Up Project…, of the open Project. */
+  | { type: 'backUp' }
+  /** File › Restore Project from Backup…, into a new Project. */
+  | { type: 'restoreBackup' }
   | { type: 'settings' }
   | { type: 'projectSettings' }
   /** The Keyboard Shortcuts cheat sheet. */

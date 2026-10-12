@@ -225,6 +225,15 @@ export type ImageExtension = 'jpg' | 'png';
 /** An Entry's, Scene's or Chapter's image's bytes, as stored in `images/`. */
 export type EntryImage = { data: Uint8Array; extension: ImageExtension };
 
+/** A unit holding an image, with its title, or an Entry's name. */
+export type ImageHolder = ImageRef & { title: string };
+
+/**
+ * An image another unit can take a copy of: one file, or several identical
+ * ones, with the units holding it; it is read from the first.
+ */
+export type ProjectImage = { holders: ImageHolder[] };
+
 export type SceneNode = { id: string; title: string };
 export type ChapterNode = { id: string; title: string; scenes: SceneNode[] };
 /** A Part: its Chapters by id, in order; the Chapters themselves are in the tree's `chapters`. */

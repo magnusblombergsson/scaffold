@@ -699,8 +699,10 @@ span.card-title {
 /* Without an image, an empty frame keeps the grid even. */
 .card-image.empty {
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
+  gap: 0.3rem;
   padding: 0.5rem;
   background: color-mix(in srgb, var(--line) 35%, transparent);
   border-bottom: 1px dashed var(--line);
@@ -3193,6 +3195,71 @@ legend .show-in-peek {
 
 .settings::backdrop {
   background: rgb(0 0 0 / 25%);
+}
+
+/*
+ * Choose from Project…: the images to pick as a grid of tiles, each named by
+ * the units holding it, under a box narrowing them by name.
+ */
+.image-picker {
+  width: min(40rem, 90vw);
+}
+
+.image-picker input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.image-picker-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(8rem, 1fr));
+  gap: 0.6rem;
+  max-height: 60vh;
+  margin: 0.75rem 0 0;
+  padding: 0.15rem;
+  overflow-y: auto;
+  list-style: none;
+}
+
+.image-picker-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  width: 100%;
+  padding: 0.3rem;
+  background: none;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+}
+
+.image-picker-tile:hover {
+  background: var(--hover);
+}
+
+.image-picker-tile:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.image-picker-tile img,
+.image-picker-blank {
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  object-fit: cover;
+  border-radius: 5px;
+}
+
+.image-picker-blank {
+  display: block;
+  background: color-mix(in srgb, var(--line) 35%, transparent);
+}
+
+.image-picker-label {
+  font-size: 0.75rem;
+  overflow-wrap: anywhere;
 }
 
 /* An image that opens the large view. */

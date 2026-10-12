@@ -2,6 +2,7 @@ import type {
   EntrySummary,
   EntryType,
   ImageRef,
+  ProjectImage,
   Manuscript,
   PartLabel,
   ProseLanguage,
@@ -370,6 +371,20 @@ export interface ProjectApi {
   removeImage(ref: ImageRef): Promise<void>;
   /** A Scene's, Chapter's or Entry's image as a `data:` URL; null without one, or before it syncs. */
   image(ref: ImageRef): Promise<string | null>;
+  /**
+   * The images a Scene, Chapter, Part or Entry can take a copy of: those
+   * other units hold, live or in the Drawer, identical files as one. With
+   * `except`, without its own image, nor any identical to it.
+   */
+  projectImages(except?: ImageRef): Promise<ProjectImage[]>;
+  /** An image `projectImages` offers, read from the unit holding it, as a `data:` URL; null without one. */
+  projectImage(ref: ImageRef): Promise<string | null>;
+  /**
+   * Gives a unit a copy of the image `source` holds, unchanged, in place of
+   * any it had; false if it can't, which main has told the Author. There is
+   * no undo.
+   */
+  copyImage(ref: ImageRef, source: ImageRef): Promise<boolean>;
   /** Puts a Trash or Drawer item back where it was, as near as the Manuscript allows. */
   restore(id: string): Promise<Changed>;
   /** Reverts `step` if it is still the latest structure operation. */
@@ -805,6 +820,17 @@ export interface ShellApi {
    * version of those in Conflict. Resolves when done or cancelled.
    */
   exportStoryBible(choice: StoryBibleChoice): Promise<void>;
+  /**
+   * Has this window's edits written, then writes a Backup of its Project
+   * where the Author chooses. Resolves with the file's name once written;
+   * null when cancelled, or refused, as the Author is then told.
+   */
+  backUpProject(): Promise<string | null>;
+  /**
+   * Asks for a Backup and checks it, then asks for a new folder, restores
+   * the Project there and opens it, as Open Project does.
+   */
+  restoreBackup(): Promise<OpenResult>;
   /** Opens a Project from the recent list. */
   openRecent(path: string): Promise<OpenResult>;
   /** Asks where a recent Project that wasn't found is now, and opens it. */
@@ -1022,6 +1048,9 @@ export const projectMethods = {
   chooseImage: 'invoke',
   removeImage: 'invoke',
   image: 'invoke',
+  projectImages: 'invoke',
+  projectImage: 'invoke',
+  copyImage: 'invoke',
   restore: 'invoke',
   undo: 'invoke',
   listTrash: 'invoke',
@@ -1108,6 +1137,8 @@ export const shellMethods = {
   exportManuscript: 'invoke',
   storyBibleExportImages: 'invoke',
   exportStoryBible: 'invoke',
+  backUpProject: 'invoke',
+  restoreBackup: 'invoke',
   openRecent: 'invoke',
   locateProject: 'invoke',
   recentProjects: 'invoke',

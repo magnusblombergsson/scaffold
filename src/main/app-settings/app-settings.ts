@@ -61,6 +61,16 @@ export type WindowBounds = {
   height: number;
 };
 
+/** The kinds of file dialog, each opening where one of its kind was last confirmed. */
+export const FOLDER_SLOTS = [
+  'images',
+  'import',
+  'export',
+  'backups',
+  'projects',
+] as const;
+export type FolderSlot = (typeof FOLDER_SLOTS)[number];
+
 /** What this computer remembers about one Project, keyed by its id. */
 export type ProjectSettings = {
   windowBounds?: WindowBounds;
@@ -112,6 +122,8 @@ type SettingsFile = {
     welcomed?: boolean;
     providers?: ProvidersSettings;
     todoDock?: Partial<TodoDock>;
+    /** The folder each kind of file dialog was last confirmed in. */
+    lastFolders?: Partial<Record<FolderSlot, string>>;
     /** The height the Author dragged the Assistant's message box to. */
     composerHeight?: number;
   } & Partial<ViewSettings> &
@@ -180,6 +192,12 @@ function parseSettings(text: string): SettingsFile | null {
   } else {
     delete global.todoDock;
   }
+  const lastFolders = readLastFolders(global.lastFolders);
+  if (Object.keys(lastFolders).length > 0) {
+    global.lastFolders = lastFolders;
+  } else {
+    delete global.lastFolders;
+  }
   if (!isFiniteNumber(global.composerHeight)) delete global.composerHeight;
   const view = parseViewSettings(global);
   delete global.writingWidth;
@@ -210,6 +228,17 @@ function parseSettings(text: string): SettingsFile | null {
       ? raw.recent.flatMap((item) => parseRecentRecord(item) ?? [])
       : [],
   };
+}
+
+/** The last folder of each known kind of dialog that is a path. */
+function readLastFolders(raw: unknown): Partial<Record<FolderSlot, string>> {
+  if (!isJsonObject(raw)) return {};
+  const folders: Partial<Record<FolderSlot, string>> = {};
+  for (const slot of FOLDER_SLOTS) {
+    const folder = raw[slot];
+    if (typeof folder === 'string' && folder !== '') folders[slot] = folder;
+  }
+  return folders;
 }
 
 function parseProvidersSettings(raw: JsonObject): ProvidersSettings {
@@ -573,6 +602,25 @@ export class AppSettings {
     this.data.global.todoDock = {
       ...this.data.global.todoDock,
       ...readTodoDock(change),
+    };
+    this.changed();
+  }
+
+  /**
+   * The folder a dialog of `slot` was last confirmed in; null before any, or
+   * once that folder is gone.
+   */
+  async lastFolder(slot: FolderSlot): Promise<string | null> {
+    const folder = this.data.global.lastFolders?.[slot];
+    if (!folder) return null;
+    return (await this.deps.fs.exists(folder)) ? folder : null;
+  }
+
+  /** A dialog of `slot` was confirmed in `folder`. */
+  setLastFolder(slot: FolderSlot, folder: string): void {
+    this.data.global.lastFolders = {
+      ...this.data.global.lastFolders,
+      [slot]: folder,
     };
     this.changed();
   }

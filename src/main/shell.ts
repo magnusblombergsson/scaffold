@@ -43,6 +43,7 @@ import {
   loadAppSettings,
   samePath,
   type AppSettings,
+  type FolderSlot,
   type WindowBounds,
 } from './app-settings/app-settings';
 import { runExport, type ExportJob } from './export/export-flow';
@@ -84,6 +85,13 @@ import {
   projectLookup,
   type ProjectStore,
 } from './project-store/project-store';
+import {
+  backupName,
+  checkBackup,
+  insideFolder,
+  restoreBackup,
+} from './project-store/backup';
+import { writeFailureReason } from './project-store/safe-write';
 import { menuTemplate, proseMenuTemplate, type MenuState } from './menu';
 import { menuWindow } from './menu-window';
 import { ProjectWindows } from './project-windows';
@@ -132,6 +140,26 @@ export function rememberModel(model: Model): void {
 /** The Provider the next call to `model` goes through, with its credential as kept then. */
 export function assistantProvider(model: Model): Provider {
   return providers.provider(model.provider);
+}
+
+/**
+ * Where a file dialog of `slot` opens: the folder one was last confirmed in,
+ * while it is still there.
+ */
+export async function lastFolder(
+  slot: FolderSlot,
+): Promise<string | undefined> {
+  return (await settings.lastFolder(slot)) ?? undefined;
+}
+
+/** A dialog of `slot` was confirmed in `folder`: the next one opens there. */
+export function rememberFolder(slot: FolderSlot, folder: string): void {
+  settings.setLastFolder(slot, folder);
+}
+
+/** A save dialog's default: `name` in the folder of `slot`, or in Documents. */
+async function savePath(slot: FolderSlot, name: string): Promise<string> {
+  return path.join((await lastFolder(slot)) ?? app.getPath('documents'), name);
 }
 
 /** Loads the settings, then reopens the Projects open at quit, each in its window. */
@@ -432,9 +460,11 @@ const shellHandlers: Handlers<ShellApi, typeof shellMethods, WindowContext> = {
       title: 'Create Project',
       buttonLabel: 'Create',
       nameFieldLabel: 'Project name',
+      defaultPath: await lastFolder('projects'),
       properties: ['createDirectory', 'showOverwriteConfirmation'],
     });
     if (canceled || !filePath) return null;
+    rememberFolder('projects', path.dirname(filePath));
     try {
       return showOpened(ctx.sender, await createProject(filePath, deps));
     } catch (error) {
@@ -461,10 +491,11 @@ const shellHandlers: Handlers<ShellApi, typeof shellMethods, WindowContext> = {
       title: 'Import into a New Project',
       buttonLabel: 'Create',
       nameFieldLabel: 'Project name',
-      defaultPath: path.join(app.getPath('documents'), file.name),
+      defaultPath: await savePath('projects', file.name),
       properties: ['createDirectory', 'showOverwriteConfirmation'],
     });
     if (canceled || !filePath) return 'canceled';
+    rememberFolder('projects', path.dirname(filePath));
     const manuscript = newManuscript(splitManuscript(file.blocks, convention));
     try {
       return showOpened(
@@ -496,6 +527,91 @@ const shellHandlers: Handlers<ShellApi, typeof shellMethods, WindowContext> = {
         storyBibleExportImages: choice.images,
       }),
     );
+  },
+  backUpProject: async (ctx) => {
+    const store = projectWindows.of(ctx.sender);
+    const window = windowOf(ctx);
+    const tell = (message: string, detail?: string) =>
+      dialog.showMessageBox(window, {
+        type: 'warning',
+        buttons: ['OK'],
+        message,
+        detail,
+      });
+    // The window's edits first; the store has them written.
+    await requestRendererFlush(ctx.sender);
+    const { canceled, filePath } = await dialog.showSaveDialog(window, {
+      title: 'Back Up Project',
+      buttonLabel: 'Back Up',
+      defaultPath: await savePath(
+        'backups',
+        backupName(store.displayName, new Date()),
+      ),
+      filters: [{ name: 'Backup', extensions: ['zip'] }],
+      properties: ['createDirectory', 'showOverwriteConfirmation'],
+    });
+    if (canceled || !filePath) return null;
+    // Real paths, so that a link into the Project folder is seen as inside it.
+    const real = (target: string) => realpath(target).catch(() => target);
+    const target = path.join(
+      await real(path.dirname(filePath)),
+      path.basename(filePath),
+    );
+    if (insideFolder(target, await real(store.path))) {
+      await tell(
+        'Choose a place outside the Project folder',
+        `A Backup is never saved inside ${store.displayName}, where it would be synced and backed up again.`,
+      );
+      return null;
+    }
+    // Only once outside the Project, so the next one doesn't start inside it.
+    rememberFolder('backups', path.dirname(filePath));
+    try {
+      await store.backUp(target);
+    } catch (error) {
+      await tell(
+        error instanceof ProjectError
+          ? error.message
+          : `Can't back up ${store.displayName}: ${writeFailureReason(error)}.`,
+      );
+      return null;
+    }
+    return path.basename(target);
+  },
+  restoreBackup: async (ctx) => {
+    const window = windowOf(ctx);
+    const chosen = await dialog.showOpenDialog(window, {
+      title: 'Restore Project from Backup',
+      buttonLabel: 'Restore',
+      defaultPath: await lastFolder('backups'),
+      filters: [{ name: 'Backup', extensions: ['zip'] }],
+      properties: ['openFile'],
+    });
+    if (chosen.canceled || chosen.filePaths.length === 0) return null;
+    const zipPath = chosen.filePaths[0];
+    rememberFolder('backups', path.dirname(zipPath));
+    let folderName: string;
+    try {
+      ({ folderName } = await checkBackup(zipPath));
+    } catch (error) {
+      return openFailure(zipPath, error);
+    }
+    // Never over a Project: always a new folder.
+    const { canceled, filePath } = await dialog.showSaveDialog(window, {
+      title: 'Restore into a New Project',
+      buttonLabel: 'Restore',
+      nameFieldLabel: 'Project name',
+      defaultPath: await savePath('projects', folderName),
+      properties: ['createDirectory'],
+    });
+    if (canceled || !filePath) return null;
+    rememberFolder('projects', path.dirname(filePath));
+    try {
+      await restoreBackup(zipPath, filePath);
+    } catch (error) {
+      return openFailure(filePath, error);
+    }
+    return openPath(ctx, filePath);
   },
   openRecent: (ctx, projectPath) => openPath(ctx, projectPath),
   locateProject: async (ctx, oldPath) => {
@@ -760,6 +876,7 @@ async function chooseImportFile(
   const { canceled, filePaths } = await dialog.showOpenDialog(windowOf(ctx), {
     title,
     buttonLabel: 'Import',
+    defaultPath: await lastFolder('import'),
     filters: [
       {
         name: 'Word or Markdown',
@@ -771,7 +888,9 @@ async function chooseImportFile(
     ],
     properties: ['openFile'],
   });
-  return canceled || filePaths.length === 0 ? null : filePaths[0];
+  if (canceled || filePaths.length === 0) return null;
+  rememberFolder('import', path.dirname(filePaths[0]));
+  return filePaths[0];
 }
 
 /**
@@ -832,11 +951,13 @@ function exportFrom(
         const { canceled, filePath } = await dialog.showSaveDialog(window, {
           title,
           buttonLabel: 'Export',
-          defaultPath: path.join(app.getPath('documents'), `${name}.docx`),
+          defaultPath: await savePath('export', `${name}.docx`),
           filters: formats.map((format) => EXPORT_FORMATS[format]),
           properties: ['createDirectory', 'showOverwriteConfirmation'],
         });
-        return canceled || !filePath ? null : filePath;
+        if (canceled || !filePath) return null;
+        rememberFolder('export', path.dirname(filePath));
+        return filePath;
       },
       confirmReplace: async (target) => {
         const { response } = await dialog.showMessageBox(window, {
@@ -883,9 +1004,13 @@ async function chooseFolder(
 ): Promise<string | null> {
   const { canceled, filePaths } = await dialog.showOpenDialog(windowOf(ctx), {
     title,
+    defaultPath: await lastFolder('projects'),
     properties: ['openDirectory'],
   });
-  return canceled || filePaths.length === 0 ? null : filePaths[0];
+  if (canceled || filePaths.length === 0) return null;
+  // The chosen folder itself: the next one opens in it.
+  rememberFolder('projects', filePaths[0]);
+  return filePaths[0];
 }
 
 /** Takes a window out of zen mode, back to the full screen it had before. */
