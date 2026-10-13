@@ -5,7 +5,13 @@ import {
   type Page,
 } from '@playwright/test';
 import path from 'node:path';
-import { answerDialogs, chooseMenu, launch, useTempDir } from './app';
+import {
+  answerDialogs,
+  chooseMenu,
+  launch,
+  roomButton,
+  useTempDir,
+} from './app';
 
 const tempDir = useTempDir();
 
@@ -49,8 +55,8 @@ test('Ctrl+Enter adds a Scene below the open one, Ctrl+Alt+Enter above, from the
     );
     await expect(page.getByLabel('Prose')).toBeFocused();
 
-    // Shown in the Story Bible, the chord switches back to the Manuscript.
-    await tab(page, 'Story Bible').click();
+    // Shown in the Trash, the chord switches back to the Manuscript.
+    await tab(page, 'Trash').click();
     await page.getByLabel('Prose').click();
     await page.keyboard.press('Control+Alt+Enter');
     await expect(tab(page, 'Manuscript')).toHaveAttribute(
@@ -186,8 +192,8 @@ test('Ctrl+E picks a type, creates the Entry and opens it in the Story Bible wit
     await page.keyboard.press('Enter');
     await expect(types).toBeHidden();
 
-    await expect(tab(page, 'Story Bible')).toHaveAttribute(
-      'aria-selected',
+    await expect(roomButton(page, 'Story Bible')).toHaveAttribute(
+      'aria-pressed',
       'true',
     );
     await expect(page.getByLabel('Name', { exact: true })).toBeFocused();
@@ -210,23 +216,45 @@ test('Ctrl+E picks a type, creates the Entry and opens it in the Story Bible wit
   }
 });
 
-test('outside Writing only Ctrl+1/2/3 work', async () => {
+test('outside Writing only Ctrl+1/2/3/4 and Ctrl+E work; Ctrl+E lands in the Story Bible', async () => {
   const { app, page } = await newProject();
-  const mode = (name: string) =>
-    page.getByRole('button', { name, exact: true });
   try {
     await page.keyboard.press('Control+2');
-    await expect(mode('Brainstorm')).toHaveAttribute('aria-pressed', 'true');
+    await expect(roomButton(page, 'Brainstorm')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
     await page.keyboard.press('Control+Enter');
     await page.keyboard.press('Control+Shift+Enter');
-    await page.keyboard.press('Control+E');
-    await expect(page.getByRole('menu', { name: 'New Entry' })).toHaveCount(0);
     await page.keyboard.press('Control+3');
-    await expect(mode('Interview')).toHaveAttribute('aria-pressed', 'true');
+    await expect(roomButton(page, 'Interview')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await page.keyboard.press('Control+4');
+    await expect(roomButton(page, 'Story Bible')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await expect(page.getByText('No Entry open')).toBeVisible();
     await page.keyboard.press('Control+1');
-    await expect(mode('Writing')).toHaveAttribute('aria-pressed', 'true');
+    await expect(roomButton(page, 'Writing')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
     await expect(binderTitles(page)).toHaveText(['Chapter 1', 'Scene 1']);
     await expect(page.locator('.toast')).toHaveCount(0);
+
+    // An Entry is made from Brainstorm, and opens in the Story Bible.
+    await page.keyboard.press('Control+2');
+    await page.keyboard.press('Control+E');
+    const types = page.getByRole('menu', { name: 'New Entry' });
+    await types.getByRole('menuitem', { name: 'Character' }).click();
+    await expect(roomButton(page, 'Story Bible')).toHaveAttribute(
+      'aria-pressed',
+      'true',
+    );
+    await expect(page.getByLabel('Name', { exact: true })).toBeFocused();
   } finally {
     await app.close();
   }
@@ -290,12 +318,13 @@ test('the Insert menu creates above or below, and Entries of a type, switching t
   }
 });
 
-test('the toolbar keeps only the Mode switch and, in Writing, Zen, and buttons show their shortcut', async () => {
+test('the toolbar keeps only the Room switch and, in Writing, Zen, and buttons show their shortcut', async () => {
   const { app, page } = await newProject();
   try {
     const header = page.locator('.project-view header');
     await expect(header.getByRole('button')).toHaveText([
       'Writing',
+      'Story Bible',
       'Brainstorm',
       'Interview',
       'Zen',
@@ -303,6 +332,9 @@ test('the toolbar keeps only the Mode switch and, in Writing, Zen, and buttons s
     await expect(
       header.getByRole('button', { name: 'Brainstorm' }),
     ).toHaveAttribute('title', 'Brainstorm (Ctrl+2)');
+    await expect(
+      header.getByRole('button', { name: 'Story Bible' }),
+    ).toHaveAttribute('title', 'Story Bible (Ctrl+4)');
     await expect(header.getByRole('button', { name: 'Zen' })).toHaveAttribute(
       'title',
       'Zen Mode (Ctrl+Shift+F)',
@@ -320,7 +352,7 @@ test('the toolbar keeps only the Mode switch and, in Writing, Zen, and buttons s
     await expect(below).toHaveAttribute('aria-keyshortcuts', 'Control+Enter');
     await expect(below).toContainText('Ctrl+Enter');
     await page.keyboard.press('Escape');
-    await tab(page, 'Story Bible').click();
+    await roomButton(page, 'Story Bible').click();
     await expect(
       page.getByRole('button', { name: 'New Entry' }),
     ).toHaveAttribute('title', 'New Entry (Ctrl+E)');

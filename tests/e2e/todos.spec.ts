@@ -7,6 +7,7 @@ import {
   answerQuestions,
   chooseMenu,
   launch,
+  roomButton,
   useTempDir,
 } from './app';
 import { useFakeAnthropic } from './fake-anthropic';
@@ -35,12 +36,12 @@ function unit(page: Page, name: string) {
     .getByRole('button', { name, exact: true });
 }
 
-/** The Todos dock's header, which folds and raises it. */
+/** The Todos dock's header, which folds and raises it, in the Room shown. */
 function dockHeader(page: Page) {
-  return page.locator('.todo-dock-header');
+  return page.locator('.room:not([hidden]) .todo-dock-header');
 }
 
-/** Raises Writing's Todos dock, unless it is raised. */
+/** Raises the Todos dock, unless it is raised. */
 async function raise(page: Page) {
   const header = dockHeader(page);
   if ((await header.getAttribute('aria-expanded')) === 'false') {
@@ -299,7 +300,7 @@ test('This context shows the open unit’s Todos and its containers’, and Brai
     await unit(page, 'Part One').click();
     await expect(newTodo(page).link).toHaveText(/Part One/);
     await addTodo(page, 'Name the part');
-    await page.getByRole('tab', { name: 'Story Bible' }).click();
+    await roomButton(page, 'Story Bible').click();
     await page.getByRole('button', { name: 'New Entry' }).click();
     await page
       .getByRole('menuitem', { name: 'Character', exact: true })
@@ -320,7 +321,7 @@ test('This context shows the open unit’s Todos and its containers’, and Brai
     await expect(dockHeader(page)).toHaveText(/Todos · 1$/);
 
     // It follows the unit opened, from whichever tab shows.
-    await page.getByRole('tab', { name: 'Manuscript' }).click();
+    await roomButton(page, 'Writing').click();
     await unit(page, 'Scene 1').click();
     await expect
       .poll(textsIn(toDo))
@@ -371,7 +372,7 @@ test('This context shows the open unit’s Todos and its containers’, and Brai
   }
 });
 
-test('the Todos dock shows under every tab, folds to a count, is resized by its divider, and is remembered', async () => {
+test('the Todos dock shows under every tab and in the Story Bible, folds to a count, is resized by its divider, and is remembered', async () => {
   const projectPath = path.join(tempDir(), 'My Novel');
   const { app, page } = await newProject(projectPath);
   await expect(page.getByRole('tab', { name: 'Todos' })).toHaveCount(0);
@@ -383,7 +384,7 @@ test('the Todos dock shows under every tab, folds to a count, is resized by its 
   await page.getByRole('checkbox', { name: 'Done: Fix the end' }).click();
   await expect(dockHeader(page)).toHaveText(/Todos · 1$/);
 
-  for (const tab of ['Story Bible', 'Trash', 'Manuscript']) {
+  for (const tab of ['Trash', 'Drawer', 'Manuscript']) {
     await page.getByRole('tab', { name: tab }).click();
     await expect(todos(page).getByLabel('New Todo')).toBeVisible();
   }
@@ -424,6 +425,12 @@ test('the Todos dock shows under every tab, folds to a count, is resized by its 
   await expect(dockHeader(page)).toBeHidden();
   await page.keyboard.press('Control+Shift+M');
   await expect(dockHeader(page)).toBeVisible();
+
+  // The Story Bible has it too, as it is in Writing.
+  await roomButton(page, 'Story Bible').click();
+  await expect(todos(page).getByLabel('New Todo')).toBeVisible();
+  await expect(dockHeader(page)).toHaveAttribute('aria-expanded', 'true');
+  await roomButton(page, 'Writing').click();
   await app.close();
 
   const second = await launch(tempDir());
@@ -466,7 +473,7 @@ test('Add Todo… in the Binder, Story Bible and Corkboard menus starts a Todo l
     await page.getByRole('menuitem', { name: 'Add Todo…' }).click();
     await add('Fix the opening', 'Scene 1');
 
-    await page.getByRole('tab', { name: 'Story Bible' }).click();
+    await roomButton(page, 'Story Bible').click();
     await page.getByRole('button', { name: 'New Entry' }).click();
     await page
       .getByRole('menuitem', { name: 'Character', exact: true })
@@ -478,7 +485,7 @@ test('Add Todo… in the Binder, Story Bible and Corkboard menus starts a Todo l
     await add('Give her a past', 'New Character');
 
     // On the Chapter's Corkboard, a Scene card's menu links its Scene.
-    await page.getByRole('tab', { name: 'Manuscript' }).click();
+    await roomButton(page, 'Writing').click();
     await unit(page, 'Chapter 1').click();
     // Right-clicked, as the Author would.
     await page

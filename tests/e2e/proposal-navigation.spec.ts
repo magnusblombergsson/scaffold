@@ -1,7 +1,13 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { addAnthropicKey, answerDialogs, launch, useTempDir } from './app';
+import {
+  addAnthropicKey,
+  answerDialogs,
+  launch,
+  roomButton,
+  useTempDir,
+} from './app';
 import { useFakeAnthropic } from './fake-anthropic';
 
 const tempDir = useTempDir();
@@ -23,7 +29,7 @@ async function switchTo(
   mode: 'Writing' | 'Brainstorm' | 'Interview',
 ) {
   await page
-    .getByRole('group', { name: 'Mode' })
+    .getByRole('group', { name: 'Room' })
     .getByRole('button', { name: mode })
     .click();
 }
@@ -40,7 +46,7 @@ async function start() {
   await page.getByRole('button', { name: 'New Project…' }).click();
   await expect(page.getByLabel('Prose')).toBeFocused();
   const assistant = await addAnthropicKey(page);
-  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(page, 'Story Bible').click();
   await page.getByRole('button', { name: 'New Entry' }).click();
   await page.getByRole('menuitem', { name: 'Character', exact: true }).click();
   await fill(page, 'Name', 'Anna');
@@ -82,16 +88,20 @@ test('in Writing, a Proposal’s title goes to its target, focused, its ghost hi
   await assistant.getByRole('button', { name: 'Send' }).click();
   const reply = assistant.getByRole('article', { name: 'Assistant' });
   await expect(reply.locator('.message-text')).toHaveText('Some changes.');
+  // Its Mode select lists only Modes, not the Story Bible.
+  await expect(
+    assistant.getByRole('combobox', { name: 'Mode' }).getByRole('option'),
+  ).toHaveText(['Writing', 'Brainstorm', 'Interview']);
 
   // Start elsewhere: the Scene.
-  await page.getByRole('tab', { name: 'Manuscript' }).click();
+  await roomButton(page, 'Writing').click();
   await page.getByRole('button', { name: 'Scene 1', exact: true }).click();
   await expect(page.getByLabel('Prose')).toBeVisible();
 
-  // An Entry's field.
+  // An Entry's field, in the Story Bible, the Assistant panel coming along.
   await reply.getByRole('button', { name: 'Anna › Voice traits' }).click();
-  await expect(page.getByRole('tab', { name: 'Story Bible' })).toHaveAttribute(
-    'aria-selected',
+  await expect(roomButton(page, 'Story Bible')).toHaveAttribute(
+    'aria-pressed',
     'true',
   );
   const traits = page.getByLabel('Traits', { exact: true });
@@ -112,7 +122,7 @@ test('in Writing, a Proposal’s title goes to its target, focused, its ghost hi
   await key.getByRole('button', { name: 'Accept' }).click();
   await expect(key).toContainText('✓ Accepted');
   // From the Scene again.
-  await page.getByRole('tab', { name: 'Manuscript' }).click();
+  await roomButton(page, 'Writing').click();
   await page.getByRole('button', { name: 'Scene 1', exact: true }).click();
   await key.getByRole('button', { name: 'New Item · Key' }).click();
   await expect(page.getByLabel('Name', { exact: true })).toBeFocused();
@@ -122,6 +132,10 @@ test('in Writing, a Proposal’s title goes to its target, focused, its ghost hi
   await reply
     .getByRole('button', { name: 'Scene “Scene 1” › Outline' })
     .click();
+  await expect(roomButton(page, 'Writing')).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
   await expect(page.getByLabel('Prose')).toBeVisible();
   await expect(page.getByLabel('Outline', { exact: true })).toBeFocused();
 
@@ -155,7 +169,7 @@ test('in Writing, a Proposal’s title goes to its target, focused, its ghost hi
   await app.close();
 });
 
-test('in Brainstorm, a Proposal’s title opens a Peek without a pin, whose Open in Writing goes to the target', async () => {
+test('in Brainstorm, a Proposal’s title opens a Peek without a pin, whose open button goes to the target', async () => {
   const { app, page, annaId, sceneId } = await start();
   await switchTo(page, 'Brainstorm');
 
@@ -204,7 +218,7 @@ test('in Brainstorm, a Proposal’s title opens a Peek without a pin, whose Open
   await expect(outlinePeek).toContainText('- Anna waits for Mira.');
   await outlinePeek.getByRole('button', { name: 'Open in Writing' }).click();
   await expect(
-    page.getByRole('group', { name: 'Mode' }).getByRole('button', {
+    page.getByRole('group', { name: 'Room' }).getByRole('button', {
       name: 'Writing',
     }),
   ).toHaveAttribute('aria-pressed', 'true');
@@ -217,7 +231,7 @@ test('in Brainstorm, a Proposal’s title opens a Peek without a pin, whose Open
   // And an Entry's field, with its ghost highlighted.
   await switchTo(page, 'Brainstorm');
   await reply.getByRole('button', { name: 'Anna › Aliases' }).click();
-  await peek.getByRole('button', { name: 'Open in Writing' }).click();
+  await peek.getByRole('button', { name: 'Open in the Story Bible' }).click();
   await expect(page.getByLabel('Aliases', { exact: true })).toBeFocused();
   await expect(
     page.getByRole('list', { name: 'Proposed Aliases' }).getByRole('listitem'),
@@ -225,7 +239,7 @@ test('in Brainstorm, a Proposal’s title opens a Peek without a pin, whose Open
   await app.close();
 });
 
-test('in Interview, a Proposal’s title opens a Peek without a pin, whose Open in Writing goes to the target', async () => {
+test('in Interview, a Proposal’s title opens a Peek without a pin, whose open button goes to the target', async () => {
   const { app, page, annaId } = await start();
   await switchTo(page, 'Interview');
   const room = page.getByRole('main', { name: 'Interview' });
@@ -249,7 +263,7 @@ test('in Interview, a Proposal’s title opens a Peek without a pin, whose Open 
   const peek = page.getByRole('dialog', { name: 'Story Bible peek' });
   await expect(peek.getByRole('heading', { name: 'Anna' })).toBeVisible();
   await expect(peek.getByRole('button', { name: /Pin/ })).toHaveCount(0);
-  await peek.getByRole('button', { name: 'Open in Writing' }).click();
+  await peek.getByRole('button', { name: 'Open in the Story Bible' }).click();
 
   await expect(
     page.getByRole('group', { name: 'Role' }).getByRole('radio').first(),

@@ -1,7 +1,13 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { addAnthropicKey, answerDialogs, launch, useTempDir } from './app';
+import {
+  addAnthropicKey,
+  answerDialogs,
+  launch,
+  roomButton,
+  useTempDir,
+} from './app';
 import { useFakeAnthropic } from './fake-anthropic';
 
 const tempDir = useTempDir();
@@ -20,7 +26,7 @@ const block = (json: object) =>
 /** Switches the window to a Mode at the top. */
 async function switchTo(page: Page, mode: 'Writing' | 'Brainstorm') {
   await page
-    .getByRole('group', { name: 'Mode' })
+    .getByRole('group', { name: 'Room' })
     .getByRole('button', { name: mode })
     .click();
 }
@@ -33,7 +39,7 @@ test('the Author brainstorms in the Brainstorm room, decides its Proposals inlin
   await page.getByRole('button', { name: 'New Project…' }).click();
   await page.getByLabel('Prose').pressSequentially('Anna packed in the rain.');
   await addAnthropicKey(page);
-  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(page, 'Story Bible').click();
   await page.getByRole('button', { name: 'New Entry' }).click();
   await page.getByRole('menuitem', { name: 'Character', exact: true }).click();
   await fill(page, 'Name', 'Anna');

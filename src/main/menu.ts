@@ -3,7 +3,7 @@ import type {
   KeyboardEvent,
   MenuItemConstructorOptions,
 } from 'electron';
-import { MODE_LABELS } from '../shared/conversation';
+import { ROOM_LABELS, ROOMS } from '../shared/room';
 import { ENTRY_TYPE_LABELS, ENTRY_TYPES } from '../shared/project-types';
 import {
   SHORTCUTS,
@@ -50,7 +50,7 @@ export type MenuActions = {
 };
 
 /**
- * The menu bar. The window takes the shortcuts of Mode, zen, the panes and
+ * The menu bar. The window takes the shortcuts of Room, zen, the panes and
  * Insert, and Ctrl+/, itself, so that they work inside an editor and only
  * where they apply, and the Prose takes Format's; the menus only show them.
  */
@@ -202,11 +202,11 @@ export function menuTemplate(
     {
       label: 'View',
       submenu: [
-        ...(['writing', 'brainstorm', 'interview'] as const).map((mode) => ({
-          label: MODE_LABELS[mode],
+        ...ROOMS.map((room) => ({
+          label: ROOM_LABELS[room],
           enabled: !!project,
-          ...windowKey(SHORTCUTS[mode]),
-          ...sending({ type: 'mode', mode }),
+          ...windowKey(SHORTCUTS[room]),
+          ...sending({ type: 'room', room }),
         })),
         { type: 'separator' },
         {

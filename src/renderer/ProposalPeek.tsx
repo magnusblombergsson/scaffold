@@ -15,16 +15,17 @@ export type TargetPeek = {
 
 /**
  * The Peek a Proposal's title opens in Brainstorm and Interview: its Entry,
- * shortened, or its Outline, and a link to go to it in Writing. Nothing is
- * pinned from it: Pinned notes are for Writing.
+ * shortened, or its Outline, and a link to go to it: an Entry in the Story
+ * Bible, an Outline in Writing. Nothing is pinned from it: Pinned notes are
+ * for Writing.
  */
 export function ProposalPeek({
   peek,
-  onOpenInWriting,
+  onOpen,
   onClose,
 }: {
   peek: TargetPeek;
-  onOpenInWriting(): void;
+  onOpen(): void;
   onClose(): void;
 }) {
   const { target, name, anchor } = peek;
@@ -39,8 +40,10 @@ export function ProposalPeek({
       ) : (
         <OutlinePeek outlineId={target.outlineId} name={name} />
       )}
-      <button className="peek-open-in-writing" onClick={onOpenInWriting}>
-        Open in Writing
+      <button className="peek-open" onClick={onOpen}>
+        {target.kind === 'entry'
+          ? 'Open in the Story Bible'
+          : 'Open in Writing'}
       </button>
     </PeekFrame>
   );

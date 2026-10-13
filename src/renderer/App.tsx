@@ -1,4 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  type RefObject,
+} from 'react';
+import { createPortal } from 'react-dom';
+import type { Editor } from '@tiptap/core';
 import type {
   Changed,
   Created,
@@ -25,7 +35,7 @@ import {
   type UnitRef,
   type UnitValue,
 } from '../shared/project-types';
-import { MODE_LABELS, type Mode } from '../shared/conversation';
+import { ROOM_LABELS, ROOMS, type Room } from '../shared/room';
 import { ProjectMirror } from './project-mirror';
 import { useProject } from './use-project';
 import type { Cut } from '../shared/prose-split';
@@ -47,7 +57,7 @@ import { capitalized, unitName } from '../shared/unit-name';
 import { AssistantPanel } from './AssistantPanel';
 import { Binder, type Selection } from './Binder';
 import { BrainstormRoom } from './BrainstormRoom';
-import { WINDOW_MODES, type ShowProposal } from './Conversation';
+import type { ShowProposal } from './Conversation';
 import { ConflictList, ConflictResolver } from './Conflicts';
 import {
   ChapterCorkboard,
@@ -95,6 +105,7 @@ import { applyFormat, focusedProse } from './prose-format';
 import { cutAtSelection } from './split-scene';
 import { flushPendingEdits } from './pending-edits';
 import type { Reveal } from './reveal';
+import { dockRoomOf, keyApplies, roomOf, type DockRoom } from './rooms';
 import { SaveFailureBanner, useSaveStatus } from './SaveStatus';
 import { SceneEditor, type QuoteJump } from './SceneEditor';
 import { SettingsDialog } from './SettingsDialog';
@@ -368,13 +379,17 @@ function ProjectView({
       : undefined;
   /** What the Project calls a Part, as in “Act”. */
   const partNamed = partName(manuscript.partLabel);
-  const [mode, setMode] = useState<Mode>('writing');
+  const [room, setRoom] = useState<Room>('writing');
   /**
-   * The Modes shown so far. Each stays mounted, hidden while another is
-   * shown, so that a reply streaming in, a draft or a Conversation open
-   * there is as the Author left it.
+   * The Rooms shown so far. Each stays mounted, hidden while another is
+   * shown, so that a reply streaming in, a draft, a Conversation or an
+   * Entry open there is as the Author left it.
    */
-  const [visited, setVisited] = useState<Set<Mode>>(() => new Set([mode]));
+  const [visited, setVisited] = useState<Set<Room>>(() => new Set([room]));
+  /** The Entry open in the Story Bible Room, by id. */
+  const [openEntryId, setOpenEntryId] = useState<string | null>(null);
+  /** How many Entry Conflicts were resolved: the open Entry is read anew after each. */
+  const [resolutions, setResolutions] = useState(0);
   const [widths, setWidths] = useState<PanelWidths>(
     project.view.panelWidths ?? {},
   );
@@ -431,6 +446,7 @@ function ProjectView({
   }
 
   function continueAt(sceneId: string, cursor?: number) {
+    switchRoom('writing');
     setTab('manuscript');
     setResolving(null);
     setSelected({ kind: 'scene', id: sceneId });
@@ -440,6 +456,7 @@ function ProjectView({
   const quotes = useRef(0);
   /** Opens a Scene with a quote of its Prose selected, as a Finding's. */
   function showQuote(sceneId: string, text: string) {
+    switchRoom('writing');
     setTab('manuscript');
     setResolving(null);
     setPeek(null);
@@ -470,36 +487,53 @@ function ProjectView({
     void window.shell.tips().then(setTips);
   }, []);
 
-  function switchMode(next: Mode) {
+  function switchRoom(next: Room) {
     flushPendingEdits();
     setPeek(null);
     setTargetPeek(null);
-    setMode(next);
+    setRoom(next);
     setVisited((visited) => new Set(visited).add(next));
   }
 
-  /** Opens an Entry in the Story Bible tab, from a Peek or a Pinned note. */
+  /** Whether the Prose takes focus back once Writing shows again. */
+  const refocusProse = useRef(false);
+  /**
+   * Switches Room as the Author asked, by the switch or its key. Back in
+   * Writing, the cursor is in the Prose where it was left.
+   */
+  function enterRoom(next: Room) {
+    refocusProse.current = next === 'writing' && room !== 'writing';
+    switchRoom(next);
+  }
+  useEffect(() => {
+    if (room !== 'writing' || !refocusProse.current) return;
+    refocusProse.current = false;
+    const prose = writingRoom.current?.querySelector('.prose');
+    // TipTap keeps its editor on the element it edits, and its selection.
+    (prose as { editor?: Editor } | null | undefined)?.editor?.commands.focus();
+  }, [room]);
+
+  /**
+   * Opens an Entry in the Story Bible Room, from any Room: a Peek, a Pinned
+   * note, an Entry card or a Todo. Writing keeps its Scene and cursor.
+   */
   function showEntry(id: string) {
-    setTab('bible');
-    select({ kind: 'entry', id });
+    switchRoom('storyBible');
+    setFocusName(null);
+    setRevealing(null);
+    setOpenEntryId(id);
   }
 
-  /** Opens an Entry in Writing, from a room. */
-  function openEntryInWriting(id: string) {
-    switchMode('writing');
-    showEntry(id);
-  }
-
-  /** Opens a Todo's Scene, Chapter, Part or Entry in Writing, from a room. */
-  function openInWriting(link: TodoLink) {
-    if (link.kind === 'entry') return openEntryInWriting(link.id);
-    switchMode('writing');
+  /** Opens a Todo's Scene, Chapter or Part in Writing, or its Entry in the Story Bible. */
+  function openLink(link: TodoLink) {
+    if (link.kind === 'entry') return showEntry(link.id);
+    switchRoom('writing');
     setTab('manuscript');
-    select(link);
+    select({ kind: link.kind, id: link.id });
   }
 
   /**
-   * The Entry or Outline a Proposal's title went to in Writing, by its id,
+   * The Entry or Outline a Proposal's title went to, by its id,
    * and the field there to go to.
    */
   const [revealing, setRevealing] = useState<{
@@ -512,26 +546,24 @@ function ProjectView({
     revealing?.id === id ? revealing.reveal : undefined;
 
   /**
-   * Goes to a Proposal's target in Writing: its Entry, at the field, or the
-   * Outline of its Scene, Chapter or the Project. The Conversation stays
-   * open beside it. Nothing happens once the target is in Trash or gone.
+   * Goes to a Proposal's target: its Entry, at the field, in the Story Bible
+   * Room, or the Outline of its Scene, Chapter or the Project in Writing.
+   * The Conversation stays open beside it. Nothing happens once the target
+   * is in Trash or gone.
    */
   function goToTarget(target: ProposalTarget, proposalId: string) {
     if (!reachable(target)) return;
     const count = ++revealCount.current;
     if (target.kind === 'entry') {
-      setTab('bible');
-      select({ kind: 'entry', id: target.entryId });
+      showEntry(target.entryId);
       setRevealing({
         id: target.entryId,
         reveal: { field: target.field, proposalId, count },
       });
       return;
     }
-    const selection = selectionOf(
-      { kind: 'outline', id: target.outlineId },
-      manuscript,
-    );
+    const selection = selectionOf(target.outlineId, manuscript);
+    switchRoom('writing');
     setTab('manuscript');
     select(selection);
     if (selection.kind === 'scene' && !outlineNotesOpen) toggleOutlineNotes();
@@ -580,8 +612,9 @@ function ProjectView({
 
   const [tab, setTab] = useState<Tab>('manuscript');
   /**
-   * Which side panes are docked in Writing, rather than collapsed to their
-   * edge tabs. In memory for the window, across Mode switches.
+   * Which side panes are docked in Writing, and the Assistant in the Story
+   * Bible, rather than collapsed to their edge tabs. In memory for the
+   * window, across Room switches.
    */
   const [docked, setDocked] = useState<DockedPanes>(ALL_DOCKED);
   useEffect(() => window.shell.showDocked(docked), [docked]);
@@ -598,12 +631,24 @@ function ProjectView({
     }
     room?.querySelector<HTMLElement>('[aria-label="Prose"]')?.focus();
   }
+  /** Moves focus to the open Entry's row in the Story Bible list if it is in the Assistant, about to go. */
+  function focusEntryOutOfAssistant() {
+    if (!document.activeElement?.closest('.assistant-panel')) return;
+    bibleRoomElement
+      ?.querySelector<HTMLElement>(
+        '.left-pane [data-row][aria-current="true"], .left-pane [data-row]',
+      )
+      ?.focus();
+  }
   /**
    * Collapses a side pane, or docks it back at the tab it last showed. Focus
-   * in a pane that collapses goes to the Prose.
+   * in a pane that collapses goes to the Prose, or in the Story Bible to the
+   * open Entry's row.
    */
   function togglePane(pane: SidePane) {
-    if (docked[pane]) {
+    if (docked[pane] && pane === 'assistant' && room === 'storyBible') {
+      focusEntryOutOfAssistant();
+    } else if (docked[pane]) {
       focusProseOutOf(pane === 'left' ? '.left-pane' : '.assistant-panel');
     }
     setDocked({ ...docked, [pane]: !docked[pane] });
@@ -623,7 +668,7 @@ function ProjectView({
    */
   const [beforeZen, setBeforeZen] = useState<PanesBeforeZen | null>(null);
   /** Zen is shown in Writing only, and resumes on the return to it. */
-  const zen = beforeZen !== null && mode === 'writing';
+  const zen = beforeZen !== null && room === 'writing';
   useEffect(() => window.shell.setZen(zen), [zen]);
   /** Puts every pane away, the Overview too, leaving the Overview's saved state as is. */
   function enterZen() {
@@ -654,7 +699,44 @@ function ProjectView({
     };
   }, [zen]);
   const writingRoom = useRef<HTMLDivElement>(null);
-  usePaneCycle(writingRoom, mode === 'writing');
+  usePaneCycle(writingRoom, room === 'writing');
+  /**
+   * The Story Bible Room's element, once it is first shown: kept as state,
+   * as it mounts after the first render, and given to the pane cycle as a
+   * ref to it.
+   */
+  const [bibleRoomElement, setBibleRoomElement] =
+    useState<HTMLDivElement | null>(null);
+  const bibleRoom = useMemo(
+    () => ({ current: bibleRoomElement }),
+    [bibleRoomElement],
+  );
+  usePaneCycle(bibleRoom, room === 'storyBible');
+  /**
+   * The Assistant panel, one for Writing and the Story Bible, so that its
+   * Conversation, draft and a reply streaming in go with the Author. It is
+   * moved into the slot of whichever of them is shown, and stays where it
+   * was while another Room is.
+   */
+  const [assistantHome] = useState(() => {
+    const home = document.createElement('div');
+    home.className = 'assistant-home';
+    return home;
+  });
+  const writingAssistantSlot = useRef<HTMLDivElement>(null);
+  const bibleAssistantSlot = useRef<HTMLDivElement>(null);
+  useLayoutEffect(() => {
+    const at = dockRoomOf(room);
+    const slot =
+      at === 'writing'
+        ? writingAssistantSlot.current
+        : at === 'storyBible'
+          ? bibleAssistantSlot.current
+          : null;
+    if (slot && assistantHome.parentElement !== slot) {
+      slot.appendChild(assistantHome);
+    }
+  }, [room, visited, assistantHome]);
   useEffect(() => setMentionEntries(entries), [entries]);
   const [corkboardView, setCorkboardView] = useCorkboardView();
   const [highlight, setHighlight] = useState(true);
@@ -724,9 +806,9 @@ function ProjectView({
   /** Whether the Floating image stacks over the Pinned notes: used last. */
   const [imageOnTop, setImageOnTop] = useState(false);
   const openEntry =
-    selected?.kind === 'entry'
-      ? entries.find((e) => e.id === selected.id)
-      : undefined;
+    openEntryId === null
+      ? undefined
+      : entries.find((e) => e.id === openEntryId);
   /** The latest structure change, while its toast offers to undo it. */
   const [latest, setLatest] = useState<{ message: string; step: number }>();
   const closeToast = useCallback(() => setLatest(undefined), []);
@@ -759,43 +841,60 @@ function ProjectView({
   }, [tab]);
   /** Shows a Trash or Drawer item in Writing's tab for it, as a Todo's link to it does. */
   function openTrashItem(id: string) {
+    switchRoom('writing');
     setTab(drawer.some((item) => item.id === id) ? 'drawer' : 'trash');
     dockLeftPane();
     setTrashReveal({ id, count: ++trashReveals.current });
   }
 
-  /** What a new Todo is linked to unless the Author unlinks it: the unit open in Writing. */
+  /** What a new Todo in Writing is linked to unless the Author unlinks it: the unit open there. */
   const prelink: TodoLink | null = open
     ? { kind: 'scene', id: open.scene.id }
     : openChapter
       ? { kind: 'chapter', id: openChapter.id }
       : openPart
         ? { kind: 'part', id: openPart.id }
-        : openEntry
-          ? { kind: 'entry', id: openEntry.id }
-          : null;
+        : null;
+  /** What a new Todo in the Story Bible is linked to: the Entry open there. */
+  const biblePrelink: TodoLink | null = openEntry
+    ? { kind: 'entry', id: openEntry.id }
+    : null;
   const [todoDock, changeTodoDock] = useTodoDock(project.todoDock);
   const composerHeight = useComposerHeight(project.composerHeight);
-  /** The Todo the Author started from elsewhere, while the Todos dock is raised. */
-  const [todoDraft, setTodoDraft] = useState<TodoDraft>();
+  /**
+   * The Todo the Author started from elsewhere, while the Todos dock is
+   * raised, and the Room whose dock it is in.
+   */
+  const [todoDraft, setTodoDraft] = useState<{
+    room: DockRoom;
+    draft: TodoDraft;
+  }>();
+  const draftIn = (at: DockRoom) =>
+    todoDraft?.room === at ? todoDraft.draft : undefined;
   const todoDrafts = useRef(0);
   useEffect(() => {
     if (todoDock.folded) setTodoDraft(undefined);
   }, [todoDock.folded]);
   /**
-   * Starts a Todo in Writing's Todos dock, raising it and docking the left
-   * pane if collapsed: New Todo, focused, linked to `link`, holding `text`
-   * if given.
+   * Starts a Todo in the Todos dock of Writing or the Story Bible, raising
+   * it, and in Writing docking the left pane if collapsed: New Todo,
+   * focused, linked to `link`, holding `text` if given.
    */
-  function startTodo(link: TodoLink | null, text?: string) {
+  function startTodo(at: DockRoom, link: TodoLink | null, text?: string) {
     if (todoDock.folded) changeTodoDock({ folded: false });
-    dockLeftPane();
+    if (at === 'writing') dockLeftPane();
     setTodoDraft({
-      link,
-      ...(text !== undefined && { text }),
-      count: ++todoDrafts.current,
+      room: at,
+      draft: {
+        link,
+        ...(text !== undefined && { text }),
+        count: ++todoDrafts.current,
+      },
     });
   }
+  /** Starts a Todo in Writing, as its Binder and Corkboards do. */
+  const startWritingTodo = (link: TodoLink | null) =>
+    startTodo('writing', link);
 
   /** The unit whose Conflict the centre shows, instead of the selection. */
   const [resolving, setResolving] = useState<UnitRef | null>(null);
@@ -805,7 +904,6 @@ function ProjectView({
   /** The left pane's tabs; Conflicts shows while there are any, or it is open. */
   const tabs: Tab[] = [
     'manuscript',
-    'bible',
     ...(conflicts.length > 0 || tab === 'conflicts'
       ? (['conflicts'] as const)
       : []),
@@ -997,7 +1095,7 @@ function ProjectView({
 
   /** Adds the Entries the Author ticked, as one step they can undo. */
   async function importEntries(added: NewEntry[], leftOut: number) {
-    setTab('bible');
+    switchRoom('storyBible');
     await change(
       () => window.project.importEntries(added),
       `Imported ${entryCount(added.length)}` +
@@ -1012,19 +1110,18 @@ function ProjectView({
       `${label} created`,
     );
     if (!id) return;
-    setTab('bible');
-    select({ kind: 'entry', id });
+    showEntry(id);
     focusNameOf(id);
   }
 
   /**
    * Does what the Author chose from the menu bar or with a shortcut; false
-   * when it doesn't apply here. Shortcuts other than the Modes' work in
-   * Writing only; the menus switch to it.
+   * when it doesn't apply here. Shortcuts work in the Rooms `keyApplies`
+   * says; the menus switch to Writing for the rest.
    */
   function run(command: Command): boolean {
-    if (command.type === 'mode') {
-      switchMode(command.mode);
+    if (command.type === 'room') {
+      enterRoom(command.room);
       return true;
     }
     if (command.type === 'projectSettings') {
@@ -1050,10 +1147,10 @@ function ProjectView({
       return true;
     }
     if (command.type === 'zen') {
-      if (mode !== 'writing') {
+      if (room !== 'writing') {
         if (command.byKey) return false;
         // Resumes zen, if the Author left Writing in it.
-        switchMode('writing');
+        switchRoom('writing');
         if (!beforeZen) enterZen();
       } else if (beforeZen) {
         leaveZen();
@@ -1063,32 +1160,38 @@ function ProjectView({
       return true;
     }
     if (command.type === 'cycleWritingWidth') {
-      if (mode !== 'writing') return false;
+      if (!keyApplies(command, room)) return false;
       cycleWritingWidth();
       return true;
     }
     if (command.type === 'togglePane') {
-      if (mode !== 'writing') {
+      if (!keyApplies(command, room)) {
         if (command.byKey) return false;
-        switchMode('writing');
+        switchRoom('writing');
       }
       togglePane(command.pane);
       return true;
     }
     if (command.type === 'newTodo') {
       if (readOnly) return false;
-      if (mode !== 'writing') {
+      if (!keyApplies(command, room)) {
         if (command.byKey) return false;
-        switchMode('writing');
+        switchRoom('writing');
       }
-      startTodo(prelink);
+      if (room === 'storyBible') startTodo('storyBible', biblePrelink);
+      else startTodo('writing', prelink);
       return true;
     }
     if (command.type === 'splitScene') {
       // Only with the cursor in a Scene's Prose, which is only in Writing.
       const prose = focusedProse();
       const sceneId = prose?.view.dom.dataset.scene;
-      if (mode !== 'writing' || !prose || !sceneId || !splittable(sceneId)) {
+      if (
+        !keyApplies(command, room) ||
+        !prose ||
+        !sceneId ||
+        !splittable(sceneId)
+      ) {
         return false;
       }
       void split(sceneId, cutAtSelection(prose), command.toNextChapter);
@@ -1102,9 +1205,9 @@ function ProjectView({
       return false;
     }
     if (readOnly) return false;
-    if (mode !== 'writing') {
+    if (!keyApplies(command, room)) {
       if (command.byKey) return false;
-      switchMode('writing');
+      switchRoom('writing');
     }
     if (command.type === 'newScene') {
       const at = sceneInsertion(manuscript, current(), command.above);
@@ -1128,6 +1231,7 @@ function ProjectView({
         setRenaming(id);
       });
     } else if (command.entryType) {
+      // From any Room; it opens in the Story Bible.
       void createEntry(command.entryType);
     } else {
       setPickingEntryType(true);
@@ -1185,13 +1289,51 @@ function ProjectView({
     await mirror.undo(step);
   }
 
-  /** Keeps one version of a unit in Conflict, then opens the unit. */
+  /**
+   * Keeps one version of a unit in Conflict, then opens the unit: an Entry
+   * in the Story Bible Room, the rest in Writing.
+   */
   async function resolve(ref: UnitRef, kept: UnitValue) {
     flushPendingEdits();
     if (!(await mirror.resolveConflict(ref, kept))) return;
-    const selection = selectionOf(ref, manuscript);
-    setTab(selection.kind === 'entry' ? 'bible' : 'manuscript');
-    select(selection);
+    setResolving(null);
+    if (roomOf(ref) === 'storyBible') {
+      setResolutions((n) => n + 1);
+      showEntry(ref.id);
+      return;
+    }
+    setTab('manuscript');
+    select(selectionOf(ref.id, manuscript));
+  }
+
+  /**
+   * Where the Assistant panel goes in Writing or the Story Bible, between
+   * its resizer and its edge tab while collapsed.
+   */
+  function assistantSlot(slot: RefObject<HTMLDivElement | null>) {
+    return (
+      <>
+        {docked.assistant && (
+          <PanelResizer
+            label="Assistant width"
+            panel="right"
+            {...pane('assistant')}
+            min={220}
+            max={640}
+          />
+        )}
+        <div className="assistant-slot" ref={slot} />
+        {!docked.assistant && (
+          <div
+            role="group"
+            aria-label="Assistant, collapsed"
+            className="edge-tabs edge-tabs-right"
+          >
+            <button onClick={() => togglePane('assistant')}>Assistant</button>
+          </div>
+        )}
+      </>
+    );
   }
 
   async function emptyTrash() {
@@ -1220,36 +1362,37 @@ function ProjectView({
       >
         <header>
           <span className="project-name">{project.displayName}</span>
-          <div role="group" aria-label="Mode" className="mode-switch">
-            {WINDOW_MODES.map((value) => (
+          <div role="group" aria-label="Room" className="mode-switch">
+            {ROOMS.map((value) => (
               <button
                 key={value}
-                aria-pressed={mode === value}
-                title={withShortcut(MODE_LABELS[value], SHORTCUTS[value], MAC)}
-                onClick={() => switchMode(value)}
+                aria-pressed={room === value}
+                title={withShortcut(ROOM_LABELS[value], SHORTCUTS[value], MAC)}
+                onClick={() => enterRoom(value)}
               >
-                {MODE_LABELS[value]}
+                {ROOM_LABELS[value]}
               </button>
             ))}
           </div>
           <span className="scene-title">
-            {mode !== 'writing'
-              ? ''
-              : resolvingConflict
-                ? 'Conflict'
-                : open
-                  ? [open.chapter?.title ?? 'Unplaced', open.scene.title].join(
-                      ' · ',
-                    )
-                  : openChapter
-                    ? openChapter.title
-                    : openPart
-                      ? openPart.title
-                      : openEntry
-                        ? entryTitle(openEntry)
+            {room === 'storyBible'
+              ? openEntry && entryTitle(openEntry)
+              : room !== 'writing'
+                ? ''
+                : resolvingConflict
+                  ? 'Conflict'
+                  : open
+                    ? [
+                        open.chapter?.title ?? 'Unplaced',
+                        open.scene.title,
+                      ].join(' · ')
+                    : openChapter
+                      ? openChapter.title
+                      : openPart
+                        ? openPart.title
                         : selected?.kind === 'project' && 'Project Outline'}
           </span>
-          {mode === 'writing' && (
+          {room === 'writing' && (
             <button
               className="zen-button"
               aria-pressed={zen}
@@ -1286,24 +1429,21 @@ function ProjectView({
         <div className="project-body">
           <ProposalTargetContext.Provider value={peekAtTarget}>
             {visited.has('brainstorm') && (
-              <div className="room" hidden={mode !== 'brainstorm'}>
+              <div className="room" hidden={room !== 'brainstorm'}>
                 <BrainstormRoom
-                  active={mode === 'brainstorm'}
+                  active={room === 'brainstorm'}
                   names={{ manuscript, entries }}
                   pane={pane}
                   onAddProvider={onAddProvider}
-                  onOpenEntry={openEntryInWriting}
+                  onOpenEntry={showEntry}
                   onChange={change}
                   todos={
                     <TodoList
                       todos={todos}
                       names={{ manuscript, entries, trash, drawer }}
                       prelink={null}
-                      onOpen={openInWriting}
-                      onOpenTrash={(id) => {
-                        switchMode('writing');
-                        openTrashItem(id);
-                      }}
+                      onOpen={openLink}
+                      onOpenTrash={openTrashItem}
                       onError={onError}
                     />
                   }
@@ -1311,20 +1451,20 @@ function ProjectView({
               </div>
             )}
             {visited.has('interview') && (
-              <div className="room" hidden={mode !== 'interview'}>
+              <div className="room" hidden={room !== 'interview'}>
                 <InterviewRoom
-                  active={mode === 'interview'}
+                  active={room === 'interview'}
                   names={{ manuscript, entries }}
                   pane={pane}
                   onAddProvider={onAddProvider}
-                  onOpenEntry={openEntryInWriting}
+                  onOpenEntry={showEntry}
                   onChange={change}
                 />
               </div>
             )}
           </ProposalTargetContext.Provider>
           {visited.has('writing') && (
-            <div className="room" hidden={mode !== 'writing'} ref={writingRoom}>
+            <div className="room" hidden={room !== 'writing'} ref={writingRoom}>
               {!docked.left && (
                 <div
                   role="group"
@@ -1333,9 +1473,6 @@ function ProjectView({
                 >
                   <button onClick={() => dockLeftPaneAt('manuscript')}>
                     Manuscript
-                  </button>
-                  <button onClick={() => dockLeftPaneAt('bible')}>
-                    Story Bible
                   </button>
                 </div>
               )}
@@ -1365,15 +1502,6 @@ function ProjectView({
                       onClick={() => setTab('manuscript')}
                     >
                       Manuscript
-                    </button>
-                    <button
-                      role="tab"
-                      aria-selected={tab === 'bible'}
-                      tabIndex={tab === 'bible' ? 0 : -1}
-                      id="bible-tab"
-                      onClick={() => setTab('bible')}
-                    >
-                      Story Bible
                     </button>
                     {tabs.includes('conflicts') && (
                       <button
@@ -1438,27 +1566,7 @@ function ProjectView({
                       }
                       onEditTags={setTagging}
                       onSetWordTarget={setSettingWordTarget}
-                      onAddTodo={(link) => startTodo(link)}
-                    />
-                  ) : tab === 'bible' ? (
-                    <StoryBible
-                      entries={entries}
-                      openId={openEntry?.id ?? null}
-                      conflicted={conflicted}
-                      onOpen={(id) => select({ kind: 'entry', id })}
-                      onRename={(id) => {
-                        select({ kind: 'entry', id });
-                        focusNameOf(id);
-                      }}
-                      onCreate={(type) => void createEntry(type)}
-                      onChange={change}
-                      onUndo={undoLatest}
-                      highlight={highlight}
-                      onHighlight={(on) => {
-                        setHighlight(on);
-                        window.shell.setHighlightMentions(on);
-                      }}
-                      onAddTodo={(id) => startTodo({ kind: 'entry', id })}
+                      onAddTodo={startWritingTodo}
                     />
                   ) : tab === 'conflicts' ? (
                     <ConflictList
@@ -1507,8 +1615,8 @@ function ProjectView({
                   todos={todos}
                   names={{ manuscript, entries, trash, drawer }}
                   prelink={prelink}
-                  draft={todoDraft}
-                  onOpen={select}
+                  draft={draftIn('writing')}
+                  onOpen={openLink}
                   onOpenTrash={openTrashItem}
                   onError={onError}
                 />
@@ -1570,51 +1678,9 @@ function ProjectView({
                     onOpenScene={(id) => select({ kind: 'scene', id })}
                     onOpenChapter={(id) => select({ kind: 'chapter', id })}
                     onOpenPart={(id) => select({ kind: 'part', id })}
-                    onAddTodo={startTodo}
+                    onAddTodo={startWritingTodo}
                   />
                 </main>
-              ) : selected?.kind === 'entry' ? (
-                openEntry ? (
-                  <EntryView
-                    // A type change rewrites its description and fields: read them anew.
-                    key={`${openEntry.id}:${openEntry.type}`}
-                    entry={openEntry}
-                    entries={entries}
-                    language={language}
-                    focusName={
-                      focusName?.id === openEntry.id
-                        ? focusName.count
-                        : undefined
-                    }
-                    reveal={revealIn(openEntry.id)}
-                    onType={(type) =>
-                      change(
-                        () => window.project.setEntryType(openEntry.id, type),
-                        `Type changed to ${ENTRY_TYPE_LABELS[type]}`,
-                      )
-                    }
-                    onVisibility={(visibility) =>
-                      change(
-                        () =>
-                          window.project.setEntryVisibility(
-                            openEntry.id,
-                            visibility,
-                          ),
-                        `Visibility set to ${VISIBILITY_LABELS[visibility]}`,
-                      )
-                    }
-                    onTags={(tags) => setTags(openEntry.id, tags)}
-                    onShowProposal={(conversationId, proposalId) =>
-                      setShowProposal({
-                        conversationId,
-                        proposalId,
-                        count: ++shows.current,
-                      })
-                    }
-                  />
-                ) : (
-                  <div className="editor empty">No Entry open</div>
-                )
               ) : openChapter ? (
                 <main className="centre" key={openChapter.id}>
                   <ChapterCorkboard
@@ -1624,7 +1690,7 @@ function ProjectView({
                     view={corkboardView}
                     onView={setCorkboardView}
                     onOpenScene={(id) => select({ kind: 'scene', id })}
-                    onAddTodo={startTodo}
+                    onAddTodo={startWritingTodo}
                   />
                 </main>
               ) : openPart ? (
@@ -1637,7 +1703,7 @@ function ProjectView({
                     view={corkboardView}
                     onView={setCorkboardView}
                     onOpenChapter={(id) => select({ kind: 'chapter', id })}
-                    onAddTodo={startTodo}
+                    onAddTodo={startWritingTodo}
                   />
                 </main>
               ) : !open ? (
@@ -1710,44 +1776,132 @@ function ProjectView({
                   />
                 </main>
               )}
-              {docked.assistant && (
-                <PanelResizer
-                  label="Assistant width"
-                  panel="right"
-                  {...pane('assistant')}
-                  min={220}
-                  max={640}
-                />
-              )}
-              <ProposalTargetContext.Provider
-                value={(proposal, target) => goToTarget(target, proposal.id)}
-              >
-                <AssistantPanel
-                  active={mode === 'writing'}
-                  docked={docked.assistant}
-                  onCollapse={() => togglePane('assistant')}
-                  width={pane('assistant').size}
-                  onAddProvider={onAddProvider}
-                  sceneId={open && !open.scene.missing ? open.scene.id : null}
-                  names={{ manuscript, entries }}
-                  show={showProposal}
-                  onQuote={showQuote}
-                  onAddTodo={(text, link) => startTodo(link, text)}
-                  onChange={change}
-                />
-              </ProposalTargetContext.Provider>
-              {!docked.assistant && (
-                <div
-                  role="group"
-                  aria-label="Assistant, collapsed"
-                  className="edge-tabs edge-tabs-right"
-                >
-                  <button onClick={() => togglePane('assistant')}>
-                    Assistant
-                  </button>
-                </div>
-              )}
+              {assistantSlot(writingAssistantSlot)}
             </div>
+          )}
+          {visited.has('storyBible') && (
+            <div
+              className="room"
+              hidden={room !== 'storyBible'}
+              ref={setBibleRoomElement}
+            >
+              <aside
+                className="left-pane with-todo-dock"
+                aria-label="Story Bible list"
+                style={{ width: binderWidth }}
+              >
+                <div className="left-pane-list">
+                  <StoryBible
+                    entries={entries}
+                    openId={openEntry?.id ?? null}
+                    conflicted={conflicted}
+                    onOpen={showEntry}
+                    onRename={(id) => {
+                      showEntry(id);
+                      focusNameOf(id);
+                    }}
+                    onCreate={(type) => void createEntry(type)}
+                    onChange={change}
+                    onUndo={undoLatest}
+                    highlight={highlight}
+                    onHighlight={(on) => {
+                      setHighlight(on);
+                      window.shell.setHighlightMentions(on);
+                    }}
+                    onAddTodo={(id) =>
+                      startTodo('storyBible', { kind: 'entry', id })
+                    }
+                  />
+                </div>
+                <TodoDockPane
+                  dock={todoDock}
+                  onDock={changeTodoDock}
+                  todos={todos}
+                  names={{ manuscript, entries, trash, drawer }}
+                  prelink={biblePrelink}
+                  draft={draftIn('storyBible')}
+                  onOpen={openLink}
+                  onOpenTrash={openTrashItem}
+                  onError={onError}
+                />
+              </aside>
+              <PanelResizer
+                label="Story Bible list width"
+                min={160}
+                max={600}
+                {...pane('binder')}
+              />
+              {/* A new key per Entry: leaving one unmounts its editors, which
+            flushes their pending edits. */}
+              {openEntry ? (
+                <EntryView
+                  // A type change rewrites its description and fields, and a
+                  // resolved Conflict the version kept: read them anew.
+                  key={`${openEntry.id}:${openEntry.type}:${resolutions}`}
+                  entry={openEntry}
+                  entries={entries}
+                  language={language}
+                  focusName={
+                    focusName?.id === openEntry.id ? focusName.count : undefined
+                  }
+                  reveal={revealIn(openEntry.id)}
+                  onType={(type) =>
+                    change(
+                      () => window.project.setEntryType(openEntry.id, type),
+                      `Type changed to ${ENTRY_TYPE_LABELS[type]}`,
+                    )
+                  }
+                  onVisibility={(visibility) =>
+                    change(
+                      () =>
+                        window.project.setEntryVisibility(
+                          openEntry.id,
+                          visibility,
+                        ),
+                      `Visibility set to ${VISIBILITY_LABELS[visibility]}`,
+                    )
+                  }
+                  onTags={(tags) => setTags(openEntry.id, tags)}
+                  onShowProposal={(conversationId, proposalId) =>
+                    setShowProposal({
+                      conversationId,
+                      proposalId,
+                      count: ++shows.current,
+                    })
+                  }
+                />
+              ) : (
+                <div className="editor empty">No Entry open</div>
+              )}
+              {assistantSlot(bibleAssistantSlot)}
+            </div>
+          )}
+          {createPortal(
+            <ProposalTargetContext.Provider
+              value={(proposal, target) => goToTarget(target, proposal.id)}
+            >
+              <AssistantPanel
+                active={dockRoomOf(room) !== null}
+                docked={docked.assistant}
+                onCollapse={() => togglePane('assistant')}
+                width={pane('assistant').size}
+                onAddProvider={onAddProvider}
+                // A Review or a message is about the Scene open in Writing, shown.
+                sceneId={
+                  room === 'writing' && open && !open.scene.missing
+                    ? open.scene.id
+                    : null
+                }
+                names={{ manuscript, entries }}
+                show={showProposal}
+                onQuote={showQuote}
+                onAddTodo={(text, link) =>
+                  startTodo(dockRoomOf(room) ?? 'writing', link, text)
+                }
+                onChange={change}
+              />
+            </ProposalTargetContext.Provider>,
+            assistantHome,
           )}
         </div>
         <StatusBar
@@ -1757,7 +1911,7 @@ function ProjectView({
             manuscript,
             scenes: sceneCounts,
             open:
-              mode !== 'writing' || resolvingConflict
+              room !== 'writing' || resolvingConflict
                 ? null
                 : open
                   ? { kind: 'scene', id: open.scene.id }
@@ -1768,7 +1922,7 @@ function ProjectView({
                       : selected?.kind === 'project'
                         ? { kind: 'project' }
                         : null,
-            selection: mode === 'writing' ? selectionCounts : null,
+            selection: room === 'writing' ? selectionCounts : null,
           })}
           onSetWordTarget={(unitId, words) => void setWordTarget(unitId, words)}
         />
@@ -1794,18 +1948,15 @@ function ProjectView({
             onClose={closePeek}
           />
         )}
-        {targetPeek && mode !== 'writing' && (
+        {targetPeek && room !== 'writing' && (
           <ProposalPeek
             peek={targetPeek}
-            onOpenInWriting={() => {
-              switchMode('writing');
-              goToTarget(targetPeek.target, targetPeek.proposalId);
-            }}
+            onOpen={() => goToTarget(targetPeek.target, targetPeek.proposalId)}
             onClose={closeTargetPeek}
           />
         )}
-        {/* Writing only: hidden in the other Modes, back on return. */}
-        {mode === 'writing' && (
+        {/* Writing only: hidden in the other Rooms, back on return. */}
+        {room === 'writing' && (
           <PinnedNotes
             notes={pinnedNotes}
             entries={entries}
@@ -1917,7 +2068,7 @@ function ProjectView({
 type PanesBeforeZen = { docked: DockedPanes; overviewOpen: boolean };
 
 /** The left pane's tabs in Writing. */
-type Tab = 'manuscript' | 'bible' | 'conflicts' | 'trash' | 'drawer';
+type Tab = 'manuscript' | 'conflicts' | 'trash' | 'drawer';
 
 /** The tab ← / →, Home or End switches to from `tab`, round the ends; null for other keys. */
 function tabAfter(key: string, tab: Tab, tabs: Tab[]): Tab | null {
@@ -1968,16 +2119,15 @@ function unitKindName(
   return kind === 'part' ? partNamed : kind === 'chapter' ? 'Chapter' : 'Scene';
 }
 
-/** What to open once a unit's Conflict is resolved: the unit it belongs to. */
-function selectionOf(ref: UnitRef, manuscript: Manuscript): Selection {
-  if (ref.kind === 'entry' || ref.kind === 'private') {
-    return { kind: 'entry', id: ref.id };
-  }
-  if (ref.id === PROJECT_OUTLINE) return { kind: 'project' };
-  if (manuscript.parts?.some((p) => p.id === ref.id)) {
-    return { kind: 'part', id: ref.id };
-  }
-  return manuscript.chapters.some((c) => c.id === ref.id)
-    ? { kind: 'chapter', id: ref.id }
-    : { kind: 'scene', id: ref.id };
+/**
+ * What Writing opens for the id of a Scene, Outline or Notes, as once its
+ * Conflict is resolved: the Part, Chapter or Scene it belongs to, or the
+ * Project.
+ */
+function selectionOf(id: string, manuscript: Manuscript): Selection {
+  if (id === PROJECT_OUTLINE) return { kind: 'project' };
+  if (manuscript.parts?.some((p) => p.id === id)) return { kind: 'part', id };
+  return manuscript.chapters.some((c) => c.id === id)
+    ? { kind: 'chapter', id }
+    : { kind: 'scene', id };
 }

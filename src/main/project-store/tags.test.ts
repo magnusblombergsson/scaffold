@@ -450,6 +450,52 @@ describe('Entry Tags', () => {
     expect(store.listConflicts()).toEqual([]);
   });
 
+  it('are kept as the Entry is written while they are being saved', async () => {
+    await newProject();
+    // Holds the save of the Entry's Tags as it starts, until let go.
+    let hold: { reached(): void; until: Promise<void> } | undefined;
+    const store = await openProject(projectPath, {
+      fs: {
+        ...nodeFileSystem,
+        mkdir: async (dir) => {
+          if (hold && dir.endsWith('bible')) {
+            hold.reached();
+            await hold.until;
+          }
+          return nodeFileSystem.mkdir(dir);
+        },
+      },
+      clock: instantClock(),
+      host: 'GAMMA',
+    });
+    opened.push(store);
+    const { id } = await store.createEntry('character', 'Anna');
+    const value = await store.read(entry(id));
+    await store.flush();
+
+    let letGo = () => {};
+    const reached = new Promise<void>((resolve) => {
+      hold = {
+        reached: resolve,
+        until: new Promise((resolve) => (letGo = resolve)),
+      };
+    });
+    const tagged = store.setTags(id, ['Mara']);
+    await reached;
+    hold = undefined;
+    await store.write(entry(id), { ...value, description: 'Later.' });
+    letGo();
+    await tagged;
+    await store.flush();
+
+    const header = parseUnitFile(
+      await readFile(entryPath(id), 'utf8'),
+    ).frontmatter;
+    expect(header.tags).toEqual(['Mara']);
+    expect((await store.read(entry(id))).description).toBe('Later.');
+    expect(summaryOf(store, id)?.tags).toEqual(['Mara']);
+  });
+
   it('count an Entry in Trash, which keeps them to be restored', async () => {
     await newProject();
     const store = await open();

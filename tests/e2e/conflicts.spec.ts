@@ -1,7 +1,7 @@
 import { expect, test } from '@playwright/test';
 import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { answerDialogs, launch, useTempDir } from './app';
+import { answerDialogs, launch, roomButton, useTempDir } from './app';
 
 // Conflict copies are written into the Project folder while the app has it
 // open, as a sync client leaves them: `<id>-HOST.md` beside `<id>.md`.
@@ -112,7 +112,7 @@ async function entryInConflict(change: (file: string) => string) {
   const page = await app.firstWindow();
   await page.getByRole('button', { name: 'New Project…' }).click();
   await expect(page.getByLabel('Prose')).toBeFocused();
-  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(page, 'Story Bible').click();
   await page.getByRole('button', { name: 'New Entry' }).click();
   await page.getByRole('menuitem', { name: 'Character', exact: true }).click();
   for (const [label, text] of [
@@ -136,6 +136,8 @@ async function entryInConflict(change: (file: string) => string) {
     path.join(bible, file.replace(/\.md$/, '-LAPTOP.md')),
     change(mine),
   );
+  // Conflicts are listed in Writing, for every kind of item.
+  await roomButton(page, 'Writing').click();
   await page.getByRole('tab', { name: /Conflicts/ }).click();
   await page.getByRole('button', { name: /Mara/ }).click();
   return { app, page, projectPath, file };
@@ -179,6 +181,11 @@ test('an Entry in Conflict shows every part of each version, and a merge chooses
   await keepMerge.click();
 
   await expect(page.getByRole('tab', { name: /Conflicts/ })).toBeHidden();
+  // The kept Entry opens in the Story Bible.
+  await expect(roomButton(page, 'Story Bible')).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
   await expect(page.getByLabel('Appearance', { exact: true })).toHaveText(
     'Short',
   );

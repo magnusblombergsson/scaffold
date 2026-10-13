@@ -7,7 +7,13 @@ import {
 } from '@playwright/test';
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { addAnthropicKey, answerDialogs, launch, useTempDir } from './app';
+import {
+  addAnthropicKey,
+  answerDialogs,
+  launch,
+  roomButton,
+  useTempDir,
+} from './app';
 import { useFakeAnthropic } from './fake-anthropic';
 
 const tempDir = useTempDir();
@@ -26,7 +32,7 @@ async function newProject() {
 }
 
 async function newEntry(page: Page, type: string) {
-  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(page, 'Story Bible').click();
   await page.getByRole('button', { name: 'New Entry' }).click();
   await page.getByRole('menuitem', { name: type, exact: true }).click();
   await expect(page.getByLabel('Name', { exact: true })).toHaveText(
@@ -246,7 +252,7 @@ test('the thumbnail sits right of the name in the Story Bible list, and on Entry
     );
   }
 
-  const modes = page.getByRole('group', { name: 'Mode' });
+  const modes = page.getByRole('group', { name: 'Room' });
   await modes.getByRole('button', { name: 'Brainstorm' }).click();
   await expectCardThumbnail(
     page.getByRole('complementary', { name: 'Reference' }),

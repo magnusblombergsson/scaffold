@@ -1,7 +1,13 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { addAnthropicKey, answerDialogs, launch, useTempDir } from './app';
+import {
+  addAnthropicKey,
+  answerDialogs,
+  launch,
+  roomButton,
+  useTempDir,
+} from './app';
 import { useFakeAnthropic } from './fake-anthropic';
 
 const tempDir = useTempDir();
@@ -111,10 +117,7 @@ test('the Author sets Status and Tags on Corkboard cards and Overview rows, sees
 
   // The Outline skeleton in Brainstorm: dots and chips, read-only.
   await addAnthropicKey(page);
-  await page
-    .getByRole('group', { name: 'Mode' })
-    .getByRole('button', { name: 'Brainstorm' })
-    .click();
+  await roomButton(page, 'Brainstorm').click();
   const reference = page.getByRole('complementary', { name: 'Reference' });
   await reference.getByRole('tab', { name: 'Outline skeleton' }).click();
   const skeletonScene = reference.getByRole('region', {
@@ -135,10 +138,7 @@ test('the Author sets Status and Tags on Corkboard cards and Overview rows, sees
       .first(),
   ).toBeVisible();
   await expect(skeletonScene.getByRole('button')).toHaveCount(0);
-  await page
-    .getByRole('group', { name: 'Mode' })
-    .getByRole('button', { name: 'Writing' })
-    .click();
+  await roomButton(page, 'Writing').click();
 
   // Upgraded elsewhere: shown, not editable.
   const manifest = path.join(projectPath, 'project.json');

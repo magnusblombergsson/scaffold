@@ -8,6 +8,7 @@ import {
   chooseMenu,
   launch,
   openExportManuscript,
+  roomButton,
   useTempDir,
 } from './app';
 import { useFakeAnthropic } from './fake-anthropic';
@@ -73,10 +74,7 @@ test('the Outline skeleton filters on Status and Tags, showing Chapters whole, d
   const page = await app.firstWindow();
   await newProject(page);
   await addAnthropicKey(page);
-  await page
-    .getByRole('group', { name: 'Mode' })
-    .getByRole('button', { name: 'Brainstorm' })
-    .click();
+  await roomButton(page, 'Brainstorm').click();
   const reference = page.getByRole('complementary', { name: 'Reference' });
   await reference.getByRole('tab', { name: 'Outline skeleton' }).click();
   const headings = reference.locator('.reference-skeleton :is(h3, h4)');

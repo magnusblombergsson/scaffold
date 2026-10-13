@@ -1,6 +1,12 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import path from 'node:path';
-import { addAnthropicKey, answerDialogs, launch, useTempDir } from './app';
+import {
+  addAnthropicKey,
+  answerDialogs,
+  launch,
+  roomButton,
+  useTempDir,
+} from './app';
 import { useFakeAnthropic } from './fake-anthropic';
 
 const tempDir = useTempDir();
@@ -108,10 +114,7 @@ test('the message box grows with its text, is made taller from its top bar in ev
   await expect.poll(() => boxHeight(box)).toBe(threeRows + 32);
 
   // The same height in the Brainstorm room.
-  await page
-    .getByRole('group', { name: 'Mode' })
-    .getByRole('button', { name: 'Brainstorm' })
-    .click();
+  await roomButton(page, 'Brainstorm').click();
   const room = page.getByRole('main', { name: 'Brainstorm' });
   const roomBox = room.getByRole('textbox', { name: 'Message' });
   await expect.poll(() => boxHeight(roomBox)).toBe(threeRows + 32);
@@ -127,10 +130,7 @@ test('the message box grows with its text, is made taller from its top bar in ev
   await expect.poll(() => boxHeight(roomBox)).toBe(threeRows + 32);
 
   // And in the Interview room.
-  await page
-    .getByRole('group', { name: 'Mode' })
-    .getByRole('button', { name: 'Interview' })
-    .click();
+  await roomButton(page, 'Interview').click();
   const interviewBox = page
     .getByRole('main', { name: 'Interview' })
     .getByRole('textbox', { name: 'Message' });

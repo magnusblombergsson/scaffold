@@ -1,6 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
 import path from 'node:path';
-import { answerDialogs, chooseMenu, launch, useTempDir } from './app';
+import {
+  answerDialogs,
+  chooseMenu,
+  launch,
+  roomButton,
+  useTempDir,
+} from './app';
 
 const tempDir = useTempDir();
 
@@ -25,11 +31,11 @@ async function newEntry(
   await expect(page.locator('.save-status.confirmed')).toBeVisible();
 }
 
-async function switchTo(page: Page, mode: 'Writing' | 'Brainstorm') {
-  await page
-    .getByRole('group', { name: 'Mode' })
-    .getByRole('button', { name: mode })
-    .click();
+async function switchTo(
+  page: Page,
+  room: 'Writing' | 'Story Bible' | 'Brainstorm',
+) {
+  await roomButton(page, room).click();
 }
 
 /** Renames or deletes a Tag in Project Settings, then closes it. */
@@ -52,7 +58,7 @@ test('the Author filters each Story Bible list by Type and Tags, and the Filter 
   await answerDialogs(first, projectPath);
   const page = await first.firstWindow();
   await page.getByRole('button', { name: 'New Project…' }).click();
-  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(page, 'Story Bible').click();
   await newEntry(page, 'Character', 'Anna', ['Mara']);
   await newEntry(page, 'Character', 'Bo', []);
   await newEntry(page, 'Place', 'Harbour', ['mara', 'the war']);
@@ -105,7 +111,7 @@ test('the Author filters each Story Bible list by Type and Tags, and the Filter 
   await expect(reference.locator('.entry-card')).toContainText('Harbour');
 
   // Renamed, the Tag stays chosen.
-  await switchTo(page, 'Writing');
+  await switchTo(page, 'Story Bible');
   await inTagSettings(first, page, (tags) =>
     tags.getByLabel('Name of the Tag Mara').fill('Mara Lind'),
   );
@@ -115,7 +121,7 @@ test('the Author filters each Story Bible list by Type and Tags, and the Filter 
   // Each list's Filter is remembered across a restart.
   const second = await launch(tempDir());
   const reopened = await second.firstWindow();
-  await reopened.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(reopened, 'Story Bible').click();
   const list2 = reopened.getByRole('navigation', { name: 'Story Bible' });
   await expect(list2.locator('.filter-button')).toHaveText(
     'Mara Lind — 2 of 3',
@@ -130,7 +136,7 @@ test('the Author filters each Story Bible list by Type and Tags, and the Filter 
   );
 
   // ✕ clears it.
-  await switchTo(reopened, 'Writing');
+  await switchTo(reopened, 'Story Bible');
   await list2.getByRole('button', { name: 'Clear Filter' }).click();
   await expect(list2.locator('.filter-button')).toHaveText('Filter');
   await expect(list2.locator('.story-bible-name')).toHaveText([
@@ -147,7 +153,7 @@ test('a Filter whose only Tag is deleted turns off, and stays off', async () => 
   await answerDialogs(first, projectPath);
   const page = await first.firstWindow();
   await page.getByRole('button', { name: 'New Project…' }).click();
-  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(page, 'Story Bible').click();
   await newEntry(page, 'Character', 'Anna', ['Mara']);
   await newEntry(page, 'Character', 'Bo', []);
 
@@ -180,7 +186,7 @@ test('a Filter whose only Tag is deleted turns off, and stays off', async () => 
 
   const second = await launch(tempDir());
   const reopened = await second.firstWindow();
-  await reopened.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(reopened, 'Story Bible').click();
   const list2 = reopened.getByRole('navigation', { name: 'Story Bible' });
   await expect(list2.locator('.story-bible-name')).toHaveText(['Anna', 'Bo']);
   await expect(list2.locator('.filter-button')).toHaveText('Filter');

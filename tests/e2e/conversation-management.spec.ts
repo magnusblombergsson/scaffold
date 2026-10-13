@@ -15,7 +15,7 @@ const anthropic = useFakeAnthropic();
 
 async function switchTo(page: Page, mode: 'Writing' | 'Brainstorm') {
   await page
-    .getByRole('group', { name: 'Mode' })
+    .getByRole('group', { name: 'Room' })
     .getByRole('button', { name: mode })
     .click();
 }

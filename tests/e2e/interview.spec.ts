@@ -6,6 +6,7 @@ import {
   answerDialogs,
   chooseMenu,
   launch,
+  roomButton,
   useTempDir,
 } from './app';
 import { useFakeAnthropic } from './fake-anthropic';
@@ -25,7 +26,7 @@ const block = (json: object) =>
 
 async function switchTo(page: Page, mode: 'Writing' | 'Interview') {
   await page
-    .getByRole('group', { name: 'Mode' })
+    .getByRole('group', { name: 'Room' })
     .getByRole('button', { name: mode })
     .click();
 }
@@ -38,7 +39,7 @@ test('the Author is interviewed about a focus they pick and change, and sees the
   await page.getByRole('button', { name: 'New Project…' }).click();
   await page.getByLabel('Prose').pressSequentially('Anna packed in the rain.');
   await addAnthropicKey(page);
-  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(page, 'Story Bible').click();
   await page.getByRole('button', { name: 'New Entry' }).click();
   await page.getByRole('menuitem', { name: 'Character', exact: true }).click();
   await fill(page, 'Name', 'Anna');
@@ -90,6 +91,16 @@ test('the Author is interviewed about a focus they pick and change, and sees the
   await expect(role.getByRole('list', { name: 'Proposed Role' })).toHaveCount(
     0,
   );
+
+  // Its ↗ opens the Entry in the Story Bible; Interview is as it was.
+  await inFocus.getByRole('button', { name: 'Open “Anna”' }).click();
+  await expect(roomButton(page, 'Story Bible')).toHaveAttribute(
+    'aria-pressed',
+    'true',
+  );
+  await expect(page.getByLabel('Name', { exact: true })).toHaveText('Anna');
+  await roomButton(page, 'Interview').click();
+  await expect(role.locator('.focus-value')).toHaveText('Protagonist');
 
   // The focus changes within the Conversation; a Scene's Prose is then sent.
   await focus.selectOption({ label: ' Scene “Scene 1”' });
@@ -160,7 +171,7 @@ test('with a Tag in focus, the Author sees and the Assistant gets the Entries an
   await page.keyboard.type('Mara,');
   await page.keyboard.press('Escape');
   await addAnthropicKey(page);
-  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(page, 'Story Bible').click();
   await page.getByRole('button', { name: 'New Entry' }).click();
   await page.getByRole('menuitem', { name: 'Character', exact: true }).click();
   await fill(page, 'Name', 'Anna');

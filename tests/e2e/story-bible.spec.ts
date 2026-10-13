@@ -2,7 +2,7 @@ import { expect, test, type Page } from '@playwright/test';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { parseUnitFile } from '../../src/main/project-store/unit-file';
-import { answerDialogs, launch, useTempDir } from './app';
+import { answerDialogs, launch, useTempDir, roomButton } from './app';
 
 const tempDir = useTempDir();
 
@@ -29,7 +29,7 @@ function toast(page: Page) {
 }
 
 async function newEntry(page: Page, type: string) {
-  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(page, 'Story Bible').click();
   await page.getByRole('button', { name: 'New Entry' }).click();
   await page.getByRole('menuitem', { name: type, exact: true }).click();
 }
@@ -121,12 +121,13 @@ test('visibility changes, deletes and restores can be undone from the toast', as
     .getByRole('button', { name: 'Entry actions: Harbour', exact: true })
     .click();
   await page.getByRole('menuitem', { name: 'Move to Trash' }).click();
+  await roomButton(page, 'Writing').click();
   await page.getByRole('tab', { name: 'Trash (1)' }).click();
   const trash = page.getByRole('region', { name: 'Trash' });
   await expect(trash.getByRole('listitem')).toHaveText([/Harbour\s*Place/]);
   await trash.getByRole('button', { name: 'Restore Harbour' }).click();
   await expect(page.getByText('Trash is empty')).toBeVisible();
-  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(page, 'Story Bible').click();
   await storyBible(page)
     .getByRole('button', { name: 'Harbour', exact: true })
     .click();
@@ -143,9 +144,9 @@ test('each Entry field keeps its undo history while the Author works elsewhere',
   await nextUndoStep(page);
   await page.keyboard.type(' and guilt');
 
-  await page.getByRole('tab', { name: 'Manuscript' }).click();
+  await roomButton(page, 'Writing').click();
   await page.getByRole('button', { name: 'Scene 1', exact: true }).click();
-  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(page, 'Story Bible').click();
   await storyBible(page)
     .getByRole('button', { name: 'New Theme', exact: true })
     .click();

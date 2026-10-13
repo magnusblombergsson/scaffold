@@ -44,11 +44,11 @@ import {
 } from '../shared/project-types';
 
 /**
- * What the centre shows: a Scene, a Chapter's or Part's Outline and Notes,
- * the Project Outline, or an Entry.
+ * What Writing's centre shows: a Scene, a Chapter's or Part's Outline and
+ * Notes, or the Project Outline. Entries open in the Story Bible.
  */
 export type Selection =
-  | { kind: 'scene' | 'chapter' | 'part' | 'entry'; id: string }
+  | { kind: 'scene' | 'chapter' | 'part'; id: string }
   | { kind: 'project' };
 
 type Props = {

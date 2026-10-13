@@ -1195,7 +1195,7 @@ button.counts.reached:hover {
   padding: 0 0.5rem 0.5rem;
 }
 
-/* One Mode's panes; another Mode's stay mounted, hidden. */
+/* One Room's panes; another Room's stay mounted, hidden. */
 .room {
   display: flex;
   flex: 1;
@@ -1205,6 +1205,15 @@ button.counts.reached:hover {
 
 .room[hidden] {
   display: none;
+}
+
+/*
+ * Where the one Assistant panel sits in Writing and the Story Bible, moved
+ * between them: neither box takes part in the layout.
+ */
+.assistant-slot,
+.assistant-home {
+  display: contents;
 }
 
 .left-pane {
@@ -1218,15 +1227,17 @@ button.counts.reached:hover {
 }
 
 /*
- * Writing's left pane: its tab scrolls above the Todos dock, which keeps its
- * height until the tab is at its least.
+ * The left pane of Writing and the Story Bible: its tab or list scrolls
+ * above the Todos dock, which keeps its height until the list is at its
+ * least.
  */
 .left-pane.with-todo-dock {
   display: flex;
   flex-direction: column;
   overflow: hidden;
 
-  > [role='tabpanel'] {
+  > [role='tabpanel'],
+  > .left-pane-list {
     flex: 1 1 auto;
     min-height: 0;
     overflow-y: auto;
@@ -2898,8 +2909,8 @@ legend .show-in-peek {
   text-decoration: underline;
 }
 
-/* A Proposal's target, Peeked at from a room: going to it in Writing. */
-.peek-open-in-writing {
+/* A Proposal's target, Peeked at from a Room: going to it in the Story Bible or Writing. */
+.peek-open {
   display: block;
   margin-top: 0.75rem;
   padding-top: 0.5rem;
@@ -2914,7 +2925,7 @@ legend .show-in-peek {
   cursor: pointer;
 }
 
-.peek-open-in-writing:hover {
+.peek-open:hover {
   text-decoration: underline;
 }
 

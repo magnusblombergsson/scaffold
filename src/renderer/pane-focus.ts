@@ -1,6 +1,6 @@
 import { useEffect, useRef, type RefObject } from 'react';
 
-/** Writing's panes, in the order F6 goes through them. */
+/** The panes of Writing or the Story Bible, in the order F6 goes through them. */
 const PANES = ['left', 'overview', 'centre', 'assistant'] as const;
 type Pane = (typeof PANES)[number];
 
@@ -8,10 +8,10 @@ const FOCUSABLE =
   '[contenteditable="true"], textarea, input, select, button:not(:disabled), [tabindex]:not([tabindex="-1"])';
 
 /**
- * F6 and Shift+F6 in Writing: focus goes to the next or previous pane, the
- * left pane, the Overview pane while it is open, the editor and the
- * Assistant, round and round. A pane gets
- * focus back where the Author left it; the first time, at its highlighted
+ * F6 and Shift+F6 in Writing or the Story Bible: focus goes to the next or
+ * previous pane, the left pane, the Overview pane while it is open, the
+ * editor and the Assistant, round and round. A pane gets focus back where
+ * the Author left it; the first time, at its highlighted
  * row, its Prose or its message box. `room` holds the panes side by side,
  * between their resizers.
  */
@@ -43,15 +43,24 @@ export function usePaneCycle(
         ? 'left'
         : child.classList.contains('overview-pane')
           ? 'overview'
-          : child.classList.contains('assistant-panel')
+          : child.classList.contains('assistant-panel') ||
+              child.classList.contains('assistant-slot')
             ? 'assistant'
             : 'centre';
     };
     const paneElement = (pane: Pane) =>
-      [...element.children].find(
+      [...element.children]
+        .filter((c) => paneOf(c) === pane)
+        // The Assistant panel, in its slot while it is in this Room.
+        .map((c) =>
+          c.classList.contains('assistant-slot')
+            ? c.querySelector('.assistant-panel')
+            : c,
+        )
         // A collapsed pane is passed.
-        (c) => !(c as HTMLElement).hidden && paneOf(c) === pane,
-      ) as HTMLElement | undefined;
+        .find((c) => c && !(c as HTMLElement).hidden) as
+        | HTMLElement
+        | undefined;
 
     const onFocusIn = (event: FocusEvent) => {
       const pane = paneOf(event.target as Node);

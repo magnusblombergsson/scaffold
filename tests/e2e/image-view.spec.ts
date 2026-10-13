@@ -7,7 +7,13 @@ import {
 } from '@playwright/test';
 import { writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { addAnthropicKey, answerDialogs, launch, useTempDir } from './app';
+import {
+  addAnthropicKey,
+  answerDialogs,
+  launch,
+  roomButton,
+  useTempDir,
+} from './app';
 import { useFakeAnthropic } from './fake-anthropic';
 
 const tempDir = useTempDir();
@@ -56,7 +62,7 @@ async function fill(page: Page, label: string, text: string) {
 /** A Character named Anna, with an image. */
 async function anna(app: ElectronApplication, page: Page) {
   await offerImage(app);
-  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(page, 'Story Bible').click();
   await page.getByRole('button', { name: 'New Entry' }).click();
   await page.getByRole('menuitem', { name: 'Character', exact: true }).click();
   await fill(page, 'Name', 'Anna');
@@ -112,7 +118,7 @@ test('an Entry image opens the large view from the Entry view, the list and the 
   const list = page.getByRole('navigation', { name: 'Story Bible' });
   await expectView(page, list.locator('img.entry-thumbnail'));
 
-  const modes = page.getByRole('group', { name: 'Mode' });
+  const modes = page.getByRole('group', { name: 'Room' });
   await modes.getByRole('button', { name: 'Brainstorm' }).click();
   await expectView(
     page,
@@ -140,7 +146,7 @@ test('an Entry image opens the large view from the Entry view, the list and the 
 test('an Entry image opens the large view from the Peek and Pinned notes, which stay', async () => {
   const { app, page } = await newProject();
   await anna(app, page);
-  await page.getByRole('tab', { name: 'Manuscript' }).click();
+  await roomButton(page, 'Writing').click();
   await page.getByRole('button', { name: 'Scene 1', exact: true }).click();
   await page.getByLabel('Prose').click();
   await page.keyboard.type('Anna waited.');

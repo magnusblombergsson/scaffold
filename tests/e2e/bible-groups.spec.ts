@@ -1,6 +1,6 @@
 import { expect, test, type Locator, type Page } from '@playwright/test';
 import path from 'node:path';
-import { answerDialogs, launch, useTempDir } from './app';
+import { answerDialogs, launch, roomButton, useTempDir } from './app';
 
 const tempDir = useTempDir();
 
@@ -56,7 +56,7 @@ test('the Author collapses Story Bible groups, groups Entries by Tag, and drags 
   await answerDialogs(first, projectPath);
   const page = await first.firstWindow();
   await page.getByRole('button', { name: 'New Project…' }).click();
-  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(page, 'Story Bible').click();
   await newEntry(page, 'Character', 'Anna', ['Red Hand', 'Officers']);
   await newEntry(page, 'Character', 'Bo', []);
   await newEntry(page, 'Place', 'Harbour', ['Red Hand']);
@@ -158,7 +158,7 @@ test('the Author collapses Story Bible groups, groups Entries by Tag, and drags 
   // The view is remembered for the Project on this computer.
   const second = await launch(tempDir());
   const reopened = await second.firstWindow();
-  await reopened.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(reopened, 'Story Bible').click();
   const list2 = reopened.getByRole('navigation', { name: 'Story Bible' });
   await expect(list2.getByLabel('Group by Tag')).toBeChecked();
   await expect(

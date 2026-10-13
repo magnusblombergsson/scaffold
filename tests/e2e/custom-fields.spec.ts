@@ -1,7 +1,13 @@
 import { expect, test, type Page } from '@playwright/test';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { answerDialogs, answerQuestions, launch, useTempDir } from './app';
+import {
+  answerDialogs,
+  answerQuestions,
+  launch,
+  roomButton,
+  useTempDir,
+} from './app';
 
 // Custom fields (ADR 0009): added from an Entry to every Entry of its type,
 // each a growing text box after the type's own fields.
@@ -18,7 +24,7 @@ async function newProject(projectPath: string) {
 }
 
 async function newEntry(page: Page, type: string, name: string) {
-  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(page, 'Story Bible').click();
   await page.getByRole('button', { name: 'New Entry' }).click();
   await page.getByRole('menuitem', { name: type, exact: true }).click();
   const field = page.getByLabel('Name', { exact: true });
@@ -79,7 +85,7 @@ test('the Author adds, fills, renames, moves and deletes a field for every Chara
     page.getByRole('button', { name: '+ Add a field to all Places' }),
   ).toBeVisible();
 
-  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(page, 'Story Bible').click();
   await page.locator('.binder-title', { hasText: 'Anna' }).click();
   await expect(page.getByLabel('Allegiance', { exact: true })).toHaveText(
     'The Crown',
@@ -106,9 +112,10 @@ test('the Author adds, fills, renames, moves and deletes a field for every Chara
     'Delete the field “Loyalty” from every Character?',
   ]);
 
+  await roomButton(page, 'Writing').click();
   await page.getByRole('tab', { name: 'Trash' }).click();
   await page.getByRole('button', { name: 'Restore Loyalty' }).click();
-  await page.getByRole('tab', { name: 'Story Bible' }).click();
+  await roomButton(page, 'Story Bible').click();
   await page.locator('.binder-title', { hasText: 'Anna' }).click();
   await expect(customLabels(page)).toHaveText(['Debt', 'Loyalty']);
   await expect(page.getByLabel('Loyalty', { exact: true })).toHaveText(

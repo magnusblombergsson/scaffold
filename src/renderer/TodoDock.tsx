@@ -27,9 +27,10 @@ export function useTodoDock(
 }
 
 /**
- * Writing's Todos dock, at the bottom of the left pane below whichever tab
- * shows. Folded, a header counts the Todos not done that it shows; raised,
- * it takes height from the tab above, set by the divider between them.
+ * The Todos dock of Writing and the Story Bible, at the bottom of the left
+ * pane below whichever tab or list shows. Folded, a header counts the Todos
+ * not done that it shows; raised, it takes height from the tab above, set by
+ * the divider between them.
  */
 export function TodoDockPane({
   dock,

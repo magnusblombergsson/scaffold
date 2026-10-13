@@ -2124,8 +2124,20 @@ export class ProjectStore {
           );
         }
       }
-      if (ref.kind === 'outline') this.noteDetails(ref.id, saved, after);
-      else this.noteEntryDetails(ref.id, after);
+      if (ref.kind === 'outline') {
+        this.noteDetails(ref.id, saved, after);
+      } else {
+        this.noteEntryDetails(ref.id, after);
+        // A value accepted meanwhile, held until now, was given the details
+        // as they were: it is saved with these.
+        const pending = this.unitWriter.pending(held);
+        if (pending) {
+          pending.value = withEntryDetails(
+            pending.value as EntryValue,
+            parseDetails('entry', ref.id, after),
+          );
+        }
+      }
     })();
     await this.unitWriter.holdingWrites(held, saving);
   }
