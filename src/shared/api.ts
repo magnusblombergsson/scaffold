@@ -123,7 +123,7 @@ export type StructureChanged = {
 
 /**
  * What two versions of `project.json` saved on different computers lost when
- * one was kept: the Parts and Chapters only the other had, and the Scenes only it
+ * one was kept: the Books, Parts and Chapters only the other had, and the Scenes only it
  * placed, which are Unplaced now. `host` is where it came from, if known.
  */
 export type Dropped = {
@@ -132,6 +132,8 @@ export type Dropped = {
   scenes: string[];
   /** The Parts only the other had; absent when none. */
   parts?: string[];
+  /** The Books only the other had; absent when none. */
+  books?: string[];
 };
 
 /**
@@ -288,20 +290,35 @@ export interface ProjectApi {
   // of Trash. They resolve once the change is on disk.
   /**
    * Creates a Chapter at `index` in a Part, or with no `partId` among the
-   * Parts and Loose Chapters, which without Parts are all the Chapters.
+   * Parts and Loose Chapters of Book `bookId`, or of the first Book, which
+   * without Parts are all its Chapters.
    */
   createChapter(
     index: number,
     title?: string,
     partId?: string,
+    bookId?: string,
   ): Promise<Created>;
-  /** Creates a Part holding no Chapters at `index` among the Parts and Loose Chapters. */
-  createPart(index: number, title?: string): Promise<Created>;
+  /**
+   * Creates a Part holding no Chapters at `index` among the Parts and Loose
+   * Chapters of Book `bookId`, or of the first Book.
+   */
+  createPart(index: number, title?: string, bookId?: string): Promise<Created>;
   renamePart(partId: string, title: string): Promise<Changed>;
-  /** Moves a Part to `index` among the Parts and Loose Chapters. */
-  movePart(partId: string, index: number): Promise<Changed>;
+  /** Moves a Part to `index` among the Parts and Loose Chapters of Book `bookId`, or of its own. */
+  movePart(partId: string, index: number, bookId?: string): Promise<Changed>;
   /** Moves a Part to Trash with its Chapters and their Scenes; never the last Chapter. */
   trashPart(partId: string): Promise<Changed>;
+  /**
+   * Adds an empty Book at `index` among the Books, or last; a Project of one
+   * Book becomes a Series, its Manuscript Book 1.
+   */
+  createBook(index?: number, title?: string): Promise<Created>;
+  renameBook(bookId: string, title: string): Promise<Changed>;
+  /** Moves a Book to `index` among the Books. */
+  moveBook(bookId: string, index: number): Promise<Changed>;
+  /** Moves a Book to Trash with its Parts, Chapters and Scenes; never the last Book or Chapter. */
+  trashBook(bookId: string): Promise<Changed>;
   createScene(
     chapterId: string,
     index: number,
@@ -311,12 +328,14 @@ export interface ProjectApi {
   renameScene(sceneId: string, title: string): Promise<Changed>;
   /**
    * Moves a Chapter, placed or Unplaced, to `index` in a Part, or with no
-   * `partId` among the Parts and Loose Chapters: into, out of or between Parts.
+   * `partId` among the Parts and Loose Chapters of Book `bookId`, or of its
+   * own: into, out of or between Parts and Books.
    */
   moveChapter(
     chapterId: string,
     index: number,
     partId?: string,
+    bookId?: string,
   ): Promise<Changed>;
   moveScene(
     sceneId: string,
@@ -791,14 +810,15 @@ export interface ShellApi {
   showDocked(docked: DockedPanes): void;
   /**
    * Says whether this window's Prose has focus, which enables the Format
-   * menu, and whether its Scene can be split, which enables the Splits.
+   * menu, and whether its Scene can be split, which enables the Splits,
+   * and to the next Chapter, which Split to Next Chapter needs too.
    */
-  showProseFocus(focused: boolean, splittable: boolean): void;
+  showProseFocus(focused: boolean, splittable: boolean, toNext: boolean): void;
   /**
    * Opens the Prose's right-click menu where the pointer is; what is chosen
    * comes back to this window by `onCommand`.
    */
-  showProseMenu(splittable: boolean): void;
+  showProseMenu(splittable: boolean, toNext: boolean): void;
   /**
    * Puts this window in zen mode, full screen and ticked in the View menu, or
    * takes it out, back to the full screen it had before. Kept in memory only.
@@ -1035,6 +1055,10 @@ export const projectMethods = {
   renamePart: 'invoke',
   movePart: 'invoke',
   trashPart: 'invoke',
+  createBook: 'invoke',
+  renameBook: 'invoke',
+  moveBook: 'invoke',
+  trashBook: 'invoke',
   createScene: 'invoke',
   renameChapter: 'invoke',
   renameScene: 'invoke',

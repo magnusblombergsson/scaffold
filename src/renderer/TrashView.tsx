@@ -141,5 +141,17 @@ function detail(item: TrashItem, partLabel?: PartLabel): string {
       `${scenes} ${scenes === 1 ? 'Scene' : 'Scenes'}`,
     ].join(' · ');
   }
+  if (item.kind === 'book') {
+    const parts = item.parts.length;
+    const chapters = [
+      ...item.chapters,
+      ...item.parts.flatMap((p) => p.chapters),
+    ].length;
+    return [
+      'Book',
+      ...(parts > 0 ? [`${parts} ${partName(partLabel, parts !== 1)}`] : []),
+      `${chapters} ${chapters === 1 ? 'Chapter' : 'Chapters'}`,
+    ].join(' · ');
+  }
   return item.chapterTitle ? `Scene from ${item.chapterTitle}` : 'Scene';
 }

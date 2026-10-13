@@ -28,12 +28,17 @@ export function versionLabel({
 
 /** What the Author is told, once, when one computer's `project.json` lost to another's. */
 export function droppedMessage(
-  { host, chapters, scenes, parts: droppedParts = [] }: Dropped,
+  { host, chapters, scenes, parts: droppedParts = [], books = [] }: Dropped,
   label?: PartLabel,
 ): string {
   const parts = [
     `The Manuscript was rearranged on two computers at once; the order from ${host ?? 'another computer'} was set aside.`,
   ];
+  if (books.length > 0) {
+    parts.push(
+      `Dropped: ${books.length === 1 ? 'Book' : 'Books'} ${quoted(books)}.`,
+    );
+  }
   if (droppedParts.length > 0) {
     parts.push(
       `Dropped: ${partName(label, droppedParts.length > 1)} ${quoted(droppedParts)}.`,

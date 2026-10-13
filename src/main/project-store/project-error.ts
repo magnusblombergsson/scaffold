@@ -9,6 +9,8 @@ export class ProjectError extends Error {
       | 'missing'
       | 'trashed'
       | 'last-chapter'
+      | 'last-book'
+      | 'last-in-book'
       | 'in-manuscript'
       | 'in-story-bible'
       | 'in-trash'

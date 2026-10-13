@@ -11,6 +11,7 @@ import {
 } from 'react';
 import type { Changed, Created } from '../shared/api';
 import {
+  bookMove,
   chapterMove,
   listRows,
   partMove,
@@ -20,6 +21,7 @@ import {
 } from './binder-keys';
 import { useListKeys } from './list-keys';
 import {
+  bookManuscript,
   partOf,
   placedChapters,
   topItems,
@@ -37,6 +39,7 @@ import {
   partName,
   PROJECT_OUTLINE,
   type Manuscript,
+  type ManuscriptBook,
   type ManuscriptChapter,
   type ManuscriptPart,
   type ManuscriptScene,
@@ -44,11 +47,12 @@ import {
 } from '../shared/project-types';
 
 /**
- * What Writing's centre shows: a Scene, a Chapter's or Part's Outline and
- * Notes, or the Project Outline. Entries open in the Story Bible.
+ * What Writing's centre shows: a Scene, a Chapter's, Part's or Book's
+ * Outline and Notes, or the Project Outline. Entries open in the Story
+ * Bible.
  */
 export type Selection =
-  | { kind: 'scene' | 'chapter' | 'part'; id: string }
+  | { kind: 'scene' | 'chapter' | 'part' | 'book'; id: string }
   | { kind: 'project' };
 
 type Props = {
@@ -62,31 +66,33 @@ type Props = {
    * `message` says what it did, beside Undo.
    */
   onChange(operation: () => Promise<Changed>, message: string): Promise<void>;
-  /** The Part, Chapter or Scene whose title is being edited, if any. */
+  /** The Book, Part, Chapter or Scene whose title is being edited, if any. */
   renaming: string | null;
   onRename(id: string | null): void;
   /** Undoes the last structure change, as Ctrl+Z in the list does. */
   onUndo(): Promise<void>;
   /** The Project's Status list, in order. */
   statuses: Status[];
-  /** Gives a Part, Chapter or Scene a Status, or none with null. */
+  /** Gives a Book, Part, Chapter or Scene a Status, or none with null. */
   onSetStatus(unitId: string, statusId: string | null): void;
-  /** Opens Tags… on a Part, Chapter or Scene. */
+  /** Opens Tags… on a Book, Part, Chapter or Scene. */
   onEditTags(unitId: string): void;
-  /** Opens Set word target… on a Part, Chapter or Scene. */
+  /** Opens Set word target… on a Book, Part, Chapter or Scene. */
   onSetWordTarget(unitId: string): void;
-  /** Starts a Todo linked to a Part, Chapter or Scene. */
+  /** Starts a Todo linked to a Book, Part, Chapter or Scene. */
   onAddTodo(link: TodoLink): void;
 };
 
 const SCENE = 'application/x-scaffold-scene';
 const CHAPTER = 'application/x-scaffold-chapter';
 const PART = 'application/x-scaffold-part';
+const BOOK = 'application/x-scaffold-book';
 
 /**
  * The Manuscript tab: the Parts, each with its Chapters, and the Loose
  * Chapters in one order, each Chapter with its Scenes; then any Unplaced
- * Chapters and Unplaced Scenes. Without Parts, just the Chapters.
+ * Chapters and Unplaced Scenes. Without Parts, just the Chapters. In a
+ * Series, each Book is a foldable top level holding its own.
  */
 export function Binder({
   manuscript,
@@ -106,18 +112,28 @@ export function Binder({
   const project = window.project;
   const readOnly = useContext(ReadOnlyContext);
   const imagePicker = useImagePicker();
-  const { chapters, parts = [] } = manuscript;
+  const { chapters, parts = [], books } = manuscript;
   /** What the Project calls a Part, as in “Act”. */
   const name = partName(manuscript.partLabel);
-  /** The Parts whose Chapters are hidden. In memory while the tab shows. */
+  /** The Books and Parts whose Chapters are hidden. In memory while the tab shows. */
   const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(
     () => new Set(),
   );
-  const expand = (partId: string) =>
-    setCollapsed((now) => new Set([...now].filter((id) => id !== partId)));
+  const expand = (id: string) =>
+    setCollapsed((now) => new Set([...now].filter((other) => other !== id)));
   const rows = listRows(manuscript, collapsed);
-  /** The ids of the Parts and Loose Chapters, in order. */
-  const topIds = manuscript.top ?? placedChapters(manuscript).map((c) => c.id);
+  /**
+   * A Book of a Series on its own, or with no `bookId` the Manuscript of a
+   * Project that is no Series: what moving within it works on.
+   */
+  const ofBook = (bookId?: string) => bookManuscript(manuscript, bookId);
+  /** The ids of the Parts and Loose Chapters of Book `bookId`, or of the Manuscript, in order. */
+  const topIds = (bookId?: string) => {
+    const book = ofBook(bookId);
+    return book.top ?? placedChapters(book).map((c) => c.id);
+  };
+  /** The Book a new Chapter or Part goes in from the end of the list: the last. */
+  const lastBook = books?.[books.length - 1];
   /** The row whose ⋯ menu is open, as by Shift+F10. */
   const [menuFor, setMenuFor] = useState<string | null>(null);
   /** Whether a row is a Part or Chapter or a Scene in one: Unplaced Scenes ignore F2 and Alt+↑/↓. */
@@ -161,14 +177,16 @@ export function Binder({
   function rename(
     id: string,
     title: string,
-    kind: 'part' | 'chapter' | 'scene',
+    kind: 'book' | 'part' | 'chapter' | 'scene',
   ) {
     setRenaming(null);
-    void (kind === 'part'
-      ? onChange(() => project.renamePart(id, title), `${name} renamed`)
-      : kind === 'chapter'
-        ? onChange(() => project.renameChapter(id, title), 'Chapter renamed')
-        : onChange(() => project.renameScene(id, title), 'Scene renamed'));
+    void (kind === 'book'
+      ? onChange(() => project.renameBook(id, title), 'Book renamed')
+      : kind === 'part'
+        ? onChange(() => project.renamePart(id, title), `${name} renamed`)
+        : kind === 'chapter'
+          ? onChange(() => project.renameChapter(id, title), 'Chapter renamed')
+          : onChange(() => project.renameScene(id, title), 'Scene renamed'));
   }
 
   function moveScene(sceneId: string, chapterId: string, index: number) {
@@ -178,31 +196,55 @@ export function Binder({
     );
   }
 
-  /** Moves a Chapter to `index` in a Part, which then shows its Chapters, or at the top. */
-  function moveChapter(chapterId: string, index: number, partId?: string) {
+  /**
+   * Moves a Chapter to `index` in a Part, which then shows its Chapters, or
+   * at the top of Book `bookId`, which then shows its own, or of its own.
+   */
+  function moveChapter(
+    chapterId: string,
+    index: number,
+    partId?: string,
+    bookId?: string,
+  ) {
     if (partId) expand(partId);
+    if (bookId) expand(bookId);
     return onChange(
-      () => project.moveChapter(chapterId, index, partId),
+      () => project.moveChapter(chapterId, index, partId, bookId),
       'Chapter moved',
     );
   }
 
-  function movePart(partId: string, index: number) {
-    return onChange(() => project.movePart(partId, index), `${name} moved`);
+  /** Moves a Part to `index` at the top of Book `bookId`, which then shows its own, or of its own. */
+  function movePart(partId: string, index: number, bookId?: string) {
+    if (bookId) expand(bookId);
+    return onChange(
+      () => project.movePart(partId, index, bookId),
+      `${name} moved`,
+    );
+  }
+
+  function moveBook(bookId: string, index: number) {
+    return onChange(() => project.moveBook(bookId, index), 'Book moved');
   }
 
   /**
-   * Moves a Part, a Chapter, or a Scene across Chapters, a place up or down;
-   * undefined at either end.
+   * Moves a Book, a Part or a Chapter within its Book, or a Scene across
+   * Chapters, a place up or down; undefined at either end.
    */
   function move(row: Row, direction: Direction) {
+    if (row.kind === 'book') {
+      const to = bookMove(manuscript, row.id, direction);
+      return to === null ? undefined : moveBook(row.id, to);
+    }
     if (row.kind === 'part') {
-      const to = partMove(manuscript, row.id, direction);
-      return to === null ? undefined : movePart(row.id, to);
+      const bookId = bookOfRow(row);
+      const to = partMove(ofBook(bookId), row.id, direction);
+      return to === null ? undefined : movePart(row.id, to, bookId);
     }
     if (row.kind === 'chapter') {
-      const to = chapterMove(manuscript, row.id, direction);
-      return to ? moveChapter(row.id, to.index, to.partId) : undefined;
+      const bookId = bookOfRow(row);
+      const to = chapterMove(ofBook(bookId), row.id, direction);
+      return to ? moveChapter(row.id, to.index, to.partId, bookId) : undefined;
     }
     const to = sceneMove(manuscript, row.id, direction);
     if (!to) return undefined;
@@ -211,24 +253,68 @@ export function Binder({
     return moveScene(row.id, to.chapterId, to.index);
   }
 
+  /** The Book a Part's or Chapter's row is in, in a Series. */
+  function bookOfRow(row: Row): string | undefined {
+    if (row.kind === 'part') return parts.find((p) => p.id === row.id)?.book;
+    if (row.kind === 'chapter') {
+      return chapters.find((c) => c.id === row.id)?.book;
+    }
+    return undefined;
+  }
+
   /** The ⋯ menu's Move Up and Move Down, after which the row keeps the highlight. */
   function moveItems(row: Row): MenuItem[] {
     return (['up', 'down'] as const).map((direction) => ({
       label: direction === 'up' ? 'Move Up' : 'Move Down',
       shortcut: direction === 'up' ? SHORTCUTS.moveUp : SHORTCUTS.moveDown,
       disabled:
-        row.kind === 'part'
-          ? partMove(manuscript, row.id, direction) === null
-          : row.kind === 'chapter'
-            ? chapterMove(manuscript, row.id, direction) === null
-            : !sceneMove(manuscript, row.id, direction),
+        row.kind === 'book'
+          ? bookMove(manuscript, row.id, direction) === null
+          : row.kind === 'part'
+            ? partMove(ofBook(bookOfRow(row)), row.id, direction) === null
+            : row.kind === 'chapter'
+              ? chapterMove(ofBook(bookOfRow(row)), row.id, direction) === null
+              : !sceneMove(manuscript, row.id, direction),
       run: () => move(row, direction)?.then(() => keys.focusRow(row.id)),
     }));
   }
 
+  /**
+   * Move to Book ▸, in a Series: a Scene goes last in the Book's last
+   * Chapter, a Chapter or Part last among its Parts and Loose Chapters.
+   * Only `own`, the Book it is loose in, isn't offered.
+   * They keep their Outline, Notes, details and image.
+   */
+  function moveToBookItem(
+    node: { id: string },
+    kind: 'scene' | 'chapter' | 'part',
+    own: string | undefined,
+  ): MenuItem[] {
+    if (!books) return [];
+    return [
+      {
+        label: 'Move to Book',
+        disabled: readOnly,
+        items: books.map((book) => {
+          const last = ofBook(book.id).chapters.at(-1);
+          return {
+            label: book.title,
+            disabled: book.id === own || (kind === 'scene' && !last),
+            run: () =>
+              kind === 'scene'
+                ? last && moveScene(node.id, last.id, last.scenes.length)
+                : kind === 'chapter'
+                  ? moveChapter(node.id, book.top.length, undefined, book.id)
+                  : movePart(node.id, book.top.length, book.id),
+          };
+        }),
+      },
+    ];
+  }
+
   function trash(
     node: { id: string; title: string },
-    kind: 'scene' | 'chapter' | 'part',
+    kind: 'scene' | 'chapter' | 'part' | 'book',
   ) {
     return onChange(
       () =>
@@ -236,7 +322,9 @@ export function Binder({
           ? project.trashScene(node.id)
           : kind === 'chapter'
             ? project.trashChapter(node.id)
-            : project.trashPart(node.id),
+            : kind === 'part'
+              ? project.trashPart(node.id)
+              : project.trashBook(node.id),
       `“${node.title}” moved to Trash`,
     );
   }
@@ -244,7 +332,7 @@ export function Binder({
   /** Move to Trash, and beside it Move to Drawer, which takes the same with it. */
   function outOfStoryItems(
     node: { id: string; title: string },
-    kind: 'scene' | 'chapter' | 'part',
+    kind: 'scene' | 'chapter' | 'part' | 'book',
     disabled: boolean,
   ): MenuItem[] {
     return [
@@ -274,7 +362,7 @@ export function Binder({
     void moveScene(sceneId, chapter.id, at + (target && after ? 1 : 0));
   }
 
-  /** Drops a Chapter before or after `target`, in its Part or at the top. */
+  /** Drops a Chapter before or after `target`, in its Part or at the top of its Book. */
   function dropChapter(
     chapterId: string,
     target: ManuscriptChapter,
@@ -282,12 +370,35 @@ export function Binder({
   ) {
     if (chapterId === target.id || target.unplaced) return;
     const part = partOf(manuscript, target.id);
-    const rest = (part ? part.chapters : topIds).filter(
+    const rest = (part ? part.chapters : topIds(target.book)).filter(
       (id) => id !== chapterId,
     );
     const at = rest.indexOf(target.id);
     if (at < 0) return;
-    void moveChapter(chapterId, at + (after ? 1 : 0), part?.id);
+    void moveChapter(chapterId, at + (after ? 1 : 0), part?.id, target.book);
+  }
+
+  /** Drops a Chapter or Part last in a Book, or a Book before or after it. */
+  function dropOnBook(event: DragEvent<HTMLElement>, book: ManuscriptBook) {
+    const { dataTransfer } = event;
+    const chapterId = dataTransfer.getData(CHAPTER);
+    const partId = dataTransfer.getData(PART);
+    const bookId = dataTransfer.getData(BOOK);
+    if (chapterId) {
+      const rest = book.top.filter((id) => id !== chapterId);
+      void moveChapter(chapterId, rest.length, undefined, book.id);
+    } else if (partId) {
+      const rest = book.top.filter((id) => id !== partId);
+      void movePart(partId, rest.length, book.id);
+    } else if (bookId && bookId !== book.id && books) {
+      const rest = books.filter((b) => b.id !== bookId);
+      const at = rest.indexOf(book);
+      void moveBook(bookId, at + (inLowerHalf(event) ? 1 : 0));
+    } else {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
   }
 
   /** Drops a Chapter into a Part, last. */
@@ -296,13 +407,18 @@ export function Binder({
     void moveChapter(chapterId, rest.length, part.id);
   }
 
-  /** Drops a Part before or after a Part or Loose Chapter. */
-  function dropPart(partId: string, targetId: string, after: boolean) {
+  /** Drops a Part before or after a Part or Loose Chapter, in its Book. */
+  function dropPart(
+    partId: string,
+    targetId: string,
+    after: boolean,
+    bookId?: string,
+  ) {
     if (partId === targetId) return;
-    const rest = topIds.filter((id) => id !== partId);
+    const rest = topIds(bookId).filter((id) => id !== partId);
     const at = rest.indexOf(targetId);
     if (at < 0) return;
-    void movePart(partId, at + (after ? 1 : 0));
+    void movePart(partId, at + (after ? 1 : 0), bookId);
   }
 
   /** The Status ▸ submenu: none, or one of the list. */
@@ -351,6 +467,7 @@ export function Binder({
         ...unitImageItems(scene, readOnly, imagePicker),
         addTodoItem(readOnly, () => onAddTodo({ kind: 'scene', id: scene.id })),
         ...moves,
+        ...moveToBookItem(scene, 'scene', undefined),
         ...toTrash,
       ];
     }
@@ -383,6 +500,7 @@ export function Binder({
       },
       ...moveItems({ kind: 'scene', id: scene.id, chapterId: chapter.id }),
       ...moves,
+      ...moveToBookItem(scene, 'scene', chapter.book),
       statusItem(scene),
       tagsItem(scene),
       wordTargetItem(scene),
@@ -394,7 +512,8 @@ export function Binder({
 
   /**
    * Moving a Chapter into another Part, last, out of its own, loose right
-   * after it, or for an Unplaced Chapter, to the end of the Manuscript.
+   * after it, or for an Unplaced Chapter, to the end of the Manuscript, or
+   * of the last Book.
    */
   function chapterPlaceItems(
     chapter: ManuscriptChapter,
@@ -405,7 +524,13 @@ export function Binder({
         ? [
             {
               label: 'Place at End',
-              run: () => moveChapter(chapter.id, topLength(manuscript)),
+              run: () =>
+                moveChapter(
+                  chapter.id,
+                  topLength(ofBook(lastBook?.id)),
+                  undefined,
+                  lastBook?.id,
+                ),
             },
           ]
         : []),
@@ -413,14 +538,23 @@ export function Binder({
         ? [
             {
               label: `Move out of ${part.title}`,
-              run: () => moveChapter(chapter.id, topIds.indexOf(part.id) + 1),
+              run: () =>
+                moveChapter(
+                  chapter.id,
+                  topIds(part.book).indexOf(part.id) + 1,
+                  undefined,
+                  part.book,
+                ),
             },
           ]
         : []),
       ...parts
         .filter((p) => p !== part)
         .map((p) => ({
-          label: `Move to ${p.title}`,
+          // In a Series, Parts of several Books may share a title.
+          label: books
+            ? `Move to ${p.title} (${books.find((b) => b.id === p.book)?.title ?? 'no Book'})`
+            : `Move to ${p.title}`,
           run: () => dropIntoPart(chapter.id, p),
         })),
     ];
@@ -430,11 +564,13 @@ export function Binder({
     chapter: ManuscriptChapter,
     part: ManuscriptPart | undefined,
   ): MenuItem[] {
-    /** Where it is among its Part's Chapters, or the Parts and Loose Chapters. */
-    const index = (part ? part.chapters : topIds).indexOf(chapter.id);
+    /** Where it is among its Part's Chapters, or its Book's Parts and Loose Chapters. */
+    const index = (part ? part.chapters : topIds(chapter.book)).indexOf(
+      chapter.id,
+    );
     const createChapter = (at: number) =>
       create(
-        () => project.createChapter(at, undefined, part?.id),
+        () => project.createChapter(at, undefined, part?.id, chapter.book),
         'Chapter created',
         setRenaming,
       );
@@ -474,6 +610,8 @@ export function Binder({
             }),
           ]),
       ...chapterPlaceItems(chapter, part),
+      // Out of its Part too, loose at the end of the Book.
+      ...moveToBookItem(chapter, 'chapter', part ? undefined : chapter.book),
       statusItem(chapter),
       tagsItem(chapter),
       wordTargetItem(chapter),
@@ -492,10 +630,14 @@ export function Binder({
   }
 
   function partMenu(part: ManuscriptPart): MenuItem[] {
-    const index = topIds.indexOf(part.id);
+    const index = topIds(part.book).indexOf(part.id);
     const inPart = chapters.filter((c) => part.chapters.includes(c.id));
     const createPart = (at: number) =>
-      create(() => project.createPart(at), `${name} created`, setRenaming);
+      create(
+        () => project.createPart(at, undefined, part.book),
+        `${name} created`,
+        setRenaming,
+      );
     return [
       {
         label: 'Rename…',
@@ -517,6 +659,7 @@ export function Binder({
       { label: `New ${name} Above`, run: () => createPart(index) },
       { label: `New ${name} Below`, run: () => createPart(index + 1) },
       ...moveItems({ kind: 'part', id: part.id }),
+      ...moveToBookItem(part, 'part', part.book),
       statusItem(part),
       tagsItem(part),
       wordTargetItem(part),
@@ -529,6 +672,66 @@ export function Binder({
         'part',
         inPart.length === chapters.length ||
           inPart.some((c) => c.scenes.some((s) => s.missing)),
+      ),
+    ];
+  }
+
+  function bookMenu(book: ManuscriptBook): MenuItem[] {
+    const index = books?.indexOf(book) ?? 0;
+    const inBook = chapters.filter((c) => c.book === book.id);
+    const createBook = (at: number) =>
+      create(() => project.createBook(at), 'Book created', setRenaming);
+    return [
+      {
+        label: 'Rename…',
+        shortcut: SHORTCUTS.rename,
+        run: () => setRenaming(book.id),
+      },
+      {
+        label: 'New Chapter',
+        run: () => {
+          expand(book.id);
+          return create(
+            () =>
+              project.createChapter(
+                book.top.length,
+                undefined,
+                undefined,
+                book.id,
+              ),
+            'Chapter created',
+            setRenaming,
+          );
+        },
+      },
+      {
+        label: `New ${name}`,
+        run: () => {
+          expand(book.id);
+          return create(
+            () => project.createPart(book.top.length, undefined, book.id),
+            `${name} created`,
+            setRenaming,
+          );
+        },
+      },
+      { label: 'New Book Above', run: () => createBook(index) },
+      { label: 'New Book Below', run: () => createBook(index + 1) },
+      ...moveItems({ kind: 'book', id: book.id }),
+      statusItem(book),
+      tagsItem(book),
+      wordTargetItem(book),
+      ...unitImageItems(book, readOnly, imagePicker),
+      addTodoItem(readOnly, () => onAddTodo({ kind: 'book', id: book.id })),
+      // Its Parts, Chapters and their Scenes go with it: the Project keeps
+      // at least one Book and one Chapter, and a Missing Scene has no Prose
+      // here to keep.
+      ...outOfStoryItems(
+        book,
+        'book',
+        (books?.length ?? 0) <= 1 ||
+          inBook.length === chapters.length ||
+          inBook.some((c) => c.scenes.some((s) => s.missing)),
       ),
     ];
   }
@@ -637,7 +840,7 @@ export function Binder({
             if (chapterId) {
               dropChapter(chapterId, chapter, inLowerHalf(event));
             } else if (partId && takesPart) {
-              dropPart(partId, chapter.id, inLowerHalf(event));
+              dropPart(partId, chapter.id, inLowerHalf(event), chapter.book);
             } else {
               return;
             }
@@ -717,7 +920,7 @@ export function Binder({
             if (!partId) return;
             event.preventDefault();
             event.stopPropagation();
-            dropPart(partId, part.id, inLowerHalf(event));
+            dropPart(partId, part.id, inLowerHalf(event), part.book);
           }}
         >
           <button
@@ -774,6 +977,96 @@ export function Binder({
     );
   }
 
+  /** A Book's row, collapsible, and its Parts' and Loose Chapters'. */
+  function bookRow(book: ManuscriptBook) {
+    const shut = collapsed.has(book.id);
+    const items = topItems(ofBook(book.id));
+    const takes = (event: DragEvent<HTMLElement>) => {
+      const { types } = event.dataTransfer;
+      if (types.includes(CHAPTER) || types.includes(PART)) {
+        event.preventDefault();
+      }
+    };
+    return (
+      <li
+        key={book.id}
+        className="binder-book"
+        data-kind="book"
+        data-id={book.id}
+        aria-label={book.title}
+        // A Chapter or Part dropped anywhere in a Book, but on another, goes last in it.
+        onDragOver={takes}
+        onDrop={(event) => dropOnBook(event, book)}
+      >
+        <div
+          className="binder-book-head"
+          onContextMenu={onContextMenu(book.id)}
+          draggable={renaming !== book.id}
+          onDragStart={(event) => event.dataTransfer.setData(BOOK, book.id)}
+          onDragOver={(event) => {
+            takes(event);
+            if (event.dataTransfer.types.includes(BOOK)) event.preventDefault();
+          }}
+          onDrop={(event) => dropOnBook(event, book)}
+        >
+          <button
+            className="binder-collapse"
+            aria-expanded={!shut}
+            aria-label={`Contents of ${book.title}`}
+            title={shut ? 'Show contents' : 'Hide contents'}
+            onClick={() =>
+              shut
+                ? expand(book.id)
+                : setCollapsed((now) => new Set(now).add(book.id))
+            }
+          >
+            <span aria-hidden="true">{shut ? '▸' : '▾'}</span>
+          </button>
+          <StatusDot status={statusOf(statuses, book.status)} />
+          {renaming === book.id ? (
+            <TitleInput
+              title={book.title}
+              onDone={(title, byKey) => {
+                if (title) rename(book.id, title, 'book');
+                else setRenaming(null);
+                if (byKey) keys.focusRow(book.id);
+              }}
+            />
+          ) : (
+            <h2 className="binder-title">
+              <button
+                data-row={book.id}
+                aria-current={isSelected('book', book.id)}
+                onClick={() => onSelect({ kind: 'book', id: book.id })}
+                onDoubleClick={() => setRenaming(book.id)}
+              >
+                {book.title}
+                <ConflictMarker shown={conflicted.has(book.id)} />
+              </button>
+            </h2>
+          )}
+          <Menu
+            label={`Book actions: ${book.title}`}
+            items={bookMenu(book)}
+            {...rowMenu(book.id)}
+          />
+        </div>
+        {!shut &&
+          (items.length > 0 ? (
+            <ol className="binder-chapters">{items.map(topRow)}</ol>
+          ) : (
+            <p className="binder-part-empty">No Chapters yet</p>
+          ))}
+      </li>
+    );
+  }
+
+  function topRow(item: ReturnType<typeof topItems>[number]) {
+    return item.kind === 'part'
+      ? partRow(item.part, item.chapters)
+      : chapterRow(item.chapter);
+  }
+
   const unplaced = unplacedChapters(manuscript);
   return (
     <nav
@@ -787,23 +1080,27 @@ export function Binder({
         aria-current={isSelected('project')}
         onClick={() => onSelect({ kind: 'project' })}
       >
-        Project Outline
+        {books ? 'Series Outline' : 'Project Outline'}
         <ConflictMarker shown={conflicted.has(PROJECT_OUTLINE)} />
       </button>
-      <ol className="binder-chapters">
-        {topItems(manuscript).map((item) =>
-          item.kind === 'part'
-            ? partRow(item.part, item.chapters)
-            : chapterRow(item.chapter),
-        )}
-      </ol>
+      {books ? (
+        <ol className="binder-books">{books.map(bookRow)}</ol>
+      ) : (
+        <ol className="binder-chapters">{topItems(manuscript).map(topRow)}</ol>
+      )}
       <div className="binder-adds">
         <button
           className="binder-add"
           title={withShortcut('New Chapter', SHORTCUTS.newChapter, MAC)}
           onClick={() =>
             create(
-              () => project.createChapter(topLength(manuscript)),
+              () =>
+                project.createChapter(
+                  topLength(ofBook(lastBook?.id)),
+                  undefined,
+                  undefined,
+                  lastBook?.id,
+                ),
               'Chapter created',
               setRenaming,
             )
@@ -815,7 +1112,12 @@ export function Binder({
           className="binder-add"
           onClick={() =>
             create(
-              () => project.createPart(topLength(manuscript)),
+              () =>
+                project.createPart(
+                  topLength(ofBook(lastBook?.id)),
+                  undefined,
+                  lastBook?.id,
+                ),
               `${name} created`,
               setRenaming,
             )
@@ -823,6 +1125,17 @@ export function Binder({
         >
           New {name}
         </button>
+        {/* A Project of one Book looks as it always has: Insert › New Book makes it a Series. */}
+        {books && (
+          <button
+            className="binder-add"
+            onClick={() =>
+              create(() => project.createBook(), 'Book created', setRenaming)
+            }
+          >
+            New Book
+          </button>
+        )}
       </div>
       {unplaced.length > 0 && (
         <section className="binder-unplaced" aria-label="Unplaced Chapters">

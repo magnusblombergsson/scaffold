@@ -5,6 +5,7 @@ import {
 } from '../shared/project-types';
 import { isWordTarget } from '../shared/word-target';
 import { readProse } from '../shared/prose-markdown';
+import { bookOf } from '../shared/manuscript-order';
 
 // What the status bar counts: words, and characters with spaces, as a word
 // processor counts them. Line breaks between paragraphs aren't characters.
@@ -40,13 +41,15 @@ export type Scope =
   | 'Part'
   | 'Act'
   | 'Episode'
-  | 'Manuscript';
+  | 'Book'
+  | 'Manuscript'
+  | 'Series';
 
 /**
  * The counts the status bar shows, and what they are of. Of a Scene, a
- * Chapter, a Part or the Manuscript: `unitId`, its id, or `project` for the
- * Manuscript; `wordTarget`, its Word target, if it has one. A selection has
- * neither.
+ * Chapter, a Part, a Book or the Manuscript, or Series: `unitId`, its id,
+ * or `project` for the Manuscript; `wordTarget`, its Word target, if it has
+ * one. A selection has neither.
  */
 export type ShownCounts = {
   scope: Scope;
@@ -57,16 +60,18 @@ export type ShownCounts = {
 
 /** The unit open in Writing, whose counts the status bar shows. */
 export type OpenUnit =
-  | { kind: 'scene' | 'chapter' | 'part'; id: string }
+  | { kind: 'scene' | 'chapter' | 'part' | 'book'; id: string }
   | { kind: 'project' }
   | null;
 
 /**
  * The counts to show: of a selection in the Prose, else of the open Scene,
- * else of the open Chapter's Scenes, else of the open Part's Chapters'
- * Scenes, against the Part's own Word target, else of the Manuscript, as
- * for the Project Outline; and the Manuscript's, its placed Chapters'
- * Scenes, which an Export has. A Scene not counted yet counts as empty.
+ * else of the open Chapter's Scenes, else of the open Part's or Book's
+ * Chapters' Scenes, against its own Word target, else of the Manuscript, or
+ * Series, as for the Project Outline; and the Manuscript's, its placed
+ * Chapters' Scenes, which an Export has. In a Series, `series` is set, and
+ * `book` is the counts of the Book holding what is open, if any. A Scene not
+ * counted yet counts as empty.
  */
 export function statusCounts({
   manuscript,
@@ -79,7 +84,12 @@ export function statusCounts({
   scenes: ReadonlyMap<string, Counts>;
   open: OpenUnit;
   selection?: Counts | null;
-}): { shown: ShownCounts; manuscript: Counts } {
+}): {
+  shown: ShownCounts;
+  manuscript: Counts;
+  series?: true;
+  book?: Counts;
+} {
   const total = (ids: string[]) =>
     ids.map((id) => scenes.get(id) ?? NO_COUNTS).reduce(addCounts, NO_COUNTS);
   const sceneIds = (chapters: Manuscript['chapters']) =>
@@ -97,6 +107,14 @@ export function statusCounts({
     open?.kind === 'part'
       ? manuscript.parts?.find((p) => p.id === open.id)
       : undefined;
+  const series = manuscript.books !== undefined;
+  const bookId = open && open.kind !== 'project' && bookOf(manuscript, open);
+  const book = bookId
+    ? manuscript.books?.find((b) => b.id === bookId)
+    : undefined;
+  const ofBook = book
+    ? total(sceneIds(manuscript.chapters.filter((c) => c.book === book.id)))
+    : undefined;
   const scene =
     open?.kind === 'scene'
       ? [
@@ -131,12 +149,23 @@ export function statusCounts({
                 ),
                 ...ofUnit(part.id, part.wordTarget),
               }
-            : {
-                scope: 'Manuscript',
-                counts: whole,
-                ...ofUnit(PROJECT_OUTLINE, manuscript.wordTarget),
-              };
-  return { shown, manuscript: whole };
+            : book && open?.kind === 'book' && ofBook
+              ? {
+                  scope: 'Book',
+                  counts: ofBook,
+                  ...ofUnit(book.id, book.wordTarget),
+                }
+              : {
+                  scope: series ? 'Series' : 'Manuscript',
+                  counts: whole,
+                  ...ofUnit(PROJECT_OUTLINE, manuscript.wordTarget),
+                };
+  return {
+    shown,
+    manuscript: whole,
+    ...(series && { series: true }),
+    ...(ofBook && { book: ofBook }),
+  };
 }
 
 /**

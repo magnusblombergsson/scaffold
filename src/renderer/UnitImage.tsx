@@ -3,6 +3,7 @@ import { entryTitle } from '../shared/entry';
 import type {
   EntrySummary,
   ImageRef,
+  ManuscriptBook,
   ManuscriptChapter,
   ManuscriptPart,
   ManuscriptScene,
@@ -13,12 +14,22 @@ import { ImagePromptDialog } from './ImagePromptDialog';
 import { useImageUrl, ViewableImage } from './ImageView';
 import { ReadOnlyContext } from './read-only';
 
-type Unit = ManuscriptPart | ManuscriptChapter | ManuscriptScene;
+type Unit =
+  | ManuscriptBook
+  | ManuscriptPart
+  | ManuscriptChapter
+  | ManuscriptScene;
 
-/** The image ref of a Part, Chapter or Scene. */
+/** The image ref of a Book, Part, Chapter or Scene. */
 function unitRef(unit: Unit): ImageRef {
   const kind =
-    'chapters' in unit ? 'part' : 'scenes' in unit ? 'chapter' : 'scene';
+    'top' in unit
+      ? 'book'
+      : 'chapters' in unit
+        ? 'part'
+        : 'scenes' in unit
+          ? 'chapter'
+          : 'scene';
   return { kind, id: unit.id };
 }
 

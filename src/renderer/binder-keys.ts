@@ -1,46 +1,68 @@
 import type { Manuscript, ManuscriptChapter } from '../shared/project-types';
-import { topItems, unplacedChapters } from '../shared/manuscript-order';
+import {
+  bookManuscript,
+  topItems,
+  unplacedChapters,
+} from '../shared/manuscript-order';
 
 export type Direction = 'up' | 'down';
 
 /**
- * A row of a list the highlight moves through: a Part, a Chapter with the
- * Part it is in (none when Loose or Unplaced), a Scene with the Chapter it
- * is in (null when Unplaced), or an Entry. An Entry may show more than once,
- * under each of its Tags, so its row has an id of its own.
+ * A row of a list the highlight moves through: a Book, a Part with the Book
+ * it is in, a Chapter with the Part it is in (none when Loose or Unplaced)
+ * or, when Loose, the Book, a Scene with the Chapter it is in (null when
+ * Unplaced), or an Entry. Only in a Series has a row a Book. An Entry may
+ * show more than once, under each of its Tags, so its row has an id of its
+ * own.
  */
 export type Row =
-  | { kind: 'part'; id: string }
-  | { kind: 'chapter'; id: string; partId?: string }
+  | { kind: 'book'; id: string }
+  | { kind: 'part'; id: string; bookId?: string }
+  | { kind: 'chapter'; id: string; partId?: string; bookId?: string }
   | { kind: 'scene'; id: string; chapterId: string | null }
   | { kind: 'entry'; id: string; entryId: string };
 
 /**
- * The Binder's rows: the Parts and Loose Chapters in order, each Part then
- * its Chapters unless `collapsed`, each Chapter then its Scenes; then the
- * Unplaced Chapters, then the Unplaced Scenes.
+ * The Binder's rows: in a Series each Book, then unless `collapsed` its
+ * Parts and Loose Chapters in order, each Part then its Chapters unless
+ * `collapsed`, each Chapter then its Scenes; then the Unplaced Chapters,
+ * then the Unplaced Scenes.
  */
 export function listRows(
   manuscript: Manuscript,
   collapsed: ReadonlySet<string> = new Set(),
 ): Row[] {
-  const chapterRows = (chapter: ManuscriptChapter, partId?: string): Row[] => [
-    { kind: 'chapter', id: chapter.id, ...(partId && { partId }) },
+  const chapterRows = (
+    chapter: ManuscriptChapter,
+    up: { partId?: string; bookId?: string } = {},
+  ): Row[] => [
+    { kind: 'chapter', id: chapter.id, ...up },
     ...chapter.scenes.map(
       (scene): Row => ({ kind: 'scene', id: scene.id, chapterId: chapter.id }),
     ),
   ];
-  return [
-    ...topItems(manuscript).flatMap((item): Row[] =>
+  const bookRows = (book: Manuscript, bookId?: string): Row[] =>
+    topItems(book).flatMap((item): Row[] =>
       item.kind === 'chapter'
-        ? chapterRows(item.chapter)
+        ? chapterRows(item.chapter, bookId ? { bookId } : {})
         : [
-            { kind: 'part', id: item.part.id },
+            { kind: 'part', id: item.part.id, ...(bookId && { bookId }) },
             ...(collapsed.has(item.part.id)
               ? []
-              : item.chapters.flatMap((c) => chapterRows(c, item.part.id))),
+              : item.chapters.flatMap((c) =>
+                  chapterRows(c, { partId: item.part.id }),
+                )),
           ],
-    ),
+    );
+  return [
+    ...(manuscript.books
+      ? manuscript.books.flatMap((book): Row[] => [
+          { kind: 'book', id: book.id },
+          ...(collapsed.has(book.id)
+            ? []
+            : bookRows(bookManuscript(manuscript, book.id), book.id)),
+        ])
+      : bookRows(manuscript)),
     ...unplacedChapters(manuscript).flatMap((c) => chapterRows(c)),
     ...manuscript.unplaced.map(
       (scene): Row => ({ kind: 'scene', id: scene.id, chapterId: null }),
@@ -51,7 +73,8 @@ export function listRows(
 /**
  * The row `key` moves the highlight to from row `at`, or null when it stays:
  * ↑/↓ the row above or below, Home / End the first or last, ← a Scene's
- * Chapter or a Chapter's Part, → a Chapter's first Scene or a Part's first
+ * Chapter, a Chapter's Part or a Part's or Loose Chapter's Book, → a
+ * Chapter's first Scene, a Part's first Chapter or a Book's first Part or
  * Chapter.
  */
 export function highlightAfter(
@@ -70,6 +93,20 @@ export function highlightAfter(
     to = rows.findIndex((r) => r.kind === 'chapter' && r.id === row.chapterId);
   } else if (key === 'ArrowLeft' && row.kind === 'chapter' && row.partId) {
     to = rows.findIndex((r) => r.kind === 'part' && r.id === row.partId);
+  } else if (
+    key === 'ArrowLeft' &&
+    (row.kind === 'chapter' || row.kind === 'part') &&
+    row.bookId
+  ) {
+    to = rows.findIndex((r) => r.kind === 'book' && r.id === row.bookId);
+  } else if (key === 'ArrowRight' && row.kind === 'book') {
+    const next = rows[at + 1];
+    if (
+      (next?.kind === 'part' || next?.kind === 'chapter') &&
+      next.bookId === row.id
+    ) {
+      to = at + 1;
+    }
   } else if (key === 'ArrowRight' && row.kind === 'chapter') {
     const next = rows[at + 1];
     if (next?.kind === 'scene' && next.chapterId === row.id) to = at + 1;
@@ -153,6 +190,18 @@ export function chapterMove(
   if (to < 0) return { index: partAt };
   if (to >= item.chapters.length) return { index: partAt + 1 };
   return { index: to, partId: item.part.id };
+}
+
+/** Where Alt+↑/↓, or Move Up / Move Down, puts a Book among the Books; null at either end. */
+export function bookMove(
+  manuscript: Manuscript,
+  bookId: string,
+  direction: Direction,
+): number | null {
+  const books = manuscript.books ?? [];
+  const index = books.findIndex((b) => b.id === bookId);
+  const to = direction === 'up' ? index - 1 : index + 1;
+  return index < 0 || to < 0 || to >= books.length ? null : to;
 }
 
 /** Where Alt+↑/↓, or Move Up / Move Down, puts a Part among the Parts and Loose Chapters; null at either end. */

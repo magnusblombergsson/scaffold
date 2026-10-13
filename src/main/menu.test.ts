@@ -23,6 +23,7 @@ const writable: MenuState = {
     zen: false,
     proseFocused: false,
     splittable: false,
+    splitsToNextChapter: false,
   },
 };
 /** A writable Project, typing in its Prose. */
@@ -33,7 +34,11 @@ const inProse: MenuState = {
 /** As `inProse`, the Prose of a Scene that can be split. */
 const inSplittable: MenuState = {
   ...inProse,
-  project: { ...inProse.project!, splittable: true },
+  project: {
+    ...inProse.project!,
+    splittable: true,
+    splitsToNextChapter: true,
+  },
 };
 
 function build(state: MenuState) {
@@ -182,6 +187,7 @@ describe('menuTemplate', () => {
         zen: false,
         proseFocused: false,
         splittable: false,
+        splitsToNextChapter: false,
       },
     });
     const view = menu(template, 'View');
@@ -220,6 +226,7 @@ describe('menuTemplate', () => {
         zen: true,
         proseFocused: false,
         splittable: false,
+        splitsToNextChapter: false,
       },
     });
     const view = menu(template, 'View');
@@ -341,6 +348,12 @@ describe('menuTemplate', () => {
     expect(off.viewChanges).toEqual([{ spellCheck: true }]);
   });
 
+  it('adds a Book from Insert, which makes a Project of one Book a Series', () => {
+    const { template, sent } = build(writable);
+    click(item(menu(template, 'Insert'), 'New Book'));
+    expect(sent).toEqual([{ type: 'newBook' }]);
+  });
+
   it('creates from Insert, below or above, and Entries of each type', () => {
     const { template, sent } = build(writable);
     const insert = menu(template, 'Insert');
@@ -351,9 +364,11 @@ describe('menuTemplate', () => {
       'Split to Next Chapter',
       'New Chapter',
       'New Chapter Above',
+      'New Book',
       'New Entry',
       'New Todo',
     ]);
+
     expect(item(insert, 'New Chapter Above').accelerator).toBe(
       'CmdOrCtrl+Shift+Alt+Enter',
     );
@@ -400,6 +415,16 @@ describe('menuTemplate', () => {
       { type: 'splitScene', toNextChapter: false },
       { type: 'splitScene', toNextChapter: true, byKey: true },
     ]);
+  });
+
+  it('offers Split to Next Chapter from Insert only where it can go', () => {
+    const lastInBook = {
+      ...inSplittable,
+      project: { ...inSplittable.project!, splitsToNextChapter: false },
+    };
+    const insert = menu(build(lastInBook).template, 'Insert');
+    expect(item(insert, 'Split Scene').enabled).toBe(true);
+    expect(item(insert, 'Split to Next Chapter').enabled).toBe(false);
   });
 
   it('splits nothing unless the Prose of a Scene that can be split has focus', () => {
@@ -540,6 +565,7 @@ describe('menuTemplate', () => {
         zen: false,
         proseFocused: false,
         splittable: false,
+        splitsToNextChapter: false,
       },
     });
     expect(item(menu(template, 'Tools'), 'Project Settings…').enabled).toBe(
@@ -561,7 +587,9 @@ describe('menuTemplate', () => {
 describe('proseMenuTemplate', () => {
   it('splits the Scene, or to the next Chapter, showing the keys', () => {
     const sent: Command[] = [];
-    const items = proseMenuTemplate(true, (command) => sent.push(command));
+    const items = proseMenuTemplate(true, true, (command) =>
+      sent.push(command),
+    );
     expect(labels(items)).toEqual(['Split Scene', 'Split to Next Chapter']);
     expect(items.map((entry) => entry.accelerator)).toEqual([
       'CmdOrCtrl+K',
@@ -577,7 +605,13 @@ describe('proseMenuTemplate', () => {
   });
 
   it('can split nothing in a Scene that can not be split', () => {
-    const items = proseMenuTemplate(false, () => {});
+    const items = proseMenuTemplate(false, false, () => {});
     for (const entry of items) expect(entry.enabled).toBe(false);
+  });
+
+  it('can split only in place in the last Chapter of a Book', () => {
+    const items = proseMenuTemplate(true, false, () => {});
+    expect(item(items, 'Split Scene').enabled).toBe(true);
+    expect(item(items, 'Split to Next Chapter').enabled).toBe(false);
   });
 });

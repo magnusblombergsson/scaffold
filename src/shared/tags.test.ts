@@ -112,6 +112,38 @@ describe('tagged', () => {
     ]);
   });
 
+  it('lists a Book with a Tag before its Parts and Chapters, Unplaced Chapters last', () => {
+    const units = tagged(
+      {
+        chapters: [
+          { id: 'c1', title: 'One', tags: ['mara'], scenes: [], book: 'b1' },
+          { id: 'c2', title: 'Two', tags: ['mara'], scenes: [], book: 'b2' },
+          {
+            id: 'c9',
+            title: 'Stray',
+            tags: ['mara'],
+            scenes: [],
+            unplaced: true,
+          },
+        ],
+        top: ['c1', 'c2'],
+        books: [
+          { id: 'b1', title: 'First', top: ['c1'] },
+          { id: 'b2', title: 'Second', top: ['c2'], tags: ['Mara'] },
+        ],
+        unplaced: [],
+      },
+      'mara',
+    );
+
+    expect(units.map(({ name }) => name)).toEqual([
+      'Chapter “One”',
+      'Book “Second”',
+      'Chapter “Two”',
+      'Chapter “Stray”',
+    ]);
+  });
+
   it('lists a Part with a Tag before its Chapters, by the Project’s label', () => {
     const units = tagged(
       {

@@ -134,3 +134,18 @@ export function partTrashPath(
 export function isPartFile(name: string): boolean {
   return PART_FILE.test(name);
 }
+
+/** A Book's record in Trash; no app without Books lists it, nor reads it as a Chapter's or a Part's. */
+export const BOOK_FILE = new RegExp(`^(${UUID})\\.book\\.json$`);
+
+export function bookTrashPath(
+  projectPath: string,
+  id: string,
+  place: Place = 'trash',
+): string {
+  return path.join(placeDir(projectPath, place), `${id}.book.json`);
+}
+
+export function isBookFile(name: string): boolean {
+  return BOOK_FILE.test(name);
+}

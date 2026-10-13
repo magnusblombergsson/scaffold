@@ -11,6 +11,7 @@ import {
   unitKey,
   type ChapterNode,
   type ManuscriptChapter,
+  type ManuscriptBook,
   type ManuscriptPart,
   type PartLabel,
   type DetailRef,
@@ -156,12 +157,14 @@ import {
   orphanedIn,
   placeName,
   Trash,
+  trashedBook,
   trashedChapter,
   trashedEntry,
   trashedPart,
   trashedScene,
   trashedVersion,
   UNPLACED_TITLE,
+  type BookFile,
   type ChapterFile,
   type MovableKind,
   type PartFile,
@@ -170,6 +173,7 @@ import {
   type TrashedConversation,
   type TrashedEntry,
   type TrashedEntryInfo,
+  type TrashedPart,
   type TrashedScene,
   type HeldImageFile,
   type TrashedSceneInfo,
@@ -177,21 +181,29 @@ import {
   type TrashedVersionInfo,
 } from './trash';
 import {
+  asSeries,
+  bookTop,
   expanded,
+  findBook,
   findChapter,
   findPart,
+  isBook,
   isPart,
+  isSeries,
   place,
   placeOf,
   sceneIds,
   settled,
   structureOf,
+  takeFromBook,
   tryFindScene,
   unplace,
   type FullTree,
 } from './tree';
 import { ProjectError } from './project-error';
 import {
+  BOOK_FILE,
+  bookTrashPath,
   CHAPTER_FILE,
   chapterTrashPath,
   CONVERSATION_FILE,
@@ -560,7 +572,8 @@ async function resolveManifestCopies(
     if (
       lost.chapters.length > 0 ||
       lost.scenes.length > 0 ||
-      (lost.parts?.length ?? 0) > 0
+      (lost.parts?.length ?? 0) > 0 ||
+      (lost.books?.length ?? 0) > 0
     ) {
       dropped.push({ ...(!copyWins && hostOfCopy(name, hosts)), ...lost });
     }
@@ -580,8 +593,9 @@ function withStatusesOf(winner: Manifest, loser: Manifest): Manifest {
 }
 
 /**
- * What `loser` had that `winner` hasn't: Chapters not in Trash or the Drawer, and Scenes
- * it placed whose files are here, so are Unplaced now.
+ * What `loser` had that `winner` hasn't: Books, Parts and Chapters not in
+ * Trash or the Drawer, and Scenes it placed whose files are here, so are
+ * Unplaced now.
  */
 async function lostWith(
   projectPath: string,
@@ -594,8 +608,17 @@ async function lostWith(
   const chapters: string[] = [];
   const scenes: string[] = [];
   const parts: string[] = [];
+  const books: string[] = [];
   const kept = async (file: (place: Place) => string) =>
     (await fs.exists(file('trash'))) || (await fs.exists(file('drawer')));
+  for (const book of loser.books ?? []) {
+    if (
+      !isBook(winner, book.id) &&
+      !(await kept((place) => bookTrashPath(projectPath, book.id, place)))
+    ) {
+      books.push(book.title);
+    }
+  }
   for (const part of loser.parts ?? []) {
     if (
       !isPart(winner, part.id) &&
@@ -620,7 +643,12 @@ async function lostWith(
       }
     }
   }
-  return { chapters, scenes, ...(parts.length > 0 && { parts }) };
+  return {
+    chapters,
+    scenes,
+    ...(parts.length > 0 && { parts }),
+    ...(books.length > 0 && { books }),
+  };
 }
 
 /** Removes temp files left by a write that crashed before its rename. */
@@ -719,6 +747,7 @@ async function scanPlace(
   const chapterIds = new Set(tree.chapters.map((c) => c.id));
   const chapters = new Map<string, TrashedChapter>();
   const partFiles: PartFile[] = [];
+  const bookFiles: BookFile[] = [];
   const scenes: TrashedScene[] = [];
   const versions: TrashedVersion[] = [];
   const conversations: TrashedConversation[] = [];
@@ -755,6 +784,16 @@ async function scanPlace(
       if (info) {
         trashedEntries.push(trashedEntry(entryValue(entryId, trashed), info));
       }
+      continue;
+    }
+    const bookId = BOOK_FILE.exec(name)?.[1];
+    if (bookId) {
+      if (isBook(tree, bookId)) {
+        if (repair) await fs.unlink(file);
+        continue;
+      }
+      const book = await readJson<BookFile>(fs, file);
+      if (book) bookFiles.push(book);
       continue;
     }
     const partId = PART_FILE.exec(name)?.[1];
@@ -801,12 +840,26 @@ async function scanPlace(
   const keep = (item: Exclude<Trashed, TrashedVersion>) =>
     kept.set(item.id, inPlace(item, place));
   // A Chapter deleted with its Part is restored with it, unless the Part's
-  // record isn't here.
+  // record isn't here; so is a Part or Loose Chapter deleted with its Book.
   const parts = new Set(partFiles.map((part) => part.id));
+  const books = new Set(bookFiles.map((book) => book.id));
+  const withBook = (item: { withBook?: true; book?: string }) =>
+    item.withBook === true && books.has(item.book ?? '');
+  const bookChapters = new Map<string, TrashedChapter>();
   for (const chapter of chapters.values()) {
-    if (!chapter.withPart || !parts.has(chapter.part ?? '')) keep(chapter);
+    if (chapter.withPart && parts.has(chapter.part ?? '')) continue;
+    if (withBook(chapter)) bookChapters.set(chapter.id, chapter);
+    else keep(chapter);
   }
-  for (const part of partFiles) keep(trashedPart(part, chapters));
+  const bookParts = new Map<string, TrashedPart>();
+  for (const file of partFiles) {
+    const part = trashedPart(file, chapters);
+    if (withBook(part)) bookParts.set(part.id, part);
+    else keep(part);
+  }
+  for (const book of bookFiles) {
+    keep(trashedBook(book, bookParts, bookChapters));
+  }
   for (const version of versions) kept.set(version.id, version);
   for (const item of trashedEntries) keep(item);
   for (const item of conversations) keep(item);
@@ -876,6 +929,7 @@ function manuscriptForAssistant(manuscript: Manuscript): Manuscript {
       scenes: chapter.scenes.map(forAssistant),
     })),
     ...(manuscript.parts && { parts: manuscript.parts.map(forAssistant) }),
+    ...(manuscript.books && { books: manuscript.books.map(forAssistant) }),
     unplaced: manuscript.unplaced.map(forAssistant),
   };
 }
@@ -1728,9 +1782,12 @@ export class ProjectStore {
     return this.sceneOrChapterRef(unitId);
   }
 
-  /** The Scene, Chapter or Part of `unitId`, as the tree or Trash has it. */
+  /** The Scene, Chapter, Part or Book of `unitId`, as the tree or Trash has it. */
   private sceneOrChapterRef(unitId: string): ImageRef {
     const { tree } = this.manifest;
+    if (isBook(tree, unitId) || this.trash.kindOf(unitId) === 'book') {
+      return { kind: 'book', id: unitId };
+    }
     if (isPart(tree, unitId) || this.trash.kindOf(unitId) === 'part') {
       return { kind: 'part', id: unitId };
     }
@@ -1816,8 +1873,9 @@ export class ProjectStore {
 
   /** `tagLists`, by the id of the unit that has them. */
   private tagsByUnit(except?: string): Map<string, string[]> {
-    const { chapters, parts = [] } = this.manifest.tree;
+    const { chapters, parts = [], books = [] } = this.manifest.tree;
     const ids = new Set([
+      ...books.map((b) => b.id),
       ...parts.map((p) => p.id),
       ...chapters.flatMap((c) => [c.id, ...c.scenes.map((s) => s.id)]),
       ...this.unitDetails.keys(),
@@ -2462,7 +2520,7 @@ export class ProjectStore {
     };
     const chapter = (
       node: ChapterNode,
-      place: { part: string } | { unplaced: true } | null,
+      place: { part?: string; book?: string } | { unplaced: true },
     ): ManuscriptChapter =>
       withUnitDetails({
         ...node,
@@ -2475,27 +2533,45 @@ export class ProjectStore {
         ),
         ...place,
       });
-    const { top, unplaced } = structureOf(tree);
-    const parts = top.flatMap((item) => ('part' in item ? [item] : []));
+    const { books, top, unplaced } = structureOf(tree);
+    const series = isSeries(tree);
+    const inBook = (book: string) => (series ? { book } : {});
+    const parts = books.flatMap(({ book, top }) =>
+      top.flatMap((item) => ('part' in item ? [{ ...item, book }] : [])),
+    );
+    const topIds = (items: typeof top) =>
+      items.map((item) => ('part' in item ? item.part.id : item.chapter.id));
     return {
       chapters: [
-        ...top.flatMap((item) =>
-          'part' in item
-            ? item.chapters.map((c) => chapter(c, { part: item.part.id }))
-            : [chapter(item.chapter, null)],
+        ...books.flatMap(({ book, top }) =>
+          top.flatMap((item) =>
+            'part' in item
+              ? item.chapters.map((c) =>
+                  chapter(c, { part: item.part.id, ...inBook(book.id) }),
+                )
+              : [chapter(item.chapter, inBook(book.id))],
+          ),
         ),
         ...unplaced.map((c) => chapter(c, { unplaced: true })),
       ],
       ...(parts.length > 0 && {
-        parts: parts.map(({ part, chapters }) =>
+        parts: parts.map(({ part, chapters, book }) =>
           withUnitDetails<ManuscriptPart>({
             id: part.id,
             title: part.title,
             chapters: chapters.map((c) => c.id),
+            ...inBook(book.id),
           }),
         ),
-        top: top.map((item) =>
-          'part' in item ? item.part.id : item.chapter.id,
+      }),
+      ...((parts.length > 0 || series) && { top: topIds(top) }),
+      ...(series && {
+        books: books.map(({ book, top }) =>
+          withUnitDetails<ManuscriptBook>({
+            id: book.id,
+            title: book.title,
+            top: topIds(top),
+          }),
         ),
       }),
       unplaced: [...this.files]
@@ -2793,7 +2869,7 @@ export class ProjectStore {
    * Drawer's; whether or not it is here yet.
    */
   private async imageFiles(): Promise<HeldImageFile[]> {
-    const { parts = [], chapters, unplaced } = this.manuscript();
+    const { books = [], parts = [], chapters, unplaced } = this.manuscript();
     const named =
       (kind: ImageHolder['kind']) =>
       (unit: { id: string; title: string; image?: string }) =>
@@ -2806,6 +2882,7 @@ export class ProjectStore {
             ]
           : [];
     return [
+      ...books.flatMap(named('book')),
       ...parts.flatMap(named('part')),
       ...chapters.flatMap((chapter) => [
         ...named('chapter')(chapter),
@@ -2883,12 +2960,14 @@ export class ProjectStore {
 
   /**
    * Creates an empty Chapter at `index` in a Part, or with no `partId` among
-   * the Parts and Loose Chapters. Chapters have no file.
+   * the Parts and Loose Chapters of Book `bookId`, or of the first Book.
+   * Chapters have no file.
    */
   async createChapter(
     index: number,
     title?: string,
     partId?: string,
+    bookId?: string,
   ): Promise<Created> {
     const id = randomUUID();
     const changed = await this.step(() =>
@@ -2898,14 +2977,21 @@ export class ProjectStore {
           title: title ?? `Chapter ${tree.chapters.length + 1}`,
           scenes: [],
         });
-        place(tree, id, index, partId);
+        place(tree, id, index, partId, bookId);
       }),
     );
     return { id, ...changed };
   }
 
-  /** Creates a Part holding no Chapters at `index` among the Parts and Loose Chapters. */
-  async createPart(index: number, title?: string): Promise<Created> {
+  /**
+   * Creates a Part holding no Chapters at `index` among the Parts and Loose
+   * Chapters of Book `bookId`, or of the first Book.
+   */
+  async createPart(
+    index: number,
+    title?: string,
+    bookId?: string,
+  ): Promise<Created> {
     const id = randomUUID();
     const changed = await this.step(() =>
       this.restructureParts((tree) => {
@@ -2915,7 +3001,8 @@ export class ProjectStore {
           title: title ?? `${name} ${tree.parts.length + 1}`,
           chapters: [],
         });
-        tree.top.splice(Math.min(index, tree.top.length), 0, id);
+        const top = bookTop(tree, bookId);
+        top.splice(Math.min(index, top.length), 0, id);
       }),
     );
     return { id, ...changed };
@@ -2929,15 +3016,85 @@ export class ProjectStore {
     );
   }
 
-  /** Moves a Part to `index` among the Parts and Loose Chapters once it is taken out. */
-  movePart(partId: string, index: number): Promise<Changed> {
+  /**
+   * Moves a Part to `index` among the Parts and Loose Chapters of Book
+   * `bookId`, or of its own, once it is taken out.
+   */
+  movePart(partId: string, index: number, bookId?: string): Promise<Changed> {
     return this.step(() =>
       this.restructureParts((tree) => {
         findPart(tree, partId);
-        tree.top.splice(tree.top.indexOf(partId), 1);
-        tree.top.splice(Math.min(index, tree.top.length), 0, partId);
+        const from = takeFromBook(tree, partId);
+        const top = bookTop(tree, bookId ?? from?.book);
+        top.splice(Math.min(index, top.length), 0, partId);
       }),
     );
+  }
+
+  /**
+   * Adds an empty Book at `index` among the Books, or last. A Project of one
+   * Book becomes a Series: its Manuscript becomes Book 1, which takes the
+   * Manuscript's Word target. Undo puts that back too.
+   */
+  async createBook(index?: number, title?: string): Promise<Created> {
+    const id = randomUUID();
+    const changed = await this.step(async () => {
+      const before = this.tree();
+      // Book 1 is new when the Project wasn't a Series.
+      let bookOne: string | undefined;
+      await this.restructureParts((tree) => {
+        const first = asSeries(tree, randomUUID);
+        if (!isSeries(before)) bookOne = first;
+        tree.books.splice(index ?? tree.books.length, 0, {
+          id,
+          title: title ?? `Book ${tree.books.length + 1}`,
+          top: [],
+        });
+      });
+      const target = this.unitDetails.get(PROJECT_OUTLINE)?.wordTarget;
+      const book = bookOne;
+      if (book === undefined || target === undefined) return undefined;
+      await this.saveDetail(outlineRef(book), 'wordTarget', target);
+      await this.saveDetail(
+        outlineRef(PROJECT_OUTLINE),
+        'wordTarget',
+        undefined,
+      );
+      return async () => {
+        await this.writeManifest({ ...this.manifest, tree: before });
+        await this.saveDetail(
+          outlineRef(PROJECT_OUTLINE),
+          'wordTarget',
+          target,
+        );
+        await this.saveDetail(outlineRef(book), 'wordTarget', undefined);
+      };
+    });
+    return { id, ...changed };
+  }
+
+  renameBook(bookId: string, title: string): Promise<Changed> {
+    return this.step(() =>
+      this.restructureParts((tree) => {
+        findBook(tree, bookId).title = title;
+      }),
+    );
+  }
+
+  /** Moves a Book to `index` among the Books once it is taken out. */
+  moveBook(bookId: string, index: number): Promise<Changed> {
+    return this.step(() =>
+      this.restructureParts((tree) => {
+        const book = findBook(tree, bookId);
+        tree.books.splice(tree.books.indexOf(book), 1);
+        tree.books.splice(Math.min(index, tree.books.length), 0, book);
+      }),
+    );
+  }
+
+  /** Moves a Book to Trash with its Parts, Chapters and Scenes; never the last Book or Chapter. */
+  trashBook(bookId: string): Promise<Changed> {
+    return this.step(() => this.trash.move('book', bookId));
   }
 
   /** Moves a Part to Trash with its Chapters and their Scenes. The last Chapter stays. */
@@ -2979,14 +3136,23 @@ export class ProjectStore {
       let created: string | undefined;
       if (toNextChapter) {
         const full = expanded(tree);
-        const placed = full.chapters.filter((c) => placeOf(full, c.id));
+        const own = placeOf(full, found.chapter.id);
+        const placed = own
+          ? full.chapters.filter((c) => placeOf(full, c.id)?.book === own.book)
+          : [];
         const at = placed.findIndex((c) => c.id === found.chapter.id);
         const next = at < 0 ? undefined : placed[at + 1];
+        // In a Series, never into another Book, nor a new Chapter after a Book's last.
+        if (!next && isSeries(tree)) {
+          throw new ProjectError(
+            'last-in-book',
+            'Only a Chapter of the same Book can take the rest of the Scene',
+          );
+        }
         if (next) {
           chapter = findChapter(tree, next.id);
         } else {
           // After its own: last in its Part, or at the end of the Manuscript.
-          const own = placeOf(full, found.chapter.id);
           chapter = {
             id: randomUUID(),
             title: `Chapter ${tree.chapters.length + 1}`,
@@ -2996,7 +3162,7 @@ export class ProjectStore {
           if (own?.part !== undefined) {
             place(full, chapter.id, own.index + 1, own.part);
           } else {
-            place(full, chapter.id, full.top.length);
+            place(full, chapter.id, bookTop(full).length);
           }
           created = chapter.id;
           Object.assign(tree, settled(full));
@@ -3143,18 +3309,20 @@ export class ProjectStore {
 
   /**
    * Moves a Chapter, placed or Unplaced, to `index` in a Part, or with no
-   * `partId` among the Parts and Loose Chapters, once it is taken out.
+   * `partId` among the Parts and Loose Chapters of Book `bookId`, or of its
+   * own, or of the first Book, once it is taken out.
    */
   moveChapter(
     chapterId: string,
     index: number,
     partId?: string,
+    bookId?: string,
   ): Promise<Changed> {
     return this.step(() =>
       this.restructureParts((tree) => {
         findChapter(tree, chapterId);
-        unplace(tree, chapterId);
-        place(tree, chapterId, index, partId);
+        const from = unplace(tree, chapterId);
+        place(tree, chapterId, index, partId, bookId ?? from?.book);
       }),
     );
   }
@@ -3360,14 +3528,15 @@ export class ProjectStore {
     });
   }
 
-  /** Whether a Part, Chapter or Scene of this id is in the Manuscript or Unplaced. */
+  /** Whether a Book, Part, Chapter or Scene of this id is in the Manuscript or Unplaced. */
   private isLive(id: string): boolean {
     const tree = this.manifest.tree;
     return (
       this.files.has(id) ||
       sceneIds(tree).includes(id) ||
       tree.chapters.some((c) => c.id === id) ||
-      isPart(tree, id)
+      isPart(tree, id) ||
+      isBook(tree, id)
     );
   }
 
@@ -3932,10 +4101,12 @@ function todoText(text: string): string {
   return line;
 }
 
-/** Only a Scene, Chapter, Part or Entry, by its id. */
+/** Only a Scene, Chapter, Part, Book or Entry, by its id. */
 function todoLink(link: TodoLink): TodoLink {
   if (!isTodoLink(link)) {
-    throw new Error('A Todo links only to a Scene, Chapter, Part or Entry');
+    throw new Error(
+      'A Todo links only to a Scene, Chapter, Part, Book or Entry',
+    );
   }
   return { kind: link.kind, id: link.id };
 }

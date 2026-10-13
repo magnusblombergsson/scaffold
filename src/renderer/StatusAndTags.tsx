@@ -1,6 +1,7 @@
 import { createContext, useContext, type ReactNode } from 'react';
 import type {
   ManuscriptChapter,
+  ManuscriptBook,
   ManuscriptPart,
   ManuscriptScene,
 } from '../shared/project-types';
@@ -94,7 +95,11 @@ export function useStatuses(): Status[] {
   return useStatusAndTags().statuses;
 }
 
-type Unit = ManuscriptPart | ManuscriptChapter | ManuscriptScene;
+type Unit =
+  | ManuscriptBook
+  | ManuscriptPart
+  | ManuscriptChapter
+  | ManuscriptScene;
 
 /** A unit's Status dot, named; nothing without a Status. */
 export function UnitStatusDot({ unit }: { unit: Unit | undefined }) {

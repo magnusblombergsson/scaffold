@@ -35,6 +35,19 @@ describe('unitName', () => {
     );
   });
 
+  it('names a Book, and the Series Outline, in a Series', () => {
+    const series = {
+      ...manuscript,
+      books: [{ id: 'b1', title: 'Sequel', top: [] }],
+    };
+    expect(unitName({ kind: 'outline', id: 'b1' }, series)).toBe(
+      'the Outline of “Sequel”',
+    );
+    expect(unitName({ kind: 'outline', id: PROJECT_OUTLINE }, series)).toBe(
+      'the Series Outline',
+    );
+  });
+
   it('falls back to the kind for a unit the Manuscript no longer holds', () => {
     expect(unitName({ kind: 'scene', id: 'gone' }, manuscript)).toBe('a Scene');
     expect(unitName({ kind: 'notes', id: 'gone' }, manuscript)).toBe(

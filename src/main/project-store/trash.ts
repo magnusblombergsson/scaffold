@@ -8,6 +8,7 @@ import { readTags } from '../../shared/tags';
 import { unitName } from '../../shared/unit-name';
 import {
   unitKey,
+  type BookNode,
   type ChapterNode,
   type PartNode,
   type EntrySummary,
@@ -26,8 +27,11 @@ import type { Clock } from './clock';
 import type { Conversations } from './conversations';
 import type { FileSystem } from './file-system';
 import {
+  BOOK_FILE,
+  bookTrashPath,
   CHAPTER_FILE,
   chapterTrashPath,
+  isBookFile,
   isPartFile,
   placeDir,
   type Place,
@@ -49,15 +53,22 @@ import {
 import { ProjectError } from './project-error';
 import { freeName, renameWithRetry, safeWrite } from './safe-write';
 import {
+  asSeries,
+  bookTop,
   expanded,
+  findBook,
   findChapter,
   findPart,
+  isBook,
   isPart,
+  ONLY_BOOK,
   place,
   sceneIds,
   settled,
+  takeFromBook,
   tryFindScene,
   unplace,
+  type FullTree,
 } from './tree';
 import {
   copyPath,
@@ -99,7 +110,8 @@ export type TrashedScene = {
 
 /**
  * A Chapter in Trash, with the Scenes deleted along with it. `index` is its
- * place in its `part`, or without one among the Parts and Loose Chapters.
+ * place in its `part`, or without one among the Parts and Loose Chapters of
+ * its `book`, which a Project that is no Series hasn't.
  */
 export type TrashedChapter = {
   kind: 'chapter';
@@ -110,6 +122,9 @@ export type TrashedChapter = {
   part?: string;
   /** Deleted with its Part, which `trash/<part id>.part.json` records. */
   withPart?: true;
+  book?: string;
+  /** Deleted with its Book, which `trash/<book id>.book.json` records. */
+  withBook?: true;
   scenes: SceneNode[];
   /** The keys of its place in the tree that this app doesn't know. */
   node: UnknownKeys;
@@ -122,8 +137,28 @@ export type TrashedPart = {
   id: string;
   title: string;
   trashedAt: number;
-  /** Its place among the Parts and Loose Chapters. */
+  /** Its place among the Parts and Loose Chapters of its `book`, if it was in one. */
   index: number;
+  book?: string;
+  /** Deleted with its Book, which `trash/<book id>.book.json` records. */
+  withBook?: true;
+  chapters: TrashedChapter[];
+  /** The keys of its place in the tree that this app doesn't know. */
+  node: UnknownKeys;
+  drawer?: true;
+};
+
+/** A Book in Trash, with the Parts and Loose Chapters deleted along with it. */
+export type TrashedBook = {
+  kind: 'book';
+  id: string;
+  title: string;
+  trashedAt: number;
+  /** Its place among the Books. */
+  index: number;
+  /** The order of its Parts and Loose Chapters, by id. */
+  top: string[];
+  parts: TrashedPart[];
   chapters: TrashedChapter[];
   /** The keys of its place in the tree that this app doesn't know. */
   node: UnknownKeys;
@@ -171,6 +206,7 @@ export type Trashed =
   | TrashedScene
   | TrashedChapter
   | TrashedPart
+  | TrashedBook
   | TrashedVersion
   | TrashedEntry
   | TrashedConversation;
@@ -233,6 +269,7 @@ export type TrashedSceneInfo = {
  * Beside these, the keys of the Chapter's place in the tree that this app
  * doesn't know. `inPart` is the Part it was in, which an app without Parts
  * keeps as such a key; `withPart` marks a Chapter deleted with its Part.
+ * `inBook` and `withBook` are the same of its Book, in a Series.
  */
 export type ChapterFile = {
   id: string;
@@ -243,11 +280,14 @@ export type ChapterFile = {
   scenes: SceneNode[];
   inPart?: string;
   withPart?: true;
+  inBook?: string;
+  withBook?: true;
 };
 
 /**
  * What `trash/<id>.part.json` records of a Part, its Chapters by id, beside
- * the keys of its place in the tree that this app doesn't know.
+ * the keys of its place in the tree that this app doesn't know. `inBook`
+ * and `withBook` are as a Chapter's.
  */
 export type PartFile = {
   id: string;
@@ -256,6 +296,22 @@ export type PartFile = {
   index: number;
   trashedAt: number;
   chapters: string[];
+  inBook?: string;
+  withBook?: true;
+};
+
+/**
+ * What `trash/<id>.book.json` records of a Book, its Parts and Loose
+ * Chapters by id, beside the keys of its place in the tree that this app
+ * doesn't know.
+ */
+export type BookFile = {
+  id: string;
+  format: number;
+  title: string;
+  index: number;
+  trashedAt: number;
+  top: string[];
 };
 
 export function trashedEntry(
@@ -307,6 +363,8 @@ export function trashedChapter(file: ChapterFile): TrashedChapter {
     scenes,
     inPart,
     withPart,
+    inBook,
+    withBook,
     ...node
   } = file;
   return {
@@ -317,6 +375,8 @@ export function trashedChapter(file: ChapterFile): TrashedChapter {
     index,
     ...(typeof inPart === 'string' && { part: inPart }),
     ...(withPart === true && { withPart }),
+    ...(typeof inBook === 'string' && { book: inBook }),
+    ...(withBook === true && { withBook }),
     scenes,
     node,
   };
@@ -334,6 +394,8 @@ export function trashedPart(
     index,
     trashedAt,
     chapters: ids,
+    inBook,
+    withBook,
     ...node
   } = file;
   return {
@@ -342,6 +404,8 @@ export function trashedPart(
     title,
     trashedAt,
     index,
+    ...(typeof inBook === 'string' && { book: inBook }),
+    ...(withBook === true && { withBook }),
     chapters: (Array.isArray(ids) ? ids : [])
       .map((chapterId) => chapters.get(chapterId))
       .filter((chapter) => chapter !== undefined),
@@ -349,18 +413,71 @@ export function trashedPart(
   };
 }
 
-/** The keys of a Part's, Chapter's or Scene's place in the tree that this app doesn't know. */
+/** A Book in Trash, with those of its Parts and Loose Chapters whose records are here. */
+export function trashedBook(
+  file: BookFile,
+  parts: ReadonlyMap<string, TrashedPart>,
+  chapters: ReadonlyMap<string, TrashedChapter>,
+): TrashedBook {
+  const { id, format: _, title, index, trashedAt, top, ...node } = file;
+  const ids = Array.isArray(top) ? top : [];
+  return {
+    kind: 'book',
+    id,
+    title,
+    trashedAt,
+    index,
+    top: ids,
+    parts: ids.flatMap((i) => parts.get(i) ?? []),
+    chapters: ids.flatMap((i) => chapters.get(i) ?? []),
+    node,
+  };
+}
+
+/** The keys of a Book's, Part's, Chapter's or Scene's place in the tree that this app doesn't know. */
 function unknownKeys(
-  node: PartNode | ChapterNode | SceneNode,
+  node: BookNode | PartNode | ChapterNode | SceneNode,
 ): UnknownKeys | undefined {
   const {
     id: _,
     title: _t,
     scenes: _s,
     chapters: _c,
+    top: _p,
     ...unknown
-  } = node as Partial<ChapterNode & PartNode>;
+  } = node as Partial<ChapterNode & PartNode & BookNode>;
   return Object.keys(unknown).length > 0 ? unknown : undefined;
+}
+
+/** A record's Book, in a Series: none of `ONLY_BOOK`. */
+function bookOfRecord(book: string | undefined): { inBook?: string } {
+  return book === undefined || book === ONLY_BOOK ? {} : { inBook: book };
+}
+
+function chapterIds(item: TrashedChapter): string[] {
+  return [item.id, ...item.scenes.map((s) => s.id)];
+}
+
+function partIds(item: TrashedPart): string[] {
+  return [item.id, ...item.chapters.flatMap(chapterIds)];
+}
+
+/** A Chapter in Trash as its Part or Book lists it. */
+function describedChapter(item: TrashedChapter) {
+  return {
+    id: item.id,
+    title: item.title,
+    scenes: item.scenes.map((s) => ({ ...s })),
+  };
+}
+
+/** A Part in Trash as its Book lists it. */
+function describedPart(item: TrashedPart) {
+  return {
+    id: item.id,
+    title: item.title,
+    chapters: item.chapters.map(describedChapter),
+  };
 }
 
 /** What the Trash needs from the store around it. */
@@ -466,25 +583,36 @@ export class Trash {
       },
     },
     part: {
-      ids: (item) => [
-        item.id,
-        ...item.chapters.flatMap((c) => [c.id, ...c.scenes.map((s) => s.id)]),
-      ],
+      ids: partIds,
       describe: (item) => ({
         kind: 'part',
-        id: item.id,
-        title: item.title,
         trashedAt: item.trashedAt,
-        chapters: item.chapters.map((c) => ({
-          id: c.id,
-          title: c.title,
-          scenes: c.scenes.map((s) => ({ ...s })),
-        })),
+        ...describedPart(item),
       }),
       move: (id, place) => this.movePart(id, place),
       restore: async (item) => {
         await this.restorePart(item);
         return this.again('part', item);
+      },
+    },
+    book: {
+      ids: (item) => [
+        item.id,
+        ...item.parts.flatMap(partIds),
+        ...item.chapters.flatMap(chapterIds),
+      ],
+      describe: (item) => ({
+        kind: 'book',
+        id: item.id,
+        title: item.title,
+        trashedAt: item.trashedAt,
+        parts: item.parts.map(describedPart),
+        chapters: item.chapters.map(describedChapter),
+      }),
+      move: (id, place) => this.moveBook(id, place),
+      restore: async (item) => {
+        await this.restoreBook(item);
+        return this.again('book', item);
       },
     },
     entry: {
@@ -591,7 +719,9 @@ export class Trash {
     const item = [...this.items.values()].find(
       (item) =>
         item.id === id ||
-        ((item.kind === 'chapter' || item.kind === 'part') &&
+        ((item.kind === 'chapter' ||
+          item.kind === 'part' ||
+          item.kind === 'book') &&
           this.row(item).ids(item).includes(id)),
     );
     return item && placeOf(item);
@@ -607,7 +737,7 @@ export class Trash {
     const held = (holder: ImageHolder, image?: string): HeldImageFile[] =>
       image ? [{ holder, file: path.join(dir, image) }] : [];
     const outline =
-      (kind: 'part' | 'chapter' | 'scene') =>
+      (kind: 'book' | 'part' | 'chapter' | 'scene') =>
       ({ id, title }: { id: string; title: string }) =>
         held({ kind, id, title }, this.deps.unitDetails(id)?.image);
     const chapter = (node: ChapterNode) => [
@@ -619,8 +749,17 @@ export class Trash {
       if (item.kind === 'version' || placeOf(item) !== place) continue;
       if (item.kind === 'scene') files.push(...outline('scene')(item));
       if (item.kind === 'chapter') files.push(...chapter(item));
-      if (item.kind === 'part') {
-        files.push(...outline('part')(item), ...item.chapters.flatMap(chapter));
+      const part = (item: TrashedPart) => [
+        ...outline('part')(item),
+        ...item.chapters.flatMap(chapter),
+      ];
+      if (item.kind === 'part') files.push(...part(item));
+      if (item.kind === 'book') {
+        files.push(
+          ...outline('book')(item),
+          ...item.parts.flatMap(part),
+          ...item.chapters.flatMap(chapter),
+        );
       }
       if (item.kind === 'entry') {
         const holder = {
@@ -862,8 +1001,9 @@ export class Trash {
         prose,
         at,
         {
-          index: where?.index ?? tree.top.length,
+          index: where?.index ?? bookTop(tree).length,
           ...(where?.part !== undefined && { inPart: where.part }),
+          ...bookOfRecord(where?.book),
         },
         place,
       );
@@ -880,7 +1020,10 @@ export class Trash {
     chapter: ChapterNode,
     prose: Map<string, UnitFile>,
     at: number,
-    where: Pick<ChapterFile, 'index' | 'inPart' | 'withPart'>,
+    where: Pick<
+      ChapterFile,
+      'index' | 'inPart' | 'withPart' | 'inBook' | 'withBook'
+    >,
     place: Place,
   ): Promise<ChapterFile> {
     for (const [i, scene] of chapter.scenes.entries()) {
@@ -935,35 +1078,15 @@ export class Trash {
     for (const id of ids) this.deps.refuseMissing(sceneRef(id));
     await this.deps.closeScenes(ids, async (prose) => {
       const at = this.deps.clock.now();
-      const records = new Map<string, TrashedChapter>();
-      for (const [index, chapter] of chapters.entries()) {
-        const record = await this.writeChapter(
-          chapter,
-          prose,
-          at,
-          { index, inPart: partId, withPart: true },
-          place,
-        );
-        records.set(chapter.id, trashedChapter(record));
-      }
-      const index = tree.top.indexOf(partId);
-      const record: PartFile = {
-        ...unknownKeys(part),
-        id: partId,
-        format: FORMAT,
-        title: part.title,
-        index,
-        trashedAt: at,
-        chapters: [...part.chapters],
-      };
-      await this.deps.fs.mkdir(placeDir(this.deps.path, place));
-      await safeWrite(
-        this.deps.fs,
-        this.deps.clock,
-        partTrashPath(this.deps.path, partId, place),
-        `${JSON.stringify(record, null, 2)}\n`,
+      const where = takeFromBook(tree, partId);
+      const { record, chapters: records } = await this.writePart(
+        tree,
+        part,
+        prose,
+        at,
+        { index: where?.index ?? 0, ...bookOfRecord(where?.book) },
+        place,
       );
-      tree.top.splice(index, 1);
       tree.parts = tree.parts.filter((p) => p.id !== partId);
       tree.chapters = tree.chapters.filter((c) => !records.has(c.id));
       await this.deps.saveTree(settled(tree));
@@ -971,6 +1094,149 @@ export class Trash {
     });
     await this.moveImages(
       [partId, ...chapters.map((c) => c.id), ...ids],
+      place,
+      'away',
+    );
+  }
+
+  /**
+   * Writes a Part's Chapters, each as when deleted on its own, marked as
+   * deleted with the Part, and then its record, to `place`.
+   */
+  private async writePart(
+    tree: FullTree,
+    part: PartNode,
+    prose: Map<string, UnitFile>,
+    at: number,
+    where: Pick<PartFile, 'index' | 'inBook' | 'withBook'>,
+    place: Place,
+  ): Promise<{ record: PartFile; chapters: Map<string, TrashedChapter> }> {
+    const chapters = new Map<string, TrashedChapter>();
+    for (const [index, id] of part.chapters.entries()) {
+      const record = await this.writeChapter(
+        findChapter(tree, id),
+        prose,
+        at,
+        {
+          index,
+          inPart: part.id,
+          withPart: true,
+          ...(where.inBook !== undefined && { inBook: where.inBook }),
+        },
+        place,
+      );
+      chapters.set(id, trashedChapter(record));
+    }
+    const record: PartFile = {
+      ...unknownKeys(part),
+      id: part.id,
+      format: FORMAT,
+      title: part.title,
+      trashedAt: at,
+      chapters: [...part.chapters],
+      ...where,
+    };
+    await this.writeRecord(
+      partTrashPath(this.deps.path, part.id, place),
+      record,
+    );
+    return { record, chapters };
+  }
+
+  /** Writes a record of what is in Trash or the Drawer, as JSON. */
+  private async writeRecord(file: string, record: object): Promise<void> {
+    await this.deps.fs.mkdir(path.dirname(file));
+    await safeWrite(
+      this.deps.fs,
+      this.deps.clock,
+      file,
+      `${JSON.stringify(record, null, 2)}\n`,
+    );
+  }
+
+  /**
+   * Moves a Book to Trash with its Parts, Loose Chapters and their Scenes:
+   * each Part and Loose Chapter as when deleted on its own, marked as
+   * deleted with the Book, then the Book's record, then the tree. The last
+   * Book stays, and so does the last Chapter.
+   */
+  private async moveBook(bookId: string, place: Place): Promise<void> {
+    const tree = expanded(this.deps.tree());
+    const book = findBook(tree, bookId);
+    if (tree.books.length === 1) {
+      throw new ProjectError('last-book', "The last Book can't be deleted");
+    }
+    const parts = book.top.filter((id) => isPart(tree, id));
+    const loose = book.top.filter((id) => !isPart(tree, id));
+    const bookChapters = [
+      ...loose,
+      ...parts.flatMap((id) => findPart(tree, id).chapters),
+    ];
+    if (
+      tree.chapters.length === bookChapters.length &&
+      bookChapters.length > 0
+    ) {
+      throw new ProjectError(
+        'last-chapter',
+        "The last Chapter can't be deleted",
+      );
+    }
+    const ids = bookChapters.flatMap((id) =>
+      findChapter(tree, id).scenes.map((s) => s.id),
+    );
+    for (const id of ids) this.deps.refuseMissing(sceneRef(id));
+    await this.deps.closeScenes(ids, async (prose) => {
+      const at = this.deps.clock.now();
+      const withBook = { inBook: bookId, withBook: true as const };
+      const chapters = new Map<string, TrashedChapter>();
+      const partItems = new Map<string, TrashedPart>();
+      for (const [index, id] of book.top.entries()) {
+        if (isPart(tree, id)) {
+          const written = await this.writePart(
+            tree,
+            findPart(tree, id),
+            prose,
+            at,
+            { index, ...withBook },
+            place,
+          );
+          partItems.set(id, trashedPart(written.record, written.chapters));
+        } else {
+          const record = await this.writeChapter(
+            findChapter(tree, id),
+            prose,
+            at,
+            { index, ...withBook },
+            place,
+          );
+          chapters.set(id, trashedChapter(record));
+        }
+      }
+      const record: BookFile = {
+        ...unknownKeys(book),
+        id: bookId,
+        format: FORMAT,
+        title: book.title,
+        index: tree.books.indexOf(book),
+        trashedAt: at,
+        top: [...book.top],
+      };
+      await this.writeRecord(
+        bookTrashPath(this.deps.path, bookId, place),
+        record,
+      );
+      const gone = new Set(bookChapters);
+      tree.books = tree.books.filter((b) => b.id !== bookId);
+      tree.parts = tree.parts.filter((p) => !parts.includes(p.id));
+      tree.chapters = tree.chapters.filter((c) => !gone.has(c.id));
+      await this.deps.saveTree(settled(tree));
+      this.items.set(
+        bookId,
+        inPlace(trashedBook(record, partItems, chapters), place),
+      );
+    });
+    await this.moveImages(
+      [bookId, ...parts, ...bookChapters, ...ids],
       place,
       'away',
     );
@@ -1104,9 +1370,10 @@ export class Trash {
       for (const scene of scenes) await restoreFile(scene.id);
       const full = expanded(tree);
       full.chapters.push({ ...item.node, id, title: item.title, scenes });
-      // Back in its Part if that is here, else among the Loose Chapters.
+      // Back in its Part if that is here, else among the Loose Chapters of
+      // its Book, or of the first.
       const inPart = item.part !== undefined && isPart(full, item.part);
-      place(full, id, item.index, inPart ? item.part : undefined);
+      place(full, id, item.index, inPart ? item.part : undefined, item.book);
       await this.deps.saveTree(settled(full));
     } else {
       await restoreFile(id);
@@ -1175,33 +1442,10 @@ export class Trash {
       );
     }
     await this.moveImages(this.row(item).ids(item), place, 'back');
-    const placed = new Set(sceneIds(full));
-    const chapterIds = new Set(full.chapters.map((c) => c.id));
-    const chapters = item.chapters.filter((c) => !chapterIds.has(c.id));
-    const restored: string[] = [];
-    for (const chapter of chapters) {
-      const scenes = chapter.scenes.filter(
-        (s) => !placed.has(s.id) && !files.has(s.id),
-      );
-      for (const scene of scenes) {
-        if (await this.restoreSceneFile(scene.id, place)) {
-          restored.push(scene.id);
-        }
-      }
-      full.chapters.push({
-        ...chapter.node,
-        id: chapter.id,
-        title: chapter.title,
-        scenes,
-      });
-    }
-    full.parts.push({
-      ...item.node,
-      id: item.id,
-      title: item.title,
-      chapters: chapters.map((c) => c.id),
-    });
-    full.top.splice(Math.min(item.index, full.top.length), 0, item.id);
+    const restored = await this.putBackPart(full, item);
+    // Back among the Parts and Loose Chapters of its Book, or of the first.
+    const top = bookTop(full, item.book);
+    top.splice(Math.min(item.index, top.length), 0, item.id);
     await this.deps.saveTree(settled(full));
     for (const sceneId of restored) files.add(sceneId);
     this.items.delete(item.id);
@@ -1209,11 +1453,128 @@ export class Trash {
     for (const sceneId of restored) {
       await fs.unlink(sceneTrashPath(projectPath, sceneId, place));
     }
-    for (const chapter of item.chapters) {
+    await this.deleteRecords(item);
+  }
+
+  /**
+   * Puts a Part's Chapters and the Part back in a full tree, but not in any
+   * Book's top level; its Chapters' Scene files are written back. A Chapter
+   * already back in the Manuscript stays where it is. Resolves with the
+   * Scenes written back.
+   */
+  private async putBackPart(full: FullTree, item: TrashedPart) {
+    const chapterIds = new Set(full.chapters.map((c) => c.id));
+    const chapters = item.chapters.filter((c) => !chapterIds.has(c.id));
+    const restored: string[] = [];
+    for (const chapter of chapters) {
+      restored.push(
+        ...(await this.putBackChapter(full, chapter, placeOf(item))),
+      );
+    }
+    full.parts.push({
+      ...item.node,
+      id: item.id,
+      title: item.title,
+      chapters: chapters.map((c) => c.id),
+    });
+    return restored;
+  }
+
+  /**
+   * Puts a Chapter back in a full tree, Unplaced, with those of its Scenes
+   * not back already, whose Scene files are written back. Resolves with the
+   * Scenes written back.
+   */
+  private async putBackChapter(
+    full: FullTree,
+    chapter: TrashedChapter,
+    place: Place,
+  ): Promise<string[]> {
+    const placed = new Set(sceneIds(full));
+    const scenes = chapter.scenes.filter(
+      (s) => !placed.has(s.id) && !this.deps.files.has(s.id),
+    );
+    const restored: string[] = [];
+    for (const scene of scenes) {
+      if (await this.restoreSceneFile(scene.id, place)) restored.push(scene.id);
+    }
+    full.chapters.push({
+      ...chapter.node,
+      id: chapter.id,
+      title: chapter.title,
+      scenes,
+    });
+    return restored;
+  }
+
+  /** Deletes the records of a Part or Book and what was deleted with it, those that are here. */
+  private async deleteRecords(item: TrashedPart | TrashedBook): Promise<void> {
+    const { path: projectPath, fs } = this.deps;
+    const place = placeOf(item);
+    const parts = item.kind === 'book' ? item.parts : [item];
+    const chapters = [
+      ...(item.kind === 'book' ? item.chapters : []),
+      ...parts.flatMap((part) => part.chapters),
+    ];
+    for (const chapter of chapters) {
       const file = chapterTrashPath(projectPath, chapter.id, place);
       if (await fs.exists(file)) await fs.unlink(file);
     }
-    await fs.unlink(partTrashPath(projectPath, item.id, place));
+    for (const part of parts) {
+      const file = partTrashPath(projectPath, part.id, place);
+      if (await fs.exists(file)) await fs.unlink(file);
+    }
+    if (item.kind === 'book') {
+      await fs.unlink(bookTrashPath(projectPath, item.id, place));
+    }
+  }
+
+  /**
+   * Puts a Book back with its Parts, Loose Chapters and their Scenes:
+   * images first, Scene files next, then the tree, and the Trash records
+   * last. A Part or Chapter already back in the Manuscript stays where it is.
+   */
+  private async restoreBook(item: TrashedBook): Promise<void> {
+    const { path: projectPath, fs, files } = this.deps;
+    const place = placeOf(item);
+    const full = expanded(this.deps.tree());
+    if (isBook(full, item.id)) {
+      throw new ProjectError(
+        'in-manuscript',
+        `${item.title} is already in the Project`,
+      );
+    }
+    await this.moveImages(this.row(item).ids(item), place, 'back');
+    const back = new Set<string>();
+    const restored: string[] = [];
+    for (const part of item.parts) {
+      if (isPart(full, part.id)) continue;
+      restored.push(...(await this.putBackPart(full, part)));
+      back.add(part.id);
+    }
+    const live = new Set(full.chapters.map((c) => c.id));
+    for (const chapter of item.chapters) {
+      if (live.has(chapter.id)) continue;
+      restored.push(...(await this.putBackChapter(full, chapter, place)));
+      back.add(chapter.id);
+    }
+    // Restored into a Project that has become one Book, as when another
+    // computer's tree won, it becomes a Series again.
+    asSeries(full, randomUUID);
+    full.books.splice(Math.min(item.index, full.books.length), 0, {
+      ...item.node,
+      id: item.id,
+      title: item.title,
+      top: item.top.filter((id) => back.has(id)),
+    });
+    await this.deps.saveTree(settled(full));
+    for (const sceneId of restored) files.add(sceneId);
+    this.items.delete(item.id);
+
+    for (const sceneId of restored) {
+      await fs.unlink(sceneTrashPath(projectPath, sceneId, place));
+    }
+    await this.deleteRecords(item);
   }
 
   /**
@@ -1255,17 +1616,19 @@ export class Trash {
     // Todo links, should another copy of it be in Trash.
     const drawered = (id: string) => this.where(id) === 'drawer';
     const dir = trashDir(projectPath);
-    // Part records first, then Chapter records: a crash then leaves their
-    // Chapters and Scenes in Trash on their own, still restorable.
+    // Book records first, then Part records, then Chapter records: a crash
+    // then leaves their Parts, Chapters and Scenes in Trash on their own,
+    // still restorable.
     const rank = (name: string) =>
-      isPartFile(name) ? 2 : isChapterFile(name) ? 1 : 0;
+      isBookFile(name) ? 3 : isPartFile(name) ? 2 : isChapterFile(name) ? 1 : 0;
     const names = (await fs.readdir(dir)).sort((a, b) => rank(b) - rank(a));
     // Outlines and Notes stay in place while their unit is in Trash, and go
     // first: a crash then leaves the unit restorable, without them.
     for (const name of names) {
       const id = (ID_FILE.exec(name) ??
         CHAPTER_FILE.exec(name) ??
-        PART_FILE.exec(name))?.[1];
+        PART_FILE.exec(name) ??
+        BOOK_FILE.exec(name))?.[1];
       if (id && !this.deps.isLive(id) && !drawered(id))
         await this.deps.deleteOutlineAndNotes(id);
       // So do an Entry's private notes.

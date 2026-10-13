@@ -157,6 +157,7 @@ describe('the menu state of a window', () => {
       zen: false,
       proseFocused: false,
       splittable: false,
+      splitsToNextChapter: false,
     });
   });
 
@@ -169,20 +170,26 @@ describe('the menu state of a window', () => {
     const docked = { ...ALL_DOCKED, assistant: false };
     windows.setDocked(window, docked);
 
-    expect(windows.setProseFocus(window, true, true)).toBe(true);
+    expect(windows.setProseFocus(window, true, true, true)).toBe(true);
     expect(windows.menuState(window)).toMatchObject({
       readOnly: true,
       docked,
       proseFocused: true,
       splittable: true,
+      splitsToNextChapter: true,
     });
-    expect(windows.setProseFocus(window, true, false)).toBe(true);
+    expect(windows.setProseFocus(window, true, true, false)).toBe(true);
+    expect(windows.menuState(window)).toMatchObject({
+      splittable: true,
+      splitsToNextChapter: false,
+    });
+    expect(windows.setProseFocus(window, true, false, false)).toBe(true);
     expect(windows.menuState(window)).toMatchObject({
       proseFocused: true,
       splittable: false,
     });
-    expect(windows.setProseFocus(window, true, false)).toBe(false);
-    windows.setProseFocus(window, false, false);
+    expect(windows.setProseFocus(window, true, false, false)).toBe(false);
+    windows.setProseFocus(window, false, false, false);
     expect(windows.menuState(window)).toMatchObject({ proseFocused: false });
   });
 

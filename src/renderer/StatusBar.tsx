@@ -81,7 +81,8 @@ export function useSceneCounts(manuscript: Manuscript): {
 /**
  * Along the bottom of the window: the save state on the left, and centred
  * under the Prose the counts of what is open, or selected, against its Word
- * target if it has one; hovering them shows the Manuscript's. Clicking them
+ * target if it has one; hovering them shows the Manuscript's, or the Series'
+ * and the open Book's. Clicking them
  * sets the Word target of what is shown, a selection's aside. Any `notice`
  * goes on the right.
  */
@@ -90,13 +91,19 @@ export function StatusBar({
   notice,
   shown,
   manuscript,
+  series,
+  book,
   onSetWordTarget,
 }: {
   saveStatus: { statuses: SaveStatuses; confirmed: boolean };
   notice?: string;
   shown: ShownCounts;
   manuscript: Counts;
-  /** Gives a Scene, a Chapter, a Part or, with `project`, the Manuscript a Word target, or none. */
+  /** Set in a Series, whose total `manuscript` is. */
+  series?: true;
+  /** The counts of the Book holding what is open, in a Series. */
+  book?: Counts;
+  /** Gives a Scene, a Chapter, a Part, a Book or, with `project`, the Manuscript a Word target, or none. */
   onSetWordTarget(unitId: string, words: number | null): void;
 }) {
   const readOnly = useContext(ReadOnlyContext);
@@ -111,7 +118,12 @@ export function StatusBar({
     wordTarget === undefined
       ? undefined
       : wordTargetProgress(counts.words, wordTarget);
-  const title = `Manuscript: ${formatCounts(manuscript)}`;
+  const title = series
+    ? [
+        ...(book ? [`Book: ${formatCounts(book)}`] : []),
+        `Series: ${formatCounts(manuscript)}`,
+      ].join(' · ')
+    : `Manuscript: ${formatCounts(manuscript)}`;
   const className = progress?.reached ? 'counts reached' : 'counts';
   const text = (
     <>

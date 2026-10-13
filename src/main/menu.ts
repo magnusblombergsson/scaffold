@@ -35,6 +35,8 @@ export type MenuState = {
     zen: boolean;
     proseFocused: boolean;
     splittable: boolean;
+    /** Whether Split to Next Chapter is offered too, which a Book's last Chapter hasn't. */
+    splitsToNextChapter: boolean;
   } | null;
   /** Latest first. */
   recent: { path: string; displayName: string }[];
@@ -104,6 +106,7 @@ export function menuTemplate(
     ...sending({ type: 'format', format }),
   });
   const canSplit = formatting && project.splittable;
+  const canSplitToNext = canSplit && project.splitsToNextChapter;
   const projectSettings: MenuItemConstructorOptions = {
     label: 'Project Settings…',
     accelerator: SHORTCUTS.projectSettings,
@@ -284,7 +287,7 @@ export function menuTemplate(
           ...windowKey(SHORTCUTS.newSceneAbove),
           ...sending({ type: 'newScene', above: true }),
         },
-        ...splitItems(canSplit, actions.send),
+        ...splitItems(canSplit, canSplitToNext, actions.send),
         {
           label: 'New Chapter',
           enabled: writable,
@@ -296,6 +299,11 @@ export function menuTemplate(
           enabled: writable,
           ...windowKey(SHORTCUTS.newChapterAbove),
           ...sending({ type: 'newChapter', above: true }),
+        },
+        {
+          label: 'New Book',
+          enabled: writable,
+          ...sending({ type: 'newBook' }),
         },
         { type: 'separator' },
         {
@@ -348,12 +356,13 @@ export function menuTemplate(
 }
 
 /**
- * Split Scene and Split to Next Chapter, enabled when `splittable`, which
- * hand their command to the window they were chosen in; the window takes
- * their keys.
+ * Split Scene, enabled when `splittable`, and Split to Next Chapter, when
+ * `toNext` too, which hand their command to the window they were chosen
+ * in; the window takes their keys.
  */
 function splitItems(
   splittable: boolean,
+  toNext: boolean,
   send: MenuActions['send'],
 ): MenuItemConstructorOptions[] {
   return (
@@ -365,7 +374,7 @@ function splitItems(
     label,
     accelerator,
     registerAccelerator: false,
-    enabled: splittable,
+    enabled: toNextChapter ? splittable && toNext : splittable,
     click: (_item, window, event: KeyboardEvent | undefined) => {
       const command: Command = { type: 'splitScene', toNextChapter };
       send(
@@ -378,11 +387,13 @@ function splitItems(
 
 /**
  * The Prose's right-click menu: the two Splits, enabled when its Scene can
- * be split. Its keys are only shown; the window takes them.
+ * be split, and Split to Next Chapter when it can be split `toNext` too.
+ * Its keys are only shown; the window takes them.
  */
 export function proseMenuTemplate(
   splittable: boolean,
+  toNext: boolean,
   send: (command: Command) => void,
 ): MenuItemConstructorOptions[] {
-  return splitItems(splittable, send);
+  return splitItems(splittable, toNext, send);
 }

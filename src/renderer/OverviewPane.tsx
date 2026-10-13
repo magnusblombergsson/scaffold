@@ -2,6 +2,7 @@ import { useEffect, useState, type ReactNode } from 'react';
 import {
   PROJECT_OUTLINE,
   type Manuscript,
+  type ManuscriptBook,
   type ManuscriptChapter,
   type ManuscriptPart,
   type ManuscriptScene,
@@ -26,6 +27,7 @@ type Navigation = {
   onOpenScene(id: string): void;
   onOpenChapter(id: string): void;
   onOpenPart(id: string): void;
+  onOpenBook(id: string): void;
   onOpenProject(): void;
 };
 
@@ -33,12 +35,15 @@ type Navigation = {
  * The column between the Binder and the Prose: a row per unit of the Chapter
  * being written, or of the whole Project, each its Status dot, title and its
  * Outline's first line, and its image, opening to edit its Status, Tags,
- * image, Outline and Notes in place. A Part's row holds its Chapters' rows. The Scene being written is marked, and
+ * image, Outline and Notes in place. A Part's row holds its Chapters' rows.
+ * In a Series, `manuscript` is the `book` being written alone, under the
+ * Series Outline and its own. The Scene being written is marked, and
  * doesn't open: its Outline & Notes are above the Prose, and one unit's
  * field is open in only one place.
  */
 export function OverviewPane({
   manuscript,
+  book,
   language,
   writing,
   width,
@@ -46,6 +51,7 @@ export function OverviewPane({
   ...navigation
 }: Navigation & {
   manuscript: Manuscript;
+  book?: ManuscriptBook;
   language: ProseLanguage;
   writing: Writing;
   width: number;
@@ -63,6 +69,7 @@ export function OverviewPane({
         // A scope, or another Chapter being written, starts as it would anew.
         key={`${scope}:${writing.chapterId ?? UNPLACED}`}
         manuscript={manuscript}
+        book={book}
         language={language}
         writing={writing}
         scope={scope}
@@ -85,7 +92,7 @@ export function OverviewPane({
                   aria-pressed={scope === 'project'}
                   onClick={() => setChosen('project')}
                 >
-                  Project
+                  {book ? 'Book' : 'Project'}
                 </button>
               </div>
               <button
@@ -109,6 +116,7 @@ export function OverviewPane({
 /** The pane's header, given its Expand all and Collapse all, then its rows. */
 function Rows({
   manuscript,
+  book,
   language,
   writing,
   scope,
@@ -116,9 +124,11 @@ function Rows({
   onOpenScene,
   onOpenChapter,
   onOpenPart,
+  onOpenBook,
   onOpenProject,
 }: Navigation & {
   manuscript: Manuscript;
+  book?: ManuscriptBook;
   language: ProseLanguage;
   writing: Writing;
   scope: OverviewScope;
@@ -153,7 +163,7 @@ function Rows({
       if (lists) setListed(new Set(listed).add(id));
     }
   };
-  const expandableIds = expandable(manuscript, scope, writing);
+  const expandableIds = expandable(manuscript, scope, writing, book?.id);
   const listable =
     scope === 'project'
       ? expandableIds.filter(
@@ -172,6 +182,7 @@ function Rows({
         : []
       : [
           PROJECT_OUTLINE,
+          ...(book ? [book.id] : []),
           ...(manuscript.parts ?? []).map((p) => p.id),
           ...manuscript.chapters.flatMap((c) => [
             c.id,
@@ -193,9 +204,13 @@ function Rows({
   }: {
     id: string;
     title: string;
-    kind: 'project' | 'part' | 'chapter' | 'scene';
-    /** A Part, Chapter or Scene, with its Status and Tags; none for the Project. */
-    unit?: ManuscriptPart | ManuscriptChapter | ManuscriptScene;
+    kind: 'project' | 'book' | 'part' | 'chapter' | 'scene';
+    /** A Book, Part, Chapter or Scene, with its Status and Tags; none for the Project. */
+    unit?:
+      | ManuscriptBook
+      | ManuscriptPart
+      | ManuscriptChapter
+      | ManuscriptScene;
     missing?: boolean;
     /** Whether the row lists Scenes, or a Part's Chapters, under it while expanded. */
     lists?: boolean;
@@ -212,7 +227,9 @@ function Rows({
           ? () => onOpenChapter(id)
           : kind === 'part'
             ? () => onOpenPart(id)
-            : onOpenProject;
+            : kind === 'book'
+              ? () => onOpenBook(id)
+              : onOpenProject;
     return (
       <section
         key={id}
@@ -355,9 +372,12 @@ function Rows({
           <>
             {row({
               id: PROJECT_OUTLINE,
-              title: 'Project Outline',
+              title: book ? 'Series Outline' : 'Project Outline',
               kind: 'project',
             })}
+            {book &&
+              row({ id: book.id, title: book.title, kind: 'book', unit: book })}
+
             {topItems(manuscript).map((item) =>
               item.kind === 'chapter'
                 ? chapterRow(item.chapter)

@@ -530,6 +530,15 @@ button.recent-open:hover {
   background: color-mix(in srgb, var(--accent) 5%, var(--sheet));
 }
 
+/* A Book's card, above its Parts' and Chapters'. */
+.card.own.book {
+  background: color-mix(in srgb, var(--accent) 13%, var(--sheet));
+
+  button.card-title {
+    font-size: 1.05rem;
+  }
+}
+
 /* A Part's card, a little above its Chapters'. */
 .card.own.part {
   background: color-mix(in srgb, var(--accent) 9%, var(--sheet));
@@ -892,6 +901,7 @@ span.card-title {
   padding: 0.2rem 0;
 }
 
+.overview-row.book > .overview-row-head,
 .overview-row.part > .overview-row-head,
 .overview-row.chapter > .overview-row-head,
 .overview-row.project > .overview-row-head,
@@ -1496,6 +1506,37 @@ button.counts.reached:hover {
 
 .binder-part .binder-scene {
   padding-left: 2rem;
+}
+
+/* A Book of a Series: above its Parts and Chapters, which it holds indented. */
+.binder-book-head {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  padding: 0 0.5rem 0 0.15rem;
+  margin-top: 1rem;
+  font-weight: 700;
+  font-size: 1.05rem;
+}
+
+.binder-book .binder-part-head {
+  padding-left: 1rem;
+}
+
+.binder-book .binder-chapter-head {
+  padding-left: 1.25rem;
+}
+
+.binder-book .binder-scene {
+  padding-left: 2rem;
+}
+
+.binder-book .binder-part .binder-chapter-head {
+  padding-left: 2rem;
+}
+
+.binder-book .binder-part .binder-scene {
+  padding-left: 2.75rem;
 }
 
 .binder-collapse {

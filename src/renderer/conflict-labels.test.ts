@@ -21,6 +21,17 @@ describe('versionLabel', () => {
     ).toContain('Dropped: Acts “I”, “II”.');
   });
 
+  it('lists the Books dropped before the Parts', () => {
+    expect(
+      droppedMessage({
+        chapters: [],
+        scenes: [],
+        parts: ['Act One'],
+        books: ['Sequel'],
+      }),
+    ).toContain('Dropped: Book “Sequel”. Dropped: Part “Act One”.');
+  });
+
   it('says another computer when it is not known', () => {
     expect(versionLabel({ savedAt: at })).toMatch(/^Another computer · /);
   });
