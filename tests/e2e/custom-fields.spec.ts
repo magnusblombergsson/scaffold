@@ -124,3 +124,74 @@ test('the Author adds, fills, renames, moves and deletes a field for every Chara
 
   await app.close();
 });
+
+test('a field suggests the values other Characters hold in it', async () => {
+  const projectPath = path.join(tempDir(), 'My Novel');
+  const { app, page } = await newProject(projectPath);
+  await newEntry(page, 'Character', 'Anna');
+  await addField(page, 'Characters', 'Allegiance');
+  const field = page.getByLabel('Allegiance', { exact: true });
+  const list = page.getByRole('listbox', {
+    name: 'Suggestions for Allegiance',
+  });
+  await field.click();
+  await expect(list).toBeHidden();
+  await page.keyboard.type('House Vael');
+  await save(page);
+  await newEntry(page, 'Character', 'Mira');
+  await field.click();
+  await page.keyboard.type('Vael');
+  await save(page);
+
+  await newEntry(page, 'Character', 'Ivo');
+  await field.click();
+  await expect(list.getByRole('option')).toHaveText(['House Vael', 'Vael']);
+  await expect(field).toHaveAttribute('aria-autocomplete', 'list');
+  await page.keyboard.type('ho');
+  await expect(list.getByRole('option')).toHaveText(['House Vael']);
+  await expect(list.getByRole('option')).toHaveAttribute(
+    'aria-selected',
+    'false',
+  );
+  await page.keyboard.press('ArrowDown');
+  await expect(list.getByRole('option')).toHaveAttribute(
+    'aria-selected',
+    'true',
+  );
+  await page.keyboard.press('Enter');
+  await expect(field).toHaveText('House Vael');
+  await expect(list).toBeHidden();
+  await save(page);
+  const ivo = async () => {
+    for (const name of await readdir(path.join(projectPath, 'bible'))) {
+      const text = await readFile(
+        path.join(projectPath, 'bible', name),
+        'utf8',
+      );
+      if (text.includes('Ivo')) return text;
+    }
+    return '';
+  };
+  await expect.poll(ivo).toMatch(/custom:\n {2}[0-9a-f-]+: House Vael\n/);
+
+  // Escape closes the list; Enter with nothing highlighted adds a line.
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.press('Backspace');
+  await expect(list.getByRole('option')).toHaveText(['House Vael', 'Vael']);
+  await page.keyboard.press('Escape');
+  await expect(list).toBeHidden();
+  await page.keyboard.type('Va');
+  await expect(list.getByRole('option')).toHaveText(['House Vael', 'Vael']);
+  await page.keyboard.press('Enter');
+  await expect(list).toBeHidden();
+  await expect(field.locator('p')).toHaveCount(2);
+
+  // What isn't suggested is saved as typed.
+  await page.keyboard.press('ControlOrMeta+a');
+  await page.keyboard.type('The Crown');
+  await expect(list).toBeHidden();
+  await save(page);
+  await expect.poll(ivo).toMatch(/custom:\n {2}[0-9a-f-]+: The Crown\n/);
+
+  await app.close();
+});

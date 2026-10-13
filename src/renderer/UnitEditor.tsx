@@ -7,6 +7,7 @@ import {
   useRef,
   useState,
   type MouseEvent as ReactMouseEvent,
+  type ReactNode,
 } from 'react';
 import {
   unitKey as keyOf,
@@ -62,6 +63,8 @@ type Props = {
   className?: string;
   /** A right-click on it, which opens its own menu if it has one. */
   onContextMenu?(event: ReactMouseEvent): void;
+  /** What to show after the editor, made with it, such as suggestions for it. */
+  beside?(editor: Editor): ReactNode;
 };
 
 /**
@@ -91,6 +94,7 @@ export function UnitEditor({
   onSelection,
   className,
   onContextMenu,
+  beside,
 }: Props) {
   const [{ editor, created }] = useState(() => {
     let created = false;
@@ -228,10 +232,13 @@ export function UnitEditor({
   }, [editor, created, autofocus, focusAt, select]);
 
   return (
-    <EditorContent
-      editor={editor}
-      className={className}
-      onContextMenu={onContextMenu}
-    />
+    <>
+      <EditorContent
+        editor={editor}
+        className={className}
+        onContextMenu={onContextMenu}
+      />
+      {beside?.(editor)}
+    </>
   );
 }
