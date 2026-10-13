@@ -181,7 +181,11 @@ _Avoid_: Compile, publish, backup
 
 **Backup**:
 One file holding a whole Project as it was when the Author made it, Trash and Drawer included, from which the Author can restore it as a new Project.
-_Avoid_: Snapshot, archive, copy
+_Avoid_: Snapshot (that is one Scene's Prose), archive, copy
+
+**Snapshot**:
+A named copy of one Scene's Prose, kept by the Author to compare beside the current Prose or to restore it. Its Prose never changes once taken, and it belongs to its Scene, going wherever the Scene goes; a Split leaves it with the original. It is never seen by the Assistant, never in an Export, and never counted toward a Word target.
+_Avoid_: Draft, version, revision, checkpoint, take
 
 **Import**:
 Reading a Word or Markdown file into the Project, the mirror of an Export, of either a manuscript or a Story Bible. A Manuscript Import makes a new Project, or a new Book in the open Project, and never adds to an existing Book: a Heading 1 starts a Chapter and a break such as `***` starts a Scene, unless the Author chooses another split after seeing it. When the file also has Heading 2s, the Author may choose that a Heading 1 starts a Part and a Heading 2 a Chapter; it is never chosen for them. A Story Bible Import adds the Entries the Author ticks after seeing them to the open Project's Story Bible, beside those already there, and changes none of them; undoing it moves them all to Trash.
