@@ -184,7 +184,7 @@ A copy written outside the Project for others to read, of either the Manuscript'
 _Avoid_: Compile, publish, backup
 
 **Backup**:
-One file holding a whole Project as it was when the Author made it, Trash and Drawer included, from which the Author can restore it as a new Project.
+One file holding a whole Project as it was when it was made, Trash and Drawer included, from which the Author can restore it as a new Project. Besides those the Author makes, the app makes its own on each computer, at most once a day and before Trash is emptied, kept outside every Project so they are never synced.
 _Avoid_: Snapshot (that is one Scene's Prose), archive, copy
 
 **Snapshot**:
