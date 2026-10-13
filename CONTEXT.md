@@ -99,6 +99,10 @@ _Avoid_: Revision (that is rewriting Prose), version, change, history
 A free-text field the Author adds to one Entry type in one Project, such as a Character's "Allegiance", held by every Entry of that type in addition to the type's own fields. The Assistant sees it like any other field.
 _Avoid_: Attribute, property, trait
 
+**Relation**:
+A connection the Author records between two Entries, either of a built-in kind or with a free-text label such as "mother of" or "rival of". The built-in kinds are *same as*, joining two Entries of one type that are the same person or thing under different faces (Clark Kent and Superman), and *part of*, putting a Place inside a Place or an Item inside an Item (the basement and its house). A free-text Relation may join Entries of any types and reads one way, shown as the same sentence on both Entries. *Part of* reads one way too, gives an Entry at most one parent and never makes a loop; *same as* has no direction and joins every face it reaches into one group. Unlike an alias, which is another name for one Entry, *same as* keeps two full Entries, and the Assistant is told to keep each face's facts to it. A Relation is not an Evolution: in a Series it may say from which Book it holds. While either Entry is in Trash or the Drawer the Relation is hidden, and it comes back with that Entry.
+_Avoid_: Link (that is a highlighted name's tie to its Entry), connection, association
+
 **Image prompt**:
 A description of an Entry, written by the Assistant on request from what the Entry says it looks, sounds, smells and feels like, for the Author to paste into an image generator elsewhere. It describes only: no narration, new dialogue or story moment, so it is not Prose, though it may quote the Author's own lines. It isn't kept.
 _Avoid_: Image description, caption
@@ -108,7 +112,7 @@ A short, read-only look at the Entries a highlighted name refers to, opened by c
 _Avoid_: Popup, tooltip, preview
 
 **Key fields**:
-The parts of an Entry a Peek shows before the Author asks to read more, chosen by the Author for each Entry type in a Project from its description, aliases, Role, type-specific fields and Custom fields. They change only what the Author sees, never what the Assistant sees.
+The parts of an Entry a Peek shows before the Author asks to read more, chosen by the Author for each Entry type in a Project from its description, aliases, Role, type-specific fields, Custom fields and Relations. They change only what the Author sees, never what the Assistant sees.
 _Avoid_: Summary fields, pinned fields
 
 **Pinned note**:
