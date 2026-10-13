@@ -519,6 +519,12 @@ export interface ProjectApi {
    */
   trashCustomField(id: string): Promise<boolean>;
   /**
+   * What a Custom field suggests to the Entry `exceptEntry`: the values the
+   * other Entries of its type hold in it, those in the Drawer too but not
+   * those in Trash, grouped and ordered as `customSuggestions` does.
+   */
+  customFieldSuggestions(id: string, exceptEntry: string): Promise<string[]>;
+  /**
    * What the Author has chosen as each Entry type's Key fields, item by
    * item; an item not in it is as its type's defaults have it.
    */
@@ -1084,6 +1090,7 @@ export const projectMethods = {
   renameCustomField: 'invoke',
   moveCustomField: 'invoke',
   trashCustomField: 'invoke',
+  customFieldSuggestions: 'invoke',
   listKeyFields: 'invoke',
   setKeyField: 'invoke',
 } as const satisfies MethodTable<ProjectApi>;

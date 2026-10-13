@@ -4185,6 +4185,37 @@ button.finding-quote:hover {
   background: var(--hover);
 }
 
+.custom-field {
+  position: relative;
+}
+
+/* Over what follows, just under the field. */
+.custom-field-suggestions {
+  position: absolute;
+  left: 0;
+  right: 0;
+  z-index: 5;
+  margin: 0.15rem 0 0;
+  padding: 0.25rem 0;
+  list-style: none;
+  max-height: 12rem;
+  overflow-y: auto;
+  background: var(--sheet);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--float-shadow);
+}
+
+.custom-field-suggestions [role='option'] {
+  padding: 0.25rem 0.6rem;
+  cursor: pointer;
+}
+
+.custom-field-suggestions [role='option']:hover,
+.custom-field-suggestions [aria-selected='true'] {
+  background: var(--hover);
+}
+
 .at-mention-where {
   color: var(--muted);
   font-size: 0.85em;

@@ -135,7 +135,12 @@ import {
 import { Switches } from './switches';
 import { TODOS, Todos } from './todos';
 import { CUSTOM_FIELDS, CustomFields } from './custom-fields';
-import { labelRefusal, type CustomField } from '../../shared/custom-field';
+import {
+  customSuggestions,
+  customValue,
+  labelRefusal,
+  type CustomField,
+} from '../../shared/custom-field';
 import {
   isChoosable,
   isKeyField,
@@ -2319,6 +2324,31 @@ export class ProjectStore {
       if (value.custom?.[id]?.trim()) uses++;
     }
     return uses;
+  }
+
+  /**
+   * What a Custom field suggests to `exceptEntry`: the values the other
+   * Entries of its type hold in it, those in the Drawer too, but not those
+   * in Trash, as `customSuggestions` orders them.
+   */
+  async customFieldSuggestions(
+    id: string,
+    exceptEntry: string,
+  ): Promise<string[]> {
+    const { type } = this.customField(id);
+    const values: string[] = [];
+    for (const entry of this.entries.values()) {
+      if (entry.type !== type || entry.id === exceptEntry) continue;
+      values.push(customValue(await this.read(entryRef(entry.id)), id));
+    }
+    for (const item of this.trash.entries()) {
+      if (!item.drawer || item.type !== type || item.id === exceptEntry) {
+        continue;
+      }
+      const kept = await this.trash.keptEntry(item);
+      if (kept) values.push(customValue(kept, id));
+    }
+    return customSuggestions(values);
   }
 
   /**

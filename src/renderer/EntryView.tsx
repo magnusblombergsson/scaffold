@@ -36,6 +36,7 @@ import {
   type Voice,
 } from '../shared/project-types';
 import { AddCustomField, CustomFieldHeading } from './CustomFields';
+import { CustomFieldSuggestions } from './CustomFieldSuggestions';
 import { useCustomFields } from './StatusAndTags';
 import { ShowInPeek } from './ShowInPeek';
 import { EntryImageSection } from './UnitImage';
@@ -550,6 +551,16 @@ export function EntryView({
                   })
                 }
                 attributes={attributes(field.label)}
+                beside={(editor) => (
+                  <CustomFieldSuggestions
+                    editor={editor}
+                    fieldId={field.id}
+                    entryId={entryId}
+                    label={field.label}
+                    toDoc={textToDoc}
+                    toText={docToText}
+                  />
+                )}
               />
               {ghosts(key)}
             </section>

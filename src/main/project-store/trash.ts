@@ -565,6 +565,16 @@ export class Trash {
     );
   }
 
+  /** The Entry kept as `item`, as its file holds it; none while its file isn't here. */
+  async keptEntry(item: TrashedEntry): Promise<EntryValue | undefined> {
+    const file = entryTrashPath(this.deps.path, item.id, placeOf(item));
+    if (!(await this.deps.fs.exists(file))) return undefined;
+    return entryValue(
+      item.id,
+      parseUnitFile(await this.deps.fs.readFile(file)),
+    );
+  }
+
   /** Makes Trash hold just `items`, as found on disk. */
   replace(items: ReadonlyMap<string, Trashed>): void {
     this.items.clear();

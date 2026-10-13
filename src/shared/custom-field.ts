@@ -3,6 +3,7 @@ import {
   type EntryType,
   type EntryValue,
 } from './project-types';
+import { tagKey } from './tags';
 
 // Custom fields (ADR 0009): free-text fields the Author adds to one Entry
 // type in a Project, held by every Entry of that type. An Entry keeps its
@@ -127,4 +128,52 @@ export function withCustom<E extends Pick<EntryValue, 'custom'>>(
   const { custom: _, ...rest } = entry;
   const custom = withCustomValue(entry.custom, id, value);
   return (custom ? { ...rest, custom } : rest) as E;
+}
+
+/** No value longer than this, once trimmed, is offered as a suggestion. */
+const LONGEST_SUGGESTION = 60;
+
+/** A value as suggestions group it: the Tag rule, without surrounding spaces. */
+function suggestionKey(value: string): string {
+  return tagKey(value.trim());
+}
+
+/**
+ * What a Custom field suggests, from the `values` other Entries hold in it:
+ * each single-line value no longer than `LONGEST_SUGGESTION`, trimmed, once
+ * in its first spelling, ignoring case; most held first, then alphabetically.
+ */
+export function customSuggestions(values: Iterable<string>): string[] {
+  const held = new Map<string, { value: string; uses: number }>();
+  for (const value of [...values].map((v) => v.trim())) {
+    if (!value || value.includes('\n') || value.length > LONGEST_SUGGESTION) {
+      continue;
+    }
+    const key = suggestionKey(value);
+    const known = held.get(key);
+    if (known) known.uses++;
+    else held.set(key, { value, uses: 1 });
+  }
+  return [...held.values()]
+    .sort(
+      (a, b) =>
+        b.uses - a.uses ||
+        a.value.localeCompare(b.value, undefined, { sensitivity: 'base' }),
+    )
+    .map(({ value }) => value);
+}
+
+/**
+ * The `suggestions` offered while a field holds `text`: those holding it,
+ * ignoring case, but the one it is; none while it is more than one line.
+ */
+export function offeredSuggestions(
+  suggestions: readonly string[],
+  text: string,
+): string[] {
+  if (text.includes('\n')) return [];
+  const key = suggestionKey(text);
+  return suggestions.filter(
+    (s) => suggestionKey(s) !== key && suggestionKey(s).includes(key),
+  );
 }

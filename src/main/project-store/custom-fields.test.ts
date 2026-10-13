@@ -459,3 +459,69 @@ describe('a Proposal to a Custom field', () => {
     });
   });
 });
+
+describe('Custom field suggestions', () => {
+  it('are the values the other Entries of its type hold in it', async () => {
+    await newProject();
+    const store = await open();
+    const allegiance = await store.addCustomField('character', 'Allegiance');
+    const home = await store.addCustomField('character', 'Home');
+    const motto = await store.addCustomField('place', 'Motto');
+    const anna = await characterWith(store, 'Anna', {
+      [allegiance]: 'House Vael',
+      [home]: 'Asterhold',
+    });
+    await characterWith(store, 'Mira', { [allegiance]: ' house vael' });
+    await characterWith(store, 'Olle', { [allegiance]: 'Vael' });
+    const third = await characterWith(store, 'Ivo', {});
+    const { id: place } = await store.createEntry('place', 'Asterhold');
+    await store.write(entry(place), {
+      ...(await store.read(entry(place))),
+      custom: { [motto]: 'Ever onward', [allegiance]: 'The Crown' },
+    });
+
+    expect(await store.customFieldSuggestions(allegiance, third)).toEqual([
+      'House Vael',
+      'Vael',
+    ]);
+    expect(await store.customFieldSuggestions(home, third)).toEqual([
+      'Asterhold',
+    ]);
+    expect(await store.customFieldSuggestions(home, anna)).toEqual([]);
+  });
+
+  it('count those of Entries in the Drawer, not in Trash', async () => {
+    await newProject();
+    const store = await open();
+    const field = await store.addCustomField('character', 'Allegiance');
+    const drawered = await characterWith(store, 'Anna', {
+      [field]: 'House Vael',
+    });
+    const trashed = await characterWith(store, 'Mira', {
+      [field]: 'The Rebels',
+    });
+    const third = await characterWith(store, 'Ivo', {});
+    await store.moveToDrawer('entry', drawered);
+    await store.trashEntry(trashed);
+
+    expect(await store.customFieldSuggestions(field, third)).toEqual([
+      'House Vael',
+    ]);
+  });
+
+  it('see a value just saved on another Entry', async () => {
+    await newProject();
+    const store = await open();
+    const field = await store.addCustomField('character', 'Allegiance');
+    const { id: anna } = await store.createEntry('character', 'Anna');
+    const { id: third } = await store.createEntry('character', 'Ivo');
+    await store.write(entry(anna), {
+      ...(await store.read(entry(anna))),
+      custom: { [field]: 'House Vael' },
+    });
+
+    expect(await store.customFieldSuggestions(field, third)).toEqual([
+      'House Vael',
+    ]);
+  });
+});
