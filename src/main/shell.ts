@@ -314,7 +314,10 @@ function windowShowing(projectPath: string): BrowserWindow | undefined {
   return (contents && BrowserWindow.fromWebContents(contents)) || undefined;
 }
 
-/** Makes `store` the Project of the window with these contents. */
+/**
+ * Makes `store` the Project of the window with these contents, and titles
+ * the window with its name.
+ */
 function attach(contents: WebContents, store: ProjectStore): void {
   projectWindows.attach(contents, store);
   // The Project's name first, so it survives the taskbar cutting it short.

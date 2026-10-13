@@ -50,6 +50,13 @@ async function windowsShowing(app: ElectronApplication) {
   return new Map(names);
 }
 
+/** The title of `page`'s window, as the taskbar and Alt+Tab show it. */
+async function windowTitle(app: ElectronApplication, page: Page) {
+  return (await app.browserWindow(page)).evaluate((window) =>
+    window.getTitle(),
+  );
+}
+
 function projectId(projectPath: string): Promise<string> {
   return readFile(path.join(projectPath, 'project.json'), 'utf8').then(
     (text) => JSON.parse(text).id,
@@ -110,13 +117,6 @@ test('the Projects open at quit reopen in their windows, at the Scene and binder
   await second.close();
 });
 
-/** The title of `page`'s window, as the taskbar and Alt+Tab show it. */
-async function windowTitle(app: ElectronApplication, page: Page) {
-  return (await app.browserWindow(page)).evaluate((window) =>
-    window.getTitle(),
-  );
-}
-
 test('each window is titled with the name of its Project, and the start screen with the app', async () => {
   const novel = path.join(tempDir(), 'My Novel');
   const stories = path.join(tempDir(), 'Short Stories');
@@ -151,8 +151,10 @@ test('each window is titled with the name of its Project, and the start screen w
   const second = await launch(tempDir());
   await expect.poll(() => second.windows().length).toBe(2);
   const windows = await windowsShowing(second);
-  for (const [name, reopened] of windows) {
-    expect(await windowTitle(second, reopened)).toBe(`${name} — Scaffold`);
+  for (const name of ['My Novel', 'Short Stories']) {
+    expect(await windowTitle(second, windows.get(name)!)).toBe(
+      `${name} — Scaffold`,
+    );
   }
   await second.close();
 });
