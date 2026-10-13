@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { Manuscript } from './project-types';
 import {
+  bookManuscript,
+  bookOf,
+  splitsToNextChapter,
   chapterNumbers,
   partOf,
   placedChapters,
@@ -92,5 +95,81 @@ describe('chapterNumbers', () => {
       ['c2', 3],
       ['c3', 4],
     ]);
+  });
+});
+
+/** Book 1 holds c0 and Act One (c1); Book 2 holds c2; c9 is Unplaced. */
+const series: Manuscript = {
+  chapters: [
+    chapter('c0', { book: 'b1' }),
+    chapter('c1', { part: 'p1', book: 'b1' }),
+    chapter('c2', { book: 'b2' }),
+    chapter('c9', { unplaced: true }),
+  ],
+  parts: [{ id: 'p1', title: 'Act One', chapters: ['c1'], book: 'b1' }],
+  top: ['c0', 'p1', 'c2'],
+  books: [
+    { id: 'b1', title: 'One', top: ['c0', 'p1'], wordTarget: 1000 },
+    { id: 'b2', title: 'Two', top: ['c2'] },
+  ],
+  unplaced: [{ id: 's9', title: 'Untitled Scene' }],
+  wordTarget: 5000,
+  partLabel: 'act',
+};
+
+describe('bookManuscript', () => {
+  it('is one Book of a Series as a Manuscript of its own, its Word target the Book’s', () => {
+    expect(bookManuscript(series, 'b1')).toEqual({
+      chapters: [series.chapters[0], series.chapters[1]],
+      parts: series.parts,
+      top: ['c0', 'p1'],
+      unplaced: [],
+      wordTarget: 1000,
+      partLabel: 'act',
+    });
+    expect(bookManuscript(series, 'b2')).toEqual({
+      chapters: [series.chapters[2]],
+      top: ['c2'],
+      unplaced: [],
+      partLabel: 'act',
+    });
+  });
+
+  it('is the whole Manuscript of a Project that is no Series', () => {
+    expect(bookManuscript(plain, undefined)).toBe(plain);
+  });
+});
+
+describe('bookOf', () => {
+  it('is the Book holding a Scene, Chapter or Part, or the Book itself', () => {
+    const withScene: Manuscript = {
+      ...series,
+      chapters: series.chapters.map((c) =>
+        c.id === 'c2' ? { ...c, scenes: [{ id: 's2', title: 'S' }] } : c,
+      ),
+    };
+    expect(bookOf(withScene, { kind: 'scene', id: 's2' })).toBe('b2');
+    expect(bookOf(series, { kind: 'chapter', id: 'c1' })).toBe('b1');
+    expect(bookOf(series, { kind: 'part', id: 'p1' })).toBe('b1');
+    expect(bookOf(series, { kind: 'book', id: 'b2' })).toBe('b2');
+  });
+
+  it('is none for what is Unplaced, and in a Project that is no Series', () => {
+    expect(bookOf(series, { kind: 'chapter', id: 'c9' })).toBeUndefined();
+    expect(bookOf(series, { kind: 'scene', id: 's9' })).toBeUndefined();
+    expect(bookOf(plain, { kind: 'chapter', id: 'a' })).toBeUndefined();
+  });
+});
+
+describe('splitsToNextChapter', () => {
+  it('in a Project of one Book, always: a new Chapter is made after the last', () => {
+    expect(splitsToNextChapter(plain, 'b')).toBe(true);
+  });
+
+  it('in a Series, only before the last Chapter of its Book', () => {
+    expect(splitsToNextChapter(series, 'c0')).toBe(true);
+    expect(splitsToNextChapter(series, 'c1')).toBe(false);
+    expect(splitsToNextChapter(series, 'c2')).toBe(false);
+    expect(splitsToNextChapter(series, 'c9')).toBe(false);
   });
 });

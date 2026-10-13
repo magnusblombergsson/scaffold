@@ -1,11 +1,18 @@
-// A Tag is a free word or phrase on Scenes, Chapters, Parts and Entries
+// A Tag is a free word or phrase on Scenes, Chapters, Parts, Books and Entries
 // (v3 spec §1). The Project's Tags are simply those in use; matching ignores
 // case, and the first spelling wins. A comma ends a Tag.
 
-import { topLevel } from './manuscript-order';
+import {
+  bookManuscript,
+  topItems,
+  topLevel,
+  unplacedChapters,
+  type TopItem,
+} from './manuscript-order';
 import {
   partName,
   type Manuscript,
+  type ManuscriptBook,
   type ManuscriptChapter,
   type ManuscriptPart,
   type ManuscriptScene,
@@ -33,14 +40,15 @@ export function tagSpelling(
 }
 
 /**
- * The Parts, Chapters and Scenes with `tag`, in Manuscript order, a Part
- * before its Chapters and Unplaced Scenes last, each with its name.
+ * The Books, Parts, Chapters and Scenes with `tag`, in Manuscript order, a
+ * Book before its Parts and Chapters, a Part before its Chapters and
+ * Unplaced Scenes last, each with its name.
  */
 export function tagged(
   manuscript: Manuscript,
   tag: string,
 ): {
-  unit: ManuscriptPart | ManuscriptChapter | ManuscriptScene;
+  unit: ManuscriptBook | ManuscriptPart | ManuscriptChapter | ManuscriptScene;
   name: string;
 }[] {
   const scene = (unit: ManuscriptScene) => ({
@@ -52,15 +60,24 @@ export function tagged(
     ...unit.scenes.map(scene),
   ];
   const label = partName(manuscript.partLabel);
+  const item = (item: TopItem) =>
+    item.kind === 'part'
+      ? [
+          { unit: item.part, name: `${label} “${item.part.title}”` },
+          ...item.chapters.flatMap(chapter),
+        ]
+      : chapter(item.chapter);
+  const { books } = manuscript;
   return [
-    ...topLevel(manuscript).flatMap((item) =>
-      item.kind === 'part'
-        ? [
-            { unit: item.part, name: `${label} “${item.part.title}”` },
-            ...item.chapters.flatMap(chapter),
-          ]
-        : chapter(item.chapter),
-    ),
+    ...(books
+      ? [
+          ...books.flatMap((book) => [
+            { unit: book, name: `Book “${book.title}”` },
+            ...topItems(bookManuscript(manuscript, book.id)).flatMap(item),
+          ]),
+          ...unplacedChapters(manuscript).flatMap(chapter),
+        ]
+      : topLevel(manuscript).flatMap(item)),
     ...manuscript.unplaced.map(scene),
   ].filter(({ unit }) => hasTag(unit.tags, tag));
 }

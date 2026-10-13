@@ -156,4 +156,76 @@ describe('inContext', () => {
   it('keeps none with nothing open', () => {
     expect(ids(null)).toEqual([]);
   });
+
+  describe('in a Series', () => {
+    const series: Manuscript = {
+      ...book,
+      chapters: book.chapters.map((c) => ({ ...c, book: 'b1' })),
+      parts: book.parts!.map((p) => ({ ...p, book: 'b1' })),
+      books: [{ id: 'b1', title: 'First', top: ['p1', 'c2'] }],
+    };
+    const inBook: Todo = {
+      id: 'k',
+      text: 'K',
+      done: false,
+      link: { kind: 'book', id: 'b1' },
+    };
+    const seriesIds = (link: TodoLink) =>
+      inContext([...todos, inBook], link, series).map((t) => t.id);
+
+    it('keeps the Todos of the Book holding a Scene, Chapter or Part too', () => {
+      expect(seriesIds({ kind: 'scene', id: 's1' })).toEqual([
+        'a',
+        'b',
+        'c',
+        'd',
+        'k',
+      ]);
+      expect(seriesIds({ kind: 'scene', id: 's4' })).toEqual(['h', 'k']);
+      expect(seriesIds({ kind: 'chapter', id: 'c1' })).toEqual(['c', 'd', 'k']);
+      expect(seriesIds({ kind: 'part', id: 'p1' })).toEqual(['d', 'k']);
+      expect(seriesIds({ kind: 'book', id: 'b1' })).toEqual(['k']);
+    });
+
+    it('names the Book a Todo links to, here or in Trash', () => {
+      const trashed: TrashItem = {
+        kind: 'book',
+        id: 'b9',
+        title: 'Lost',
+        trashedAt: 1,
+        parts: [
+          {
+            id: 'p9',
+            title: 'Act',
+            chapters: [
+              {
+                id: 'c8',
+                title: 'In Act',
+                scenes: [{ id: 's6', title: 'Sea' }],
+              },
+            ],
+          },
+        ],
+        chapters: [{ id: 'c7', title: 'Loose', scenes: [] }],
+      };
+      const here = {
+        manuscript: series,
+        entries,
+        trash: [trashed],
+        drawer: [],
+      };
+      expect(linkView({ kind: 'book', id: 'b1' }, here)).toEqual({
+        title: 'First',
+      });
+      for (const [kind, id, title] of [
+        ['book', 'b9', 'Lost'],
+        ['part', 'p9', 'Act'],
+        ['chapter', 'c8', 'In Act'],
+        ['chapter', 'c7', 'Loose'],
+        ['scene', 's6', 'Sea'],
+      ] as const) {
+        expect(linkView({ kind, id }, here)).toEqual({ title, trashId: 'b9' });
+      }
+    });
+  });
 });

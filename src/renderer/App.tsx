@@ -29,12 +29,18 @@ import {
   VISIBILITY_LABELS,
   type EntryType,
   type Manuscript,
+  type ManuscriptBook,
   type ManuscriptChapter,
   type ManuscriptPart,
   type ManuscriptScene,
   type UnitRef,
   type UnitValue,
 } from '../shared/project-types';
+import {
+  bookManuscript,
+  bookOf,
+  splitsToNextChapter,
+} from '../shared/manuscript-order';
 import { ROOM_LABELS, ROOMS, type Room } from '../shared/room';
 import { ProjectMirror } from './project-mirror';
 import { useProject } from './use-project';
@@ -61,6 +67,7 @@ import type { ShowProposal } from './Conversation';
 import { ConflictList, ConflictResolver } from './Conflicts';
 import {
   ChapterCorkboard,
+  BookCorkboard,
   PartCorkboard,
   ProjectCorkboard,
   useCorkboardView,
@@ -164,7 +171,7 @@ export function App() {
   // while its Scene can be split, as its element says. Focus has moved on
   // once its events are done; it stays put while the window is behind.
   useEffect(() => {
-    let shown = { focused: false, splittable: false };
+    let shown = { focused: false, splittable: false, toNext: false };
     let timer: ReturnType<typeof setTimeout> | undefined;
     const check = () => {
       clearTimeout(timer);
@@ -173,15 +180,17 @@ export function App() {
         const now = {
           focused: prose !== null,
           splittable: prose?.view.dom.dataset.split === 'true',
+          toNext: prose?.view.dom.dataset.splitNext === 'true',
         };
         if (
           now.focused === shown.focused &&
-          now.splittable === shown.splittable
+          now.splittable === shown.splittable &&
+          now.toNext === shown.toNext
         ) {
           return;
         }
         shown = now;
-        window.shell.showProseFocus(now.focused, now.splittable);
+        window.shell.showProseFocus(now.focused, now.splittable, now.toNext);
       });
     };
     document.addEventListener('focusin', check);
@@ -190,7 +199,7 @@ export function App() {
     const splits = new MutationObserver(check);
     splits.observe(document.body, {
       subtree: true,
-      attributeFilter: ['data-split'],
+      attributeFilter: ['data-split', 'data-split-next'],
     });
     return () => {
       clearTimeout(timer);
@@ -377,6 +386,21 @@ function ProjectView({
     selected?.kind === 'part'
       ? manuscript.parts?.find((p) => p.id === selected.id)
       : undefined;
+  const openBook =
+    selected?.kind === 'book'
+      ? manuscript.books?.find((b) => b.id === selected.id)
+      : undefined;
+  /** In a Series, the Book holding the Scene being written, if it has one. */
+  const writingBook = open
+    ? manuscript.books?.find(
+        (b) =>
+          b.id === bookOf(manuscript, { kind: 'scene', id: open.scene.id }),
+      )
+    : undefined;
+  /** What the Project Outline is called: in a Series, the Series Outline. */
+  const projectOutlineName = manuscript.books
+    ? 'Series Outline'
+    : 'Project Outline';
   /** What the Project calls a Part, as in “Act”. */
   const partNamed = partName(manuscript.partLabel);
   const [room, setRoom] = useState<Room>('writing');
@@ -524,7 +548,7 @@ function ProjectView({
     setOpenEntryId(id);
   }
 
-  /** Opens a Todo's Scene, Chapter or Part in Writing, or its Entry in the Story Bible. */
+  /** Opens a Todo's Scene, Chapter, Part or Book in Writing, or its Entry in the Story Bible. */
   function openLink(link: TodoLink) {
     if (link.kind === 'entry') return showEntry(link.id);
     switchRoom('writing');
@@ -854,7 +878,9 @@ function ProjectView({
       ? { kind: 'chapter', id: openChapter.id }
       : openPart
         ? { kind: 'part', id: openPart.id }
-        : null;
+        : openBook
+          ? { kind: 'book', id: openBook.id }
+          : null;
   /** What a new Todo in the Story Bible is linked to: the Entry open there. */
   const biblePrelink: TodoLink | null = openEntry
     ? { kind: 'entry', id: openEntry.id }
@@ -916,12 +942,12 @@ function ProjectView({
   /** The Story Bible being imported, while the Author ticks its Entries. */
   const [storyBibleImport, setStoryBibleImport] =
     useState<StoryBibleFile | null>(null);
-  /** The Part, Chapter or Scene whose Tags… is open, by id. */
+  /** The Book, Part, Chapter or Scene whose Tags… is open, by id. */
   const [tagging, setTagging] = useState<string | null>(null);
   /** It, as the Manuscript has it now; gone if it is no longer there. */
   const taggingUnit =
     tagging === null ? undefined : unitOf(tagging, manuscript);
-  /** The Part, Chapter or Scene whose Set word target… is open, by id. */
+  /** The Book, Part, Chapter or Scene whose Set word target… is open, by id. */
   const [settingWordTarget, setSettingWordTarget] = useState<string | null>(
     null,
   );
@@ -1005,6 +1031,14 @@ function ProjectView({
     );
   }
 
+  /** Whether a Scene that can be split can be split to the next Chapter: never into another Book. */
+  function splitsToNext(sceneId: string): boolean {
+    const found = allScenes(manuscript).find((s) => s.scene.id === sceneId);
+    return (
+      !!found?.chapter && splitsToNextChapter(manuscript, found.chapter.id)
+    );
+  }
+
   /**
    * Splits a Scene at `cut`, as Insert › Split Scene does, then opens the
    * new Scene at the start of its Prose; without a cut, the status bar says
@@ -1057,8 +1091,8 @@ function ProjectView({
   const [pickingEntryType, setPickingEntryType] = useState(false);
 
   /**
-   * The Scene, Chapter or Part a create chord works from: the highlighted
-   * one when focus is in the Binder, else the open one.
+   * The Scene, Chapter, Part or Book a create chord works from: the
+   * highlighted one when focus is in the Binder, else the open one.
    */
   function current(): Current {
     const row = document.activeElement?.closest<HTMLElement>(
@@ -1067,15 +1101,14 @@ function ProjectView({
     if (row?.dataset.id) {
       const { kind } = row.dataset;
       return {
-        kind: kind === 'chapter' || kind === 'part' ? kind : 'scene',
+        kind:
+          kind === 'chapter' || kind === 'part' || kind === 'book'
+            ? kind
+            : 'scene',
         id: row.dataset.id,
       };
     }
-    if (
-      selected?.kind === 'scene' ||
-      selected?.kind === 'chapter' ||
-      selected?.kind === 'part'
-    ) {
+    if (selected && selected.kind !== 'project') {
       return { kind: selected.kind, id: selected.id };
     }
     return null;
@@ -1190,7 +1223,8 @@ function ProjectView({
         !keyApplies(command, room) ||
         !prose ||
         !sceneId ||
-        !splittable(sceneId)
+        !splittable(sceneId) ||
+        (command.toNextChapter && !splitsToNext(sceneId))
       ) {
         return false;
       }
@@ -1200,6 +1234,7 @@ function ProjectView({
     if (
       command.type !== 'newScene' &&
       command.type !== 'newChapter' &&
+      command.type !== 'newBook' &&
       command.type !== 'newEntry'
     ) {
       return false;
@@ -1223,13 +1258,27 @@ function ProjectView({
     } else if (command.type === 'newChapter') {
       const at = chapterInsertion(manuscript, current(), command.above);
       void create(
-        () => window.project.createChapter(at.index, undefined, at.partId),
+        () =>
+          window.project.createChapter(
+            at.index,
+            undefined,
+            at.partId,
+            at.bookId,
+          ),
         'Chapter created',
       ).then((id) => {
         if (!id) return;
         setTab('manuscript');
         setRenaming(id);
       });
+    } else if (command.type === 'newBook') {
+      void create(() => window.project.createBook(), 'Book created').then(
+        (id) => {
+          if (!id) return;
+          setTab('manuscript');
+          setRenaming(id);
+        },
+      );
     } else if (command.entryType) {
       // From any Room; it opens in the Story Bible.
       void createEntry(command.entryType);
@@ -1390,7 +1439,9 @@ function ProjectView({
                       ? openChapter.title
                       : openPart
                         ? openPart.title
-                        : selected?.kind === 'project' && 'Project Outline'}
+                        : openBook
+                          ? openBook.title
+                          : selected?.kind === 'project' && projectOutlineName}
           </span>
           {room === 'writing' && (
             <button
@@ -1635,7 +1686,8 @@ function ProjectView({
                 !open.scene.missing && (
                   <>
                     <OverviewPane
-                      manuscript={manuscript}
+                      manuscript={bookManuscript(manuscript, writingBook?.id)}
+                      book={writingBook}
                       language={language}
                       writing={{
                         sceneId: open.scene.id,
@@ -1645,6 +1697,7 @@ function ProjectView({
                       onOpenScene={(id) => select({ kind: 'scene', id })}
                       onOpenChapter={(id) => select({ kind: 'chapter', id })}
                       onOpenPart={(id) => select({ kind: 'part', id })}
+                      onOpenBook={(id) => select({ kind: 'book', id })}
                       onOpenProject={() => select({ kind: 'project' })}
                       onClose={toggleOverview}
                     />
@@ -1678,6 +1731,22 @@ function ProjectView({
                     onOpenScene={(id) => select({ kind: 'scene', id })}
                     onOpenChapter={(id) => select({ kind: 'chapter', id })}
                     onOpenPart={(id) => select({ kind: 'part', id })}
+                    onOpenBook={(id) => select({ kind: 'book', id })}
+                    onAddTodo={startWritingTodo}
+                  />
+                </main>
+              ) : openBook ? (
+                <main className="centre" key={openBook.id}>
+                  <BookCorkboard
+                    book={openBook}
+                    manuscript={manuscript}
+                    language={language}
+                    reveal={revealIn(openBook.id)}
+                    view={corkboardView}
+                    onView={setCorkboardView}
+                    onOpenScene={(id) => select({ kind: 'scene', id })}
+                    onOpenChapter={(id) => select({ kind: 'chapter', id })}
+                    onOpenPart={(id) => select({ kind: 'part', id })}
                     onAddTodo={startWritingTodo}
                   />
                 </main>
@@ -1697,7 +1766,8 @@ function ProjectView({
                 <main className="centre" key={openPart.id}>
                   <PartCorkboard
                     part={openPart}
-                    manuscript={manuscript}
+                    // Its Chapters are numbered from its Book's first.
+                    manuscript={bookManuscript(manuscript, openPart.book)}
                     language={language}
                     reveal={revealIn(openPart.id)}
                     view={corkboardView}
@@ -1773,6 +1843,7 @@ function ProjectView({
                     onProse={setProse}
                     onSelection={onSelection}
                     splittable={splittable(open.scene.id)}
+                    splitsToNext={splitsToNext(open.scene.id)}
                   />
                 </main>
               )}
@@ -1919,9 +1990,11 @@ function ProjectView({
                     ? { kind: 'chapter', id: openChapter.id }
                     : openPart
                       ? { kind: 'part', id: openPart.id }
-                      : selected?.kind === 'project'
-                        ? { kind: 'project' }
-                        : null,
+                      : openBook
+                        ? { kind: 'book', id: openBook.id }
+                        : selected?.kind === 'project'
+                          ? { kind: 'project' }
+                          : null,
             selection: room === 'writing' ? selectionCounts : null,
           })}
           onSetWordTarget={(unitId, words) => void setWordTarget(unitId, words)}
@@ -2094,15 +2167,18 @@ function allScenes(
 /** No Tags, the same each time. */
 const NO_TAGS: string[] = [];
 
-/** The Part, Chapter or Scene of `id` in `manuscript`, if it is there. */
+/** The Book, Part, Chapter or Scene of `id` in `manuscript`, if it is there. */
 function unitOf(
   id: string,
   manuscript: Manuscript,
 ):
+  | { kind: 'book'; node: ManuscriptBook }
   | { kind: 'part'; node: ManuscriptPart }
   | { kind: 'chapter'; node: ManuscriptChapter }
   | { kind: 'scene'; node: ManuscriptScene }
   | undefined {
+  const book = manuscript.books?.find((b) => b.id === id);
+  if (book) return { kind: 'book', node: book };
   const part = manuscript.parts?.find((p) => p.id === id);
   if (part) return { kind: 'part', node: part };
   const chapter = manuscript.chapters.find((c) => c.id === id);
@@ -2111,21 +2187,23 @@ function unitOf(
   return found && { kind: 'scene', node: found.scene };
 }
 
-/** A Part, as the Project calls it, a Chapter or a Scene, as in a dialog's title. */
+/** A Book, a Part, as the Project calls it, a Chapter or a Scene, as in a dialog's title. */
 function unitKindName(
-  kind: 'part' | 'chapter' | 'scene',
+  kind: 'book' | 'part' | 'chapter' | 'scene',
   partNamed: string,
 ): string {
+  if (kind === 'book') return 'Book';
   return kind === 'part' ? partNamed : kind === 'chapter' ? 'Chapter' : 'Scene';
 }
 
 /**
  * What Writing opens for the id of a Scene, Outline or Notes, as once its
- * Conflict is resolved: the Part, Chapter or Scene it belongs to, or the
- * Project.
+ * Conflict is resolved: the Book, Part, Chapter or Scene it belongs to, or
+ * the Project.
  */
 function selectionOf(id: string, manuscript: Manuscript): Selection {
   if (id === PROJECT_OUTLINE) return { kind: 'project' };
+  if (manuscript.books?.some((b) => b.id === id)) return { kind: 'book', id };
   if (manuscript.parts?.some((p) => p.id === id)) return { kind: 'part', id };
   return manuscript.chapters.some((c) => c.id === id)
     ? { kind: 'chapter', id }

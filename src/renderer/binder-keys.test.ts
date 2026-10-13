@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Manuscript } from '../shared/project-types';
 import {
+  bookMove,
   chapterMove,
   highlightAfter,
   listRows,
@@ -227,5 +228,76 @@ describe('with Parts', () => {
     expect(partMove(acts, 'p1', 'up')).toBe(0);
     expect(partMove(acts, 'p1', 'down')).toBe(2);
     expect(partMove(acts, 'p2', 'down')).toBeNull();
+  });
+});
+
+describe('in a Series', () => {
+  /** Book 1: c1 (s1), Act p1 (c2); Book 2: c3; Unplaced c9. */
+  const series: Manuscript = {
+    chapters: [
+      {
+        id: 'c1',
+        title: 'One',
+        book: 'b1',
+        scenes: [{ id: 's1', title: 'S1' }],
+      },
+      { id: 'c2', title: 'Two', part: 'p1', book: 'b1', scenes: [] },
+      { id: 'c3', title: 'Three', book: 'b2', scenes: [] },
+      { id: 'c9', title: 'Stray', unplaced: true, scenes: [] },
+    ],
+    parts: [{ id: 'p1', title: 'Act', chapters: ['c2'], book: 'b1' }],
+    top: ['c1', 'p1', 'c3'],
+    books: [
+      { id: 'b1', title: 'Book 1', top: ['c1', 'p1'] },
+      { id: 'b2', title: 'Book 2', top: ['c3'] },
+      { id: 'b3', title: 'Book 3', top: [] },
+    ],
+    unplaced: [],
+  };
+  const rows = listRows(series);
+  const after = (id: string, key: string) => {
+    const to = highlightAfter(
+      rows,
+      rows.findIndex((r) => r.id === id),
+      key,
+    );
+    return to === null ? null : rows[to].id;
+  };
+
+  it('lists each Book then its Parts and Chapters, then the Unplaced', () => {
+    expect(rows.map((r) => r.id)).toEqual([
+      'b1',
+      'c1',
+      's1',
+      'p1',
+      'c2',
+      'b2',
+      'c3',
+      'b3',
+      'c9',
+    ]);
+    expect(listRows(series, new Set(['b1'])).map((r) => r.id)).toEqual([
+      'b1',
+      'b2',
+      'c3',
+      'b3',
+      'c9',
+    ]);
+  });
+
+  it('goes from a Part or Loose Chapter to its Book with ←, and from a Book to its first with →', () => {
+    expect(after('p1', 'ArrowLeft')).toBe('b1');
+    expect(after('c1', 'ArrowLeft')).toBe('b1');
+    expect(after('c2', 'ArrowLeft')).toBe('p1');
+    expect(after('b1', 'ArrowRight')).toBe('c1');
+    expect(after('b3', 'ArrowRight')).toBeNull();
+    expect(after('c9', 'ArrowLeft')).toBeNull();
+  });
+
+  it('moves a Book among the Books, but not past either end', () => {
+    expect(bookMove(series, 'b2', 'up')).toBe(0);
+    expect(bookMove(series, 'b2', 'down')).toBe(2);
+    expect(bookMove(series, 'b1', 'up')).toBeNull();
+    expect(bookMove(series, 'b3', 'down')).toBeNull();
   });
 });

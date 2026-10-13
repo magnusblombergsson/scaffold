@@ -12,7 +12,7 @@ export function unitName(
   entries: EntrySummary[] = [],
 ): string {
   if (ref.kind === 'outline' && ref.id === PROJECT_OUTLINE) {
-    return 'the Project Outline';
+    return manuscript.books ? 'the Series Outline' : 'the Project Outline';
   }
   if (ref.kind === 'entry' || ref.kind === 'private') {
     const name = entries.find((e) => e.id === ref.id)?.name;
@@ -32,6 +32,8 @@ export function capitalized(text: string): string {
 }
 
 function titleOf(id: string, manuscript: Manuscript): string | undefined {
+  const book = manuscript.books?.find((b) => b.id === id);
+  if (book) return book.title;
   const part = manuscript.parts?.find((p) => p.id === id);
   if (part) return part.title;
   for (const chapter of manuscript.chapters) {

@@ -71,6 +71,12 @@ describe('expandable', () => {
     ]);
   });
 
+  it("in a Series, has the Book's own row after the Series Outline's", () => {
+    expect(
+      expandable(manuscript, 'project', inChapter1, 'b1').slice(0, 3),
+    ).toEqual([PROJECT_OUTLINE, 'b1', 'c1']);
+  });
+
   it('leaves out a missing Scene, which has no Outline to open', () => {
     expect(
       expandable(manuscript, 'chapter', { sceneId: 's3', chapterId: 'c2' }),

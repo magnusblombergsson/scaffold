@@ -644,13 +644,15 @@ const shellHandlers: Handlers<ShellApi, typeof shellMethods, WindowContext> = {
     projectWindows.setDocked(sender, docked);
     updateMenu();
   },
-  showProseFocus: ({ sender }, focused, splittable) => {
-    if (projectWindows.setProseFocus(sender, focused, splittable)) updateMenu();
+  showProseFocus: ({ sender }, focused, splittable, toNext) => {
+    if (projectWindows.setProseFocus(sender, focused, splittable, toNext)) {
+      updateMenu();
+    }
   },
-  showProseMenu: ({ sender, window }, splittable) => {
+  showProseMenu: ({ sender, window }, splittable, toNext) => {
     if (!(window instanceof BrowserWindow)) return;
     Menu.buildFromTemplate(
-      proseMenuTemplate(splittable, (command) =>
+      proseMenuTemplate(splittable, toNext, (command) =>
         emit(sender, 'shell', 'onCommand', command),
       ),
     ).popup({ window });

@@ -317,3 +317,53 @@ describe('statusCounts with Parts', () => {
     ).toEqual({ words: 35, characters: 175 });
   });
 });
+
+describe('statusCounts in a Series', () => {
+  const series: Manuscript = {
+    chapters: [
+      { ...manuscript.chapters[0], book: 'b1' },
+      { ...manuscript.chapters[1], book: 'b2' },
+    ],
+    top: ['c1', 'c2'],
+    books: [
+      { id: 'b1', title: 'One', top: ['c1'], wordTarget: 100 },
+      { id: 'b2', title: 'Two', top: ['c2'] },
+    ],
+    unplaced: [],
+  };
+
+  it("shows a Book's Chapters' totals against its own Word target", () => {
+    expect(
+      statusCounts({
+        manuscript: series,
+        scenes,
+        open: { kind: 'book', id: 'b1' },
+      }).shown,
+    ).toEqual({
+      scope: 'Book',
+      counts: { words: 30, characters: 150 },
+      unitId: 'b1',
+      wordTarget: 100,
+    });
+  });
+
+  it('totals the Series, and the Book holding what is open', () => {
+    const counts = statusCounts({
+      manuscript: series,
+      scenes,
+      open: { kind: 'scene', id: 's3' },
+    });
+    expect(counts.manuscript).toEqual({ words: 35, characters: 175 });
+    expect(counts.series).toBe(true);
+    expect(counts.book).toEqual({ words: 5, characters: 25 });
+  });
+
+  it('shows the Series for the Series Outline', () => {
+    expect(
+      statusCounts({ manuscript: series, scenes, open: { kind: 'project' } }),
+    ).toMatchObject({
+      shown: { scope: 'Series', unitId: 'project' },
+      series: true,
+    });
+  });
+});

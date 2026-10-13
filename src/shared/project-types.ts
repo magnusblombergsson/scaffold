@@ -4,11 +4,14 @@ import type { CustomValues } from './custom-field';
 // Types shared by main, preload and renderer. The renderer never sees paths or
 // file formats, only these values.
 
-/** The id of the Project Outline, of the whole story, beside the ids of Chapters and Scenes. */
+/**
+ * The id of the Project Outline, of the whole story, beside the ids of
+ * Chapters and Scenes: in a Series, the Series Outline above each Book's.
+ */
 export const PROJECT_OUTLINE = 'project';
 
 export type SceneRef = { kind: 'scene'; id: string };
-/** The Outline of a Chapter or Scene, or with the id `PROJECT_OUTLINE`, of the Project. */
+/** The Outline of a Book, Part, Chapter or Scene, or with the id `PROJECT_OUTLINE`, of the Project. */
 export type OutlineRef = { kind: 'outline'; id: string };
 /** The Author's Notes on a Chapter or Scene. */
 export type NotesRef = { kind: 'notes'; id: string };
@@ -209,11 +212,12 @@ export type EntrySummary = {
 };
 
 /**
- * What a unit detail is addressed by (ADR 0008): a Scene, a Chapter, a Part
- * or an Entry by id, or the Manuscript, which is the Project Outline's.
+ * What a unit detail is addressed by (ADR 0008): a Scene, a Chapter, a
+ * Part, a Book or an Entry by id, or the Manuscript, which is the Project
+ * Outline's.
  */
 export type DetailRef =
-  | { kind: 'scene' | 'chapter' | 'part' | 'entry'; id: string }
+  | { kind: 'scene' | 'chapter' | 'part' | 'book' | 'entry'; id: string }
   | { kind: 'manuscript' };
 
 /** What an image belongs to: any unit but the Manuscript. */
@@ -238,17 +242,25 @@ export type SceneNode = { id: string; title: string };
 export type ChapterNode = { id: string; title: string; scenes: SceneNode[] };
 /** A Part: its Chapters by id, in order; the Chapters themselves are in the tree's `chapters`. */
 export type PartNode = { id: string; title: string; chapters: string[] };
+/** A Book: the order of its Parts and Loose Chapters, by id. */
+export type BookNode = { id: string; title: string; top: string[] };
 /**
  * The Manuscript's structure as `project.json` holds it. `chapters` is every
  * Chapter, in reading order, which is all an app without Parts reads. Once
  * the Project has a Part, `parts` holds them and `top` the order of the Parts
  * and Loose Chapters; a Chapter in neither is Unplaced. Without Parts, both
  * are absent and every Chapter is loose, in the order of `chapters`.
+ *
+ * A Series also has `books` (ADR 0012), each with the order of its Parts and
+ * Loose Chapters, which decide the order; `top` is then only every Book's
+ * order one after another, for an app without Books. A Project with one
+ * Book has no `books`.
  */
 export type ProjectTree = {
   chapters: ChapterNode[];
   parts?: PartNode[];
   top?: string[];
+  books?: BookNode[];
 };
 
 /** What the Project calls its Parts: only a label (a Project setting). */
@@ -284,21 +296,36 @@ export type Manuscript = {
   /** The Parts, in order; absent when the Project has none. */
   parts?: ManuscriptPart[];
   /**
-   * The ids of the Parts and Loose Chapters, in order; absent when the
-   * Project has no Parts, when every Chapter is loose.
+   * The ids of the Parts and Loose Chapters, in order, every Book's one
+   * after another; absent when the Project has no Parts and is no Series,
+   * when every Chapter is loose.
    */
   top?: string[];
+  /** The Books, in reading order; absent unless the Project is a Series. */
+  books?: ManuscriptBook[];
   unplaced: ManuscriptScene[];
   /** The Manuscript's Word target, as the Project Outline's file holds it. */
   wordTarget?: number;
   /** What the Project calls its Parts; Part when absent. */
   partLabel?: PartLabel;
 };
+/** A Book of a Series, with its Parts and Loose Chapters by id and its details, as a Part has them. */
+export type ManuscriptBook = {
+  id: string;
+  title: string;
+  top: string[];
+  status?: string;
+  tags?: string[];
+  image?: string;
+  wordTarget?: number;
+};
 /** A Part, with its Chapters by id and its details, as a Chapter has them. */
 export type ManuscriptPart = {
   id: string;
   title: string;
   chapters: string[];
+  /** The id of the Book it is in; absent unless the Project is a Series. */
+  book?: string;
   status?: string;
   tags?: string[];
   image?: string;
@@ -316,6 +343,8 @@ export type ManuscriptChapter = {
   scenes: ManuscriptScene[];
   /** The id of the Part it is in; absent for a Loose or Unplaced Chapter. */
   part?: string;
+  /** The id of the Book it is in; absent unless the Project is a Series, and for an Unplaced Chapter. */
+  book?: string;
   /** In no Part and nowhere in the top-level order: shown after the rest. */
   unplaced?: true;
   status?: string;
@@ -343,6 +372,7 @@ export type MovableKind =
   | 'scene'
   | 'chapter'
   | 'part'
+  | 'book'
   | 'entry'
   | 'conversation';
 
@@ -350,7 +380,7 @@ export type MovableKind =
  * A deleted Scene or Chapter, or a version of a unit set aside when its
  * Conflict was resolved, recoverable until Trash is emptied. A Scene names the
  * Chapter it was deleted from, if it had one; a Chapter lists the Scenes
- * deleted with it, and a Part the Chapters. A version's `title` names its unit, as in “Opening” or the
+ * deleted with it, a Part the Chapters, and a Book its Parts and Loose Chapters. A version's `title` names its unit, as in “Opening” or the
  * Outline of “Opening”; restoring it brings the Conflict back.
  */
 export type TrashItem =
@@ -381,6 +411,19 @@ export type TrashItem =
       id: string;
       title: string;
       trashedAt: number;
+      chapters: { id: string; title: string; scenes: SceneNode[] }[];
+    }
+  | {
+      /** A Book, with its Parts and its Loose Chapters. */
+      kind: 'book';
+      id: string;
+      title: string;
+      trashedAt: number;
+      parts: {
+        id: string;
+        title: string;
+        chapters: { id: string; title: string; scenes: SceneNode[] }[];
+      }[];
       chapters: { id: string; title: string; scenes: SceneNode[] }[];
     }
   | {

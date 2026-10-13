@@ -50,6 +50,8 @@ export type Command = (
   | { type: 'newScene'; above: boolean }
   /** Below, or `above`, the current Chapter, starting in rename. */
   | { type: 'newChapter'; above: boolean }
+  /** A Book after the last, starting in rename; a Project of one Book becomes a Series. */
+  | { type: 'newBook' }
   /** An Entry of `entryType`, or without one, the menu of types to pick from. */
   | { type: 'newEntry'; entryType?: EntryType }
   /**

@@ -19,7 +19,8 @@ export type QuoteJump = { text: string; count: number };
  * `focusAt` puts the cursor there, `quote` selects the quote where it is, and `onCursor` hears
  * where the Author moves it. `onProse` hears the Prose as it changes, and
  * `onSelection` the text selected in it. Its right-click menu splits it,
- * when it is `splittable`, which its element says too.
+ * when it is `splittable`, and to the next Chapter when it `splitsToNext`
+ * too, which its element says too.
  */
 export function SceneEditor({
   sceneId,
@@ -31,6 +32,7 @@ export function SceneEditor({
   onProse,
   onSelection,
   splittable = false,
+  splitsToNext = false,
 }: {
   sceneId: string;
   language: ProseLanguage;
@@ -41,6 +43,7 @@ export function SceneEditor({
   onProse?(sceneId: string, markdown: string): void;
   onSelection?(text: string): void;
   splittable?: boolean;
+  splitsToNext?: boolean;
 }) {
   const [markdown, setMarkdown] = useState<string | null>(null);
   const select = useMemo(
@@ -85,6 +88,7 @@ export function SceneEditor({
         lang: language,
         'data-scene': sceneId,
         'data-split': String(splittable),
+        'data-split-next': String(splittable && splitsToNext),
       }}
       autofocus={autofocus}
       focusAt={focusAt}
@@ -95,7 +99,7 @@ export function SceneEditor({
       className="editor"
       onContextMenu={(event) => {
         event.preventDefault();
-        window.shell.showProseMenu(splittable);
+        window.shell.showProseMenu(splittable, splittable && splitsToNext);
       }}
     />
   );

@@ -12,6 +12,7 @@ import {
   partName,
   PROJECT_OUTLINE,
   type Manuscript,
+  type ManuscriptBook,
   type ManuscriptChapter,
   type ManuscriptPart,
   type ManuscriptScene,
@@ -21,6 +22,7 @@ import {
 import type { TodoLink } from '../shared/todo';
 import { addTodoItem, Menu } from './Binder';
 import {
+  bookManuscript,
   chapterNumbers,
   topItems,
   unplacedChapters,
@@ -216,7 +218,7 @@ function OwnCard({
   view,
   onView,
 }: ViewProps & {
-  unit: ManuscriptPart | ManuscriptChapter;
+  unit: ManuscriptBook | ManuscriptPart | ManuscriptChapter;
   language: ProseLanguage;
   reveal?: Reveal;
 }) {
@@ -241,12 +243,22 @@ function OwnCard({
   );
 }
 
+/** What opens from a card on the Project's or a Book's Corkboard. */
+type LaneNavigation = {
+  onOpenScene(id: string): void;
+  onOpenChapter(id: string): void;
+  onOpenPart(id: string): void;
+  /** Starts a Todo linked to a card's unit, from its menu. */
+  onAddTodo(link: TodoLink): void;
+};
+
 /**
  * The Project Outline in a wide card, then a lane per Part and per Loose
  * Chapter, in order: a Part's card opening sideways to its Chapters' cards,
- * a Chapter's to its Scenes'. The Unplaced Chapters, then the Unplaced
- * Scenes, come last, lanes of their own. Lanes start closed. `reveal` goes
- * to the Project Outline.
+ * a Chapter's to its Scenes'. In a Series, the Series Outline, then a lane
+ * per Book, opening to its Parts' and Loose Chapters' cards. The Unplaced
+ * Chapters, then the Unplaced Scenes, come last, lanes of their own. Lanes
+ * start closed. `reveal` goes to the Project Outline.
  */
 export function ProjectCorkboard({
   manuscript,
@@ -254,29 +266,108 @@ export function ProjectCorkboard({
   reveal,
   view,
   onView,
+  onOpenBook,
+  ...navigation
+}: ViewProps &
+  LaneNavigation & {
+    manuscript: Manuscript;
+    language: ProseLanguage;
+    reveal?: Reveal;
+    onOpenBook(id: string): void;
+  }) {
+  const title = manuscript.books ? 'Series Outline' : 'Project Outline';
+  return (
+    <CorkboardSheet view={view}>
+      <div className="corkboard-title">
+        <h2 className="centre-title">{title}</h2>
+        <ViewSwitch view={view} onView={onView} />
+      </div>
+      <article className="card wide own" aria-label={title}>
+        <OutlineNotes
+          unitId={PROJECT_OUTLINE}
+          language={language}
+          withNotes={false}
+          reveal={reveal}
+        />
+      </article>
+      <Lanes
+        manuscript={manuscript}
+        language={language}
+        onOpenBook={onOpenBook}
+        {...navigation}
+      />
+    </CorkboardSheet>
+  );
+}
+
+/**
+ * A Book of a Series as index cards, as a Project of one Book shows: its
+ * own Outline and Notes in a wide card, then a lane per Part and per Loose
+ * Chapter, its Chapters numbered from its first. `reveal` goes to the
+ * Book's Outline.
+ */
+export function BookCorkboard({
+  book,
+  manuscript,
+  language,
+  reveal,
+  view,
+  onView,
+  ...navigation
+}: ViewProps &
+  LaneNavigation & {
+    book: ManuscriptBook;
+    manuscript: Manuscript;
+    language: ProseLanguage;
+    reveal?: Reveal;
+  }) {
+  return (
+    <CorkboardSheet view={view}>
+      <OwnCard
+        unit={book}
+        language={language}
+        reveal={reveal}
+        view={view}
+        onView={onView}
+      />
+      <Lanes
+        manuscript={bookManuscript(manuscript, book.id)}
+        language={language}
+        {...navigation}
+      />
+    </CorkboardSheet>
+  );
+}
+
+/**
+ * The lanes of a Corkboard: a lane per Book of a Series, or per Part and
+ * Loose Chapter, then the Unplaced Chapters' and Scenes'.
+ */
+function Lanes({
+  manuscript,
+  language,
   onOpenScene,
   onOpenChapter,
   onOpenPart,
+  onOpenBook,
   onAddTodo,
-}: ViewProps & {
+}: LaneNavigation & {
   manuscript: Manuscript;
   language: ProseLanguage;
-  reveal?: Reveal;
-  onOpenScene(id: string): void;
-  onOpenChapter(id: string): void;
-  onOpenPart(id: string): void;
-  /** Starts a Todo linked to a card's unit, from its menu. */
-  onAddTodo(link: TodoLink): void;
+  onOpenBook?(id: string): void;
 }) {
   const [shown, setShown] = useState<ReadonlySet<string>>(() => new Set());
+  const { books } = manuscript;
   const items = topItems(manuscript);
   const unplaced = unplacedChapters(manuscript);
   const numbers = chapterNumbers(manuscript);
   const hasParts = items.some((item) => item.kind === 'part');
   const lanes = [
-    ...items.map((item) =>
-      item.kind === 'part' ? item.part.id : item.chapter.id,
-    ),
+    ...(books
+      ? books.map((b) => b.id)
+      : items.map((item) =>
+          item.kind === 'part' ? item.part.id : item.chapter.id,
+        )),
     ...unplaced.map((c) => c.id),
     ...(manuscript.unplaced.length > 0 ? [UNPLACED] : []),
   ];
@@ -285,7 +376,7 @@ export function ProjectCorkboard({
     if (!next.delete(id)) next.add(id);
     setShown(next);
   };
-  const what = hasParts ? '' : ' Scenes';
+  const what = hasParts || books ? '' : ' Scenes';
 
   const chapterLane = (chapter: ManuscriptChapter) => (
     <Lane
@@ -315,22 +406,45 @@ export function ProjectCorkboard({
     </Lane>
   );
 
-  return (
-    <CorkboardSheet view={view}>
-      <div className="corkboard-title">
-        <h2 className="centre-title">Project Outline</h2>
-        <ViewSwitch view={view} onView={onView} />
-      </div>
-      <article className="card wide own" aria-label="Project Outline">
-        <OutlineNotes
-          unitId={PROJECT_OUTLINE}
+  /** A Book's Parts' and Loose Chapters' cards, in order. */
+  const bookCards = (bookId: string) => {
+    const cards = topItems(bookManuscript(manuscript, bookId));
+    if (cards.length === 0) {
+      return <p className="corkboard-empty">No Chapters yet.</p>;
+    }
+    return cards.map((item) =>
+      item.kind === 'part' ? (
+        <UnitCard
+          key={item.part.id}
+          unit={item.part}
+          className="card part"
           language={language}
-          withNotes={false}
-          reveal={reveal}
+          onOpen={() => onOpenPart(item.part.id)}
+          onAddTodo={() => onAddTodo({ kind: 'part', id: item.part.id })}
         />
-      </article>
+      ) : (
+        <ChapterCard
+          key={item.chapter.id}
+          chapter={item.chapter}
+          number={numbers.get(item.chapter.id)}
+          language={language}
+          onOpen={() => onOpenChapter(item.chapter.id)}
+          onAddTodo={() => onAddTodo({ kind: 'chapter', id: item.chapter.id })}
+        />
+      ),
+    );
+  };
+
+  return (
+    <>
       <div className="corkboard-heading">
         <h3>
+          {books && (
+            <>
+              Books <span className="corkboard-count">{books.length}</span>
+              {' · '}
+            </>
+          )}
           {hasParts && (
             <>
               {partName(manuscript.partLabel, true)}{' '}
@@ -355,37 +469,57 @@ export function ProjectCorkboard({
           Hide all{what}
         </button>
       </div>
-      {items.map((item) => {
-        if (item.kind === 'chapter') return chapterLane(item.chapter);
-        const { part, chapters } = item;
-        return (
-          <Lane
-            key={part.id}
-            title={part.title}
-            what="Chapters"
-            count={chapters.length}
-            shown={shown.has(part.id)}
-            onToggle={() => toggle(part.id)}
-            cards={
-              <ChapterCards
-                chapters={chapters}
-                numbers={numbers}
+      {books?.map((book) => (
+        <Lane
+          key={book.id}
+          title={book.title}
+          what="Cards"
+          count={book.top.length}
+          shown={shown.has(book.id)}
+          onToggle={() => toggle(book.id)}
+          cards={bookCards(book.id)}
+        >
+          <UnitCard
+            unit={book}
+            className="card own book"
+            language={language}
+            onOpen={() => onOpenBook?.(book.id)}
+            onAddTodo={() => onAddTodo({ kind: 'book', id: book.id })}
+          />
+        </Lane>
+      ))}
+      {!books &&
+        items.map((item) => {
+          if (item.kind === 'chapter') return chapterLane(item.chapter);
+          const { part, chapters } = item;
+          return (
+            <Lane
+              key={part.id}
+              title={part.title}
+              what="Chapters"
+              count={chapters.length}
+              shown={shown.has(part.id)}
+              onToggle={() => toggle(part.id)}
+              cards={
+                <ChapterCards
+                  chapters={chapters}
+                  numbers={numbers}
+                  language={language}
+                  onOpenChapter={onOpenChapter}
+                  onAddTodo={onAddTodo}
+                />
+              }
+            >
+              <UnitCard
+                unit={part}
+                className="card own part"
                 language={language}
-                onOpenChapter={onOpenChapter}
-                onAddTodo={onAddTodo}
+                onOpen={() => onOpenPart(part.id)}
+                onAddTodo={() => onAddTodo({ kind: 'part', id: part.id })}
               />
-            }
-          >
-            <UnitCard
-              unit={part}
-              className="card own part"
-              language={language}
-              onOpen={() => onOpenPart(part.id)}
-              onAddTodo={() => onAddTodo({ kind: 'part', id: part.id })}
-            />
-          </Lane>
-        );
-      })}
+            </Lane>
+          );
+        })}
       {unplaced.length > 0 && (
         <>
           <div className="corkboard-heading">
@@ -415,13 +549,14 @@ export function ProjectCorkboard({
           </div>
         </Lane>
       )}
-    </CorkboardSheet>
+    </>
   );
 }
 
 /**
  * A row of cards: the lane's own card, the control that shows or hides
- * `what` it holds, Scenes or Chapters, and, while shown, their `cards`.
+ * `what` it holds, Scenes, Chapters, or a Book's Parts and Chapters as
+ * Cards, and, while shown, their `cards`.
  */
 function Lane({
   title,
@@ -433,14 +568,15 @@ function Lane({
   children,
 }: {
   title: string;
-  what: 'Scenes' | 'Chapters';
+  what: 'Scenes' | 'Chapters' | 'Cards';
   count: number;
   shown: boolean;
   onToggle(): void;
   cards: ReactNode;
   children: ReactNode;
 }) {
-  const one = what === 'Scenes' ? 'Scene' : 'Chapter';
+  const one =
+    what === 'Scenes' ? 'Scene' : what === 'Cards' ? 'Card' : 'Chapter';
   return (
     <section className="lane" aria-label={`Lane: ${title}`}>
       {children}
@@ -574,7 +710,7 @@ function SceneCard({
 const MISSING_TEXT = 'Missing, possibly not synced yet.';
 
 type UnitCardProps = {
-  unit: ManuscriptPart | ManuscriptChapter | ManuscriptScene;
+  unit: ManuscriptBook | ManuscriptPart | ManuscriptChapter | ManuscriptScene;
   number?: number;
   className: string;
   /** Set for a Scene whose file hasn't arrived. */
@@ -695,9 +831,10 @@ function CardTitle({
   onOpen,
   onAddTodo,
 }: {
-  unit: ManuscriptPart | ManuscriptChapter | ManuscriptScene;
+  unit: ManuscriptBook | ManuscriptPart | ManuscriptChapter | ManuscriptScene;
   number?: number;
   describedBy?: string;
+
   onOpen(): void;
   onAddTodo(): void;
 }) {

@@ -1,14 +1,20 @@
 import type { EntrySummary, Manuscript, TrashItem } from './project-types';
 
-/** What a Todo may link to: one Scene, Chapter, Part or Entry. */
+/** What a Todo may link to: one Scene, Chapter, Part, Book or Entry. */
 export type TodoLink = {
-  kind: 'scene' | 'chapter' | 'part' | 'entry';
+  kind: 'scene' | 'chapter' | 'part' | 'book' | 'entry';
   id: string;
 };
 
-const LINK_KINDS: readonly unknown[] = ['scene', 'chapter', 'part', 'entry'];
+const LINK_KINDS: readonly unknown[] = [
+  'scene',
+  'chapter',
+  'part',
+  'book',
+  'entry',
+];
 
-/** Whether `value` is a link to a Scene, Chapter, Part or Entry by its id. */
+/** Whether `value` is a link to a Scene, Chapter, Part, Book or Entry by its id. */
 export function isTodoLink(value: unknown): value is TodoLink {
   if (typeof value !== 'object' || value === null) return false;
   const { kind, id } = value as Record<string, unknown>;
@@ -34,8 +40,9 @@ export type Todo = {
 
 /**
  * The Todos This context shows for the unit open, `link`: those linked to it
- * and to the units containing it, a Scene's Chapter and Part, or a Chapter's
- * Part, in the Author's order; none with nothing open.
+ * and to the units containing it, a Scene's Chapter, Part and Book, a
+ * Chapter's Part and Book, or a Part's Book, in the Author's order; none with
+ * nothing open.
  */
 export function inContext(
   todos: Todo[],
@@ -56,6 +63,11 @@ export function inContext(
     units.push({ kind: 'chapter', id: chapter.id });
   }
   if (chapter?.part) units.push({ kind: 'part', id: chapter.part });
+  const book =
+    link.kind === 'part'
+      ? manuscript.parts?.find((p) => p.id === link.id)?.book
+      : chapter?.book;
+  if (book) units.push({ kind: 'book', id: book });
   return todos.filter((todo) =>
     units.some(
       (unit) => todo.link?.kind === unit.kind && todo.link.id === unit.id,
@@ -73,7 +85,7 @@ export type TodoChange = {
 /**
  * A link as the Todo shows it: the unit's title, and while the unit is in
  * Trash, or `drawer`, the id of the item that holds it (a Scene's Chapter's,
- * if the Scene went with it, or the Part's, if the Chapter did).
+ * if the Scene went with it, or the Part's or Book's, if the Chapter did).
  */
 export type LinkView = { title: string; trashId?: string; drawer?: true };
 
@@ -96,6 +108,9 @@ export function linkView(
   } else if (kind === 'part') {
     const part = manuscript.parts?.find((p) => p.id === id);
     if (part) return { title: part.title };
+  } else if (kind === 'book') {
+    const book = manuscript.books?.find((b) => b.id === id);
+    if (book) return { title: book.title };
   } else {
     const scene = [
       ...manuscript.chapters.flatMap((c) => c.scenes),
@@ -119,11 +134,20 @@ function keptView({ kind, id }: TodoLink, items: TrashItem[]): LinkView | null {
       const scene = item.scenes.find((s) => s.id === id);
       if (scene) return { title: scene.title, trashId: item.id };
     }
-    if (item.kind === 'part' && (kind === 'chapter' || kind === 'scene')) {
+    if (item.kind === 'part' || item.kind === 'book') {
+      const parts = item.kind === 'book' ? item.parts : [item];
+      const chapters = [
+        ...(item.kind === 'book' ? item.chapters : []),
+        ...parts.flatMap((p) => p.chapters),
+      ];
       const units =
-        kind === 'chapter'
-          ? item.chapters
-          : item.chapters.flatMap((c) => c.scenes);
+        kind === 'part'
+          ? parts.filter((p) => p.id !== item.id)
+          : kind === 'chapter'
+            ? chapters
+            : kind === 'scene'
+              ? chapters.flatMap((c) => c.scenes)
+              : [];
       const unit = units.find((u) => u.id === id);
       if (unit) return { title: unit.title, trashId: item.id };
     }

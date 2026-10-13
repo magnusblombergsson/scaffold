@@ -58,7 +58,7 @@ type Session<W, S> = {
   store?: S;
   docked?: DockedPanes;
   /** Set while the window's Prose has focus. */
-  prose?: { splittable: boolean };
+  prose?: { splittable: boolean; splitsToNextChapter: boolean };
   /** Set in zen mode: whether the window was full screen before. */
   zen?: boolean;
   /** Stops sending the window its store's events. */
@@ -138,13 +138,24 @@ export class ProjectWindows<
 
   /**
    * Notes that the window's Prose has, or has not, the focus, and whether
-   * its Scene can be split; true if that is news.
+   * its Scene can be split, and to the next Chapter; true if that is news.
    */
-  setProseFocus(window: W, focused: boolean, splittable: boolean): boolean {
+  setProseFocus(
+    window: W,
+    focused: boolean,
+    splittable: boolean,
+    splitsToNextChapter: boolean,
+  ): boolean {
     const session = this.sessionOf(window);
     const was = session.prose;
-    if (focused === !!was && splittable === !!was?.splittable) return false;
-    session.prose = focused ? { splittable } : undefined;
+    if (
+      focused === !!was &&
+      splittable === !!was?.splittable &&
+      splitsToNextChapter === !!was?.splitsToNextChapter
+    ) {
+      return false;
+    }
+    session.prose = focused ? { splittable, splitsToNextChapter } : undefined;
     return true;
   }
 
@@ -181,6 +192,7 @@ export class ProjectWindows<
       zen: session.zen !== undefined,
       proseFocused: !!session.prose,
       splittable: session.prose?.splittable ?? false,
+      splitsToNextChapter: session.prose?.splitsToNextChapter ?? false,
     };
   }
 

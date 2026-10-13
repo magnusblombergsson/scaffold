@@ -41,14 +41,16 @@ export function startListed(
 
 /**
  * The rows Expand all opens, in order: in Chapter scope that Chapter's, in
- * Project scope every one, and each Part lists its Chapters, and each
- * Chapter and the Unplaced Scenes their Scenes. Never the Scene being
- * written, whose Outline & Notes are above the Prose, nor a missing Scene.
+ * Project scope every one, the Book's after the Project Outline's in a
+ * Series, and each Part lists its Chapters, and each Chapter and the
+ * Unplaced Scenes their Scenes. Never the Scene being written, whose Outline
+ * & Notes are above the Prose, nor a missing Scene.
  */
 export function expandable(
   manuscript: Manuscript,
   scope: OverviewScope,
   writing: Writing,
+  bookId?: string,
 ): string[] {
   const scenes = (list: ManuscriptScene[]) =>
     list.filter((s) => s.id !== writing.sceneId && !s.missing).map((s) => s.id);
@@ -59,6 +61,7 @@ export function expandable(
   }
   return [
     PROJECT_OUTLINE,
+    ...(bookId ? [bookId] : []),
     ...topItems(manuscript).flatMap((item) =>
       item.kind === 'part'
         ? [item.part.id, ...item.chapters.flatMap(chapterIds)]

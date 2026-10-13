@@ -50,12 +50,18 @@ const projectHandlers: Handlers<
   flush: ({ store }) => store.flush(),
   hasUnsaved: async ({ store }) => store.hasUnsaved(),
   saveStatuses: async ({ store }) => store.saveStatuses(),
-  createChapter: ({ store }, index, title, partId) =>
-    store.createChapter(index, title, partId),
-  createPart: ({ store }, index, title) => store.createPart(index, title),
+  createChapter: ({ store }, index, title, partId, bookId) =>
+    store.createChapter(index, title, partId, bookId),
+  createPart: ({ store }, index, title, bookId) =>
+    store.createPart(index, title, bookId),
   renamePart: ({ store }, partId, title) => store.renamePart(partId, title),
-  movePart: ({ store }, partId, index) => store.movePart(partId, index),
+  movePart: ({ store }, partId, index, bookId) =>
+    store.movePart(partId, index, bookId),
   trashPart: ({ store }, partId) => store.trashPart(partId),
+  createBook: ({ store }, index, title) => store.createBook(index, title),
+  renameBook: ({ store }, bookId, title) => store.renameBook(bookId, title),
+  moveBook: ({ store }, bookId, index) => store.moveBook(bookId, index),
+  trashBook: ({ store }, bookId) => store.trashBook(bookId),
   createScene: ({ store }, chapterId, index, title) =>
     store.createScene(chapterId, index, title),
   renameChapter: ({ store }, chapterId, title) =>
@@ -63,8 +69,8 @@ const projectHandlers: Handlers<
   renameScene: ({ store }, sceneId, title) => store.renameScene(sceneId, title),
   splitScene: ({ store }, sceneId, cut, toNextChapter) =>
     store.splitScene(sceneId, cut, toNextChapter),
-  moveChapter: ({ store }, chapterId, index, partId) =>
-    store.moveChapter(chapterId, index, partId),
+  moveChapter: ({ store }, chapterId, index, partId, bookId) =>
+    store.moveChapter(chapterId, index, partId, bookId),
   moveScene: ({ store }, sceneId, chapterId, index) =>
     store.moveScene(sceneId, chapterId, index),
   trashScene: ({ store }, sceneId) => store.trashScene(sceneId),

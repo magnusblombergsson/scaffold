@@ -169,3 +169,74 @@ describe('with Parts', () => {
     });
   });
 });
+
+describe('in a Series', () => {
+  const series: Manuscript = {
+    chapters: [
+      {
+        id: 'c1',
+        title: 'One',
+        book: 'b1',
+        scenes: [{ id: 's1', title: 'S1' }],
+      },
+      { id: 'c2', title: 'Two', book: 'b2', scenes: [] },
+      { id: 'c3', title: 'Three', book: 'b2', scenes: [] },
+      { id: 'c9', title: 'Stray', unplaced: true, scenes: [] },
+    ],
+    top: ['c1', 'c2', 'c3'],
+    books: [
+      { id: 'b1', title: 'Book 1', top: ['c1'] },
+      { id: 'b2', title: 'Book 2', top: ['c2', 'c3'] },
+    ],
+    unplaced: [],
+  };
+
+  it("puts a new Chapter beside the current one among its Book's", () => {
+    const current = { kind: 'chapter', id: 'c2' } as const;
+    expect(chapterInsertion(series, current, false)).toEqual({
+      index: 1,
+      bookId: 'b2',
+    });
+    expect(chapterInsertion(series, { kind: 'scene', id: 's1' }, true)).toEqual(
+      { index: 0, bookId: 'b1' },
+    );
+  });
+
+  it('puts a new Chapter last in the current Book, or first when above', () => {
+    const current = { kind: 'book', id: 'b2' } as const;
+    expect(chapterInsertion(series, current, false)).toEqual({
+      index: 2,
+      bookId: 'b2',
+    });
+    expect(chapterInsertion(series, current, true)).toEqual({
+      index: 0,
+      bookId: 'b2',
+    });
+  });
+
+  it('puts a new Chapter at the end of the last Book, or the start of the first, without a current one', () => {
+    expect(chapterInsertion(series, null, false)).toEqual({
+      index: 2,
+      bookId: 'b2',
+    });
+    expect(chapterInsertion(series, null, true)).toEqual({
+      index: 0,
+      bookId: 'b1',
+    });
+    expect(
+      chapterInsertion(series, { kind: 'chapter', id: 'c9' }, false),
+    ).toEqual({ index: 2, bookId: 'b2' });
+  });
+
+  it("puts a new Scene at the end of the current Book's last Chapter, or the start of its first", () => {
+    const current = { kind: 'book', id: 'b2' } as const;
+    expect(sceneInsertion(series, current, false)).toEqual({
+      chapterId: 'c3',
+      index: 0,
+    });
+    expect(sceneInsertion(series, current, true)).toEqual({
+      chapterId: 'c2',
+      index: 0,
+    });
+  });
+});
