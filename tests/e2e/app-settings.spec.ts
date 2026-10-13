@@ -50,6 +50,13 @@ async function windowsShowing(app: ElectronApplication) {
   return new Map(names);
 }
 
+/** The title of `page`'s window, as the taskbar and Alt+Tab show it. */
+async function windowTitle(app: ElectronApplication, page: Page) {
+  return (await app.browserWindow(page)).evaluate((window) =>
+    window.getTitle(),
+  );
+}
+
 function projectId(projectPath: string): Promise<string> {
   return readFile(path.join(projectPath, 'project.json'), 'utf8').then(
     (text) => JSON.parse(text).id,
@@ -107,6 +114,48 @@ test('the Projects open at quit reopen in their windows, at the Scene and binder
       await second.browserWindow(reopened)
     ).evaluate((window) => window.getBounds()),
   ).toEqual(bounds);
+  await second.close();
+});
+
+test('each window is titled with the name of its Project, and the start screen with the app', async () => {
+  const novel = path.join(tempDir(), 'My Novel');
+  const stories = path.join(tempDir(), 'Short Stories');
+  const first = await launch(tempDir());
+  const storiesPage = await first.firstWindow();
+  await expect(
+    storiesPage.getByRole('button', { name: 'New Project…' }),
+  ).toBeVisible();
+  expect(await windowTitle(first, storiesPage)).toBe('Scaffold');
+
+  await newProject(first, storiesPage, stories);
+  await expect(storiesPage.getByLabel('Prose')).toBeFocused();
+  expect(await windowTitle(first, storiesPage)).toBe(
+    'Short Stories — Scaffold',
+  );
+  await answerDialogs(first, novel);
+  const [novelPage] = await Promise.all([
+    first.waitForEvent('window'),
+    chooseMenu(first, ['File', 'New Project…'], storiesPage),
+  ]);
+  await expect(novelPage.locator('.project-name')).toHaveText('My Novel');
+  expect(await windowTitle(first, novelPage)).toBe('My Novel — Scaffold');
+  expect(await windowTitle(first, storiesPage)).toBe(
+    'Short Stories — Scaffold',
+  );
+
+  await novelPage.reload();
+  await expect(novelPage.locator('.project-name')).toHaveText('My Novel');
+  expect(await windowTitle(first, novelPage)).toBe('My Novel — Scaffold');
+  await first.close();
+
+  const second = await launch(tempDir());
+  await expect.poll(() => second.windows().length).toBe(2);
+  const windows = await windowsShowing(second);
+  for (const name of ['My Novel', 'Short Stories']) {
+    expect(await windowTitle(second, windows.get(name)!)).toBe(
+      `${name} — Scaffold`,
+    );
+  }
   await second.close();
 });
 

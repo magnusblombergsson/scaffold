@@ -240,6 +240,8 @@ function createWindow(store: ProjectStore | null): BrowserWindow {
       preload: path.join(__dirname, 'preload.cjs'),
     },
   });
+  // The title is the shell's: index.html's <title> never replaces it.
+  window.on('page-title-updated', (event) => event.preventDefault());
   if (store) attach(window.webContents, store);
   // Links, such as to Anthropic Console, open in the browser.
   window.webContents.setWindowOpenHandler(({ url }) => {
@@ -312,9 +314,16 @@ function windowShowing(projectPath: string): BrowserWindow | undefined {
   return (contents && BrowserWindow.fromWebContents(contents)) || undefined;
 }
 
-/** Makes `store` the Project of the window with these contents. */
+/**
+ * Makes `store` the Project of the window with these contents, and titles
+ * the window with its name.
+ */
 function attach(contents: WebContents, store: ProjectStore): void {
   projectWindows.attach(contents, store);
+  // The Project's name first, so it survives the taskbar cutting it short.
+  BrowserWindow.fromWebContents(contents)?.setTitle(
+    `${store.displayName} — Scaffold`,
+  );
   settings.recordOpened({
     path: store.path,
     id: store.id,
