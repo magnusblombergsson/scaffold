@@ -163,6 +163,74 @@ test('the Author brainstorms in the Brainstorm room, decides its Proposals inlin
   await app.close();
 });
 
+test('the Author accepts a Relation the Assistant proposed, with its words edited, and Peeks at either Entry from it', async () => {
+  const projectPath = path.join(tempDir(), 'My Novel');
+  const app = await launch(tempDir(), { anthropicUrl: anthropic.url });
+  await answerDialogs(app, projectPath);
+  const page = await app.firstWindow();
+  await page.getByRole('button', { name: 'New Project…' }).click();
+  await addAnthropicKey(page);
+  await roomButton(page, 'Story Bible').click();
+  const ids: Record<string, string> = {};
+  for (const [name, description] of [
+    ['Mara', 'Runs the inn.'],
+    ['Tobin', 'The stable boy.'],
+  ]) {
+    const before = new Set(
+      await readdir(path.join(projectPath, 'bible')).catch(() => []),
+    );
+    await page.getByRole('button', { name: 'New Entry' }).click();
+    await page
+      .getByRole('menuitem', { name: 'Character', exact: true })
+      .click();
+    await fill(page, 'Name', name!);
+    await fill(page, 'Description', description!);
+    await page.keyboard.press('ControlOrMeta+s');
+    await expect(page.locator('.save-status.confirmed')).toBeVisible();
+    const file = (await readdir(path.join(projectPath, 'bible'))).find(
+      (f) => !before.has(f),
+    )!;
+    ids[name!] = path.basename(file, '.md');
+  }
+  await switchTo(page, 'Brainstorm');
+
+  anthropic.calls.push({
+    reply: [
+      'Then the Story Bible should say so.\n\n',
+      block({ from: ids.Mara, to: ids.Tobin, label: 'mother of' }),
+    ],
+  });
+  const room = page.getByRole('main', { name: 'Brainstorm' });
+  await room
+    .getByRole('textbox', { name: 'Message' })
+    .fill('Mara raised Tobin.');
+  await room.getByRole('button', { name: 'Send' }).click();
+
+  const card = room.getByRole('region', {
+    name: 'Proposal: Mara is mother of Tobin',
+  });
+  await expect(card).toBeVisible();
+  await card.getByRole('button', { name: 'Tobin', exact: true }).click();
+  await expect(
+    page.getByRole('dialog', { name: 'Story Bible peek' }),
+  ).toContainText('The stable boy.');
+  await page.keyboard.press('Escape');
+
+  await card.getByRole('button', { name: 'Edit…' }).click();
+  await card
+    .getByRole('textbox', { name: 'Edited words' })
+    .fill('foster mother of');
+  await card.getByRole('button', { name: 'Accept edited' }).click();
+  await expect(card).toContainText('✓ Accepted (edited)');
+
+  await roomButton(page, 'Story Bible').click();
+  await page.getByRole('button', { name: 'Mara', exact: true }).first().click();
+  await expect(page.getByRole('region', { name: 'Relations' })).toContainText(
+    'foster mother of',
+  );
+  await app.close();
+});
+
 test('every side pane can be resized, and keeps its width', async () => {
   const projectPath = path.join(tempDir(), 'My Novel');
   const first = await launch(tempDir());

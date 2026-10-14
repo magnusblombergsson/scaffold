@@ -42,6 +42,8 @@ function conversationsOver() {
     moveEntryToTrash: unsupported,
     enqueueWrite: (operation) => operation(),
     passFormatGate: async () => {},
+    relations: () => [],
+    changeRelations: unsupported,
   };
   return { conversations: new Conversations(deps), events, deps };
 }

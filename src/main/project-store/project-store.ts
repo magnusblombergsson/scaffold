@@ -1178,6 +1178,9 @@ export class ProjectStore {
       },
       enqueueWrite: (operation) => this.enqueueWrite(operation),
       passFormatGate: () => this.passFormatGate(),
+      relations: () => this.relations.list(),
+      changeRelations: (change) =>
+        this.changeRelations(() => change(this.relations)),
     });
     this.sessions = new Sessions(
       {
@@ -2666,11 +2669,12 @@ export class ProjectStore {
    * Changes the Relations, then tells the window. They aren't in the tree,
    * so another computer's tree is no reason to wait.
    */
-  private changeRelations(change: () => Promise<void>): Promise<void> {
+  private changeRelations<T>(change: () => Promise<T>): Promise<T> {
     return this.enqueueStructure(async () => {
       await this.passFormatGate();
-      await change();
+      const changed = await change();
       this.emitRelations();
+      return changed;
     });
   }
 

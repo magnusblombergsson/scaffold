@@ -130,6 +130,7 @@ export async function buildContext(
     ],
     request.mode === 'interview' ? request.focus : null,
     asOf,
+    request.mode !== 'writing',
   );
 
   const system: PromptBlock[] = [
@@ -216,13 +217,15 @@ function summaryBlock(text: string, covered: ConversationMessage[]): string {
  * doesn't count, and an Entry seen never is never sent. In a Series, each
  * is as of the `book` the turn is about, its Books being `books` in reading
  * order: a mention is by any name or alias it has had up to it, and one
- * that first appears in a later Book is never sent.
+ * that first appears in a later Book is never sent. Where the Assistant
+ * may `relate` Entries, it is told how, once there are two.
  */
 async function storyBible(
   view: AssistantView,
   texts: string[],
   interview: InterviewFocus | null,
   { books, book }: AsOfBook,
+  relate: boolean,
 ): Promise<{ text: string; ids: string[] }> {
   const summaries = view
     .listEntries()
@@ -259,10 +262,24 @@ async function storyBible(
         ? ['(No Entries for this turn.)']
         : entries.map((entry) => entryText(entry, fields))),
       ...relationsText(view, summaries, entries, { books, book }),
+      ...(relate && entries.length > 1 ? [RELATION_PROPOSALS] : []),
     ].join('\n\n'),
     ids: seen.map((e) => e.id),
   };
 }
+
+/**
+ * How the Assistant proposes a Relation, in Brainstorm and Interview. It is
+ * told with the Story Bible rather than in the Mode's prompt, which the
+ * never-Prose eval checks, as it proposes no text of the story.
+ */
+const RELATION_PROPOSALS = `You may propose a Relation between two of these Entries, naming each by its Id, when what the Author said, the Story Bible or the Prose shows how they relate. "part-of" puts a Place inside another Place, or an Item inside another Item; "same-as" says two Entries of one type are one and the same person or thing; otherwise give a few words as "label", read from the first Entry to the second:
+
+\`\`\`proposal
+{"from": "<Id>", "to": "<Id>", "label": "mother of"}
+\`\`\`
+
+Write "relation": "part-of" or "relation": "same-as" in place of the label for those. Propose "same-as" only when the Story Bible or the Prose clearly supports it, never as a guess. Relate only Entries already in the Story Bible: for one you propose as new, propose the Relation in a later message, once the Author has accepted it.`;
 
 /**
  * The Relations among the `sent` Entries, each a sentence by their names as

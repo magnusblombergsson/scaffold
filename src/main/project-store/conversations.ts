@@ -21,8 +21,22 @@ import { newEntryValue } from '../../shared/entry';
 import {
   entryAsOf,
   removeEvolution,
+  summaryAsOf,
   withEvolved,
 } from '../../shared/evolution';
+import {
+  relationsView,
+  type Relation,
+  type RelationChoice,
+} from '../../shared/relation';
+import {
+  relationProposalSentence,
+  type RelationAddition,
+  type RelationBasis,
+  type RelationNames,
+  type RelationWritten,
+} from '../../shared/relation-proposal';
+import type { Relations } from './relations';
 import { bookIds } from '../../shared/manuscript-order';
 import {
   accept,
@@ -73,6 +87,7 @@ import {
   type Landing,
   parseLog,
   proposedEvent,
+  relationAcceptedEvent,
   type ConversationEvent,
   type LoggedConversation,
   type LoggedProposal,
@@ -131,6 +146,12 @@ export type ConversationsDeps = {
   /** Runs a structure operation, past the format gate. */
   enqueueWrite: <T>(operation: () => Promise<T>) => Promise<T>;
   passFormatGate: () => Promise<void>;
+  /** Every Relation held, as last read or written. */
+  relations: () => Relation[];
+  /** Runs a change to the Relations as a structure operation, past the format gate, then tells the window. */
+  changeRelations: <T>(
+    change: (relations: Relations) => Promise<T>,
+  ) => Promise<T>;
 };
 
 /**
@@ -525,8 +546,19 @@ ${text}`);
       if (fromBook && this.evolvesFrom(proposal) === undefined) {
         throw new ProjectError(
           'cannot-evolve',
-          'A Proposal can be accepted as an Evolution only from a Book after the first',
+          proposal.kind === 'relation'
+            ? 'A Relation can be accepted from its Book on only on a Book after the first'
+            : 'A Proposal can be accepted as an Evolution only from a Book after the first',
         );
+      }
+      if (proposal.kind === 'relation') {
+        const related = await this.acceptRelation(proposal, value, fromBook);
+        await this.appendEvent(
+          conversationId,
+          relationAcceptedEvent(proposalId, related, this.deps.clock.now()),
+        );
+        this.deps.emit({ type: 'proposalsChanged' });
+        return;
       }
       // Seen as of no Book, it would land on what every Book sees.
       if (this.bookGone(proposal)) {
@@ -579,6 +611,31 @@ ${text}`);
   }
 
   /**
+   * Adds the Relation a Proposal proposed, the label as the Author edited
+   * it, if they did, as `acceptProposal`: in every Book, or `fromBook` on,
+   * the Book of its Conversation, its rules checked as it would hold. A
+   * face joining a *same as* group holds from the group's Book, as when
+   * the Room adds it.
+   */
+  private acceptRelation(
+    proposal: DecidedProposal & RelationAddition,
+    value: ProposedValue,
+    fromBook: boolean,
+  ): Promise<RelationWritten> {
+    const book = fromBook ? proposal.book : undefined;
+    return this.deps.changeRelations(async (relations) => {
+      const basis = this.relationBasis(proposal, [book]);
+      const { wrote } = granted(accept(proposal, basis, value));
+      return relations.addAccepted(
+        proposal.from,
+        proposal.to,
+        wrote as RelationChoice,
+        book,
+      );
+    });
+  }
+
+  /**
    * Where accepting a change to a field lands in `unit`: on the Evolution
    * the value its Book sees comes from, or the Entry's own value; `fromBook`,
    * on an Evolution of that Book, which it makes unless there is one.
@@ -621,7 +678,8 @@ ${text}`);
    * when it may be accepted from that Book on: a Book after the first.
    */
   private evolvesFrom(proposal: Proposal): string | undefined {
-    if (proposal.kind !== 'field' || proposal.book === undefined) return;
+    if (proposal.kind !== 'field' && proposal.kind !== 'relation') return;
+    if (proposal.book === undefined) return;
     const books = this.deps.manuscript().books ?? [];
     const index = books.findIndex((b) => b.id === proposal.book);
     return index > 0 ? books[index].title : undefined;
@@ -691,7 +749,9 @@ ${text}`);
       const reloaded =
         proposal.kind === 'new-entry'
           ? await this.undoNewEntry(proposal)
-          : await this.undoChange(proposal);
+          : proposal.kind === 'relation'
+            ? await this.undoRelation(proposal)
+            : await this.undoChange(proposal);
       await this.appendEvent(conversationId, {
         type: 'proposal.undone',
         id: proposalId,
@@ -723,6 +783,20 @@ ${text}`);
     });
     this.refuseUnsaved(ref, after);
     return { ref, value: after };
+  }
+
+  /** Takes away what accepting a Relation wrote, if as written still, as `undoProposal`. */
+  private async undoRelation(
+    proposal: DecidedProposal & RelationAddition,
+  ): Promise<undefined> {
+    await this.deps.changeRelations(async (relations) => {
+      const basis = this.relationBasis(proposal, []);
+      const { undo: wrote } = granted(undo(proposal, basis)) as {
+        undo: RelationWritten;
+      };
+      await relations.takeAway(wrote, proposal.from);
+    });
+    return undefined;
   }
 
   /** Moves a new Entry to Trash, if untouched since the accept, as `undoProposal`. */
@@ -796,14 +870,63 @@ ${text}`);
       name,
       state,
       ...(evolvesFrom !== undefined && { evolvesFrom }),
+      ...(proposal.kind === 'relation' && {
+        names: this.relationNames(proposal),
+      }),
     };
   }
 
   /** A Proposal's target as it is now, for `stateOf`. */
-  private basis(proposal: DecidedProposal): Promise<ProposalBasis> {
+  private async basis(proposal: DecidedProposal): Promise<ProposalBasis> {
+    if (proposal.kind === 'relation') {
+      // In every Book, or from its Book on where the card offers that.
+      const fromItsBook = this.evolvesFrom(proposal) !== undefined;
+      return this.relationBasis(
+        proposal,
+        fromItsBook ? [undefined, proposal.book] : [undefined],
+      );
+    }
     return proposal.kind === 'new-entry'
       ? this.newEntryPlace(proposal.entryId)
       : this.target(proposal);
+  }
+
+  /**
+   * A Relation Proposal's basis: the Entry out of reach, if one is; or every
+   * Relation held, and its rules as each of `ways` would have it hold: from
+   * a Book on, or in every Book with none.
+   */
+  private relationBasis(
+    { from, to }: RelationAddition,
+    ways: readonly (string | undefined)[],
+  ): RelationBasis {
+    for (const id of [from, to]) {
+      const orphaned = this.entryOrphaned(id);
+      if (orphaned) {
+        return { orphaned, name: this.entryName(id) ?? 'An Entry' };
+      }
+    }
+    const relations = this.deps.relations();
+    const books = this.bookIds();
+    const entries = [...this.deps.entries.values()];
+    const views = ways.map((book) =>
+      book !== undefined && books.includes(book)
+        ? relationsView(
+            relations,
+            entries.map((e) => summaryAsOf(e, books, book)),
+            { books, book },
+          )
+        : relationsView(relations, entries),
+    );
+    return { relations, views };
+  }
+
+  /** A Relation Proposal's two Entries, by their names now. */
+  private relationNames({ from, to }: RelationAddition): RelationNames {
+    return {
+      from: this.entryName(from) ?? 'An Entry',
+      to: this.entryName(to) ?? 'An Entry',
+    };
   }
 
   /**
@@ -886,6 +1009,12 @@ ${text}`);
    */
   private proposalName(proposal: Proposal): string {
     if (proposal.kind === 'new-entry') return proposal.proposed.name;
+    if (proposal.kind === 'relation') {
+      return relationProposalSentence(
+        this.relationNames(proposal),
+        proposal.proposed,
+      );
+    }
     if (proposal.kind === 'field') {
       return this.entryName(proposal.entryId) ?? 'An Entry';
     }
