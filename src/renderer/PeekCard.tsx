@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { createContext, useContext, useRef, useState } from 'react';
 import { entryTitle, roleText } from '../shared/entry';
 import {
   ENTRY_TYPE_LABELS,
@@ -8,8 +8,15 @@ import {
 import { entryImageRef, useUnitImage } from './UnitImage';
 import { ViewableImage } from './ImageView';
 import { isKeyField, type KeyFieldItem } from '../shared/key-fields';
+import { relationSentences, type RelationsView } from '../shared/relation';
 import { entryFields, keyFields } from './card-fields';
 import { useCustomFields, useKeyFields } from './StatusAndTags';
+
+/**
+ * The Relations a Peek and a Pinned note show, among the Entries as of the
+ * Book being written; none where there are none to show.
+ */
+export const PeekRelationsContext = createContext<RelationsView | null>(null);
 
 /**
  * An Entry in the Peek, shortened: its image small, type and name, then
@@ -21,7 +28,8 @@ import { useCustomFields, useKeyFields } from './StatusAndTags';
  * the large view. Its parts keep their places whatever is chosen, so that a
  * type's defaults show as the Peek always did: the Role under the name, then
  * the aliases and description, then the other Key fields in the order the
- * Entry view shows them.
+ * Entry view shows them, then its Relations, each a sentence as on its page,
+ * none cut short.
  *
  * In a Peek, its header has ↗ and, in Writing, 📌; in a Pinned note, whose
  * header has the name and those, it has neither.
@@ -52,6 +60,11 @@ export function PeekCard({
   const fields = expanded
     ? entryFields(entry, customFields)
     : keyFields(entry, customFields, choices);
+  const relationsView = useContext(PeekRelationsContext);
+  const relations =
+    relationsView && shows('relations')
+      ? relationSentences(relationsView, entry.id)
+      : [];
   return (
     <article
       ref={card}
@@ -125,6 +138,19 @@ export function PeekCard({
             <dd>{text}</dd>
           </div>
         ))}
+        {relations.length > 0 && (
+          <div>
+            <dt>Relations</dt>
+            <dd className="peek-card-relations">
+              <ul>
+                {relations.map((sentence, index) => (
+                  // Two Relations may read the same.
+                  <li key={index}>{sentence}</li>
+                ))}
+              </ul>
+            </dd>
+          </div>
+        )}
         {expanded && (
           <div>
             <dt>Assistant sees it</dt>

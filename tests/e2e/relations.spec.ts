@@ -134,3 +134,68 @@ test('in a Series, a Relation holds from the Book the Author sets', async () => 
   ).toHaveText('From Reveal');
   await app.close();
 });
+
+test('a Peek shows an Entry’s Relations as a Key field, a Place’s by default', async () => {
+  const projectPath = path.join(tempDir(), 'My Novel');
+  const { app, page } = await newProject(projectPath);
+  await newEntry(page, 'Place', 'The House');
+  await newEntry(page, 'Place', 'The Basement');
+  await page.getByRole('button', { name: '+ Add a Relation' }).click();
+  await page.getByLabel('Other Entry').selectOption({ label: 'The House' });
+  await page.getByRole('button', { name: 'Add', exact: true }).click();
+  await newEntry(page, 'Character', 'Superman');
+  await newEntry(page, 'Character', 'Clark');
+  await page.getByRole('button', { name: '+ Add a Relation' }).click();
+  await page.getByLabel('Kind of Relation').selectOption('same-as');
+  await page.getByLabel('Other Entry').selectOption({ label: 'Superman' });
+  await page.getByRole('button', { name: 'Add', exact: true }).click();
+  await expect(relations(page)).toHaveText(['Clark — same as — Superman']);
+
+  const peek = page.getByRole('dialog', { name: 'Story Bible peek' });
+  const shown = peek.locator('.peek-card-relations li');
+  /** Peeks at the Entry `name` highlights in the Scene. */
+  async function peekAt(name: string) {
+    await roomButton(page, 'Writing').click();
+    await page.getByRole('button', { name: 'Scene 1', exact: true }).click();
+    await page.locator('.mention', { hasText: name }).click();
+    await expect(peek).toBeVisible();
+  }
+  await roomButton(page, 'Writing').click();
+  await page.getByRole('button', { name: 'Scene 1', exact: true }).click();
+  await page.getByLabel('Prose').click();
+  await page.keyboard.type('Clark went down to The Basement.');
+
+  // A Place's, with no setup.
+  await peekAt('The Basement');
+  await expect(shown).toHaveText(['The Basement — part of — The House']);
+  await page.keyboard.press('Escape');
+
+  // A Character's only once chosen; Clark's name still opens only Clark.
+  await peekAt('Clark');
+  await expect(peek.getByRole('article')).toHaveCount(1);
+  await expect(peek.getByRole('article', { name: 'Clark' })).toBeVisible();
+  await expect(shown).toHaveCount(0);
+  await peek.getByRole('button', { name: 'Open “Clark”' }).click();
+  await page
+    .getByRole('checkbox', {
+      name: 'Show Relations in Peek for all Characters',
+    })
+    .check();
+  await peekAt('Clark');
+  await expect(peek.getByRole('article')).toHaveCount(1);
+  await expect(shown).toHaveText(['Clark — same as — Superman']);
+  await page.keyboard.press('Escape');
+
+  // Turned off for Places, hidden.
+  await roomButton(page, 'Story Bible').click();
+  await open(page, 'The Basement');
+  const placeSwitch = page.getByRole('checkbox', {
+    name: 'Show Relations in Peek for all Places',
+  });
+  await expect(placeSwitch).toBeChecked();
+  await placeSwitch.uncheck();
+  await peekAt('The Basement');
+  await expect(peek.getByRole('article')).toBeVisible();
+  await expect(shown).toHaveCount(0);
+  await app.close();
+});

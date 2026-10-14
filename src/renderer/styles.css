@@ -3019,6 +3019,17 @@ legend .show-in-peek {
   -webkit-line-clamp: 2;
 }
 
+/* Each Relation a line of its own, every one shown. */
+.peek-card:not(.expanded) dd.peek-card-relations {
+  display: block;
+}
+
+.peek-card-relations ul {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
 .peek-card-more {
   font: inherit;
   font-size: 0.85rem;

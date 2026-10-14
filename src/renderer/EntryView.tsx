@@ -724,6 +724,7 @@ export function EntryView({
         <AddCustomField type={summary.type} fields={customFields} />
         <RelationsSection
           entryId={entryId}
+          type={summary.type}
           view={relations}
           books={books}
           onOpen={onOpenEntry}

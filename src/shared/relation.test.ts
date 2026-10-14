@@ -4,6 +4,7 @@ import {
   entryRelations,
   nestedByPartOf,
   relationRefusal,
+  relationSentences,
   relationsView,
   type AsOfBook,
   type Relation,
@@ -55,9 +56,7 @@ function sentences(
   id: string,
   asOf?: AsOfBook,
 ): string[] {
-  return entryRelations(relationsView(relations, entries, asOf), id).map((r) =>
-    r.parts.join(' — '),
-  );
+  return relationSentences(relationsView(relations, entries, asOf), id);
 }
 
 describe('An Entry’s Relations', () => {

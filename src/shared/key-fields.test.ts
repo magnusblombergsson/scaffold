@@ -56,4 +56,21 @@ describe('Key fields', () => {
     expect(isChoosable('item', 'image', fields)).toBe(false);
     expect(isChoosable('character', 'roleNote', fields)).toBe(false);
   });
+
+  it('may show an Entry’s Relations, by default only a Place’s', () => {
+    for (const type of ['character', 'place', 'item', 'theme'] as const) {
+      expect(isChoosable(type, 'relations', [])).toBe(true);
+    }
+    expect(isKeyField('place', 'relations', {})).toBe(true);
+    expect(isKeyField('item', 'relations', {})).toBe(false);
+    expect(isKeyField('character', 'relations', {})).toBe(false);
+    expect(
+      isKeyField('character', 'relations', {
+        character: { relations: true },
+      }),
+    ).toBe(true);
+    expect(
+      isKeyField('place', 'relations', { place: { relations: false } }),
+    ).toBe(false);
+  });
 });

@@ -299,6 +299,11 @@ export function entryRelations(
   ];
 }
 
+/** The Relations `id` is in, as `view` shows them, each as the sentence its page reads. */
+export function relationSentences(view: RelationsView, id: string): string[] {
+  return entryRelations(view, id).map((line) => line.parts.join(' — '));
+}
+
 /** What a pair Relation says `from` is to `to`, as in “part of”. */
 export function relationPhrase(relation: PairRelation): string {
   return relation.kind === 'part-of' ? 'part of' : relation.label;

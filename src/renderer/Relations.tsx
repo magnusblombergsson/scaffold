@@ -6,6 +6,7 @@ import {
   ENTRY_GROUP_TITLES,
   ENTRY_TYPES,
   type EntrySummary,
+  type EntryType,
 } from '../shared/project-types';
 import {
   entryRelations,
@@ -16,21 +17,25 @@ import {
   type RelationsView,
 } from '../shared/relation';
 import { ReadOnlyContext } from './read-only';
+import { ShowInPeek } from './ShowInPeek';
 
 /**
  * An Entry's Relations: each one it is in, from either side, as one
  * sentence, the same on both Entries' pages; the warnings for rules that
  * merging copies broke; and a way to add one. A free-text Relation can be
  * relabelled, and a pair removed; a face can leave its Same as group. In a
- * Series, each says from which Book it holds.
+ * Series, each says from which Book it holds. Its heading has the switch
+ * that makes them a Key field of the Entry's type.
  */
 export function RelationsSection({
   entryId,
+  type,
   view,
   books = [],
   onOpen,
 }: {
   entryId: string;
+  type: EntryType;
   /** The Relations among the Entries in the Story Bible. */
   view: RelationsView;
   /** In a Series, the Books in reading order; none otherwise. */
@@ -82,6 +87,7 @@ export function RelationsSection({
     >
       <div className="field-heading">
         <h3>Relations</h3>
+        <ShowInPeek type={type} item="relations" label="Relations" />
       </div>
       {warnings.length > 0 && (
         <ul className="entry-collisions" role="status">
