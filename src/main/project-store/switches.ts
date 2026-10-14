@@ -72,7 +72,7 @@ export class Switches {
    * later call.
    */
   async read(): Promise<boolean> {
-    const before = this.snapshot();
+    const before = this.liveState();
     const names = (await this.fs.readdir(this.dir)).filter((name) =>
       name.endsWith('.json'),
     );
@@ -102,7 +102,7 @@ export class Switches {
       file && name !== fileName(file.of) ? [{ name, file }] : [],
     );
     for (const copy of copies) await this.mergeCopy(copy.name, copy.file);
-    return !isDeepStrictEqual(before, this.snapshot());
+    return !isDeepStrictEqual(before, this.liveState());
   }
 
   /**
@@ -181,7 +181,7 @@ export class Switches {
     if (fingerprint) this.files.set(fileName(file.of), { fingerprint, file });
   }
 
-  private snapshot(): Record<string, string[]> {
+  private liveState(): Record<string, string[]> {
     return Object.fromEntries(
       [...this.files.values()].flatMap(({ file }) =>
         file ? [[file.of, [...this.on(file.of)].sort()]] : [],

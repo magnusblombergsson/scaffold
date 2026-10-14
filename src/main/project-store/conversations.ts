@@ -47,7 +47,7 @@ import {
   type ProposalView,
   type ProposedValue,
   type Refusal,
-  type Snapshot,
+  type ProposalBasis,
   type Target,
 } from '../../shared/proposal';
 import { capitalized, unitName } from '../../shared/unit-name';
@@ -667,7 +667,7 @@ ${text}`);
   rejectProposal(conversationId: string, proposalId: string): Promise<void> {
     return this.inLog(conversationId, async () => {
       const proposal = await this.decidedProposal(conversationId, proposalId);
-      granted(reject(proposal, await this.snapshot(proposal)));
+      granted(reject(proposal, await this.basis(proposal)));
       await this.appendEvent(conversationId, {
         type: 'proposal.rejected',
         id: proposalId,
@@ -788,7 +788,7 @@ ${text}`);
     const name = this.proposalName(proposal);
     const labelled = this.labelled(proposal);
     const decided = { ...proposal, ...labelled, decision, name };
-    const state = stateOf(decided, await this.snapshot(decided));
+    const state = stateOf(decided, await this.basis(decided));
     const evolvesFrom = this.evolvesFrom(proposal);
     return {
       ...proposal,
@@ -800,7 +800,7 @@ ${text}`);
   }
 
   /** A Proposal's target as it is now, for `stateOf`. */
-  private snapshot(proposal: DecidedProposal): Promise<Snapshot> {
+  private basis(proposal: DecidedProposal): Promise<ProposalBasis> {
     return proposal.kind === 'new-entry'
       ? this.newEntryPlace(proposal.entryId)
       : this.target(proposal);

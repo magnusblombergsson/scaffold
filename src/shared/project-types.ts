@@ -530,6 +530,15 @@ export type TrashItem =
       title: string;
       trashedAt: number;
       type: EntryType;
+    }
+  | {
+      /** A Snapshot of a Scene's Prose, its `title` its name. */
+      kind: 'snapshot';
+      id: string;
+      title: string;
+      trashedAt: number;
+      /** The title of the Scene it belongs to. */
+      sceneTitle: string;
     };
 
 /** The languages Prose is spellchecked and typeset in. */

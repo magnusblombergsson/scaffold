@@ -23,7 +23,7 @@ import type {
 } from '../shared/project-types';
 
 /** What the renderer knows of its Project, as of the last thing main said. */
-export type ProjectSnapshot = {
+export type ProjectState = {
   manuscript: Manuscript;
   entries: EntrySummary[];
   /** Set once `entries` holds the Story Bible, not the empty list before it. */
@@ -52,8 +52,8 @@ export type ProjectSnapshot = {
 };
 
 /**
- * What the mirror tells the UI, for what it can't show by the snapshot alone.
- * `readOnlyStarted` and `languageChanged` come before the snapshot changes,
+ * What the mirror tells the UI, for what it can't show by the state alone.
+ * `readOnlyStarted` and `languageChanged` come before the state changes,
  * so that pending edits reach main first; the others come after.
  */
 export type MirrorEvent =
@@ -72,11 +72,11 @@ type Listener = () => void;
 
 /**
  * The renderer's copy of the Project, kept in step with main: it loads what
- * main holds, applies main's events to an immutable snapshot, and runs the
+ * main holds, applies main's events to an immutable state, and runs the
  * Project commands the UI calls, reporting a failure one way.
  */
 export class ProjectMirror {
-  private snapshot: ProjectSnapshot;
+  private state: ProjectState;
   private readonly listeners = new Set<Listener>();
   private readonly eventListeners = new Set<(event: MirrorEvent) => void>();
   /** The slices main has told us of since the load began, which a load leaves be. */
@@ -93,7 +93,7 @@ export class ProjectMirror {
     private readonly api: ProjectApi,
     opened: OpenedProject,
   ) {
-    this.snapshot = {
+    this.state = {
       manuscript: opened.manuscript,
       entries: [],
       entriesLoaded: false,
@@ -125,7 +125,7 @@ export class ProjectMirror {
     return () => void this.listeners.delete(listener);
   };
 
-  getSnapshot = (): ProjectSnapshot => this.snapshot;
+  getSnapshot = (): ProjectState => this.state;
 
   /** Calls `listener` with each MirrorEvent; returns an unsubscribe function. */
   onEvent(listener: (event: MirrorEvent) => void): () => void {
@@ -153,8 +153,8 @@ export class ProjectMirror {
     if (!this.told.has('conflicts')) this.set({ conflicts });
   }
 
-  private set(change: Partial<ProjectSnapshot>): void {
-    this.snapshot = { ...this.snapshot, ...change };
+  private set(change: Partial<ProjectState>): void {
+    this.state = { ...this.state, ...change };
     for (const listener of this.listeners) listener();
   }
 
@@ -180,15 +180,15 @@ export class ProjectMirror {
         const lost = event.dropped;
         this.set({
           manuscript: event.manuscript,
-          ...(lost && { dropped: [...this.snapshot.dropped, ...lost] }),
+          ...(lost && { dropped: [...this.state.dropped, ...lost] }),
         });
         this.emit({ type: 'structureChanged' });
         void this.refreshTrash();
         break;
       }
       case 'unitReloaded':
-        // A reload by a Proposal or a Split shows in the editor already.
-        if (!event.byProposal && !event.bySplit) {
+        // A reload by a Proposal, a Split or a restore shows in the editor already.
+        if (!event.byProposal && !event.bySplit && !event.byRestore) {
           this.emit({ type: 'unitReloaded', ref: event.ref });
         }
         break;
@@ -232,6 +232,10 @@ export class ProjectMirror {
       case 'keyFieldsChanged':
         this.told.add('keyFields');
         this.set({ keyFields: event.choices });
+        break;
+      case 'snapshotsChanged':
+        // A Snapshot may have gone to Trash, or come out.
+        void this.refreshTrash();
         break;
       case 'relationsChanged':
         this.told.add('relations');
@@ -346,6 +350,6 @@ export class ProjectMirror {
 
   /** Dismisses a notice of what versions of `project.json` lost. */
   dismissDropped(notice: Dropped): void {
-    this.set({ dropped: this.snapshot.dropped.filter((d) => d !== notice) });
+    this.set({ dropped: this.state.dropped.filter((d) => d !== notice) });
   }
 }

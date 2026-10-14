@@ -47,6 +47,7 @@ import { entryAsOf, namesUpTo, summaryAsOf } from '../shared/evolution';
 import { ROOM_LABELS, ROOMS, type Room } from '../shared/room';
 import { relationsView } from '../shared/relation';
 import { ProjectMirror } from './project-mirror';
+import { SceneSnapshots, type ListenToProse } from './Snapshots';
 import { useProject } from './use-project';
 import type { Cut } from '../shared/prose-split';
 import { entryCount, entryTitle } from '../shared/entry';
@@ -524,6 +525,23 @@ function ProjectView({
   );
   const saveStatus = useSaveStatus();
   const { scenes: sceneCounts, setProse } = useSceneCounts(manuscript);
+  /** Whether the open Scene's Snapshots are listed above its Prose. */
+  const [snapshotsOpen, setSnapshotsOpen] = useState(false);
+  /** Hear the open Scene's Prose as it changes, as a Snapshot beside it does. */
+  const proseListeners = useRef(new Set<Parameters<ListenToProse>[0]>());
+  const listenToProse = useCallback<ListenToProse>((listener) => {
+    proseListeners.current.add(listener);
+    return () => proseListeners.current.delete(listener);
+  }, []);
+  const onSceneProse = useCallback(
+    (sceneId: string, markdown: string) => {
+      setProse(sceneId, markdown);
+      for (const listener of proseListeners.current) {
+        listener(sceneId, markdown);
+      }
+    },
+    [setProse],
+  );
   /** What is selected in the open Scene's Prose, counted. */
   const [selectionCounts, setSelectionCounts] = useState<Counts | null>(null);
   const onSelection = useCallback(
@@ -1952,6 +1970,13 @@ function ProjectView({
                         />
                         <button
                           className="overview-button"
+                          aria-pressed={snapshotsOpen}
+                          onClick={() => setSnapshotsOpen(!snapshotsOpen)}
+                        >
+                          Snapshots
+                        </button>
+                        <button
+                          className="overview-button"
                           aria-pressed={overviewOpen}
                           onClick={toggleOverview}
                         >
@@ -1968,25 +1993,34 @@ function ProjectView({
                       />
                     )}
                   </section>
-                  <SceneEditor
-                    // Its editor's typography is made for one language.
-                    key={language}
+                  <SceneSnapshots
                     sceneId={open.scene.id}
-                    language={language}
-                    // Focus goes to the Outline instead, as a Proposal's title asks.
-                    autofocus={!revealIn(open.scene.id)}
-                    focusAt={
-                      jump?.sceneId === open.scene.id ? jump.cursor : undefined
-                    }
-                    quote={
-                      jump?.sceneId === open.scene.id ? jump.quote : undefined
-                    }
-                    onCursor={reportCursor}
-                    onProse={setProse}
-                    onSelection={onSelection}
-                    splittable={splittable(open.scene.id)}
-                    splitsToNext={splitsToNext(open.scene.id)}
-                  />
+                    open={snapshotsOpen}
+                    inConflict={conflicted.has(open.scene.id)}
+                    listen={listenToProse}
+                  >
+                    <SceneEditor
+                      // Its editor's typography is made for one language.
+                      key={language}
+                      sceneId={open.scene.id}
+                      language={language}
+                      // Focus goes to the Outline instead, as a Proposal's title asks.
+                      autofocus={!revealIn(open.scene.id)}
+                      focusAt={
+                        jump?.sceneId === open.scene.id
+                          ? jump.cursor
+                          : undefined
+                      }
+                      quote={
+                        jump?.sceneId === open.scene.id ? jump.quote : undefined
+                      }
+                      onCursor={reportCursor}
+                      onProse={onSceneProse}
+                      onSelection={onSelection}
+                      splittable={splittable(open.scene.id)}
+                      splitsToNext={splitsToNext(open.scene.id)}
+                    />
+                  </SceneSnapshots>
                 </main>
               )}
               {assistantSlot(writingAssistantSlot)}

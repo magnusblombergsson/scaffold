@@ -194,6 +194,11 @@ const projectHandlers: Handlers<
   setRelationBook: ({ store }, id, book) => store.setRelationBook(id, book),
   removeRelation: ({ store }, id) => store.removeRelation(id),
   leaveSameAs: ({ store }, entryId) => store.leaveSameAs(entryId),
+  listSnapshots: async ({ store }, sceneId) => store.listSnapshots(sceneId),
+  takeSnapshot: ({ store }, sceneId, name) => store.takeSnapshot(sceneId, name),
+  renameSnapshot: ({ store }, id, name) => store.renameSnapshot(id, name),
+  trashSnapshot: ({ store }, id) => store.trashSnapshot(id),
+  restoreSnapshot: ({ store }, id) => store.restoreSnapshot(id),
   setFoldedNoteImage: ({ store, sender }, on) =>
     saveProjectSetting(
       sender,

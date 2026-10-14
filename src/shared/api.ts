@@ -33,6 +33,7 @@ import type { TodoDock } from './todo-dock';
 import type { CustomField } from './custom-field';
 import type { KeyFieldChoices, KeyFieldItem } from './key-fields';
 import type { Relation, RelationChoice } from './relation';
+import type { Snapshot } from './snapshot';
 import type { ImportBlock, ImportConvention } from './manuscript-import';
 import type { Cut } from './prose-split';
 import type { ListedModel, Model, ProviderId, ProviderStatus } from './models';
@@ -105,6 +106,11 @@ export type UnitReloaded = {
    * shows it, as what it sent before is in it.
    */
   bySplit?: true;
+  /**
+   * Set when restoring a Snapshot here wrote it: an editor shows it, as what
+   * it sent before is in the Snapshot taken first.
+   */
+  byRestore?: true;
 };
 
 /**
@@ -235,6 +241,12 @@ export type RelationsChanged = {
   relations: Relation[];
 };
 
+/**
+ * A Snapshot was taken, renamed, moved to Trash or back, or deleted, here or
+ * on another computer.
+ */
+export type SnapshotsChanged = { type: 'snapshotsChanged' };
+
 /** A newer app upgraded the Project; `host` is the computer it did so on, when known. */
 export type Upgrade = { host?: string };
 
@@ -267,6 +279,7 @@ export type ProjectEvent =
   | CustomFieldsChanged
   | KeyFieldsChanged
   | RelationsChanged
+  | SnapshotsChanged
   | ConflictsChanged
   | EntriesChanged
   | ImageChanged
@@ -629,6 +642,24 @@ export interface ProjectApi {
   removeRelation(id: string): Promise<void>;
   /** Takes an Entry out of its Same as group, the others staying together. */
   leaveSameAs(entryId: string): Promise<void>;
+  /** The Scene's Snapshots not in Trash, newest first. */
+  listSnapshots(sceneId: string): Promise<Snapshot[]>;
+  /**
+   * Takes a Snapshot of a Scene's Prose as main has it, named `name`;
+   * resolves with its id. Refused for a Missing Scene or one in Conflict.
+   * Each change to the Snapshots follows as a `snapshotsChanged`.
+   */
+  takeSnapshot(sceneId: string, name: string): Promise<string>;
+  /** Gives a Snapshot another name, which may not be empty. */
+  renameSnapshot(id: string, name: string): Promise<void>;
+  /** Moves a Snapshot to Trash, from which `restore` brings it back as other Trash items. */
+  trashSnapshot(id: string): Promise<void>;
+  /**
+   * Replaces a Scene's Prose with a Snapshot's, first taking a Snapshot of
+   * the Prose it replaces; refused as taking one is. Follows as a
+   * `unitReloaded` by restore.
+   */
+  restoreSnapshot(id: string): Promise<void>;
 }
 
 /**
@@ -1259,6 +1290,11 @@ export const projectMethods = {
   setRelationBook: 'invoke',
   removeRelation: 'invoke',
   leaveSameAs: 'invoke',
+  listSnapshots: 'invoke',
+  takeSnapshot: 'invoke',
+  renameSnapshot: 'invoke',
+  trashSnapshot: 'invoke',
+  restoreSnapshot: 'invoke',
 } as const satisfies MethodTable<ProjectApi>;
 
 export const assistantMethods = {
