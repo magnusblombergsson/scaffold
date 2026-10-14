@@ -166,11 +166,14 @@ export function UnitEditor({
         if (event.type !== 'unitReloaded' || keyOf(event.ref) !== reloadKey) {
           return;
         }
-        // A split or a restore here wrote it after what was sent, which is
+        // A split, a restore or a Combine here wrote it after what was sent, which is
         // in it, or in the Snapshot the restore took first.
         if (
           !autosave.pending() &&
-          (sending.current === 0 || event.bySplit || event.byRestore)
+          (sending.current === 0 ||
+            event.bySplit ||
+            event.byRestore ||
+            event.byCombine)
         ) {
           reloadUnitEditor(editor, toDoc(textOf(event.value)));
           void window.project.reloadTaken(event.ref);

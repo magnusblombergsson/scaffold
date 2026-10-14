@@ -213,6 +213,28 @@ export type RenamedEvent = { type: 'renamed'; title: string; at: number };
  */
 export type TrashMoveEvent = { type: 'trashed' | 'restored'; at: number };
 
+/**
+ * The Entry `other` was combined into `kept` (#273): from here on, what the
+ * log said before of `other` it says of `kept`, a Proposal's target and an
+ * Interview's focus, until `entries.combined.undone` names its `id`. A new
+ * Entry a Proposal made keeps its id, as Undo of its accept takes that Entry
+ * away. Apps from before Combine skip it and see `other` in Trash.
+ */
+export type CombinedEvent = {
+  type: 'entries.combined';
+  id: string;
+  kept: string;
+  other: string;
+  at: number;
+};
+
+/** The Combine of `id` was undone: what it moved names the other Entry again. */
+export type CombineUndoneEvent = {
+  type: 'entries.combined.undone';
+  id: string;
+  at: number;
+};
+
 /** An event this app writes. */
 export type ConversationEvent =
   | MessageEvent
@@ -229,7 +251,9 @@ export type ConversationEvent =
   | RelatedEvent
   | AcceptedEvent
   | RejectedEvent
-  | UndoneEvent;
+  | UndoneEvent
+  | CombinedEvent
+  | CombineUndoneEvent;
 
 /** A Proposal in a log: the message it came with, by index, and the latest decision on it. */
 export type LoggedProposal = Proposal & { message: number; decision: Decision };
@@ -311,8 +335,20 @@ export function parseLog(log: string): LoggedConversation | null {
   let book: string | undefined;
   let { title } = header;
   let trashedAt: number | undefined;
+  /** Each Combine logged, by id: what puts back what it moved. */
+  const combines = new Map<string, () => void>();
   for (const line of rest) {
     const event = parseLine(line) as { type?: unknown; id?: unknown } | null;
+    if (isCombined(event)) {
+      const { id, kept, other } = event;
+      combines.set(id, combine(proposals, focusChanges, other, kept));
+      continue;
+    }
+    if (isCombineUndone(event)) {
+      combines.get(event.id)?.();
+      combines.delete(event.id);
+      continue;
+    }
     if (isRenamed(event)) {
       title = event.title;
       continue;
@@ -396,6 +432,53 @@ export function parseLog(log: string): LoggedConversation | null {
     ...(compactions.length > 0 && { compactions }),
     ...(unusedSummaries.length > 0 && { unusedSummaries }),
     proposals: [...proposals.values()],
+  };
+}
+
+/**
+ * Has what `proposals` and `focusChanges` say of `other` say it of `kept`,
+ * as a Combine logged does; returns what has them name `other` again, the
+ * rest of what was logged since kept.
+ */
+function combine(
+  proposals: Map<string, LoggedProposal>,
+  focusChanges: FocusChange[],
+  other: string,
+  kept: string,
+): () => void {
+  const back: (() => void)[] = [];
+  for (const [id, proposal] of proposals) {
+    if (proposal.kind === 'field' && proposal.entryId === other) {
+      proposals.set(id, { ...proposal, entryId: kept });
+      back.push(() => {
+        const now = proposals.get(id) as typeof proposal;
+        proposals.set(id, { ...now, entryId: other });
+      });
+    } else if (
+      proposal.kind === 'relation' &&
+      (proposal.from === other || proposal.to === other)
+    ) {
+      // The ends that named `other`, naming `by`.
+      const ends = (by: string) => ({
+        ...(proposal.from === other && { from: by }),
+        ...(proposal.to === other && { to: by }),
+      });
+      proposals.set(id, { ...proposal, ...ends(kept) });
+      back.push(() => {
+        const now = proposals.get(id) as typeof proposal;
+        proposals.set(id, { ...now, ...ends(other) });
+      });
+    }
+  }
+  focusChanges.forEach((change, i) => {
+    if (change.focus.kind !== 'entry' || change.focus.id !== other) return;
+    focusChanges[i] = { ...change, focus: { kind: 'entry', id: kept } };
+    back.push(() => {
+      focusChanges[i] = { ...focusChanges[i], focus: change.focus };
+    });
+  });
+  return () => {
+    for (const put of back) put();
   };
 }
 
@@ -901,6 +984,23 @@ function isRenamed(value: unknown): value is RenamedEvent {
     event?.type === 'renamed' &&
     typeof event.title === 'string' &&
     event.title.trim() !== ''
+  );
+}
+
+function isCombined(value: unknown): value is CombinedEvent {
+  const event = value as Partial<CombinedEvent> | null;
+  return (
+    event?.type === 'entries.combined' &&
+    typeof event.id === 'string' &&
+    typeof event.kept === 'string' &&
+    typeof event.other === 'string'
+  );
+}
+
+function isCombineUndone(value: unknown): value is CombineUndoneEvent {
+  const event = value as Partial<CombineUndoneEvent> | null;
+  return (
+    event?.type === 'entries.combined.undone' && typeof event.id === 'string'
   );
 }
 

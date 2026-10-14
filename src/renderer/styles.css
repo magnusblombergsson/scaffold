@@ -3669,6 +3669,55 @@ legend .show-in-peek {
   font-size: 0.85rem;
 }
 
+.combine fieldset {
+  margin: 0.75rem 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+
+.combine-keep {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem 1.5rem;
+}
+
+.combine-result {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 0.25rem 1rem;
+  margin: 0.75rem 0;
+}
+
+.combine-result dt {
+  color: var(--muted);
+}
+
+.combine-result dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.combine-picks {
+  max-height: 40vh;
+  overflow-y: auto;
+}
+
+.combine-pick {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin-bottom: 0.6rem;
+}
+
+.combine-pick-label {
+  font-weight: 600;
+}
+
+.combine-pick q {
+  overflow-wrap: anywhere;
+}
+
 .import-opening {
   display: block;
   overflow: hidden;

@@ -1048,7 +1048,7 @@ function alreadyDecided(state: ProposalState): Refusal {
  * Whether two JSON values are equal, whatever order their keys are in, as
  * node:util's isDeepStrictEqual, which shared code can't use.
  */
-function sameJson(a: unknown, b: unknown): boolean {
+export function sameJson(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (typeof a !== 'object' || typeof b !== 'object') return false;
   if (a === null || b === null || Array.isArray(a) !== Array.isArray(b)) {

@@ -21,6 +21,7 @@ import type {
   ExportUnticked,
   StoryBibleChoice,
 } from './export-choice';
+import type { CombineChoices } from './combine';
 import type { BibleView } from './bible-view';
 import type { CorkboardView } from './corkboard-view';
 import type { Filter, FilterPlace, Filters } from './filter';
@@ -111,6 +112,11 @@ export type UnitReloaded = {
    * it sent before is in the Snapshot taken first.
    */
   byRestore?: true;
+  /**
+   * Set when combining two Entries here, or undoing that, wrote it: an
+   * editor shows it, as what it sent before is in it.
+   */
+  byCombine?: true;
 };
 
 /**
@@ -411,6 +417,16 @@ export interface ProjectApi {
    * changing none, as one step: `undo` moves them all to Trash.
    */
   importEntries(entries: NewEntry[]): Promise<Changed & { ids: string[] }>;
+  /**
+   * Combines the Entry `otherId` into `keptId`, of one type, as the Author
+   * chose, as one step: `undo` puts both back, and what pointed to the
+   * other. `dropped` says which Relations broke a rule and were dropped.
+   */
+  combineEntries(
+    keptId: string,
+    otherId: string,
+    choices: CombineChoices,
+  ): Promise<Changed & { dropped: string[] }>;
   /** Sets when the Assistant sees an Entry, as a step that `undo` reverts. */
   setEntryVisibility(entryId: string, visibility: Visibility): Promise<Changed>;
   /**
@@ -1236,6 +1252,7 @@ export const projectMethods = {
   moveToDrawer: 'invoke',
   moveBetweenTrashAndDrawer: 'invoke',
   importEntries: 'invoke',
+  combineEntries: 'invoke',
   setEntryVisibility: 'invoke',
   setEntryType: 'invoke',
   chooseImage: 'invoke',

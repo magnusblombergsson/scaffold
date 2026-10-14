@@ -62,7 +62,18 @@ import {
   newEntryValue,
   revertEntryType,
 } from '../../shared/entry';
+import {
+  combinedEntry,
+  combinedFirstAppears,
+  combinedPrivateNotes,
+  combinedRelations,
+  combinedTags,
+  combineRefusal,
+  evolutionKey,
+  type CombineChoices,
+} from '../../shared/combine';
 import { withoutBook } from '../../shared/evolution';
+import { bookIds } from '../../shared/manuscript-order';
 import {
   type Orphaned,
   type PendingProposal,
@@ -3000,6 +3011,208 @@ export class ProjectStore {
     });
   }
 
+  /**
+   * Combines the Entry `otherId` into `keptId`, which keeps its id: the
+   * other's name becomes an alias, its aliases and Tags are added, its
+   * private notes appended under a line naming it, and of each field, its
+   * image too, the kept one takes the other's where only that has one, or
+   * where both do, the one `choices` picks, the kept one's by default; in a
+   * Series, the other's may be kept from a Book after the first on, as an
+   * Evolution, and the two Entries' Evolutions are kept the same way. It
+   * first appears in the earlier of their Books. Then the Relations, Todos,
+   * Proposals and Interview focuses naming the other name the kept one, a
+   * Relation that would break a rule dropped, as `dropped` says, and the
+   * other goes to Trash as it was. Refused between Entries of different
+   * types, or while either is in Conflict.
+   *
+   * The kept one is written first and the other goes to Trash last, so a
+   * crash between leaves both Entries in the Story Bible and every
+   * reference naming one of them; a failure between puts back what it did.
+   * Undo, while it is the latest change, puts
+   * back both Entries and every reference it moved.
+   */
+  combineEntries(
+    keptId: string,
+    otherId: string,
+    choices: CombineChoices,
+  ): Promise<Changed & { dropped: string[] }> {
+    let dropped: string[] = [];
+    return this.step(async () => {
+      const [kept, other] = [keptId, otherId].map((id) => {
+        const entry = this.entries.get(id);
+        if (!entry)
+          throw new ProjectError(
+            'trashed',
+            'Both Entries must be in the Story Bible',
+          );
+        return entry;
+      });
+      const refusal = combineRefusal(kept, other);
+      if (refusal) throw new ProjectError('combine-refused', refusal);
+      for (const id of [keptId, otherId]) {
+        for (const ref of [entryRef(id), privateRef(id)]) {
+          this.refuseUnavailable(ref);
+          if (this.conflicts.has(unitKey(ref))) {
+            throw new ProjectError(
+              'in-conflict',
+              'An Entry in Conflict can’t be combined; choose a version first',
+            );
+          }
+        }
+      }
+      const books = bookIds(this.manuscript());
+      const picks = Object.values(choices.fields ?? {}).flatMap((pick) =>
+        typeof pick === 'object' ? [pick.from] : [],
+      );
+      if (picks.some((book) => books.indexOf(book) < 1)) {
+        throw new ProjectError(
+          'combine-refused',
+          'A value can be kept from a Book on only from a Book after the first',
+        );
+      }
+      const keptValue = await this.read(entryRef(keptId));
+      const otherValue = await this.read(entryRef(otherId));
+      const undo: (() => Promise<void>)[] = [];
+
+      const undoAll = async () => {
+        for (const step of [...undo].reverse()) await step();
+      };
+      try {
+        // The kept one first: a crash after leaves both, nothing lost.
+        const { before } = await this.changeEntry(keptId, () =>
+          combinedEntry(
+            keptValue,
+            otherValue,
+            choices,
+            this.customFields.list(),
+            books,
+          ),
+        );
+        undo.push(async () => {
+          await this.changeEntry(keptId, () => before);
+        });
+        const detail = { kind: 'entry', id: keptId } as const;
+        await this.setDetail(
+          detail,
+          'tags',
+          combinedTags(keptValue.tags ?? [], otherValue.tags ?? []),
+        );
+        await this.setDetail(
+          detail,
+          'firstAppears',
+          combinedFirstAppears(
+            keptValue.firstAppears,
+            otherValue.firstAppears,
+            books,
+          ),
+        );
+        undo.push(async () => {
+          await this.setDetail(detail, 'tags', before.tags);
+          await this.setDetail(detail, 'firstAppears', before.firstAppears);
+        });
+        undo.push(
+          ...(await this.combineImages(keptValue, otherValue, choices)),
+        );
+        const theirs = (await this.read(privateRef(otherId))).body;
+        const notes = await this.changeUnit(privateRef(keptId), (value) => ({
+          ...value,
+          body: combinedPrivateNotes(value.body, theirs, other.name),
+        }));
+        undo.push(async () => {
+          await this.changeUnit(privateRef(keptId), () => notes.before);
+        });
+
+        // What named the other names the kept one.
+        const plan = combinedRelations(
+          this.relations.list(),
+          this.listEntries(),
+          otherId,
+          keptId,
+        );
+        dropped = plan.dropped;
+        undo.push(await this.relations.combine(plan.steps));
+        this.emitRelations();
+        const relinked = await this.todos.relinkEntry(otherId, keptId);
+        if (relinked) {
+          this.emitTodos();
+          undo.push(async () => {
+            await relinked();
+            this.emitTodos();
+          });
+        }
+        undo.push(await this.conversations.combine(otherId, keptId));
+
+        // Last: the other, as it was.
+        undo.push(await this.trash.move('entry', otherId));
+      } catch (error) {
+        // All or none: what it did before failing is put back.
+        await undoAll().catch((undoing: unknown) =>
+          console.error("Can't put back a Combine that failed:", undoing),
+        );
+        throw error;
+      }
+      await this.reloadEntry(keptId);
+      return async () => {
+        await undoAll();
+        this.emitRelations();
+        await this.reloadEntry(keptId);
+      };
+    }).then((changed) => ({ ...changed, dropped }));
+  }
+
+  /**
+   * Gives the kept Entry the other's image where it has none, or where the
+   * Author picked the other's, from a Book on too, and the other's images
+   * from a Book on the same way; resolves with what puts back the kept
+   * one's as they were.
+   */
+  private async combineImages(
+    kept: EntryValue,
+    other: EntryValue,
+    choices: CombineChoices,
+  ): Promise<(() => Promise<void>)[]> {
+    const copies: { to: ImageRef; from: ImageRef }[] = [];
+    const own = choices.fields?.image ?? 'kept';
+    if (other.image && (!kept.image || own === 'other')) {
+      copies.push({
+        to: { kind: 'entry', id: kept.id },
+        from: { kind: 'entry', id: other.id },
+      });
+    } else if (other.image && typeof own === 'object') {
+      copies.push({
+        to: { kind: 'entry', id: kept.id, book: own.from },
+        from: { kind: 'entry', id: other.id },
+      });
+    }
+    for (const book of Object.keys(other.evolvedImages ?? {})) {
+      const pick = choices.evolutions?.[evolutionKey(book, 'image')];
+      if (kept.evolvedImages?.[book] && pick !== 'other') continue;
+      copies.push({
+        to: { kind: 'entry', id: kept.id, book },
+        from: { kind: 'entry', id: other.id, book },
+      });
+    }
+    const undo: (() => Promise<void>)[] = [];
+    for (const { to, from } of copies) {
+      const image = await this.readImage(from);
+      if (!image) continue;
+      const was = await this.readImage(to);
+      await this.writeImage(to, image);
+      undo.push(() =>
+        was ? this.writeImage(to, was) : this.changeImage(to, undefined),
+      );
+    }
+    return undo;
+  }
+
+  /** Tells an open view of the Entry and its private notes what a Combine, or its undo, wrote. */
+  private async reloadEntry(id: string): Promise<void> {
+    for (const ref of [entryRef(id), privateRef(id)]) {
+      const value = await this.read(ref);
+      this.emit({ type: 'unitReloaded', ref, value, byCombine: true });
+    }
+  }
+
   /** Sets when the Assistant sees an Entry; undo sets it back. */
   setEntryVisibility(
     entryId: string,
@@ -4637,6 +4850,11 @@ function relationsOf(projectPath: string, deps: StoreDeps): Relations {
 
 function snapshotsOf(projectPath: string, deps: StoreDeps): Snapshots {
   return new Snapshots(path.join(projectPath, SNAPSHOTS), deps.fs, deps.clock);
+}
+
+/** The private notes of the Entry `id`. */
+function privateRef(id: string): PrivateRef {
+  return { kind: 'private', id };
 }
 
 /** A Snapshot's name, trimmed; there must be one. */

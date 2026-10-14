@@ -90,6 +90,8 @@ const projectHandlers: Handlers<
   moveBetweenTrashAndDrawer: ({ store }, id, to) =>
     store.moveBetweenTrashAndDrawer(id, to),
   importEntries: ({ store }, entries) => store.importEntries(entries),
+  combineEntries: ({ store }, keptId, otherId, choices) =>
+    store.combineEntries(keptId, otherId, choices),
   setEntryVisibility: ({ store }, entryId, visibility) =>
     store.setEntryVisibility(entryId, visibility),
   setEntryType: ({ store }, entryId, type) => store.setEntryType(entryId, type),

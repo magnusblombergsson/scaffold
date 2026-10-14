@@ -1067,6 +1067,68 @@ ${text}`);
     );
   }
 
+  /**
+   * Has every log that names the Entry `other`, by a Proposal's target or
+   * an Interview's focus, name `kept` instead, as a Combine does: logged as
+   * `entries.combined`, in Trash and the Drawer too. Resolves with what
+   * undoes it, logged as undone in each of them.
+   */
+  async combine(other: string, kept: string): Promise<() => Promise<void>> {
+    const id = randomUUID();
+    const files: string[] = [];
+    for (const file of await this.logFiles()) {
+      const log = parseLog(await this.deps.fs.readFile(file));
+      if (!log || !namesEntry(log, other)) continue;
+      await this.appendTo(file, {
+        type: 'entries.combined',
+        id,
+        kept,
+        other,
+        at: this.deps.clock.now(),
+      });
+      files.push(file);
+    }
+    if (files.length > 0) this.deps.emit({ type: 'proposalsChanged' });
+    return async () => {
+      for (const file of files) {
+        // Where its Conversation is now, as it may have moved since.
+        const now = (await this.logFiles()).find(
+          (f) => path.basename(f) === path.basename(file),
+        );
+        if (!now) continue;
+        await this.appendTo(now, {
+          type: 'entries.combined.undone',
+          id,
+          at: this.deps.clock.now(),
+        });
+      }
+      if (files.length > 0) this.deps.emit({ type: 'proposalsChanged' });
+    };
+  }
+
+  /** Each Conversation's log, in `conversations/`, Trash or the Drawer. */
+  private async logFiles(): Promise<string[]> {
+    const live = path.join(this.deps.path, CONVERSATIONS);
+    const files = (await this.deps.fs.readdir(live))
+      .filter((name) => CONVERSATION_FILE.test(name))
+      .map((name) => path.join(live, name));
+    for (const item of this.deps.trash.values()) {
+      if (item.kind !== 'conversation') continue;
+      files.push(conversationTrashPath(this.deps.path, item.id, placeOf(item)));
+    }
+    return files;
+  }
+
+  /** Appends `event` to the log at `file`, as one of its turns if it is a live one. */
+  private appendTo(file: string, event: ConversationEvent): Promise<void> {
+    const id = path.basename(file).replace(/\.jsonl$/, '');
+    return this.inLog(id, async () => {
+      if (!(await this.deps.fs.exists(file))) return;
+      const line = eventLine(await this.deps.fs.readFile(file), event);
+      await this.deps.fs.appendFileDurable(file, line);
+    });
+  }
+
   /** Runs `run` once what was asked of a Conversation's log before is done: one at a time. */
   private inLog<T>(id: string, run: () => Promise<T>): Promise<T> {
     const ran = (this.appends.get(id) ?? Promise.resolve()).then(run);
@@ -1121,6 +1183,20 @@ function landingIn(decision: Decision): Landing {
 
 /** How the Author accepts a change to a target: `anyway` when stale, or to `append`. */
 type AcceptHow = Required<Pick<AcceptOptions, 'anyway' | 'append'>>;
+
+/** Whether a log names the Entry `id` by a Proposal's target, but a new Entry's, or an Interview's focus. */
+function namesEntry(log: LoggedConversation, id: string): boolean {
+  return (
+    log.proposals.some((p) =>
+      p.kind === 'field'
+        ? p.entryId === id
+        : p.kind === 'relation' && (p.from === id || p.to === id),
+    ) ||
+    (log.focusChanges ?? []).some(
+      ({ focus }) => focus.kind === 'entry' && focus.id === id,
+    )
+  );
+}
 
 /** What follows `<id>-` in a conflict copy's name, as the host a sync client named it by. */
 function copySuffix(name: string, id: string): string | undefined {

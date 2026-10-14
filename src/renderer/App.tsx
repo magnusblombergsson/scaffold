@@ -96,10 +96,13 @@ import { ProposalTargetContext } from './ProposalCard';
 import { ProposalPeek, type TargetPeek } from './ProposalPeek';
 import { PeekRelationsContext } from './PeekCard';
 import { PinnedNotes } from './PinnedNotes';
+import { CombineDialog } from './CombineDialog';
+import type { CombineChoices } from '../shared/combine';
 import { FloatingImagePanel, OutlineBarImage } from './FloatingImage';
 import { applyImageChange, floatImage } from './floating-image';
 import {
   applyChange,
+  repointed,
   textWithoutImage,
   togglePin,
   withoutTrashed,
@@ -944,7 +947,18 @@ function ProjectView({
       : entries.find((e) => e.id === openEntryId);
   /** The latest structure change, while its toast offers to undo it. */
   const [latest, setLatest] = useState<{ message: string; step: number }>();
-  const closeToast = useCallback(() => setLatest(undefined), []);
+  /**
+   * The step of a Combine while its toast offers to undo it: Undo is
+   * offered only there, never later, as by Ctrl+Z once the toast is gone.
+   */
+  const undoOnlyInToast = useRef<number>(undefined);
+  const closeToast = useCallback(() => {
+    if (undoable.current === undoOnlyInToast.current) {
+      undoable.current = undefined;
+    }
+    undoOnlyInToast.current = undefined;
+    setLatest(undefined);
+  }, []);
   /**
    * The step Ctrl+Z in the Binder or Story Bible list undoes: the latest
    * structure change, while main can still undo it, its toast gone or not.
@@ -1482,6 +1496,53 @@ function ProjectView({
     flushPendingEdits();
     changeLatest(undefined);
     await mirror.undo(step);
+    // Undoing a Combine puts the Pinned notes back, its other Entry back too.
+    const combined = notesBeforeCombine.current;
+    if (combined?.step === step) changePinnedNotes(combined.notes);
+    notesBeforeCombine.current = undefined;
+  }
+
+  /** The Entry Combine with… is open on, if any. */
+  const [combining, setCombining] = useState<string | null>(null);
+  const combiningEntry = entries.find((e) => e.id === combining);
+  /** The Pinned notes before the latest Combine, by its step, for its Undo. */
+  const notesBeforeCombine = useRef<{ step: number; notes: PinnedNote[] }>(
+    undefined,
+  );
+
+  /**
+   * Combines `otherId` into `keptId`, as one step the Author can undo from
+   * its toast only; the other's Pinned note becomes the kept one's first,
+   * before it goes from the Story Bible.
+   */
+  async function combineEntries(
+    keptId: string,
+    otherId: string,
+    choices: CombineChoices,
+    names: { kept: string; other: string },
+  ) {
+    flushPendingEdits();
+    const notes = notesNow.current;
+    changePinnedNotes(repointed(notes, otherId, keptId));
+    const result = await mirror.change(() =>
+      window.project.combineEntries(keptId, otherId, choices),
+    );
+    if (!result) {
+      changePinnedNotes(notes);
+      return;
+    }
+    notesBeforeCombine.current = { step: result.step, notes };
+    undoOnlyInToast.current = result.step;
+    const { dropped } = result;
+    changeLatest({
+      message:
+        `Combined “${names.other}” into “${names.kept}”` +
+        (dropped.length > 0
+          ? `; dropped ${dropped.length === 1 ? 'a Relation' : `${dropped.length} Relations`} that broke a rule: ${dropped.join('; ')}`
+          : ''),
+      step: result.step,
+    });
+    showEntry(keptId);
   }
 
   /**
@@ -2062,6 +2123,7 @@ function ProjectView({
                     onAddTodo={(id) =>
                       startTodo('storyBible', { kind: 'entry', id })
                     }
+                    onCombine={setCombining}
                   />
                 </div>
                 <TodoDockPane
@@ -2309,6 +2371,19 @@ function ProjectView({
             customFields={customFields}
             onImport={(added, leftOut) => void importEntries(added, leftOut)}
             onClose={() => setStoryBibleImport(null)}
+          />
+        )}
+        {combiningEntry && (
+          <CombineDialog
+            entry={combiningEntry}
+            entries={entries}
+            relations={relations}
+            customFields={customFields}
+            books={seriesBooks}
+            onCombine={(keptId, otherId, choices, names) =>
+              void combineEntries(keptId, otherId, choices, names)
+            }
+            onClose={() => setCombining(null)}
           />
         )}
         {storyBibleExportOpen && (

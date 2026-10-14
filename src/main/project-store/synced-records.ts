@@ -196,6 +196,23 @@ export class SyncedRecords<F extends string, T extends Synced<F>> {
     }));
   }
 
+  /**
+   * Brings a deleted record back as it was before the delete, as when the
+   * delete is undone: an edit made now, which beats it.
+   */
+  revive(id: string): Promise<void> {
+    return this.update(id, (record) => {
+      const at = this.stamp(record);
+      const { deleted: _, ...kept } = record;
+      return {
+        ...kept,
+        editedAt: Object.fromEntries(
+          this.kind.fields.map((field) => [field, at]),
+        ),
+      } as T;
+    });
+  }
+
   /** The live records, as compared to tell whether a read changed them. */
   private liveState(): unknown {
     return this.live()

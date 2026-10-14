@@ -5,6 +5,7 @@ import {
   type Relation,
   type RelationChoice,
 } from '../../shared/relation';
+import type { RelationStep } from '../../shared/combine';
 import type { RelationWritten } from '../../shared/relation-proposal';
 import type { Clock } from './clock';
 import type { FileSystem } from './file-system';
@@ -257,6 +258,59 @@ export class Relations {
         await this.records.delete(record.id);
       }
     }
+  }
+
+  /**
+   * Does what a Combine plans to the Relations, `steps`, as
+   * `combinedRelations` works them out; resolves with what undoes exactly
+   * that: each pair named again as it was, a deleted record brought back,
+   * each face switched as it was.
+   */
+  async combine(steps: readonly RelationStep[]): Promise<() => Promise<void>> {
+    const undo: (() => Promise<void>)[] = [];
+    const toggle = async (id: string, face: string, on: boolean) => {
+      const was = this.records.get(id)?.faces[face]?.on ?? false;
+      await this.records.toggle(id, 'faces', face, on);
+      undo.push(() => this.records.toggle(id, 'faces', face, was));
+    };
+    const remove = async (id: string) => {
+      await this.records.delete(id);
+      undo.push(() => this.records.revive(id));
+    };
+    /** Deletes the group `id` once it has fewer than two faces on. */
+    const settle = async (id: string) => {
+      const record = this.records.get(id);
+      if (record && onFaces(record).length < 2) await remove(id);
+    };
+    for (const step of steps) {
+      if (step.kind === 'move') {
+        const { from, to } = this.records.get(step.id)!;
+        await this.records.change(step.id, { from: step.from, to: step.to });
+        undo.push(() => this.records.change(step.id, { from, to }));
+      } else if (step.kind === 'remove') {
+        await remove(step.id);
+      } else if (step.kind === 'leave') {
+        await toggle(step.id, step.face, false);
+        await settle(step.id);
+      } else {
+        // Every group the kept one is in, written as this one.
+        const meeting = foldedGroups(this.list())
+          .filter((g) => g.faces.includes(step.on) && !g.ids.includes(step.id))
+          .flatMap((g) => g.ids);
+        await toggle(step.id, step.off, false);
+        await toggle(step.id, step.on, true);
+        for (const id of meeting) {
+          for (const face of onFaces(this.records.get(id)!)) {
+            await toggle(step.id, face, true);
+          }
+          await remove(id);
+        }
+        await settle(step.id);
+      }
+    }
+    return async () => {
+      for (const step of undo.reverse()) await step();
+    };
   }
 
   /** The folded group `face` is in, if any. */
