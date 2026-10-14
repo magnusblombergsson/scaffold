@@ -12,6 +12,10 @@ import { instantClock } from '../project-store/clock';
 import { nodeFileSystem } from '../project-store/file-system';
 import { createProject, openProject } from '../project-store/project-store';
 import {
+  mvpReadManifest,
+  mvpWriteManifest,
+} from '../project-store/mvp-manifest-file';
+import {
   buildContext,
   type Command,
   type ContextRequest,
@@ -1365,5 +1369,237 @@ describe('Custom fields', () => {
     expect(await focusOf({ kind: 'entry', id: entries.kista })).not.toContain(
       'added',
     );
+  });
+});
+
+describe('Series', () => {
+  /**
+   * The fixture as a Series: Book 1 holds Chapter “Arrival”, Book 2 holds
+   * Chapter “Storm”, whose Scene “Wreck” alone mentions the Ferry. Each
+   * Book has an Outline and Notes.
+   */
+  async function series() {
+    const project = await fixture();
+    const { store, chapters, scenes } = project;
+    const { id: two } = await store.createBook();
+    const one = store.manuscript().books![0].id;
+    await store.moveChapter(chapters.storm, 0, undefined, two);
+    await store.write(
+      { kind: 'outline', id: scenes.wreck },
+      { id: scenes.wreck, body: '- The Ferry sinks', meta: {} },
+    );
+    await store.write(
+      { kind: 'outline', id: scenes.harbour },
+      { id: scenes.harbour, body: '- She waits', meta: {} },
+    );
+    for (const [id, body] of [
+      [one, '- She leaves'],
+      [two, '- She returns'],
+    ]) {
+      await store.write({ kind: 'outline', id }, { id, body, meta: {} });
+      await store.write({ kind: 'notes', id }, { id, body: `Notes ${body}` });
+    }
+    return { ...project, books: { one, two } };
+  }
+  const skeletonOf = (context: Awaited<ReturnType<typeof buildContext>>) =>
+    context.system[2].text;
+
+  it('sends the Series Outline, every Book’s Outline, and the Parts, Chapters and Scenes of the Conversation’s Book only', async () => {
+    const { view, chapters, scenes, books } = await series();
+
+    const skeleton = skeletonOf(
+      await buildContext(view, {
+        mode: 'brainstorm',
+        book: books.one,
+        messages: [message('author', 'Hm.')],
+      }),
+    );
+
+    expect(skeleton).toContain(
+      `## The Series\nId: ${PROJECT_OUTLINE}\n- A woman leaves an island`,
+    );
+    expect(skeleton).toContain(
+      `## Book “Book 1”\nId: ${books.one}\n- She leaves`,
+    );
+    expect(skeleton).toContain(
+      `## Book “Book 2”\nId: ${books.two}\n- She returns`,
+    );
+    expect(skeleton).toContain(
+      `### Chapter “Arrival”\nId: ${chapters.arrival}\n- She arrives`,
+    );
+    expect(skeleton).toContain(
+      `#### Scene “Harbour”\nId: ${scenes.harbour}\n- She waits`,
+    );
+    expect(skeleton).not.toContain('Storm');
+    expect(skeleton).not.toContain('Wreck');
+    expect(skeleton).not.toContain('The storm breaks');
+    expect(skeleton).not.toContain('Notes');
+    expect(skeleton.indexOf('Book “Book 1”')).toBeLessThan(
+      skeleton.indexOf('Chapter “Arrival”'),
+    );
+    expect(skeleton.indexOf('Chapter “Arrival”')).toBeLessThan(
+      skeleton.indexOf('Book “Book 2”'),
+    );
+  });
+
+  it('nests a Part of the Book under it', async () => {
+    const { store, view, chapters, books } = await series();
+    const { id: sea } = await store.createPart(0, 'The Sea', books.two);
+    await store.moveChapter(chapters.storm, 0, sea);
+
+    const skeleton = skeletonOf(
+      await buildContext(view, {
+        mode: 'brainstorm',
+        book: books.two,
+        messages: [message('author', 'Hm.')],
+      }),
+    );
+
+    expect(skeleton).toContain(`### Part “The Sea”\nId: ${sea}`);
+    expect(skeleton).toContain(`#### Chapter “Storm”`);
+    expect(skeleton).toContain(`##### Scene “Wreck”`);
+    expect(skeleton).not.toContain('Arrival');
+  });
+
+  it('matches mentions only in what is sent, never in another Book’s skeleton', async () => {
+    const { view, books, entries } = await series();
+    const asked = (book: string) =>
+      buildContext(view, {
+        mode: 'brainstorm',
+        book,
+        messages: [message('author', 'Hm.')],
+      });
+
+    expect((await asked(books.one)).saw.entries).not.toContain(entries.ferry);
+    expect((await asked(books.two)).saw.entries).toContain(entries.ferry);
+  });
+
+  it('is about the first Book when the Conversation names none, or one no longer a Book', async () => {
+    const { view } = await series();
+
+    for (const book of [undefined, 'gone']) {
+      const skeleton = skeletonOf(
+        await buildContext(view, {
+          mode: 'interview',
+          focus: OPEN,
+          ...(book && { book }),
+          messages: [message('author', 'Hm.')],
+        }),
+      );
+      expect(skeleton).toContain('Chapter “Arrival”');
+      expect(skeleton).not.toContain('Chapter “Storm”');
+    }
+  });
+
+  it('Writing: is about the Book holding the Scene in focus', async () => {
+    const { view, scenes } = await series();
+
+    const context = await buildContext(view, {
+      mode: 'writing',
+      command: 'question',
+      sceneId: scenes.wreck,
+      messages: [message('author', 'Hm.')],
+    });
+
+    expect(skeletonOf(context)).toContain('Chapter “Storm”');
+    expect(skeletonOf(context)).not.toContain('Arrival');
+  });
+
+  it('Writing: with no Scene of a Book in focus, sends no Book’s Parts, Chapters or Scenes', async () => {
+    const { view, books } = await series();
+
+    const skeleton = skeletonOf(
+      await buildContext(view, {
+        mode: 'writing',
+        command: 'question',
+        sceneId: null,
+        messages: [message('author', 'Hm.')],
+      }),
+    );
+
+    expect(skeleton).toContain(`## Book “Book 1”\nId: ${books.one}`);
+    expect(skeleton).toContain(`## Book “Book 2”\nId: ${books.two}`);
+    expect(skeleton).not.toContain('Arrival');
+    expect(skeleton).not.toContain('Storm');
+  });
+
+  it('leaves out the Unplaced Chapters, which are in no Book', async () => {
+    const { store, books } = await series();
+    const projectPath = path.join(dir, 'My Novel');
+    await store.close();
+    // An older app adds a Chapter: it only knows `chapters`.
+    const file = path.join(projectPath, 'project.json');
+    const manifest = mvpReadManifest(await readFile(file, 'utf8'));
+    const tree = {
+      ...manifest.tree,
+      chapters: [
+        {
+          id: '0e0e0e0e-0000-4000-8000-000000000000',
+          title: 'Elsewhere',
+          scenes: [],
+        },
+        ...manifest.tree.chapters,
+      ],
+    };
+    await writeFile(file, mvpWriteManifest(manifest, tree));
+    const reopened = await openProject(projectPath, {
+      fs: nodeFileSystem,
+      clock: instantClock(),
+    });
+
+    const skeleton = skeletonOf(
+      await buildContext(reopened.assistantView(), {
+        mode: 'brainstorm',
+        book: books.one,
+        messages: [message('author', 'Hm.')],
+      }),
+    );
+
+    expect(skeleton).toContain('Arrival');
+    expect(skeleton).not.toContain('Elsewhere');
+  });
+
+  it('Interview: a Book in focus brings its Outline and Notes and its Chapters’ Outlines, never their Prose', async () => {
+    const { view, books } = await series();
+
+    const context = await buildContext(view, {
+      mode: 'interview',
+      focus: { kind: 'book', id: books.two },
+      book: books.one,
+      messages: [message('author', 'Ask me.')],
+    });
+
+    const text = sent(context);
+    expect(text).toContain('Notes - She returns');
+    expect(text).toContain('Outline of Chapter “Storm”');
+    expect(text).not.toContain('Nothing was left of the boat.');
+    const focus = context.system.find((b) =>
+      b.text.startsWith('The Interview’s focus'),
+    )?.text;
+    expect(focus).toContain(
+      `the Book “Book 2”, Id: ${books.two}, which holds Chapter “Storm”.`,
+    );
+    expect(focus).toContain('Interview out its Outline');
+  });
+
+  it('Interview: names a Book in focus no longer there as gone', async () => {
+    const { view } = await series();
+
+    const context = await buildContext(view, {
+      mode: 'interview',
+      focus: { kind: 'book', id: 'gone' },
+      messages: [message('author', 'Ask me.')],
+    });
+
+    expect(sent(context)).toContain('a Book which is no longer in the Project');
+  });
+
+  it('a Project of one Book ignores a Book it is given', async () => {
+    const { view } = await fixture();
+    const messages = [message('author', 'Hm.')];
+
+    expect(
+      await buildContext(view, { mode: 'brainstorm', book: 'any', messages }),
+    ).toEqual(await buildContext(view, { mode: 'brainstorm', messages }));
   });
 });

@@ -3,7 +3,12 @@ import {
   OPEN_FOCUS,
   type InterviewFocus,
 } from '../shared/conversation';
-import { topLevel } from '../shared/manuscript-order';
+import {
+  bookManuscript,
+  topLevel,
+  unplacedChapters,
+  type TopItem,
+} from '../shared/manuscript-order';
 import {
   ENTRY_TYPE_LABELS,
   ENTRY_TYPES,
@@ -16,7 +21,7 @@ import { tagSpelling, tagVocabulary } from '../shared/tags';
 import type { Names } from './Conversation';
 
 // An Interview's focus as the Author picks it and reads it: one Entry, one
-// Entry type, a Part, Chapter or Scene, a Tag, or open.
+// Entry type, a Book, Part, Chapter or Scene, a Tag, or open.
 
 function typeLabel(type: EntryType): string {
   return type === 'other'
@@ -60,6 +65,10 @@ export function focusLabel(focus: InterviewFocus, names: Names): string {
     case 'entry': {
       const entry = entries.find((e) => e.id === focus.id);
       return entry ? entryName(entry) : 'An Entry no longer there';
+    }
+    case 'book': {
+      const book = manuscript.books?.find((b) => b.id === focus.id);
+      return book ? `Book “${book.title}”` : 'A Book no longer there';
     }
     case 'part': {
       const name = partName(manuscript.partLabel);
@@ -124,7 +133,9 @@ export type FocusOption = { value: string; label: string };
 /**
  * What the picker offers, in groups: open; each Entry type; each Entry; each
  * Tag in use; each Part with its Chapters indented and each Chapter with its
- * Scenes indented, in Manuscript order, then the Unplaced Scenes.
+ * Scenes indented, in Manuscript order, in a Series each Book with them
+ * indented under it and the Unplaced Chapters after the last, then the
+ * Unplaced Scenes.
  */
 export function focusOptions(names: Names): {
   label: string;
@@ -139,6 +150,24 @@ export function focusOptions(names: Names): {
     option({ kind: 'chapter', id: c.id }, indent),
     ...c.scenes.map((s) => option({ kind: 'scene', id: s.id }, indent + 1)),
   ];
+  const items = (of: TopItem[], indent: number) =>
+    of.flatMap((item) =>
+      item.kind === 'part'
+        ? [
+            option({ kind: 'part', id: item.part.id }, indent),
+            ...item.chapters.flatMap((c) => chapter(c, indent + 1)),
+          ]
+        : chapter(item.chapter, indent),
+    );
+  const ordered = manuscript.books
+    ? [
+        ...manuscript.books.flatMap((book) => [
+          option({ kind: 'book', id: book.id }),
+          ...items(topLevel(bookManuscript(manuscript, book.id)), 1),
+        ]),
+        ...unplacedChapters(manuscript).flatMap((c) => chapter(c, 0)),
+      ]
+    : items(topLevel(manuscript), 0);
   return [
     { label: '', options: [option(OPEN_FOCUS)] },
     {
@@ -156,14 +185,7 @@ export function focusOptions(names: Names): {
     {
       label: 'Manuscript',
       options: [
-        ...topLevel(manuscript).flatMap((item) =>
-          item.kind === 'part'
-            ? [
-                option({ kind: 'part', id: item.part.id }),
-                ...item.chapters.flatMap((c) => chapter(c, 1)),
-              ]
-            : chapter(item.chapter, 0),
-        ),
+        ...ordered,
         ...manuscript.unplaced.map((s) => option({ kind: 'scene', id: s.id })),
       ],
     },

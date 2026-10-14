@@ -1538,6 +1538,7 @@ function ProjectView({
                 <BrainstormRoom
                   active={room === 'brainstorm'}
                   names={{ manuscript, entries }}
+                  book={bookBeingWritten}
                   pane={pane}
                   onAddProvider={onAddProvider}
                   onOpenEntry={showEntry}
@@ -1560,6 +1561,7 @@ function ProjectView({
                 <InterviewRoom
                   active={room === 'interview'}
                   names={{ manuscript, entries }}
+                  book={bookBeingWritten}
                   pane={pane}
                   onAddProvider={onAddProvider}
                   onOpenEntry={showEntry}

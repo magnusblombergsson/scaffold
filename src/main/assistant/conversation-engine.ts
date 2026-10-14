@@ -134,7 +134,8 @@ export function createConversationEngine({
   /**
    * Asks the Conversation's Model to answer it as logged, which ends with
    * the Author's message, with the context the Conversation's Mode gives the
-   * Scene in `focus`, or in an Interview, the focus it was last set to.
+   * Scene in `focus`, or in an Interview, the focus it was last set to, and
+   * in a Series, a Brainstorm or Interview about the Book it was last put on.
    * Past the threshold, the older messages are compacted first.
    * The reply is logged once it has come, without its thinking: as
    * interrupted if the call fails partway, or cut short at the length limit,
@@ -150,7 +151,8 @@ export function createConversationEngine({
       focus: interviewFocus,
       compactions,
       model,
-    }: Pick<Conversation, 'mode' | 'focus' | 'compactions' | 'model'>,
+      book,
+    }: Pick<Conversation, 'mode' | 'focus' | 'compactions' | 'model' | 'book'>,
     messages: ConversationMessage[],
     focus: string[],
     onText: (text: string) => void,
@@ -163,7 +165,7 @@ export function createConversationEngine({
       chosen,
     );
     const asked = {
-      ...defaultRequest(mode, focus[0] ?? null, messages, interviewFocus),
+      ...defaultRequest(mode, focus[0] ?? null, messages, interviewFocus, book),
       ...(summary && { summary }),
     };
     const context = await buildContext(store.assistantView(), asked);

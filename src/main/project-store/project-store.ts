@@ -3918,6 +3918,17 @@ export class ProjectStore {
   }
 
   /**
+   * In a Series, puts a Brainstorm or Interview on one of its Books from its
+   * next message on, logged as chosen.
+   */
+  async chooseBook(id: string, book: string): Promise<void> {
+    if (!this.manuscript().books?.some((b) => b.id === book)) {
+      throw new Error('No such Book');
+    }
+    await this.conversations.chooseBook(id, book);
+  }
+
+  /**
    * The Conversations in `conversations/`, latest first; `project.json`
    * doesn't list them. A log whose header can't be read is logged and left out.
    */

@@ -18,15 +18,16 @@ export const MODE_LABELS: Record<Mode, string> = {
 };
 
 /**
- * What an Interview is about: one Entry, one Entry type, a Part, Chapter or
- * Scene, a Tag, or open. An app from before Parts skips a focus change to a
- * Part in the log, as it does any it can't read (ADR 0006).
+ * What an Interview is about: one Entry, one Entry type, a Book, Part,
+ * Chapter or Scene, a Tag, or open. An app from before Parts or Books skips
+ * a focus change to one in the log, as it does any it can't read (ADR 0006).
  */
 export type InterviewFocus =
   | { kind: 'open' }
   | { kind: 'entry'; id: string }
   | { kind: 'entry-type'; type: EntryType }
   | { kind: 'tag'; tag: string }
+  | { kind: 'book'; id: string }
   | { kind: 'part'; id: string }
   | { kind: 'chapter'; id: string }
   | { kind: 'scene'; id: string };
@@ -43,6 +44,7 @@ export function isInterviewFocus(value: unknown): value is InterviewFocus {
     case 'tag':
       return typeof focus.tag === 'string' && focus.tag.trim() !== '';
     case 'entry':
+    case 'book':
     case 'part':
     case 'chapter':
     case 'scene':
@@ -52,7 +54,7 @@ export function isInterviewFocus(value: unknown): value is InterviewFocus {
   }
 }
 
-/** The ids of the Entry, Part, Chapter or Scene an Interview's focus is, if any. */
+/** The ids of the Entry, Book, Part, Chapter or Scene an Interview's focus is, if any. */
 export function focusIds(focus: InterviewFocus): string[] {
   return 'id' in focus ? [focus.id] : [];
 }
@@ -65,7 +67,9 @@ export type FocusChange = { focus: InterviewFocus; at: number; before: number };
 
 /**
  * A Conversation as the picker lists it; an Interview has the `focus` it was
- * last set to, if any.
+ * last set to, if any. In a Series, a Brainstorm or Interview has the `book`
+ * it was last put on, by id, if any: `conversationBook` says which Book that
+ * makes it about.
  */
 export type ConversationSummary = {
   id: string;
@@ -74,6 +78,7 @@ export type ConversationSummary = {
   /** When the Author started it, in ms since the epoch. */
   created: number;
   focus?: InterviewFocus;
+  book?: string;
   /**
    * Whether the Author starred it, as the Conversation list says; kept in
    * the Project, never in its log.

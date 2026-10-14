@@ -225,6 +225,8 @@ const assistantHandlers: Handlers<
     await store.chooseModel(conversationId, model);
     rememberModel(model);
   },
+  chooseBook: ({ store }, conversationId, bookId) =>
+    store.chooseBook(conversationId, bookId),
   renameConversation: ({ store }, conversationId, title) =>
     store.renameConversation(conversationId, title),
   starConversation: ({ store }, conversationId, starred) =>

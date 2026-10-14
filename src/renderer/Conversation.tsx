@@ -25,6 +25,7 @@ import {
   type Finding,
   type ReviewCommand,
 } from '../shared/finding';
+import { conversationBook } from '../shared/manuscript-order';
 import { loggedModel, type Model } from '../shared/models';
 import type { TodoLink } from '../shared/todo';
 import type {
@@ -126,7 +127,9 @@ function sceneOf(
  * moved to Trash or restored, or forked on another computer. A failed call
  * is kept as `failure`, with the Model it asked, for Retry; it isn't in the
  * log. A Conversation is on its `model`, which a new one starts on: the one
- * chosen last, unless the Author chooses another before sending.
+ * chosen last, unless the Author chooses another before sending. In a
+ * Series, a Brainstorm or Interview is about its `book`, which a new one
+ * starts on: the `book` given, unless the Author chooses another first.
  */
 export function useConversation({
   mode,
@@ -135,11 +138,14 @@ export function useConversation({
   active,
   show,
   focus = OPEN_FOCUS,
+  book: startingBook,
   onChange,
 }: {
   mode: Mode;
   sceneId: string | null;
   focus?: InterviewFocus;
+  /** In a Series, the Book a new Brainstorm or Interview is about, by id. */
+  book?: string;
   names: Names;
   /** Runs moving a Conversation to Trash, offering to undo it. */
   onChange: OnChange;
@@ -165,6 +171,19 @@ export function useConversation({
   const [newModel, setNewModel] = useState<Model>();
   /** Whether the Model dropdown is open. */
   const [picking, setPicking] = useState(false);
+  /** The Book the Author chose for a new Conversation, before it starts. */
+  const [newBook, setNewBook] = useState<string>();
+  /**
+   * In a Series, the Book a Brainstorm or Interview is about, as main sends
+   * it; none in Writing, which is about the Book of the Scene in focus.
+   */
+  const book =
+    mode === 'writing'
+      ? undefined
+      : conversationBook(
+          names.manuscript,
+          current ? current.book : (newBook ?? startingBook),
+        );
   const providers = useProviders();
   /** One that never had a Model chosen nor a reply is asked as a new one is. */
   const model = current
@@ -244,6 +263,7 @@ export function useConversation({
     setFailure(null);
     setShown(null);
     setNewModel(undefined);
+    setNewBook(undefined);
     setPicking(false);
     if (id === '') {
       setCurrent(null);
@@ -305,7 +325,8 @@ export function useConversation({
   /**
    * Shows the Author's message in the Conversation it is asked in, which
    * starts with it if new, while the Assistant answers; resolves with the
-   * Conversation's id. A new Interview starts with its focus set.
+   * Conversation's id. A new Interview starts with its focus set, and in a
+   * Series, a new Brainstorm or Interview on its Book.
    */
   async function showAsked(
     message: Pick<ConversationMessage, 'text' | 'command'>,
@@ -319,7 +340,12 @@ export function useConversation({
         model,
       );
       setNewModel(undefined);
+      setNewBook(undefined);
       conversation = { ...started, model, messages: [] };
+      if (book !== undefined) {
+        await window.assistant.chooseBook(started.id, book);
+        conversation = { ...conversation, book };
+      }
       if (mode === 'interview') {
         await window.assistant.setInterviewFocus(started.id, focus);
         conversation = {
@@ -371,6 +397,28 @@ export function useConversation({
       if (currentId.current === changed.id) setCurrent(changed);
     } catch (error) {
       setError(`Can't change the Model: ${(error as CallFailure).message}`);
+    }
+  }
+
+  /**
+   * Puts the open Brainstorm or Interview on the Book `next` from its next
+   * message on, or a new one, once it starts.
+   */
+  async function chooseBook(next: string) {
+    const conversation = current;
+    if (streaming !== null) return;
+    setError(null);
+    if (!conversation) {
+      setNewBook(next);
+      return;
+    }
+    try {
+      await window.assistant.chooseBook(conversation.id, next);
+      const changed = await window.assistant.readConversation(conversation.id);
+      if (currentId.current === changed.id) setCurrent(changed);
+      setList(await window.assistant.listConversations());
+    } catch (error) {
+      setError(`Can't change the Book: ${(error as CallFailure).message}`);
     }
   }
 
@@ -482,6 +530,8 @@ export function useConversation({
     total,
     model,
     chooseModel,
+    book,
+    chooseBook,
     picking,
     setPicking,
     resume,

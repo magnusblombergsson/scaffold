@@ -136,6 +136,16 @@ export type ModelChosenEvent = {
   at: number;
 };
 
+/**
+ * In a Series, the Book a Brainstorm or Interview is about, by id, from its
+ * next message on. An app from before Books skips it (ADR 0006).
+ */
+export type BookChosenEvent = {
+  type: 'bookChosen';
+  book: string;
+  at: number;
+};
+
 /** The Author set an Interview's focus. */
 export type FocusChangedEvent = {
   type: 'focusChanged';
@@ -171,6 +181,7 @@ export type ConversationEvent =
   | MessageEvent
   | EmptyReplyEvent
   | ModelChosenEvent
+  | BookChosenEvent
   | FocusChangedEvent
   | SummaryEvent
   | UnusedSummaryEvent
@@ -245,8 +256,8 @@ export function forkedLog(
  * The Conversation a log holds, or null when its header is unreadable. Lines
  * that can't be read, as one a crash cut short, and events this app doesn't
  * know are skipped; they stay in the file. A Proposal belongs to the message
- * before it. An Interview's focus is the one it was last set to, and its
- * title the one it was last renamed to.
+ * before it. An Interview's focus is the one it was last set to, its Book
+ * the one it was last put on, and its title the one it was last renamed to.
  */
 export function parseLog(log: string): LoggedConversation | null {
   const [first, ...rest] = log.split('\n');
@@ -259,6 +270,7 @@ export function parseLog(log: string): LoggedConversation | null {
   const compactions: Compaction[] = [];
   const unusedSummaries: UnusedSummary[] = [];
   let chosen: Model | undefined;
+  let book: string | undefined;
   let { title } = header;
   let trashedAt: number | undefined;
   for (const line of rest) {
@@ -277,6 +289,10 @@ export function parseLog(log: string): LoggedConversation | null {
     }
     if (isModelChosen(event)) {
       chosen = { provider: event.provider, id: event.model };
+      continue;
+    }
+    if (isBookChosen(event)) {
+      book = event.book;
       continue;
     }
     if (isEmptyReply(event)) {
@@ -328,6 +344,7 @@ export function parseLog(log: string): LoggedConversation | null {
     title,
     created,
     ...(model && { model }),
+    ...(book !== undefined && { book }),
     ...(trashedAt !== undefined && { trashedAt }),
     ...(focusChanges.length > 0 && {
       focus: focusChanges.at(-1)!.focus,
@@ -734,6 +751,15 @@ function isFocusChanged(value: unknown): value is FocusChangedEvent {
   return (
     event?.type === 'focusChanged' &&
     isInterviewFocus(event.focus) &&
+    typeof event.at === 'number'
+  );
+}
+
+function isBookChosen(value: unknown): value is BookChosenEvent {
+  const event = value as Partial<BookChosenEvent> | null;
+  return (
+    event?.type === 'bookChosen' &&
+    typeof event.book === 'string' &&
     typeof event.at === 'number'
   );
 }

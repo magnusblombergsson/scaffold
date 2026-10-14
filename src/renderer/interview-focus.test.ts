@@ -182,3 +182,56 @@ describe('Parts', () => {
     ]);
   });
 });
+
+describe('Books', () => {
+  const series: Manuscript = {
+    chapters: [
+      {
+        id: 'c1',
+        title: 'Arrival',
+        scenes: [{ id: 's1', title: 'Harbour' }],
+        part: 'p1',
+        book: 'b1',
+      },
+      { id: 'c2', title: 'Storm', scenes: [], book: 'b2' },
+      { id: 'c3', title: 'Elsewhere', scenes: [], unplaced: true },
+    ],
+    parts: [{ id: 'p1', title: 'The Sea', chapters: ['c1'], book: 'b1' }],
+    top: ['p1', 'c2'],
+    books: [
+      { id: 'b1', title: 'The Island', top: ['p1'] },
+      { id: 'b2', title: 'The Return', top: ['c2'] },
+    ],
+    unplaced: [],
+  };
+  const seriesNames = { manuscript: series, entries: [] };
+
+  it('names a Book focus by its title, and one no longer there by its kind', () => {
+    expect(focusLabel({ kind: 'book', id: 'b2' }, seriesNames)).toBe(
+      'Book “The Return”',
+    );
+    expect(focusLabel({ kind: 'book', id: 'gone' }, seriesNames)).toBe(
+      'A Book no longer there',
+    );
+  });
+
+  it('turns a Book focus into a value and back', () => {
+    const focus: InterviewFocus = { kind: 'book', id: 'b1' };
+
+    expect(focusOfValue(valueOf(focus))).toEqual(focus);
+  });
+
+  it('offers each Book with what it holds nested, then the Unplaced Chapters', () => {
+    const groups = focusOptions(seriesNames);
+
+    expect(groups.find((g) => g.label === 'Manuscript')!.options).toEqual([
+      { value: 'book:b1', label: 'Book “The Island”' },
+      { value: 'part:p1', label: ' Part “The Sea”' },
+      { value: 'chapter:c1', label: '  Chapter “Arrival”' },
+      { value: 'scene:s1', label: '   Scene “Harbour”' },
+      { value: 'book:b2', label: 'Book “The Return”' },
+      { value: 'chapter:c2', label: ' Chapter “Storm”' },
+      { value: 'chapter:c3', label: 'Chapter “Elsewhere”' },
+    ]);
+  });
+});

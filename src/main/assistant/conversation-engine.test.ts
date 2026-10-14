@@ -426,6 +426,27 @@ describe('askAssistant', () => {
   });
 });
 
+describe('Books', () => {
+  it('asks a Brainstorm about the Book it was last put on, sending only that Book’s Chapters', async () => {
+    const { store, engine, provider, chapterId } = await setUp();
+    const { id: two } = await store.createBook();
+    const { id: storm } = await store.createChapter(0, 'Storm', undefined, two);
+    const { id } = await store.startConversation('brainstorm', 'Anna');
+
+    await engine.askAssistant(id, 'Hm.', { sceneId: null }, () => {});
+    await store.chooseBook(id, two);
+    await engine.askAssistant(id, 'And?', { sceneId: null }, () => {});
+
+    const [first, second] = provider.requests.map((r) =>
+      r.system.map((b) => b.text).join('\n'),
+    );
+    expect(first).toContain(`Id: ${chapterId}`);
+    expect(first).not.toContain(`Id: ${storm}`);
+    expect(second).toContain(`Id: ${storm}`);
+    expect(second).not.toContain(`Id: ${chapterId}`);
+  });
+});
+
 describe('Interviews', () => {
   it('asks about the focus the Interview was last set to, sending only that Scene’s Prose, and logs it in each message', async () => {
     const { store, engine, provider, sceneId, chapterId } = await setUp();

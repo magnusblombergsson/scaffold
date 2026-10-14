@@ -3,6 +3,7 @@ import type { PanelWidths } from '../shared/api';
 import { OPEN_FOCUS, type InterviewFocus } from '../shared/conversation';
 import { entryTitle } from '../shared/entry';
 import { hasTag, tagged } from '../shared/tags';
+import { bookManuscript, topLevel } from '../shared/manuscript-order';
 import { fieldsOfType } from '../shared/custom-field';
 import {
   customFieldKey,
@@ -31,6 +32,7 @@ import {
 } from './Conversation';
 import { EntryCard } from './EntryCard';
 import { Ghosts } from './EntryView';
+import { BookPicker } from './BookPicker';
 import { ModelPicker } from './ModelPicker';
 import {
   focusLabel,
@@ -53,6 +55,7 @@ import { useCustomFields } from './StatusAndTags';
 export function InterviewRoom({
   active,
   names,
+  book,
   pane,
   onAddProvider,
   onOpenEntry,
@@ -61,6 +64,8 @@ export function InterviewRoom({
   /** Whether the room is shown, its Mode the window's. */
   active: boolean;
   names: Names;
+  /** In a Series, the Book a new Interview is about: the Book being written. */
+  book?: string;
   /** The width of a side pane, and how to resize it. */
   pane(key: keyof PanelWidths): PaneSize;
   onAddProvider(): void;
@@ -80,6 +85,7 @@ export function InterviewRoom({
     sceneId: null,
     focus: chosen,
     names,
+    book,
     active,
     show,
     onChange,
@@ -150,6 +156,7 @@ export function InterviewRoom({
                   ) && <option value={valueOf(focus, names)}>{label}</option>}
                 </select>
               </label>
+              <BookPicker conversation={conversation} names={names} />
               <ModelPicker conversation={conversation} />
               <ConversationUsage total={total} />
               <MessageLog
@@ -291,6 +298,7 @@ function InFocus({
           onOpenEntry={onOpenEntry}
         />
       );
+    case 'book':
     case 'part':
     case 'chapter':
     case 'scene':
@@ -521,18 +529,23 @@ function TagFocus({
 }
 
 /**
- * A Part, Chapter or Scene in focus: its Outline, and a Scene's Prose, a
- * Chapter's Scenes or a Part's Chapters with their Outlines.
+ * A Book, Part, Chapter or Scene in focus: its Outline, and a Scene's Prose,
+ * a Chapter's Scenes, a Part's Chapters or a Book's Parts and Loose Chapters
+ * with their Outlines.
  */
 function FocusUnit({
   focus,
   manuscript,
   changes,
 }: {
-  focus: { kind: 'part' | 'chapter' | 'scene'; id: string };
+  focus: { kind: 'book' | 'part' | 'chapter' | 'scene'; id: string };
   manuscript: Manuscript;
   changes: number;
 }) {
+  const book =
+    focus.kind === 'book'
+      ? manuscript.books?.find((b) => b.id === focus.id)
+      : undefined;
   const part =
     focus.kind === 'part'
       ? manuscript.parts?.find((p) => p.id === focus.id)
@@ -549,11 +562,15 @@ function FocusUnit({
         ].find((s) => s.id === focus.id)
       : undefined;
   // What it holds, each shown with its Outline.
-  const held: { id: string; title: string }[] = part
-    ? part.chapters.flatMap(
-        (id) => manuscript.chapters.find((c) => c.id === id) ?? [],
+  const held: { id: string; title: string }[] = book
+    ? topLevel(bookManuscript(manuscript, book.id)).map((item) =>
+        item.kind === 'part' ? item.part : item.chapter,
       )
-    : (chapter?.scenes ?? []);
+    : part
+      ? part.chapters.flatMap(
+          (id) => manuscript.chapters.find((c) => c.id === id) ?? [],
+        )
+      : (chapter?.scenes ?? []);
   const [read, setRead] = useState<{
     outlines: Map<string, string>;
     prose: string | null;
@@ -584,7 +601,7 @@ function FocusUnit({
       current = false;
     };
   }, [key, changes, scene?.missing]);
-  if (!part && !chapter && !scene) {
+  if (!book && !part && !chapter && !scene) {
     return <p className="reference-empty">This is no longer in the Project.</p>;
   }
   if (!read) return null;

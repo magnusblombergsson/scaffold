@@ -16,7 +16,13 @@ import {
 } from '../../shared/custom-field';
 import { mentionMatcher } from '../../shared/mentions';
 import { statusOf } from '../../shared/status';
-import { partOf, topLevel } from '../../shared/manuscript-order';
+import {
+  bookManuscript,
+  bookOf,
+  conversationBook,
+  partOf,
+  topLevel,
+} from '../../shared/manuscript-order';
 import { hasTag, tagged, tagSpelling } from '../../shared/tags';
 import {
   customFieldKey,
@@ -36,6 +42,7 @@ import {
   type EntryType,
   type EntryValue,
   type Manuscript,
+  type ManuscriptBook,
   type ManuscriptChapter,
   type ManuscriptPart,
   type ManuscriptScene,
@@ -57,11 +64,13 @@ export type { InterviewFocus };
  * One turn: the Conversation's Mode and what it is about, and its messages
  * so far, ending with the Author's new one, with the latest `summary` of
  * the older ones once it is long. In Writing, `sceneId` is the Scene in
- * focus, and a Review Chapter reviews its Chapter.
+ * focus, and a Review Chapter reviews its Chapter. In a Series, a Brainstorm
+ * or Interview is about the `book` it is on, as `conversationBook` says, and
+ * Writing about the Book holding the Scene in focus.
  */
 export type ContextRequest = (
-  | { mode: 'brainstorm' }
-  | { mode: 'interview'; focus: InterviewFocus }
+  | { mode: 'brainstorm'; book?: string }
+  | { mode: 'interview'; focus: InterviewFocus; book?: string }
   | { mode: 'writing'; command: Command; sceneId: string | null }
 ) & {
   messages: ConversationMessage[];
@@ -86,7 +95,11 @@ export async function buildContext(
   request: ContextRequest,
 ): Promise<AssistantContext> {
   const manuscript = view.manuscript();
-  const skeleton = await outlineSkeleton(view, manuscript);
+  const skeleton = await outlineSkeleton(
+    view,
+    manuscript,
+    bookAbout(manuscript, request),
+  );
   const focus = await inFocus(view, manuscript, request);
   const { summary } = request;
   const covered = request.messages.slice(0, summary?.covers ?? 0);
@@ -313,14 +326,35 @@ function entryText(entry: EntryValue, fields: readonly CustomField[]): string {
 }
 
 /**
+ * In a Series, the Book a turn is about: in Writing, the one holding the
+ * Scene in focus, if any; otherwise the Conversation's. None in a Project
+ * that is no Series.
+ */
+function bookAbout(
+  manuscript: Manuscript,
+  request: ContextRequest,
+): string | undefined {
+  if (request.mode !== 'writing') {
+    return conversationBook(manuscript, request.book);
+  }
+  const { sceneId } = request;
+  return sceneId
+    ? bookOf(manuscript, { kind: 'scene', id: sceneId })
+    : undefined;
+}
+
+/**
  * Every Outline in Manuscript order, the Project's first, under the titles
  * of its Parts, Chapters and Scenes, a Chapter in a Part nested under it,
  * with the Status of each that has one in the list, and its Tags; no Prose.
- * `texts` holds the Outlines.
+ * In a Series, each Book's Outline under the Series', and the Parts,
+ * Chapters and Scenes of the Book `book` alone, nested under it; never the
+ * Unplaced Chapters, which are in no Book. `texts` holds the Outlines.
  */
 async function outlineSkeleton(
   view: AssistantView,
   manuscript: Manuscript,
+  book: string | undefined,
 ): Promise<{ text: string; texts: string[] }> {
   const texts: string[] = [];
   const statuses = view.statuses();
@@ -331,7 +365,7 @@ async function outlineSkeleton(
   }
   async function unit(
     heading: string,
-    node: ManuscriptPart | ManuscriptChapter | ManuscriptScene,
+    node: ManuscriptBook | ManuscriptPart | ManuscriptChapter | ManuscriptScene,
   ): Promise<string> {
     const status = statusOf(statuses, node.status);
     return [
@@ -343,11 +377,21 @@ async function outlineSkeleton(
     ].join('\n');
   }
   const label = partName(manuscript.partLabel);
+  const { books } = manuscript;
+  const about = books?.find((b) => b.id === book);
+  const hasParts = books
+    ? !!manuscript.parts?.some((p) => p.book === about?.id)
+    : !!manuscript.parts;
+  const listed = hasParts
+    ? `each ${label}, Chapter and Scene in Manuscript order with its Outline, a Chapter in ${withArticle(label)} under it`
+    : 'each Chapter and Scene in Manuscript order with its Outline';
   const blocks = [
-    manuscript.parts
-      ? `The Outline skeleton: the Outline of the whole story, then each ${label}, Chapter and Scene in Manuscript order with its Outline, a Chapter in ${withArticle(label)} under it, each under its Id and, if the Author gave them, its Status and Tags. It holds no Prose.`
-      : 'The Outline skeleton: the Outline of the whole story, then each Chapter and Scene in Manuscript order with its Outline, each under its Id and, if the Author gave them, its Status and Tags. It holds no Prose.',
-    `## The story\nId: ${PROJECT_OUTLINE}\n${await outline(PROJECT_OUTLINE)}`,
+    !books
+      ? `The Outline skeleton: the Outline of the whole story, then ${listed}, each under its Id and, if the Author gave them, its Status and Tags. It holds no Prose.`
+      : about
+        ? `The Outline skeleton: the Outline of the whole Series, then each Book's in reading order, and under the Book this turn is about, “${about.title}”, ${listed}; the other Books' are not sent. Each is under its Id and, if the Author gave them, its Status and Tags. It holds no Prose.`
+        : "The Outline skeleton: the Outline of the whole Series, then each Book's in reading order, each under its Id and, if the Author gave them, its Status and Tags. No Book's Parts, Chapters and Scenes are sent, as this turn is about none. It holds no Prose.",
+    `## The ${books ? 'Series' : 'story'}\nId: ${PROJECT_OUTLINE}\n${await outline(PROJECT_OUTLINE)}`,
   ];
   async function chapter(node: ManuscriptChapter, level: string) {
     const name = node.unplaced ? 'Unplaced Chapter' : 'Chapter';
@@ -356,13 +400,28 @@ async function outlineSkeleton(
       blocks.push(await unit(`${level}# Scene “${scene.title}”`, scene));
     }
   }
-  for (const item of topLevel(manuscript)) {
-    if (item.kind === 'chapter') {
-      await chapter(item.chapter, '##');
-      continue;
+  /** The top level of `of`, its headings `level` deep. */
+  async function tree(of: Manuscript, level: string) {
+    for (const item of topLevel(of)) {
+      if (item.kind === 'chapter') {
+        await chapter(item.chapter, level);
+        continue;
+      }
+      blocks.push(
+        await unit(`${level} ${label} “${item.part.title}”`, item.part),
+      );
+      for (const c of item.chapters) await chapter(c, `${level}#`);
     }
-    blocks.push(await unit(`## ${label} “${item.part.title}”`, item.part));
-    for (const c of item.chapters) await chapter(c, '###');
+  }
+  if (!books) {
+    await tree(manuscript, '##');
+    return { text: blocks.join('\n\n'), texts };
+  }
+  for (const each of books) {
+    blocks.push(await unit(`## Book “${each.title}”`, each));
+    if (each.id === about?.id) {
+      await tree(bookManuscript(manuscript, each.id), '###');
+    }
   }
   return { text: blocks.join('\n\n'), texts };
 }
@@ -460,8 +519,23 @@ async function inFocus(
     }
   }
 
+  /**
+   * A Book's Outline and Notes, and the Outlines of its Parts and Loose
+   * Chapters; never their Prose, which may be much of the story.
+   */
+  async function book(id: string): Promise<void> {
+    const found = manuscript.books?.find((b) => b.id === id);
+    if (!found) return;
+    await add({ kind: 'outline', id }, `Outline of Book “${found.title}”`);
+    await add({ kind: 'notes', id }, `Notes on Book “${found.title}”`);
+    for (const { id: unit, name } of bookHoldings(manuscript, id)) {
+      await add({ kind: 'outline', id: unit }, `Outline of ${name}`);
+    }
+  }
+
   if (request.mode === 'interview') {
     const { focus } = request;
+    if (focus.kind === 'book') await book(focus.id);
     if (focus.kind === 'scene') await scene(focus.id, false);
     if (focus.kind === 'chapter') await chapter(focus.id, false);
     if (focus.kind === 'part') await part(focus.id);
@@ -551,6 +625,16 @@ function interviewFocusText(
       }
       return `${heading} the Entries, Chapters and Scenes tagged “${spelling}”. Ask about what is missing among them.`;
     }
+    case 'book': {
+      const book = manuscript.books?.find((b) => b.id === focus.id);
+      if (!book) return `${heading} a Book ${gone}`;
+      const held = bookHoldings(manuscript, book.id).map(({ name }) => name);
+      const holds =
+        held.length > 0
+          ? `which holds ${held.join(', ')}`
+          : 'which holds nothing yet';
+      return `${heading} the Book “${book.title}”, Id: ${book.id}, ${holds}. Interview out its Outline: what happens, who and why.`;
+    }
     case 'part': {
       const label = partName(manuscript.partLabel);
       const part = where.parts.get(focus.id);
@@ -575,6 +659,22 @@ function interviewFocusText(
       return `${heading} the Scene “${place.scene.title}”, Id: ${focus.id}. Interview out its Outline: what happens, who and why.`;
     }
   }
+}
+
+/**
+ * The Parts and Loose Chapters of a Book, in order, each by id and named as
+ * the Assistant is told them, a Part by the Project's label.
+ */
+function bookHoldings(
+  manuscript: Manuscript,
+  bookId: string,
+): { id: string; name: string }[] {
+  const label = partName(manuscript.partLabel);
+  return topLevel(bookManuscript(manuscript, bookId)).map((item) =>
+    item.kind === 'part'
+      ? { id: item.part.id, name: `${label} “${item.part.title}”` }
+      : { id: item.chapter.id, name: `Chapter “${item.chapter.title}”` },
+  );
 }
 
 function focusBlock(units: UnitInFocus[]): string {
@@ -667,16 +767,21 @@ export function readableScene(
 /**
  * For a log that names the Mode: the request a Mode's turn makes. In
  * Writing, a Review when the Author's message asks for one; in an Interview,
- * about the focus it was last set to.
+ * about the focus it was last set to; in a Brainstorm or Interview, about
+ * the `book` it was last put on, if any.
  */
 export function defaultRequest(
   mode: Mode,
   sceneId: string | null,
   messages: ConversationMessage[],
   interviewFocus: InterviewFocus = OPEN_FOCUS,
+  book?: string,
 ): ContextRequest {
-  if (mode === 'brainstorm') return { mode, messages };
-  if (mode === 'interview') return { mode, focus: interviewFocus, messages };
+  const onBook = book !== undefined ? { book } : {};
+  if (mode === 'brainstorm') return { mode, messages, ...onBook };
+  if (mode === 'interview') {
+    return { mode, focus: interviewFocus, messages, ...onBook };
+  }
   const command = messages.findLast((m) => !m.interrupted)?.command;
   return { mode, command: command ?? 'question', sceneId, messages };
 }
