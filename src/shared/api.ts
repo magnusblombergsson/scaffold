@@ -82,6 +82,17 @@ export type Changed = { manuscript: Manuscript; step: number };
 export type Created = Changed & { id: string };
 
 /**
+ * Another Project added from a Backup: its name, its Books by their new
+ * ids, in order, and each Entry added to the Story Bible by its new id and
+ * the id it had in the Backup.
+ */
+export type AddedFromBackup = Changed & {
+  name: string;
+  books: string[];
+  entries: { id: string; original: string }[];
+};
+
+/**
  * Where main is with saving a unit: `failed` keeps its value unsaved in
  * memory, and main tries it again, waiting longer each time.
  */
@@ -358,6 +369,14 @@ export interface ProjectApi {
    * Project of one Book becomes a Series, its Manuscript Book 1.
    */
   importBook(file: ImportFile, convention: ImportConvention): Promise<Created>;
+  /**
+   * Asks for a Backup of another Project and adds it after the last Book,
+   * once a Backup of this one is made or the Author chose to go on
+   * without, as one step: `undo` moves the added Books and Entries to
+   * Trash. Null when the Author cancels or it is refused, which they are
+   * told.
+   */
+  addBookFromBackup(): Promise<AddedFromBackup | null>;
   renameBook(bookId: string, title: string): Promise<Changed>;
   /** Moves a Book to `index` among the Books. */
   moveBook(bookId: string, index: number): Promise<Changed>;
@@ -1235,6 +1254,7 @@ export const projectMethods = {
   trashPart: 'invoke',
   createBook: 'invoke',
   importBook: 'invoke',
+  addBookFromBackup: 'invoke',
   renameBook: 'invoke',
   moveBook: 'invoke',
   trashBook: 'invoke',

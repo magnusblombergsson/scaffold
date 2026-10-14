@@ -47,6 +47,7 @@ import type {
   Conflict,
   AcceptOptions,
   ConflictVersion,
+  AddedFromBackup,
   Created,
   Dropped,
   ProjectEvent,
@@ -124,6 +125,15 @@ import {
 } from './file-system';
 import { FormatUpgraded, GatedFileSystem } from './gated-file-system';
 import { backUpProject } from './backup';
+import {
+  addedFile,
+  entriesIn,
+  planAdd,
+  readBackupProject,
+  seriesOutline,
+  STARRED_CONVERSATIONS,
+  STARS,
+} from './add-from-backup';
 import { freeName, safeWrite } from './safe-write';
 import {
   markerHosts,
@@ -1318,34 +1328,39 @@ export class ProjectStore {
     return this.enqueueStructure(async () => {
       // What a newer app writes, this one may misread.
       if (this.upgraded) return;
-      const tagsBefore = this.tagsByUnit();
       try {
-        await this.checkStructure();
-        if (this.upgraded) return;
-        await this.checkUnits();
-        await this.findConflicts();
-        await this.forkConversationCopies();
-        if (await this.readUnitDetails()) {
-          this.emit({
-            type: 'unitDetailsChanged',
-            manuscript: this.manuscript(),
-          });
-        }
-        if (await this.todos.read()) this.emitTodos();
-        if (await this.stars.read()) {
-          this.emit({ type: 'conversationsChanged' });
-        }
-        if (await this.customFields.read()) this.emitCustomFields();
-        if (await this.keyFields.read()) this.emitKeyFields();
-        if (await this.relations.read()) this.emitRelations();
-        if (await this.snapshots.read()) this.emitSnapshots();
-        for (const change of tagChanges(tagsBefore, this.tagsByUnit())) {
-          this.emitVocabulary(change);
-        }
+        await this.readChanges();
       } catch (error) {
         console.error(`Can't check ${this.path} for changes:`, error);
       }
     });
+  }
+
+  /** Takes in what changed on disk, as `checkForChanges` does, telling the window. */
+  private async readChanges(): Promise<void> {
+    const tagsBefore = this.tagsByUnit();
+    await this.checkStructure();
+    if (this.upgraded) return;
+    await this.checkUnits();
+    await this.findConflicts();
+    await this.forkConversationCopies();
+    if (await this.readUnitDetails()) {
+      this.emit({
+        type: 'unitDetailsChanged',
+        manuscript: this.manuscript(),
+      });
+    }
+    if (await this.todos.read()) this.emitTodos();
+    if (await this.stars.read()) {
+      this.emit({ type: 'conversationsChanged' });
+    }
+    if (await this.customFields.read()) this.emitCustomFields();
+    if (await this.keyFields.read()) this.emitKeyFields();
+    if (await this.relations.read()) this.emitRelations();
+    if (await this.snapshots.read()) this.emitSnapshots();
+    for (const change of tagChanges(tagsBefore, this.tagsByUnit())) {
+      this.emitVocabulary(change);
+    }
   }
 
   private async checkStructure(): Promise<void> {
@@ -3699,6 +3714,96 @@ export class ProjectStore {
   }
 
   /**
+   * Adds the Project in the Backup at `zipPath` after the last Book, as
+   * one step: each of its Books a new Book, in order, a Project of one
+   * Book becoming one titled as its folder, its Project Outline that
+   * Book's; its Story Bible beside this one's, each Entry first appearing
+   * in the first added Book unless it says a later one; its Trash, Drawer,
+   * Conversations, Todos, Relations, Snapshots and images. Everything
+   * added has a new id. Its Custom fields and Statuses join those here of
+   * the same label and type, or name; the rest are added. A Series's
+   * Series Outline is appended to this one's under a line naming it. Its
+   * settings stay behind. Refused, writing nothing, for a Backup that
+   * can't be restored. Undo moves the added Books and Entries to Trash.
+   */
+  async addBookFromBackup(zipPath: string): Promise<AddedFromBackup> {
+    const project = await readBackupProject(zipPath, this.deps.clock);
+    try {
+      let added: Omit<AddedFromBackup, keyof Changed> | undefined;
+      const changed = await this.step(async () => {
+        const plan = await planAdd(project, {
+          statuses: this.statuses(),
+          customFields: this.customFields.list(),
+        });
+        const now = this.deps.clock.now();
+        // Unit files first, the tree last.
+        for (const file of project.files) {
+          const comes = await addedFile(project, plan, file, now);
+          if (!comes) continue;
+          const target = path.join(this.path, ...comes.to.split('/'));
+          if (await this.deps.fs.exists(target)) {
+            console.error(`Not adding ${comes.to}: it is here already`);
+            continue;
+          }
+          await this.deps.fs.mkdir(path.dirname(target));
+          await safeWrite(this.deps.fs, this.deps.clock, target, comes.data);
+        }
+        if (plan.statuses.length > 0) {
+          await this.writeManifest({
+            ...this.manifest,
+            statuses: [...this.statuses(), ...plan.statuses],
+          });
+          this.emit({ type: 'statusesChanged', statuses: this.statuses() });
+        }
+        const [first, ...rest] = plan.books;
+        await this.addBook(first.id, undefined, first.title, (tree) => {
+          findBook(tree, first.id).top.push(...first.top);
+          tree.books.push(...rest);
+          tree.chapters.push(...plan.chapters);
+          tree.parts.push(...plan.parts);
+        });
+        await this.readChanges();
+        for (const id of project.starred) {
+          const starred = plan.ids.get(id);
+          if (starred)
+            await this.stars.set(STARRED_CONVERSATIONS, starred, true);
+        }
+        if (project.starred.size > 0)
+          this.emit({ type: 'conversationsChanged' });
+        const outline = (await seriesOutline(project)).trim();
+        if (plan.onlyBook === undefined && outline) {
+          await this.changeUnit(outlineRef(PROJECT_OUTLINE), (value) => ({
+            ...value,
+            body: [
+              value.body.replace(/\s+$/, ''),
+              `From “${project.folderName}”:`,
+              outline,
+            ]
+              .filter(Boolean)
+              .join('\n\n'),
+          }));
+        }
+        const entries = entriesIn(project).flatMap((original) => {
+          const id = plan.ids.get(original);
+          return id && this.entries.has(id) ? [{ id, original }] : [];
+        });
+        added = { name: project.folderName, books: plan.bookIds, entries };
+        return async () => {
+          for (const { id } of entries) {
+            if (this.entries.has(id)) await this.trash.move('entry', id);
+          }
+          for (const id of [...plan.bookIds].reverse()) {
+            if (isBook(this.tree(), id)) await this.trash.move('book', id);
+          }
+        };
+      });
+      return { ...changed, ...added! };
+    } finally {
+      await project.dispose();
+    }
+  }
+
+  /**
    * Adds Book `id` at `index` among the Books, or last, and has `fill` put
    * what it holds in the tree. A Project of one Book becomes a Series: its
    * Manuscript becomes Book 1, which takes the Manuscript's Word target.
@@ -4823,11 +4928,6 @@ export class ProjectStore {
     }
   }
 }
-
-/** The folder of switch files, which older apps never look in (ADR 0006). */
-const STARS = 'stars';
-/** The file in `stars/` holding the Starred Conversations. */
-const STARRED_CONVERSATIONS = 'conversations';
 
 function starsOf(projectPath: string, deps: StoreDeps): Switches {
   return new Switches(path.join(projectPath, STARS), deps.fs, deps.clock);

@@ -3718,6 +3718,16 @@ legend .show-in-peek {
   overflow-wrap: anywhere;
 }
 
+.add-pair {
+  display: block;
+  margin-bottom: 0.35rem;
+  overflow-wrap: anywhere;
+}
+
+.add-pair-by-hand select {
+  max-width: 14rem;
+}
+
 .import-opening {
   display: block;
   overflow: hidden;
