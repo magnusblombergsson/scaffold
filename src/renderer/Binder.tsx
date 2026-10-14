@@ -20,6 +20,7 @@ import {
   type Row,
 } from './binder-keys';
 import { useListKeys } from './list-keys';
+import { bookMoveNotice } from '../shared/evolution';
 import {
   bookManuscript,
   partOf,
@@ -38,6 +39,7 @@ import { useImagePicker } from './ImagePicker';
 import {
   partName,
   PROJECT_OUTLINE,
+  type EntrySummary,
   type Manuscript,
   type ManuscriptBook,
   type ManuscriptChapter,
@@ -57,6 +59,8 @@ export type Selection =
 
 type Props = {
   manuscript: Manuscript;
+  /** The Entries, to tell how moving a Book moves their Evolutions. */
+  entries: readonly EntrySummary[];
   selected: Selection | null;
   onSelect(selection: Selection): void;
   /** The Parts, Chapters and Scenes, or `PROJECT_OUTLINE`, with a unit in Conflict. */
@@ -96,6 +100,7 @@ const BOOK = 'application/x-scaffold-book';
  */
 export function Binder({
   manuscript,
+  entries,
   selected,
   onSelect,
   conflicted,
@@ -224,7 +229,12 @@ export function Binder({
   }
 
   function moveBook(bookId: string, index: number) {
-    return onChange(() => project.moveBook(bookId, index), 'Book moved');
+    const order = (manuscript.books ?? []).map((book) => book.id);
+    const notice = bookMoveNotice(entries, order, bookId, index);
+    return onChange(
+      () => project.moveBook(bookId, index),
+      notice ? `Book moved: ${notice}` : 'Book moved',
+    );
   }
 
   /**

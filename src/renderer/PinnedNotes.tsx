@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { PinnedNote } from '../shared/api';
 import { entryTitle } from '../shared/entry';
 import type { EntrySummary, EntryValue } from '../shared/project-types';
-import { useUnitImage } from './UnitImage';
+import { entryImageRef, useUnitImage } from './UnitImage';
 import { ViewableImage } from './ImageView';
 import { PeekCard } from './PeekCard';
 import { onEntryWritten } from './entry-written';
@@ -16,18 +16,22 @@ const NOTE_WIDTH = 320;
  * Each is dragged by its header, folded to its title, switched between its
  * Entry's text and image, opened or unpinned; the window shrinking never
  * leaves one outside it. `children`, the Floating image, float in the same
- * layer.
+ * layer. In a Series each shows its Entry as of the Book being written.
  */
 export function PinnedNotes({
   notes,
   entries,
+  asWritten = (entry) => entry,
   foldedImage,
   onChange,
   onOpen,
   children,
 }: {
   notes: PinnedNote[];
+  /** In a Series, as of the Book being written. */
   entries: EntrySummary[];
+  /** An Entry as a note shows it: in a Series, as of the Book being written. */
+  asWritten?(entry: EntryValue): EntryValue;
   /** Whether a folded note shows its Entry's image. */
   foldedImage: boolean;
   /** `save` once the change is done, not while a note is dragged. */
@@ -52,6 +56,7 @@ export function PinnedNotes({
               summary={summary}
               room={room}
               foldedImage={foldedImage}
+              asWritten={asWritten}
               onChange={(change, save) => onChange(note.entryId, change, save)}
               onOpen={onOpen}
             />
@@ -69,6 +74,7 @@ function Note({
   summary,
   room,
   foldedImage,
+  asWritten,
   onChange,
   onOpen,
 }: {
@@ -78,11 +84,16 @@ function Note({
   summary: EntrySummary;
   room: Size;
   foldedImage: boolean;
+  asWritten(entry: EntryValue): EntryValue;
   onChange(change: NoteChange, save: boolean): void;
   onOpen(entryId: string): void;
 }) {
-  const entry = useEntry(summary);
-  const image = useUnitImage({ kind: 'entry', id: summary.id }, summary.image);
+  const read = useEntry(summary);
+  const entry = read && asWritten(read);
+  const image = useUnitImage(
+    entryImageRef(summary.id, summary.image),
+    summary.image,
+  );
   const title = entryTitle(summary);
   const element = useRef<HTMLElement>(null);
   const size = useElementSize(element, NOTE_WIDTH);

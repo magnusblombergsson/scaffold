@@ -19,6 +19,7 @@ import { ENTRY_TYPE_LABELS, ENTRY_TYPES } from '../shared/project-types';
 import type { Status } from '../shared/status';
 import { tagKey } from '../shared/tags';
 import { StatusDot } from './Binder';
+import type { TitledBook } from '../shared/evolution';
 import { useStatuses } from './StatusAndTags';
 
 /** The events after which the Tags in use may have changed. */
@@ -32,9 +33,13 @@ const TAG_EVENTS = new Set([
  * The Filter at `place`, as this computer remembers it for the Project, and
  * the Tags in use to pick from. A Tag no longer in use, or a Status no longer
  * in the list, drops out; one gone as the place opens is forgotten, so a
- * Filter emptied that way is off.
+ * Filter emptied that way is off; so does a Book no longer among `books`,
+ * when given.
  */
-export function useFilter(place: FilterPlace): {
+export function useFilter(
+  place: FilterPlace,
+  books?: readonly string[],
+): {
   filter: Filter;
   setFilter(filter: Filter): void;
   inUse: string[];
@@ -79,7 +84,9 @@ export function useFilter(place: FilterPlace): {
   // The same object while it chooses the same values, as the Tags in use
   // are read anew.
   const filterKey = JSON.stringify(
-    stored && inUse ? keepKnown(stored, { tags: inUse, statuses }) : {},
+    stored && inUse
+      ? keepKnown(stored, { tags: inUse, statuses, ...(books && { books }) })
+      : {},
   );
   const filter = useMemo(() => JSON.parse(filterKey) as Filter, [filterKey]);
 
@@ -116,6 +123,7 @@ export function FilterControl({
   total,
   by = 'types',
   label = 'Filter',
+  books,
 }: {
   filter: Filter;
   onChange(filter: Filter): void;
@@ -127,6 +135,8 @@ export function FilterControl({
   by?: 'types' | 'statuses';
   /** The button's name while no Filter is on. */
   label?: string;
+  /** In a Series, the Books to filter Entries by the one they first appear in. */
+  books?: readonly TitledBook[];
 }) {
   const statuses = useStatuses();
   const [open, setOpen] = useState(false);
@@ -165,7 +175,7 @@ export function FilterControl({
           onClick={() => setOpen(!open)}
         >
           {on
-            ? `${filterSummary(filter, statuses)} — ${shown} of ${total}`
+            ? `${filterSummary(filter, statuses, books)} — ${shown} of ${total}`
             : label}
         </button>
         {on && (
@@ -185,6 +195,7 @@ export function FilterControl({
           onChange={onChange}
           inUse={inUse}
           statuses={by === 'statuses' ? statuses : null}
+          books={by === 'types' ? books : undefined}
         />
       )}
     </div>
@@ -196,17 +207,21 @@ function FilterPanel({
   onChange,
   inUse,
   statuses,
+  books,
 }: {
   filter: Filter;
   onChange(filter: Filter): void;
   inUse: string[];
   /** The Statuses to tick, or null for Entry types. */
   statuses: Status[] | null;
+  /** The Books an Entry may first appear in, to tick; none outside a Series. */
+  books?: readonly TitledBook[];
 }) {
   const [typing, setTyping] = useState('');
   const listId = useId();
   const types = filter.types ?? [];
   const chosenStatuses = filter.statuses ?? [];
+  const chosenBooks = filter.books ?? [];
   const tags = filter.tags ?? [];
   const chosen = new Set(
     tags.flatMap((tag) => (tag === null ? [] : [tagKey(tag)])),
@@ -262,6 +277,30 @@ function FilterPanel({
                 }
               />
               {ENTRY_TYPE_LABELS[type]}
+            </label>
+          ))}
+        </fieldset>
+      )}
+      {books && books.length > 0 && (
+        <fieldset>
+          <legend>First appears in</legend>
+          {[...books, null].map((book) => (
+            <label key={book?.id ?? ''}>
+              <input
+                type="checkbox"
+                checked={chosenBooks.includes(book?.id ?? null)}
+                onChange={(event) =>
+                  onChange(
+                    withValue(
+                      filter,
+                      'books',
+                      book?.id ?? null,
+                      event.target.checked,
+                    ),
+                  )
+                }
+              />
+              {book?.title ?? 'Not said'}
             </label>
           ))}
         </fieldset>

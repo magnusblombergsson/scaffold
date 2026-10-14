@@ -261,3 +261,38 @@ describe('readFilters', () => {
     expect(readFilters([1])).toEqual({});
   });
 });
+
+describe('Entries by the Book they first appear in', () => {
+  it('matches an Entry first appearing in a chosen Book, and "Not said" one that says none', () => {
+    const filter: Filter = { books: ['b2'] };
+    expect(matchesFilter(filter, { book: 'b2' })).toBe(true);
+    expect(matchesFilter(filter, { book: 'b1' })).toBe(false);
+    expect(matchesFilter(filter, {})).toBe(false);
+    expect(matchesFilter({ books: [null] }, {})).toBe(true);
+    expect(matchesFilter({ books: [null, 'b1'] }, { book: 'b1' })).toBe(true);
+  });
+
+  it('names the chosen Books', () => {
+    const books = [
+      { id: 'b1', title: 'The Hollow Crown' },
+      { id: 'b2', title: 'Ashes' },
+    ];
+    expect(
+      filterSummary({ types: ['character'], books: ['b2', null] }, [], books),
+    ).toBe('Character · Ashes · Not said');
+  });
+
+  it('drops a Book no longer in the Series', () => {
+    expect(
+      keepKnown({ books: ['b1', 'gone', null] }, { tags: [], books: ['b1'] }),
+    ).toEqual({
+      books: ['b1', null],
+    });
+  });
+
+  it('is remembered', () => {
+    expect(
+      readFilters({ 'writing-bible': { books: ['b1', null, 3] } }),
+    ).toEqual({ 'writing-bible': { books: ['b1', null] } });
+  });
+});

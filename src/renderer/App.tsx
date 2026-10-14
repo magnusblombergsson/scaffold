@@ -28,6 +28,7 @@ import {
   unitKey,
   VISIBILITY_LABELS,
   type EntryType,
+  type EntryValue,
   type Manuscript,
   type ManuscriptBook,
   type ManuscriptChapter,
@@ -41,6 +42,7 @@ import {
   bookOf,
   splitsToNextChapter,
 } from '../shared/manuscript-order';
+import { entryAsOf, namesUpTo, summaryAsOf } from '../shared/evolution';
 import { ROOM_LABELS, ROOMS, type Room } from '../shared/room';
 import { ProjectMirror } from './project-mirror';
 import { useProject } from './use-project';
@@ -397,6 +399,46 @@ function ProjectView({
           b.id === bookOf(manuscript, { kind: 'scene', id: open.scene.id }),
       )
     : undefined;
+  /** In a Series, the Books in reading order, by title; none otherwise. */
+  const seriesBooks = useMemo(
+    () => (manuscript.books ?? []).map(({ id, title }) => ({ id, title })),
+    [manuscript.books],
+  );
+  const bookIds = useMemo(() => seriesBooks.map((b) => b.id), [seriesBooks]);
+  /**
+   * In a Series, the Book being written: the one holding the Scene open in
+   * Writing, or else what is selected there, or else the last. A Peek, the
+   * Pinned notes and highlighting show the Entries as of it.
+   */
+  const bookBeingWritten = manuscript.books
+    ? (writingBook?.id ??
+      (selected && selected.kind !== 'project'
+        ? bookOf(manuscript, selected)
+        : undefined) ??
+      bookIds[bookIds.length - 1])
+    : undefined;
+  /** An Entry as of the Book being written. */
+  const asWritten = useCallback(
+    (entry: EntryValue) => entryAsOf(entry, bookIds, bookBeingWritten).entry,
+    [bookIds, bookBeingWritten],
+  );
+  /** The Entries' summaries as of the Book being written. */
+  const entriesAsWritten = useMemo(
+    () => entries.map((e) => summaryAsOf(e, bookIds, bookBeingWritten)),
+    [entries, bookIds, bookBeingWritten],
+  );
+  /** The Book the Story Bible Room shows the Entries as of, if the Author chose one. */
+  const [bibleBook, setBibleBook] = useState<string | null>(null);
+  /** In a Series, the Book the Story Bible Room shows the Entries as of: the one chosen, or the Book being written. */
+  const bibleAsOf =
+    bibleBook !== null && bookIds.includes(bibleBook)
+      ? bibleBook
+      : bookBeingWritten;
+  /** The Entries' summaries as the Story Bible Room shows them. */
+  const entriesAsOfBible = useMemo(
+    () => entries.map((e) => summaryAsOf(e, bookIds, bibleAsOf)),
+    [entries, bookIds, bibleAsOf],
+  );
   /** What the Project Outline is called: in a Series, the Series Outline. */
   const projectOutlineName = manuscript.books
     ? 'Series Outline'
@@ -761,7 +803,14 @@ function ProjectView({
       slot.appendChild(assistantHome);
     }
   }, [room, visited, assistantHome]);
-  useEffect(() => setMentionEntries(entries), [entries]);
+  // In Book N, every name and alias an Entry has had up to it.
+  useEffect(
+    () =>
+      setMentionEntries(
+        entries.map((e) => namesUpTo(e, bookIds, bookBeingWritten)),
+      ),
+    [entries, bookIds, bookBeingWritten],
+  );
   const [corkboardView, setCorkboardView] = useCorkboardView();
   const [highlight, setHighlight] = useState(true);
   useEffect(() => {
@@ -1609,6 +1658,7 @@ function ProjectView({
                   {tab === 'manuscript' ? (
                     <Binder
                       manuscript={manuscript}
+                      entries={entries}
                       selected={selected}
                       onSelect={select}
                       conflicted={conflicted}
@@ -1868,7 +1918,10 @@ function ProjectView({
               >
                 <div className="left-pane-list">
                   <StoryBible
-                    entries={entries}
+                    entries={entriesAsOfBible}
+                    books={seriesBooks}
+                    asOf={bibleAsOf}
+                    onAsOf={setBibleBook}
                     openId={openEntry?.id ?? null}
                     conflicted={conflicted}
                     onOpen={showEntry}
@@ -1912,11 +1965,17 @@ function ProjectView({
               {openEntry ? (
                 <EntryView
                   // A type change rewrites its description and fields, and a
-                  // resolved Conflict the version kept: read them anew.
-                  key={`${openEntry.id}:${openEntry.type}:${resolutions}`}
-                  entry={openEntry}
-                  entries={entries}
+                  // resolved Conflict the version kept: read them anew; so
+                  // does seeing it as of another Book, or the Books reordered.
+                  key={`${openEntry.id}:${openEntry.type}:${resolutions}:${bibleAsOf}:${bookIds.join()}`}
+                  entry={summaryAsOf(openEntry, bookIds, bibleAsOf)}
+                  entries={entriesAsOfBible}
                   language={language}
+                  books={seriesBooks}
+                  asOf={bibleAsOf}
+                  onFirstAppears={(bookId) =>
+                    void mirror.setFirstAppears(openEntry.id, bookId)
+                  }
                   focusName={
                     focusName?.id === openEntry.id ? focusName.count : undefined
                   }
@@ -2016,6 +2075,7 @@ function ProjectView({
         {peek && (
           <MentionPeek
             peek={peek}
+            asWritten={asWritten}
             pinned={pinnedNotes.map((note) => note.entryId)}
             onOpen={showEntry}
             onTogglePin={(id, card) =>
@@ -2037,7 +2097,8 @@ function ProjectView({
         {room === 'writing' && (
           <PinnedNotes
             notes={pinnedNotes}
-            entries={entries}
+            entries={entriesAsWritten}
+            asWritten={asWritten}
             foldedImage={foldedNoteImage}
             onChange={(entryId, change, save) => {
               if (change.type === 'raise') setImageOnTop(false);

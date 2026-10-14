@@ -19,6 +19,7 @@ import {
   sameType,
   type PartKey,
 } from './conflict-parts';
+import type { TitledBook } from '../shared/evolution';
 
 /** The Conflicts tab: each unit saved on two computers, until the Author resolves it. */
 export function ConflictList({
@@ -119,6 +120,7 @@ export function ConflictResolver({
             versions={versions}
             values={values as EntryValue[]}
             customFields={customFields}
+            books={manuscript.books ?? []}
             description={merge}
             onDescription={setMerge}
             onResolve={onResolve}
@@ -168,6 +170,7 @@ function EntryVersions({
   versions,
   values,
   customFields,
+  books,
   description,
   onDescription,
   onResolve,
@@ -175,12 +178,14 @@ function EntryVersions({
   versions: Conflict['versions'];
   values: EntryValue[];
   customFields: readonly CustomField[];
+  /** The Books, in a Series, to name the Book of each Evolution. */
+  books: readonly TitledBook[];
   description: string;
   onDescription(text: string): void;
   onResolve(kept: UnitValue): void;
 }) {
   const [choices, setChoices] = useState<Partial<Record<PartKey, number>>>({});
-  const parts = entryParts(values, customFields);
+  const parts = entryParts(values, customFields, books);
   const toChoose = partsToChoose(parts);
   const mergeable = sameType(values);
   const chosen = toChoose.every((part) => choices[part.key] !== undefined);
@@ -232,7 +237,7 @@ function EntryVersions({
             {toChoose.map(({ key, label, texts }) => (
               <fieldset key={key} className="conflict-choice">
                 <legend>{label}</legend>
-                {distinct(texts as string[]).map(({ text, index }) => (
+                {distinct(texts).map(({ text, index }) => (
                   <label key={index}>
                     <input
                       type="radio"
@@ -243,7 +248,11 @@ function EntryVersions({
                       }
                     />
                     <span className="conflict-choice-text">
-                      {text.trim() ? text : '(empty)'}
+                      {text === undefined
+                        ? '(no Evolution)'
+                        : text.trim()
+                          ? text
+                          : '(empty)'}
                     </span>
                   </label>
                 ))}
@@ -261,7 +270,13 @@ function EntryVersions({
               disabled={!chosen}
               onClick={() =>
                 onResolve(
-                  mergedEntry(values, choices, description, customFields),
+                  mergedEntry(
+                    values,
+                    choices,
+                    description,
+                    customFields,
+                    books,
+                  ),
                 )
               }
             >
@@ -274,8 +289,10 @@ function EntryVersions({
   );
 }
 
-/** Each text once, with the first version that holds it. */
-function distinct(texts: string[]): { text: string; index: number }[] {
+/** Each text once, with the first version that holds it; undefined for an Evolution a version hasn't. */
+function distinct(
+  texts: (string | undefined)[],
+): { text: string | undefined; index: number }[] {
   return texts.flatMap((text, index) =>
     texts.indexOf(text) === index ? [{ text, index }] : [],
   );

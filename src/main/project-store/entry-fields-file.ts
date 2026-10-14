@@ -35,6 +35,12 @@ const FIELD_KEYS: Record<EntryType, readonly (keyof EntryFields)[]> = {
  */
 export const CUSTOM = 'custom';
 
+/**
+ * The frontmatter key of an Entry's Evolutions, by Book id, then field
+ * (ADR 0012): Entry text, as the values they change are.
+ */
+export const EVOLUTIONS = 'evolutions';
+
 /** The frontmatter keys an Entry's fields may be stored under, of any type. */
 export const ENTRY_FIELD_KEYS: readonly string[] = [
   ...new Set(Object.values(FIELD_KEYS).flat()),

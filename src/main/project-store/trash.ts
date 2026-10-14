@@ -86,7 +86,7 @@ import {
 } from './unit-codec';
 import {
   filesMovingWithTrash,
-  IMAGE_FILE,
+  imageOwner,
   parseDetails,
   type HeldDetails,
 } from './unit-details-catalogue';
@@ -1642,7 +1642,7 @@ export class Trash {
       // The image of an Entry back in the Story Bible, as when an MVP app
       // restored it, goes back to images/; so does a Scene's or Chapter's
       // back in the Manuscript.
-      const owner = IMAGE_FILE.exec(name)?.[1];
+      const owner = imageOwner(name);
       if (
         owner &&
         (filesMovingWithTrash(entries.get(owner)).includes(name) ||

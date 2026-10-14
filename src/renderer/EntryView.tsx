@@ -1,16 +1,28 @@
 import type { Node } from '@tiptap/pm/model';
-import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import {
-  customValue,
-  fieldsOfType,
-  withCustomValue,
-} from '../shared/custom-field';
+  Fragment,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from 'react';
+import { customValue, fieldsOfType } from '../shared/custom-field';
+import {
+  editAsOf,
+  entryAsOf,
+  evolveFrom,
+  removeEvolution,
+  type Sources,
+  type TitledBook,
+} from '../shared/evolution';
 import { entryCollisions, entryTitle } from '../shared/entry';
 import {
   customFieldKey,
   fieldLabel,
   fieldText,
   isAppending,
+  type FieldValue,
   type PendingProposal,
   type ProposalField,
 } from '../shared/proposal';
@@ -28,6 +40,7 @@ import {
   type EntrySummary,
   type EntryType,
   type EntryValue,
+  type EvolvingField,
   type PrivateValue,
   type ProseLanguage,
   type Senses,
@@ -39,7 +52,7 @@ import { AddCustomField, CustomFieldHeading } from './CustomFields';
 import { CustomFieldSuggestions } from './CustomFieldSuggestions';
 import { useCustomFields } from './StatusAndTags';
 import { ShowInPeek } from './ShowInPeek';
-import { EntryImageSection } from './UnitImage';
+import { EntryImageSection, EvolvedMark } from './UnitImage';
 import { entryBody, type BodyField } from './entry-layout';
 import { useReveal, type Reveal } from './reveal';
 import {
@@ -161,22 +174,37 @@ type Loaded = { entry: EntryValue; privateNotes: PrivateValue };
  * with its ghost highlighted. The Custom fields of its type follow its own,
  * and the Author can add, rename, move and delete them there, for every
  * Entry of the type.
+ *
+ * In a Series it shows the Entry as of one Book (#243), marking each value
+ * that comes from an Evolution; an edit lands where the shown value comes
+ * from, the Entry's own value or the Evolution in effect. Seen as of any
+ * Book after the first, a field offers to change from that Book on, which
+ * makes an Evolution starting from the value shown; an Evolution can be
+ * removed. Its type, Tags and private notes never evolve.
  */
 export function EntryView({
   entry: summary,
   entries,
   language,
+  books = [],
+  asOf,
   focusName,
   reveal,
   onType,
   onVisibility,
   onTags,
+  onFirstAppears,
   onShowProposal,
 }: {
+  /** As of the Book it is seen as of, if any. */
   entry: EntrySummary;
   /** Every Entry in the Story Bible, to warn of names they share. */
   entries: EntrySummary[];
   language: ProseLanguage;
+  /** In a Series, the Books in reading order; none otherwise. */
+  books?: readonly TitledBook[];
+  /** The id of the Book it is seen as of, in a Series. */
+  asOf?: string;
   /**
    * Puts focus in the Name with it selected, as for an Entry just made; each
    * new number asks again.
@@ -188,6 +216,8 @@ export function EntryView({
   onVisibility(visibility: Visibility): void;
   /** Gives the Entry Tags; resolves once main has, or the Author is told it couldn't. */
   onTags(tags: string[]): Promise<void>;
+  /** Says which Book it first appears in, or with null that it isn't said. */
+  onFirstAppears?(bookId: string | null): void;
   /** Opens a pending Proposal's Conversation at its card. */
   onShowProposal(conversationId: string, proposalId: string): void;
 }) {
@@ -198,7 +228,20 @@ export function EntryView({
   /** A Character's Role and a Plot Thread's Status, as last saved or reloaded. */
   const [choices, setChoices] = useState<EntryFields>({});
   const [pending, setPending] = useState<PendingProposal[]>([]);
+  /** Which values come from an Evolution, as last written or reloaded. */
+  const [sources, setSources] = useState<Sources>({});
   const customFields = useCustomFields();
+  const order = books.map((book) => book.id);
+  const orderKey = order.join();
+  /** The Entry as of the Book it is seen as of. */
+  const shownOf = useCallback(
+    (stored: UnitValue) =>
+      entryAsOf(stored as EntryValue, orderKey.split(','), asOf),
+    [orderKey, asOf],
+  );
+  const asOfBook = books.find((book) => book.id === asOf);
+  /** Whether a value may change from the Book it is seen as of: one after the first. */
+  const evolves = asOfBook !== undefined && order.indexOf(asOfBook.id) > 0;
   const view = useRef<HTMLElement>(null);
   const entryKey = unitKey({ kind: 'entry', id: entryId });
   // A new selection for each ask, so that the Name takes focus again.
@@ -242,7 +285,7 @@ export function EntryView({
       if (!current) return;
       value.current = entry;
       setLoaded({ entry, privateNotes });
-      setChoices(entry.fields);
+      showAnew();
     });
     const unsubscribe = window.project.subscribe((event) => {
       // Changed on another computer: a save from here keeps the other fields.
@@ -252,7 +295,7 @@ export function EntryView({
         event.ref.id === entryId
       ) {
         value.current = event.value as EntryValue;
-        setChoices(value.current.fields);
+        showAnew();
       }
     });
     return () => {
@@ -272,50 +315,111 @@ export function EntryView({
     reveal?.field ? `[data-field="${reveal.field}"]` : '.entry-name',
   );
 
-  /** Resolves once main has the Entry. */
-  async function save(change: Partial<EntryValue>): Promise<void> {
+  /** Shows the Role, Status and marks of the Entry as last written or reloaded. */
+  function showAnew() {
     if (!value.current) return;
-    value.current = { ...value.current, ...change };
+    const { entry, from } = shownOf(value.current);
+    setChoices(entry.fields);
+    setSources(from);
+  }
+
+  /** Writes the Entry as it is now; resolves once main has it. */
+  async function write(): Promise<void> {
+    if (!value.current) return;
     tellEntryWritten(value.current);
     return window.project.write({ kind: 'entry', id: entryId }, value.current);
   }
 
-  async function saveFields(
-    change: (fields: EntryFields) => EntryFields,
-  ): Promise<void> {
+  /** Saves `field` where the value shown comes from; resolves once main has it. */
+  async function save(field: EvolvingField, typed: FieldValue): Promise<void> {
     if (!value.current) return;
-    return save({ fields: change(value.current.fields) });
+    value.current = editAsOf(value.current, order, asOf, field, typed);
+    return write();
   }
 
-  function choose(change: EntryFields) {
-    setChoices((choices) => ({ ...choices, ...change }));
-    void saveFields((fields) => ({ ...fields, ...change }));
+  /** Changes `field` from the Book it is seen as of on, starting from the value shown. */
+  function evolve(field: EvolvingField) {
+    if (!value.current || !asOf) return;
+    value.current = evolveFrom(value.current, order, asOf, field);
+    showAnew();
+    void write();
+  }
+
+  /** Takes off the Evolution from `book` of `field`. */
+  function unevolve(book: string, field: EvolvingField) {
+    if (!value.current) return;
+    value.current = removeEvolution(value.current, book, field);
+    showAnew();
+    void write();
+  }
+
+  function choose(field: 'role' | 'status', chosen: FieldValue) {
+    setChoices((choices) => ({ ...choices, [field]: chosen }));
+    void save(field, chosen);
   }
 
   /** Saves what was typed in a text field of the body. */
   function saveText(field: TextBodyField, typed: string): Promise<void> {
-    if (field === 'description') return save({ description: typed });
-    if (field === 'roleNote' || field === 'appearance')
-      return saveFields((fields) => ({ ...fields, [field]: typed }));
-    const [group, key] = field.split('.');
-    if (group === 'voice')
-      return saveFields((fields) => ({
-        ...fields,
-        voice: {
-          ...fields.voice!,
-          [key]: key === 'traits' ? typed : textToLines(typed),
-        },
-      }));
-    return saveFields((fields) => ({
-      ...fields,
-      senses: { ...fields.senses!, [key]: typed },
-    }));
+    const list =
+      field === 'voice.says' ||
+      field === 'voice.neverSays' ||
+      field === 'voice.examples';
+    return save(field, list ? textToLines(typed) : typed);
   }
+
+  /**
+   * Where `field`'s value comes from, in a Series: the Book of its
+   * Evolution, marked, with Remove Evolution; and, seen as of a Book after
+   * the first, Change from that Book on. Nothing outside a Series.
+   */
+  function evolution(field: EvolvingField) {
+    if (!asOfBook) return null;
+    const from = sources[field];
+    const fromBook = books.find((book) => book.id === from);
+    return (
+      <span className="evolution-controls">
+        {from && fromBook && (
+          <>
+            <EvolvedMark from={fromBook} />
+            <button
+              type="button"
+              className="link-button"
+              onClick={() => unevolve(from, field)}
+            >
+              Remove Evolution
+            </button>
+          </>
+        )}
+        {evolves && from !== asOfBook.id && (
+          <button
+            type="button"
+            className="link-button"
+            onClick={() => evolve(field)}
+          >
+            Change from {asOfBook.title} on
+          </button>
+        )}
+      </span>
+    );
+  }
+
+  /** The key a field's editor keeps its undo history under: an Evolution's own, for one. */
+  const editorKey = (field: EvolvingField, own: string) => {
+    const from = sources[field];
+    return from ? `${entryKey}:${field}@${from}` : own;
+  };
 
   const collisions = entryCollisions(summary, entries);
 
   if (!loaded) return <main className="centre loading" aria-busy="true" />;
-  const { entry, privateNotes } = loaded;
+  const { privateNotes } = loaded;
+  /** As of the Book it is seen as of, as last written or reloaded. */
+  const entry = shownOf(value.current ?? loaded.entry).entry;
+  /** A field's text, in a value of the Entry as stored, as of that Book. */
+  const shownText =
+    (text: (value: UnitValue) => string) =>
+    (stored: UnitValue): string =>
+      text(shownOf(stored).entry);
   const attributes = (label: string, className = 'plain-text') => ({
     class: className,
     'aria-label': label,
@@ -336,6 +440,7 @@ export function EntryView({
           <legend>
             <span id={`role-label-${entryId}`}>Role</span>
             <ShowInPeek type={entry.type} item="role" label="Role" />
+            {evolution('role')}
           </legend>
           {ROLES.map((role) => (
             <label key={role}>
@@ -343,7 +448,7 @@ export function EntryView({
                 type="radio"
                 name={`role-${entryId}`}
                 checked={choices.role === role}
-                onChange={() => choose({ role })}
+                onChange={() => choose('role', role)}
               />
               {ROLE_LABELS[role]}
             </label>
@@ -363,6 +468,7 @@ export function EntryView({
           <legend>
             <span id={`status-label-${entryId}`}>Status</span>
             <ShowInPeek type={entry.type} item="status" label="Status" />
+            {evolution('status')}
           </legend>
           {THREAD_STATUSES.map((status) => (
             <label key={status}>
@@ -370,7 +476,7 @@ export function EntryView({
                 type="radio"
                 name={`status-${entryId}`}
                 checked={choices.status === status}
-                onChange={() => choose({ status })}
+                onChange={() => choose('status', status)}
               />
               {STATUS_LABELS[status]}
             </label>
@@ -382,19 +488,23 @@ export function EntryView({
     const Heading = inGroup ? 'h4' : 'h3';
     return (
       <section className="plain-text-field" key={field} data-field={field}>
-        {field === 'roleNote' ? (
-          // The Role's switch is the Role note's too.
+        <div className="field-heading">
           <Heading>{label}</Heading>
-        ) : (
-          <div className="field-heading">
-            <Heading>{label}</Heading>
+          {/* The Role's switch is the Role note's too. */}
+          {field !== 'roleNote' && (
             <ShowInPeek type={entry.type} item={field} label={label} />
-          </div>
-        )}
+          )}
+          {evolution(field)}
+        </div>
         <UnitEditor
+          // Made anew as the value comes from elsewhere, as an Evolution.
+          key={sources[field] ?? ''}
           // The Description's undo history is the Entry's own.
-          unitKey={field === 'description' ? entryKey : `${entryKey}:${field}`}
-          field={{ unitKey: entryKey, text }}
+          unitKey={editorKey(
+            field,
+            field === 'description' ? entryKey : `${entryKey}:${field}`,
+          )}
+          field={{ unitKey: entryKey, text: shownText(text) }}
           text={text(entry)}
           extensions={
             field === 'roleNote'
@@ -445,32 +555,66 @@ export function EntryView({
                   ))}
                 </select>
               </label>
+              {books.length > 0 && onFirstAppears && (
+                <>
+                  <span aria-hidden="true">·</span>
+                  <label>
+                    First appears in
+                    <select
+                      value={summary.firstAppears ?? ''}
+                      onChange={(event) =>
+                        onFirstAppears(event.target.value || null)
+                      }
+                    >
+                      <option value="">Not said</option>
+                      {books.map((book) => (
+                        <option key={book.id} value={book.id}>
+                          {book.title}
+                        </option>
+                      ))}
+                      {summary.firstAppears &&
+                        !order.includes(summary.firstAppears) && (
+                          // In Trash or the Drawer: kept until said otherwise.
+                          <option value={summary.firstAppears}>
+                            A Book not in the Series
+                          </option>
+                        )}
+                    </select>
+                  </label>
+                </>
+              )}
             </div>
             <UnitEditor
-              unitKey={`${entryKey}:name`}
-              field={{ unitKey: entryKey, text: nameOf }}
+              key={sources.name ?? ''}
+              unitKey={editorKey('name', `${entryKey}:name`)}
+              field={{ unitKey: entryKey, text: shownText(nameOf) }}
               text={entry.name}
               extensions={singleLineExtensions()}
               toDoc={textToDoc}
               toText={docToText}
-              save={(name) => save({ name })}
+              save={(name) => save('name', name)}
               attributes={attributes('Name', 'plain-text entry-name')}
               autofocus={!!focusName}
               select={selectName}
             />
+            {evolution('name')}
             <section
               className="plain-text-field entry-aliases"
               data-field="aliases"
             >
-              <h3>Aliases</h3>
+              <div className="field-heading">
+                <h3>Aliases</h3>
+                {evolution('aliases')}
+              </div>
               <UnitEditor
-                unitKey={`${entryKey}:aliases`}
-                field={{ unitKey: entryKey, text: aliasesOf }}
+                key={sources.aliases ?? ''}
+                unitKey={editorKey('aliases', `${entryKey}:aliases`)}
+                field={{ unitKey: entryKey, text: shownText(aliasesOf) }}
                 text={entry.aliases.join('\n')}
                 extensions={plainTextExtensions({ bullets: false })}
                 toDoc={textToDoc}
                 toText={docToText}
-                save={(text) => save({ aliases: textToLines(text) })}
+                save={(text) => save('aliases', textToLines(text))}
                 attributes={attributes('Aliases')}
               />
               <p className="field-hint">One per line</p>
@@ -483,7 +627,16 @@ export function EntryView({
               <TagInput tags={summary.tags ?? NO_TAGS} onChange={onTags} />
             </div>
           </div>
-          <EntryImageSection entry={summary} />
+          <EntryImageSection
+            entry={summary}
+            evolution={
+              asOfBook && {
+                asOf: asOfBook,
+                from: books.find((book) => book.id === sources.image),
+                evolves,
+              }
+            }
+          />
         </header>
         {collisions.length > 0 && (
           <ul className="entry-collisions" role="status">
@@ -533,23 +686,17 @@ export function EntryView({
                 index={index}
                 fields={customFields}
               />
+              {evolution(key)}
               <UnitEditor
-                unitKey={`${entryKey}:${key}`}
-                field={{ unitKey: entryKey, text }}
+                key={sources[key] ?? ''}
+                unitKey={editorKey(key, `${entryKey}:${key}`)}
+                field={{ unitKey: entryKey, text: shownText(text) }}
                 // As last saved: it may show anew, as once restored from Trash.
-                text={text(value.current ?? entry)}
+                text={text(entry)}
                 extensions={plainTextExtensions({ bullets: false })}
                 toDoc={textToDoc}
                 toText={docToText}
-                save={(typed) =>
-                  save({
-                    custom: withCustomValue(
-                      value.current?.custom,
-                      field.id,
-                      typed,
-                    ),
-                  })
-                }
+                save={(typed) => save(key, typed)}
                 attributes={attributes(field.label)}
                 beside={(editor) => (
                   <CustomFieldSuggestions

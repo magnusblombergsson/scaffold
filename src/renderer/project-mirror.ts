@@ -273,6 +273,13 @@ export class ProjectMirror {
     return this.attempt('save the Tags', () => this.api.setTags(unitId, tags));
   }
 
+  /** Says which Book an Entry first appears in, or that it isn't said. */
+  setFirstAppears(entryId: string, bookId: string | null): Promise<boolean> {
+    return this.attempt('save the Book it first appears in', () =>
+      this.api.setFirstAppears(entryId, bookId),
+    );
+  }
+
   /**
    * Runs a structure operation and shows its Manuscript; the result, or
    * undefined when the Author cancelled it or it failed.

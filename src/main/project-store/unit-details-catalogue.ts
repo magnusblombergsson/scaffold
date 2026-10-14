@@ -8,15 +8,26 @@ import { isWordTarget } from '../../shared/word-target';
 // Split carries it, whether the Assistant sees it, and whether it is a file
 // that moves with Trash. Adding a detail is adding a row.
 
-export type DetailKey = 'status' | 'tags' | 'wordTarget' | 'image';
+export type DetailKey =
+  | 'status'
+  | 'tags'
+  | 'wordTarget'
+  | 'image'
+  | 'firstAppears'
+  | 'evolvedImages';
 export type DetailKind = DetailRef['kind'];
 
-/** A unit's details as its header holds them: the Status id, Tags, image file, Word target. */
+/**
+ * A unit's details as its header holds them: the Status id, Tags, image
+ * file, Word target, and an Entry's first Book and image files by Book.
+ */
 export type HeldDetails = {
   status?: string;
   tags?: string[];
   image?: string;
   wordTarget?: number;
+  firstAppears?: string;
+  evolvedImages?: Record<string, string>;
 };
 
 /** What a validator may read: the Project's current vocabulary. */
@@ -53,6 +64,43 @@ export function imageFile(unitId: string, image: unknown): string | undefined {
   return typeof image === 'string' && IMAGE_FILE.exec(image)?.[1] === unitId
     ? image
     : undefined;
+}
+
+/** `<entry id>.<book id>.jpg` or `.png`: the file of an Entry's image from a Book on. */
+export const EVOLVED_IMAGE_FILE = new RegExp(
+  `^(${UUID})\\.(${UUID})\\.(jpg|png)$`,
+);
+
+/** `image` when it names the file of `entryId`'s image from `book` on. */
+export function evolvedImageFile(
+  entryId: string,
+  book: string,
+  image: unknown,
+): string | undefined {
+  const match = typeof image === 'string' && EVOLVED_IMAGE_FILE.exec(image);
+  return match && match[1] === entryId && match[2] === book
+    ? (image as string)
+    : undefined;
+}
+
+/** The unit an image file in `images/` or Trash belongs to, by id; undefined for another file. */
+export function imageOwner(name: string): string | undefined {
+  return (IMAGE_FILE.exec(name) ?? EVOLVED_IMAGE_FILE.exec(name))?.[1];
+}
+
+/** An Entry's image files by Book, those that name its own; undefined for none. */
+function evolvedImages(
+  raw: unknown,
+  entryId: string,
+): Record<string, string> | undefined {
+  if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+  const files = Object.entries(raw as Record<string, unknown>).flatMap(
+    ([book, image]) => {
+      const file = evolvedImageFile(entryId, book, image);
+      return file ? [[book, file]] : [];
+    },
+  );
+  return files.length > 0 ? Object.fromEntries(files) : undefined;
 }
 
 export const DETAILS: readonly Row[] = [
@@ -119,6 +167,40 @@ export const DETAILS: readonly Row[] = [
     assistant: 'hidden',
     trash: 'moves',
   },
+  {
+    key: 'firstAppears',
+    only: 'Only an Entry first appears in a Book',
+    kinds: ['entry'],
+    parse: (raw) => (typeof raw === 'string' && raw ? raw : undefined),
+    validate(value) {
+      if (value === null || value === undefined) return undefined;
+      if (typeof value !== 'string' || !value) {
+        throw new Error(`Not a Book: ${String(value)}`);
+      }
+      return value;
+    },
+    split: 'stays',
+    // What the Assistant makes of it is for the Book it works in (#244).
+    assistant: 'hidden',
+    trash: 'stays',
+  },
+  {
+    // Every Book's under one key, merged whole as any key is (ADR 0008).
+    key: 'evolvedImages',
+    only: 'Only an Entry has an image from a Book on',
+    kinds: ['entry'],
+    parse: (raw, unitId) => evolvedImages(raw, unitId),
+    validate(value, unitId) {
+      const files = evolvedImages(value, unitId) ?? {};
+      if (Object.keys(files).length !== Object.keys(value ?? {}).length) {
+        throw new Error(`Not images of ${unitId}: ${JSON.stringify(value)}`);
+      }
+      return Object.keys(files).length > 0 ? files : undefined;
+    },
+    split: 'stays',
+    assistant: 'hidden',
+    trash: 'moves',
+  },
 ];
 
 const ROWS = new Map(DETAILS.map((row) => [row.key, row]));
@@ -175,7 +257,8 @@ export function carriedOnSplit(held: HeldDetails): HeldDetails {
 export function filesMovingWithTrash(held: HeldDetails | undefined): string[] {
   return DETAILS.flatMap(({ key, trash }) => {
     const value = held?.[key];
-    return trash === 'moves' && typeof value === 'string' ? [value] : [];
+    if (trash !== 'moves' || value === undefined) return [];
+    return typeof value === 'string' ? [value] : Object.values(value);
   });
 }
 
