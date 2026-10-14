@@ -1,10 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
-import {
-  createServer,
-  type Server,
-  type ServerResponse,
-} from 'node:http';
+import { createServer, type Server, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import path from 'node:path';
 import { answerDialogs, chooseMenu, launch, useTempDir } from './app';
