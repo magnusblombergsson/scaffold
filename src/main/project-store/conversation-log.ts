@@ -58,12 +58,15 @@ export type MessageEvent = { type: 'message' } & ConversationMessage;
  * one proposed. This app proposes a change to one field of an Entry; a new
  * Entry, by the id it will get, with its type, name and description and no
  * base; or the whole Outline of a Chapter, a Scene or the story as its `body`.
+ * In a Series, a change to a field names the `book` it was made on; an app
+ * from before Evolutions skips the key and sees the Entry's own value.
  */
 export type ProposedEvent = {
   type: 'proposal.proposed';
   id: string;
   target: { kind: 'entry' | 'new-entry' | 'outline'; id: string };
   fields: Record<string, { base?: FieldValue; proposed: FieldValue }>;
+  book?: string;
   at: number;
 };
 
@@ -80,17 +83,22 @@ export type OfferedEvent = {
   operation: 'append' | 'add';
   target: { kind: 'entry' | 'outline'; id: string };
   fields: Record<string, { proposed: string }>;
+  book?: string;
   at: number;
 };
 
 /**
  * An accept as logged: per field, the value it replaced and the one it
- * wrote, whatever its operation; a new Entry replaced nothing.
+ * wrote, whatever its operation; a new Entry replaced nothing. In a Series,
+ * one that landed on an Evolution says from which Book `on`, and whether it
+ * `evolved` it, making that Evolution (ADR 0012).
  */
 export type AcceptedEvent = {
   type: 'proposal.accepted';
   id: string;
   fields: Record<string, { replaced?: FieldValue; wrote: FieldValue }>;
+  on?: string;
+  evolved?: true;
   at: number;
 };
 
@@ -380,6 +388,7 @@ export function proposedEvent(
           proposed: Array.isArray(proposed) ? proposed[0] : (proposed ?? ''),
         },
       },
+      ...onBook(proposal),
       at,
     };
   }
@@ -390,6 +399,7 @@ export function proposedEvent(
       id,
       target: { kind: 'entry', id: entryId },
       fields: { [field]: { base, proposed } },
+      ...onBook(proposal),
       at,
     };
   }
@@ -417,15 +427,24 @@ export function proposedEvent(
   };
 }
 
+/** The Book a change to a field was made on, as its event logs it; none outside a Series. */
+function onBook(proposal: Proposal): { book?: string } {
+  return proposal.kind === 'field' && proposal.book !== undefined
+    ? { book: proposal.book }
+    : {};
+}
+
 /**
  * The event that logs an accept of `proposal`: what it replaced in its
- * target, if anything, and what it `wrote`.
+ * target, if anything, what it `wrote`, and in a Series, the Evolution it
+ * `landed` on, if any.
  */
 export function acceptedEvent(
   proposal: Proposal,
   replaced: FieldValue | undefined,
   wrote: ProposedValue,
   at: number,
+  landed: Landing = {},
 ): AcceptedEvent {
   const { id } = proposal;
   if (proposal.kind === 'new-entry') {
@@ -446,9 +465,21 @@ export function acceptedEvent(
     type: 'proposal.accepted',
     id,
     fields: { [field]: { replaced: replaced!, wrote: wrote as FieldValue } },
+    ...(landed.on !== undefined && { on: landed.on }),
+    ...(landed.evolved && { evolved: true as const }),
     at,
   };
 }
+
+/**
+ * Where an accept of a field landed in a Series: on the Evolution from the
+ * Book `on`, which it `evolved` when it made it; on the Entry's own value
+ * when `on` is absent.
+ */
+export type Landing = Pick<
+  Extract<Decision, { kind: 'accepted' }>,
+  'on' | 'evolved'
+>;
 
 /**
  * The Proposal an event logs, if this app can take it: a change to one field
@@ -482,7 +513,22 @@ function loggedProposal(event: Partial<ProposedEvent>): Proposal | null {
   if (!isFieldValue(field, base) || !isFieldValue(field, proposed)) {
     return null;
   }
-  return { kind: 'field', id, entryId: target.id, field, base, proposed };
+  return {
+    kind: 'field',
+    id,
+    entryId: target.id,
+    field,
+    ...bookOf(event),
+    base,
+    proposed,
+  };
+}
+
+/** The Book an event says its change to a field was made on, if it says one. */
+function bookOf(event: { book?: unknown }): { book?: string } {
+  return typeof event.book === 'string' && event.book
+    ? { book: event.book }
+    : {};
 }
 
 /**
@@ -505,7 +551,13 @@ function loggedOffer(event: Partial<OfferedEvent>): Proposal | null {
     return { kind: 'outline', id, outlineId: target.id, operation, proposed };
   }
   if (target.kind !== 'entry' || !isProposalField(field)) return null;
-  const change = { kind: 'field', id, entryId: target.id, field } as const;
+  const change = {
+    kind: 'field',
+    id,
+    entryId: target.id,
+    field,
+    ...bookOf(event),
+  } as const;
   if (isListField(field)) {
     return operation === 'add'
       ? { ...change, operation, proposed: [proposed] }
@@ -549,7 +601,15 @@ function acceptedOf(
       ? isFieldValue(proposal.field, value)
       : typeof value === 'string';
   if (!holds(replaced) || !holds(wrote)) return null;
-  return { kind: 'accepted', replaced, wrote };
+  const { on, evolved } = event;
+  return {
+    kind: 'accepted',
+    replaced,
+    wrote,
+    ...(proposal.kind === 'field' &&
+      typeof on === 'string' &&
+      on && { on, ...(evolved === true && { evolved }) }),
+  };
 }
 
 /**

@@ -121,6 +121,11 @@ export function bookOf(
   )?.book;
 }
 
+/** The Books' ids in reading order; none in a Project that is no Series. */
+export function bookIds(manuscript: Manuscript): string[] {
+  return (manuscript.books ?? []).map((b) => b.id);
+}
+
 /**
  * In a Series, the Book a Brainstorm or Interview Conversation is about: the
  * one it was last put on, while that is a Book, or else the first, as one

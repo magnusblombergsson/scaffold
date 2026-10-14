@@ -41,13 +41,15 @@ export type { CallFailure } from './bridge';
 
 /**
  * How the Author accepts a Proposal: with the value they `edited` it to,
- * `anyway` when they saw it was stale, and `append` to add it to what its
- * target holds now rather than replace that.
+ * `anyway` when they saw it was stale, `append` to add it to what its
+ * target holds now rather than replace that, and in a Series, `fromBook` to
+ * make it an Evolution from the Book it was made on.
  */
 export type AcceptOptions = {
   edited?: ProposedValue;
   anyway?: boolean;
   append?: boolean;
+  fromBook?: boolean;
 };
 import type {
   AskResult,

@@ -445,6 +445,80 @@ describe('Books', () => {
     expect(second).toContain(`Id: ${storm}`);
     expect(second).not.toContain(`Id: ${chapterId}`);
   });
+
+  it('makes a Proposal against the Entry as the Conversation’s Book sees it, logging that Book, never one for an Entry first appearing later', async () => {
+    let ids = { anna: '', mira: '' };
+    const block = (json: object) =>
+      `\`\`\`proposal\n${JSON.stringify(json)}\n\`\`\``;
+    const { store, engine } = await setUp(() => [
+      block({ entry: ids.anna, field: 'description', value: 'Older.' }),
+      block({ entry: ids.mira, field: 'description', value: 'Who?' }),
+      'Noted.',
+    ]);
+    const { id: two } = await store.createBook();
+    const [one] = store.manuscript().books!.map((b) => b.id);
+    const entry = async (name: string, description: string) => {
+      const { id } = await store.createEntry('character', name);
+      const value = await store.read({ kind: 'entry', id });
+      await store.write(
+        { kind: 'entry', id },
+        { ...value, description, visibility: 'always' },
+      );
+      return id;
+    };
+    ids = { anna: await entry('Anna', 'Her sister.'), mira: '' };
+    ids.mira = await entry('Mira', 'Her mother.');
+    const anna = await store.read({ kind: 'entry', id: ids.anna });
+    await store.write(
+      { kind: 'entry', id: ids.anna },
+      { ...anna, evolutions: { [two]: { description: 'Queen now.' } } },
+    );
+    await store.setFirstAppears(ids.mira, two);
+    const { id } = await store.startConversation('brainstorm', 'Anna');
+
+    await engine.askAssistant(id, 'Hm.', { sceneId: null }, () => {});
+    await store.chooseBook(id, two);
+    await engine.askAssistant(id, 'And?', { sceneId: null }, () => {});
+
+    const [, inOne, , inTwo] = (await store.readConversation(id)).messages;
+    expect(inOne.unreadable).toBe(1);
+    expect(inOne.proposals).toEqual([
+      expect.objectContaining({
+        entryId: ids.anna,
+        book: one,
+        base: 'Her sister.',
+      }),
+    ]);
+    expect(inTwo.proposals).toEqual([
+      expect.objectContaining({
+        entryId: ids.anna,
+        book: two,
+        base: 'Queen now.',
+        evolvesFrom: 'Book 2',
+      }),
+      expect.objectContaining({ entryId: ids.mira, book: two }),
+    ]);
+  });
+
+  it('makes a Proposal in a Project of one Book as before, with no Book', async () => {
+    const { store, engine } = await setUp(() => [
+      '```proposal\n' +
+        JSON.stringify({
+          entry: annaId,
+          field: 'description',
+          value: 'Older.',
+        }) +
+        '\n```',
+    ]);
+    const { id: annaId } = await store.createEntry('character', 'Anna');
+    const { id } = await store.startConversation('brainstorm', 'Anna');
+
+    await engine.askAssistant(id, 'Hm.', { sceneId: null }, () => {});
+
+    const [, replied] = (await store.readConversation(id)).messages;
+    expect(replied.proposals).toHaveLength(1);
+    expect(replied.proposals![0]).not.toHaveProperty('book');
+  });
 });
 
 describe('Interviews', () => {

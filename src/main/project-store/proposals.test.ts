@@ -1600,3 +1600,254 @@ describe('a crash while accepting a Proposal', () => {
     },
   );
 });
+
+describe('a Proposal in a Series', () => {
+  /**
+   * A Series of three Books, whose Character Anna is “Her sister.” and from
+   * Book 2 on “Queen now.”, and a Conversation on Book 3 whose reply
+   * proposes adding to her description as Book 3 sees it.
+   */
+  async function proposedInBook3() {
+    const store = await createProject(projectPath, {
+      fs: nodeFileSystem,
+      clock: instantClock(1_000),
+    });
+    await store.createBook();
+    await store.createBook();
+    const [b1, b2, b3] = store.manuscript().books!.map((b) => b.id);
+    const { id: annaId } = await store.createEntry('character', 'Anna');
+    const anna = await store.read(entryRef(annaId));
+    await store.write(entryRef(annaId), {
+      ...anna,
+      description: 'Her sister.',
+      evolutions: { [b2]: { description: 'Queen now.' } },
+    });
+    await store.flush();
+    const { id: conversationId } = await store.conversations.startConversation(
+      'brainstorm',
+      'Anna',
+    );
+    for (const role of ['author', 'assistant'] as const) {
+      await store.conversations.appendMessage(conversationId, {
+        role,
+        text: 'Hm.',
+        focus: [],
+        at: 1_000,
+      });
+    }
+    const proposal: Proposal = {
+      kind: 'field',
+      id: 'p1',
+      entryId: annaId,
+      field: 'description',
+      book: b3,
+      base: 'Queen now.',
+      proposed: 'Queen now.\nOlder.',
+    };
+    await store.conversations.appendProposal(conversationId, proposal);
+    return { store, b1, b2, b3, annaId, conversationId };
+  }
+
+  it('is logged with its Book, and pending against the value as that Book sees it, offering “from that Book on”', async () => {
+    const { store, b3, annaId, conversationId } = await proposedInBook3();
+
+    expect((await logLines(conversationId)).at(-1)).toMatchObject({
+      type: 'proposal.proposed',
+      book: b3,
+    });
+    expect(await cardOf(store, conversationId)).toMatchObject({
+      book: b3,
+      evolvesFrom: 'Book 3',
+      state: { kind: 'pending', current: 'Queen now.', stale: false },
+    });
+    expect(await store.conversations.pendingProposals(annaId)).toHaveLength(1);
+  });
+
+  it('goes stale when the value its Book sees changes, not when another Book’s does', async () => {
+    const { store, b2, annaId, conversationId } = await proposedInBook3();
+    const anna = await store.read(entryRef(annaId));
+
+    await store.write(entryRef(annaId), { ...anna, description: 'A girl.' });
+    expect((await cardOf(store, conversationId))?.state).toMatchObject({
+      stale: false,
+    });
+    await store.write(entryRef(annaId), {
+      ...anna,
+      evolutions: { [b2]: { description: 'Queen still.' } },
+    });
+    expect((await cardOf(store, conversationId))?.state).toEqual({
+      kind: 'pending',
+      current: 'Queen still.',
+      stale: true,
+    });
+  });
+
+  it('by default lands on the Evolution in effect, never the Entry’s own value, and undoes there', async () => {
+    const { store, b2, annaId, conversationId } = await proposedInBook3();
+
+    await store.conversations.acceptProposal(conversationId, 'p1');
+
+    const accepted = await store.read(entryRef(annaId));
+    expect(accepted.description).toBe('Her sister.');
+    expect(accepted.evolutions).toEqual({
+      [b2]: { description: 'Queen now.\nOlder.' },
+    });
+    expect((await logLines(conversationId)).at(-1)).toMatchObject({
+      type: 'proposal.accepted',
+      on: b2,
+      fields: {
+        description: { replaced: 'Queen now.', wrote: 'Queen now.\nOlder.' },
+      },
+    });
+    expect((await cardOf(store, conversationId))?.state).toEqual({
+      kind: 'accepted',
+      edited: false,
+    });
+
+    await store.conversations.undoProposal(conversationId, 'p1');
+
+    const undone = await store.read(entryRef(annaId));
+    expect(undone.description).toBe('Her sister.');
+    expect(undone.evolutions).toEqual({ [b2]: { description: 'Queen now.' } });
+    expect((await cardOf(store, conversationId))?.state).toEqual({
+      kind: 'pending',
+      current: 'Queen now.',
+      stale: false,
+    });
+  });
+
+  it('lands on the Entry’s own value when no Evolution gives the value its Book sees', async () => {
+    const { store, b2, b3, annaId, conversationId } = await proposedInBook3();
+    await store.conversations.appendProposal(conversationId, {
+      kind: 'field',
+      id: 'p2',
+      entryId: annaId,
+      field: 'appearance',
+      book: b3,
+      operation: 'append',
+      proposed: 'Tall.',
+    });
+
+    await store.conversations.acceptProposal(conversationId, 'p2');
+
+    const accepted = await store.read(entryRef(annaId));
+    expect(accepted.fields.appearance).toBe('Tall.');
+    expect(accepted.evolutions?.[b2]).toEqual({ description: 'Queen now.' });
+    expect((await logLines(conversationId)).at(-1)).not.toHaveProperty('on');
+  });
+
+  it('accepted “from that Book on”, makes an Evolution of it, and undoing takes it away', async () => {
+    const { store, b2, b3, annaId, conversationId } = await proposedInBook3();
+
+    await store.conversations.acceptProposal(conversationId, 'p1', {
+      fromBook: true,
+    });
+
+    const accepted = await store.read(entryRef(annaId));
+    expect(accepted.description).toBe('Her sister.');
+    expect(accepted.evolutions).toEqual({
+      [b2]: { description: 'Queen now.' },
+      [b3]: { description: 'Queen now.\nOlder.' },
+    });
+    expect((await logLines(conversationId)).at(-1)).toMatchObject({
+      type: 'proposal.accepted',
+      on: b3,
+      evolved: true,
+    });
+    expect((await cardOf(store, conversationId))?.state).toEqual({
+      kind: 'accepted',
+      edited: false,
+    });
+
+    await store.conversations.undoProposal(conversationId, 'p1');
+
+    expect((await store.read(entryRef(annaId))).evolutions).toEqual({
+      [b2]: { description: 'Queen now.' },
+    });
+    expect((await cardOf(store, conversationId))?.state).toEqual({
+      kind: 'pending',
+      current: 'Queen now.',
+      stale: false,
+    });
+  });
+
+  it('accepted “from that Book on”, can’t be undone once its Evolution changed', async () => {
+    const { store, b2, b3, annaId, conversationId } = await proposedInBook3();
+    await store.conversations.acceptProposal(conversationId, 'p1', {
+      fromBook: true,
+    });
+    const anna = await store.read(entryRef(annaId));
+
+    await store.write(entryRef(annaId), {
+      ...anna,
+      evolutions: {
+        [b2]: { description: 'Queen now.' },
+        [b3]: { description: 'Old queen.' },
+      },
+    });
+
+    expect((await cardOf(store, conversationId))?.state).toMatchObject({
+      kind: 'accepted',
+      undoBlocked: 'Description has changed since it was accepted.',
+    });
+    await expect(
+      store.conversations.undoProposal(conversationId, 'p1'),
+    ).rejects.toThrow('Description has changed since it was accepted.');
+  });
+
+  it('counts as undone when its Evolution is gone, as after a crash before the undo was logged', async () => {
+    const { store, b2, annaId, conversationId } = await proposedInBook3();
+    await store.conversations.acceptProposal(conversationId, 'p1', {
+      fromBook: true,
+    });
+    const anna = await store.read(entryRef(annaId));
+
+    await store.write(entryRef(annaId), {
+      ...anna,
+      evolutions: { [b2]: { description: 'Queen now.' } },
+    });
+
+    expect((await cardOf(store, conversationId))?.state).toEqual({
+      kind: 'pending',
+      current: 'Queen now.',
+      stale: false,
+    });
+  });
+
+  it('is never accepted while its Book is in Trash, which would rewrite what the other Books see', async () => {
+    const { store, b2, b3, annaId, conversationId } = await proposedInBook3();
+    await store.trashBook(b3);
+
+    await expect(
+      store.conversations.acceptProposal(conversationId, 'p1', {
+        anyway: true,
+      }),
+    ).rejects.toThrow('The Book it was proposed on is in Trash or the Drawer');
+    const anna = await store.read(entryRef(annaId));
+    expect(anna.description).toBe('Her sister.');
+    expect(anna.evolutions).toEqual({ [b2]: { description: 'Queen now.' } });
+  });
+
+  it('made on the first Book offers no “from that Book on”, and refuses it', async () => {
+    const { store, b1, annaId, conversationId } = await proposedInBook3();
+    await store.conversations.appendProposal(conversationId, {
+      kind: 'field',
+      id: 'p2',
+      entryId: annaId,
+      field: 'appearance',
+      book: b1,
+      operation: 'append',
+      proposed: 'Tall.',
+    });
+    const { messages } =
+      await store.conversations.readConversation(conversationId);
+
+    expect(messages[1].proposals?.[1]).not.toHaveProperty('evolvesFrom');
+    await expect(
+      store.conversations.acceptProposal(conversationId, 'p2', {
+        fromBook: true,
+      }),
+    ).rejects.toThrow('only from a Book after the first');
+    expect((await store.read(entryRef(annaId))).fields.appearance).toBe('');
+  });
+});

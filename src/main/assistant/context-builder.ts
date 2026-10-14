@@ -14,9 +14,16 @@ import {
   fieldsOfType,
   type CustomField,
 } from '../../shared/custom-field';
+import {
+  appearsAfter,
+  entryAsOf,
+  namesUpTo,
+  summaryAsOf,
+} from '../../shared/evolution';
 import { mentionMatcher } from '../../shared/mentions';
 import { statusOf } from '../../shared/status';
 import {
+  bookIds,
   bookManuscript,
   bookOf,
   conversationBook,
@@ -82,12 +89,14 @@ export type ContextRequest = (
  * Prose in focus and the summary of the older messages, if any, as system
  * blocks, then the Conversation's earlier messages and the new one.
  * Cache breakpoints follow the skeleton and the last block before the new
- * message. `saw` lists what was sent, by id.
+ * message. `saw` lists what was sent, by id. In a Series, `book` is the Book
+ * the turn is about, by id, as of which the Entries were sent.
  */
 export type AssistantContext = {
   system: PromptBlock[];
   messages: PromptMessage[];
   saw: Saw;
+  book?: string;
 };
 
 export async function buildContext(
@@ -95,11 +104,9 @@ export async function buildContext(
   request: ContextRequest,
 ): Promise<AssistantContext> {
   const manuscript = view.manuscript();
-  const skeleton = await outlineSkeleton(
-    view,
-    manuscript,
-    bookAbout(manuscript, request),
-  );
+  const book = bookAbout(manuscript, request);
+  const asOf = { books: bookIds(manuscript), book };
+  const skeleton = await outlineSkeleton(view, manuscript, book);
   const focus = await inFocus(view, manuscript, request);
   const { summary } = request;
   const covered = request.messages.slice(0, summary?.covers ?? 0);
@@ -117,6 +124,7 @@ export async function buildContext(
       ...sent.map((m) => m.text),
     ],
     request.mode === 'interview' ? request.focus : null,
+    asOf,
   );
 
   const system: PromptBlock[] = [
@@ -125,7 +133,9 @@ export async function buildContext(
     { text: skeleton.text, cache: true },
   ];
   if (request.mode === 'interview') {
-    system.push({ text: interviewFocusText(view, manuscript, request.focus) });
+    system.push({
+      text: interviewFocusText(view, manuscript, request.focus, asOf),
+    });
   }
   if (focus.length > 0) system.push({ text: focusBlock(focus) });
   if (summary) system.push({ text: summaryBlock(summary.text, covered) });
@@ -152,6 +162,7 @@ export async function buildContext(
         summarised: covered.filter((m) => !m.interrupted).length,
       }),
     },
+    ...(book !== undefined && { book }),
   };
 }
 
@@ -197,16 +208,24 @@ function summaryBlock(text: string, covered: ConversationMessage[]): string {
  * The Entries the Assistant may see, as one block: those seen always, those
  * seen when mentioned whose name or an alias is in `texts`, and those an
  * Interview is about, by Entry, type or Tag. A mention in another Entry
- * doesn't count, and an Entry seen never is never sent.
+ * doesn't count, and an Entry seen never is never sent. In a Series, each
+ * is as of the `book` the turn is about, its Books being `books` in reading
+ * order: a mention is by any name or alias it has had up to it, and one
+ * that first appears in a later Book is never sent.
  */
 async function storyBible(
   view: AssistantView,
   texts: string[],
   interview: InterviewFocus | null,
+  { books, book }: AsOfBook,
 ): Promise<{ text: string; ids: string[] }> {
-  const summaries = view.listEntries();
+  const summaries = view
+    .listEntries()
+    .filter((e) => !appearsAfter(e, books, book));
   const mentioned = mentionMatcher(
-    summaries.filter((e) => e.visibility === 'mentioned'),
+    summaries
+      .filter((e) => e.visibility === 'mentioned')
+      .map((e) => namesUpTo(e, books, book)),
   ).mentioned(texts);
   const inFocus = (e: EntrySummary) =>
     (interview?.kind === 'entry' && interview.id === e.id) ||
@@ -218,7 +237,11 @@ async function storyBible(
       (e.visibility === 'mentioned' && (mentioned.has(e.id) || inFocus(e))),
   );
   const entries = await Promise.all(
-    seen.map((e) => view.read({ kind: 'entry', id: e.id })),
+    seen.map(
+      async (e) =>
+        entryAsOf(await view.read({ kind: 'entry', id: e.id }), books, book)
+          .entry,
+    ),
   );
   const fields = view.customFields();
   const heading =
@@ -324,6 +347,9 @@ function entryText(entry: EntryValue, fields: readonly CustomField[]): string {
   }
   return lines.join('\n');
 }
+
+/** In a Series, the Book a turn is about, among the Books' ids in reading order. */
+type AsOfBook = { books: readonly string[]; book: string | undefined };
 
 /**
  * In a Series, the Book a turn is about: in Writing, the one holding the
@@ -586,13 +612,15 @@ function customFieldsAsk(view: AssistantView, type: EntryType): string {
 }
 
 /**
- * What an Interview is about, by name and id as the Project has it now. An
- * Entry the Assistant never sees isn't named, nor one no longer there.
+ * What an Interview is about, by name and id as the Project has it now, an
+ * Entry's as of the Book the turn is about. An Entry the Assistant never
+ * sees isn't named, nor one no longer there or first appearing later.
  */
 function interviewFocusText(
   view: AssistantView,
   manuscript: Manuscript,
   focus: InterviewFocus,
+  { books, book }: AsOfBook,
 ): string {
   const heading = 'The Interview’s focus, as the Author set it:';
   const gone =
@@ -602,9 +630,10 @@ function interviewFocusText(
     case 'open':
       return `${heading} open. Choose the gap in the Story Bible or the Outlines most worth filling now. When you choose a gap, first say which gap you chose and why, then ask.`;
     case 'entry': {
-      const entry = view.listEntries().find((e) => e.id === focus.id);
-      if (!entry) return `${heading} an Entry ${gone}`;
-      if (entry.visibility === 'never') {
+      const found = view.listEntries().find((e) => e.id === focus.id);
+      if (!found) return `${heading} an Entry ${gone}`;
+      const entry = summaryAsOf(found, books, book);
+      if (entry.visibility === 'never' || appearsAfter(entry, books, book)) {
         return `${heading} an Entry the Author has kept from you. Say you can't see it, and suggest the Author lets you see it or picks another focus.`;
       }
       return `${heading} the Entry “${entry.name}” (${ENTRY_TYPE_LABELS[entry.type]}), Id: ${entry.id}. Ask about what it lacks.${customFieldsAsk(view, entry.type)}`;
