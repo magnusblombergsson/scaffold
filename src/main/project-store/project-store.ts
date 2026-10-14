@@ -302,26 +302,17 @@ export type NewPart = { title: string; chapters: NewChapter[] };
 export type NewManuscriptItem = NewChapter | NewPart;
 
 /**
- * Creates a new Project folder: with the `manuscript` given, or else one
- * Chapter holding one empty Scene. Its Parts, if any, are called Parts.
+ * The Parts, Chapters and Scenes of `items`, newly made: every Chapter in
+ * reading order, as a tree holds them, each Scene's Prose, and the ids of
+ * the Parts and Loose Chapters in order.
  */
-export async function createProject(
-  projectPath: string,
-  deps: StoreDeps,
-  options: { language?: string; manuscript?: NewManuscriptItem[] } = {},
-): Promise<ProjectStore> {
-  const { fs, clock } = deps;
-  if (await fs.exists(path.join(projectPath, MANIFEST))) {
-    throw new ProjectError(
-      'already-a-project',
-      `${projectPath} is already a Project`,
-    );
-  }
-  const items: NewManuscriptItem[] = options.manuscript?.length
-    ? options.manuscript
-    : [{ title: 'Chapter 1', scenes: [{ title: 'Scene 1', markdown: '' }] }];
+function newUnits(items: readonly NewManuscriptItem[]): {
+  scenes: SceneValue[];
+  chapters: ChapterNode[];
+  parts: NonNullable<ProjectTree['parts']>;
+  top: string[];
+} {
   const scenes: SceneValue[] = [];
-  // Every Chapter in reading order, as a tree holds them.
   const chapters: ChapterNode[] = [];
   const chapterNode = (chapter: NewChapter): string => {
     const id = randomUUID();
@@ -347,6 +338,29 @@ export async function createProject(
     parts.push(part);
     return part.id;
   });
+  return { scenes, chapters, parts, top };
+}
+
+/**
+ * Creates a new Project folder: with the `manuscript` given, or else one
+ * Chapter holding one empty Scene. Its Parts, if any, are called Parts.
+ */
+export async function createProject(
+  projectPath: string,
+  deps: StoreDeps,
+  options: { language?: string; manuscript?: NewManuscriptItem[] } = {},
+): Promise<ProjectStore> {
+  const { fs, clock } = deps;
+  if (await fs.exists(path.join(projectPath, MANIFEST))) {
+    throw new ProjectError(
+      'already-a-project',
+      `${projectPath} is already a Project`,
+    );
+  }
+  const items: NewManuscriptItem[] = options.manuscript?.length
+    ? options.manuscript
+    : [{ title: 'Chapter 1', scenes: [{ title: 'Scene 1', markdown: '' }] }];
+  const { scenes, chapters, parts, top } = newUnits(items);
   const manifest: Manifest = {
     format: FORMAT,
     id: randomUUID(),
@@ -3188,39 +3202,81 @@ export class ProjectStore {
    */
   async createBook(index?: number, title?: string): Promise<Created> {
     const id = randomUUID();
+    const changed = await this.step(() => this.addBook(id, index, title));
+    return { id, ...changed };
+  }
+
+  /**
+   * Adds a Book after the last holding `manuscript`, as a Manuscript Import
+   * makes it: its Parts, Chapters and Scenes, with their Prose, Scene files
+   * first. A Project of one Book becomes a Series, as with `createBook`.
+   * Undo moves the new Book to Trash, as its Prose may have changed by then;
+   * the Project stays a Series, Book 1 keeping the Word target it took.
+   */
+  async importBook(
+    title: string,
+    manuscript: readonly NewManuscriptItem[],
+  ): Promise<Created> {
+    const id = randomUUID();
     const changed = await this.step(async () => {
-      const before = this.tree();
-      // Book 1 is new when the Project wasn't a Series.
-      let bookOne: string | undefined;
-      await this.restructureParts((tree) => {
-        const first = asSeries(tree, randomUUID);
-        if (!isSeries(before)) bookOne = first;
-        tree.books.splice(index ?? tree.books.length, 0, {
-          id,
-          title: title ?? `Book ${tree.books.length + 1}`,
-          top: [],
-        });
-      });
-      const target = this.unitDetails.get(PROJECT_OUTLINE)?.wordTarget;
-      const book = bookOne;
-      if (book === undefined || target === undefined) return undefined;
-      await this.saveDetail(outlineRef(book), 'wordTarget', target);
-      await this.saveDetail(
-        outlineRef(PROJECT_OUTLINE),
-        'wordTarget',
-        undefined,
-      );
-      return async () => {
-        await this.writeManifest({ ...this.manifest, tree: before });
-        await this.saveDetail(
-          outlineRef(PROJECT_OUTLINE),
-          'wordTarget',
-          target,
+      const { scenes, chapters, parts, top } = newUnits(manuscript);
+      await this.deps.fs.mkdir(path.join(this.path, 'scenes'));
+      for (const scene of scenes) {
+        await safeWrite(
+          this.deps.fs,
+          this.deps.clock,
+          scenePath(this.path, scene.id),
+          sceneFile(scene),
         );
-        await this.saveDetail(outlineRef(book), 'wordTarget', undefined);
+        this.files.add(scene.id);
+      }
+      await this.addBook(id, undefined, title, (tree) => {
+        tree.chapters.push(...chapters);
+        tree.parts.push(...parts);
+        findBook(tree, id).top.push(...top);
+      });
+      return async () => {
+        await this.trash.move('book', id);
       };
     });
     return { id, ...changed };
+  }
+
+  /**
+   * Adds Book `id` at `index` among the Books, or last, and has `fill` put
+   * what it holds in the tree. A Project of one Book becomes a Series: its
+   * Manuscript becomes Book 1, which takes the Manuscript's Word target.
+   * Resolves with how to undo that, when the Word target moved.
+   */
+  private async addBook(
+    id: string,
+    index: number | undefined,
+    title: string | undefined,
+    fill?: (tree: FullTree) => void,
+  ): Promise<(() => Promise<void>) | undefined> {
+    const before = this.tree();
+    // Book 1 is new when the Project wasn't a Series.
+    let bookOne: string | undefined;
+    await this.restructureParts((tree) => {
+      const first = asSeries(tree, randomUUID);
+      if (!isSeries(before)) bookOne = first;
+      tree.books.splice(index ?? tree.books.length, 0, {
+        id,
+        title: title ?? `Book ${tree.books.length + 1}`,
+        top: [],
+      });
+      fill?.(tree);
+    });
+    const target = this.unitDetails.get(PROJECT_OUTLINE)?.wordTarget;
+    const book = bookOne;
+    if (book === undefined || target === undefined) return undefined;
+    await this.saveDetail(outlineRef(book), 'wordTarget', target);
+    await this.saveDetail(outlineRef(PROJECT_OUTLINE), 'wordTarget', undefined);
+    return async () => {
+      await this.writeManifest({ ...this.manifest, tree: before });
+      await this.saveDetail(outlineRef(PROJECT_OUTLINE), 'wordTarget', target);
+      await this.saveDetail(outlineRef(book), 'wordTarget', undefined);
+    };
   }
 
   renameBook(bookId: string, title: string): Promise<Changed> {

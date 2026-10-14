@@ -13,6 +13,7 @@ import {
   type Tick,
 } from '../shared/export-choice';
 import { filterManuscript, filterOn, type Filter } from '../shared/filter';
+import { bookManuscript } from '../shared/manuscript-order';
 import type {
   Manuscript,
   ManuscriptChapter,
@@ -26,16 +27,28 @@ import { useStatuses } from './StatusAndTags';
  * with its Scenes ticked under it, and each Part with its Chapters, before
  * the save dialog. Unplaced Chapters never go in, so aren't listed. Tick matching…
  * ticks only what a Filter matches, for the Author to adjust by hand. What
- * they leave unticked is remembered for the Project on this computer.
+ * they leave unticked is remembered for the Project on this computer. In a
+ * Series, it is of one Book, `book` to start with, or else the first, with
+ * its title as a heading above the rest unless the Author says otherwise.
  */
 export function ExportManuscriptDialog({
-  manuscript,
+  manuscript: whole,
+  book,
   onClose,
 }: {
   manuscript: Manuscript;
+  book?: string;
   onClose(): void;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
+  const books = whole.books;
+  const [chosenBook, setChosenBook] = useState(book);
+  /** The Book exported: the one chosen, while it is still one. */
+  const bookId = books
+    ? (books.find((b) => b.id === chosenBook) ?? books[0])?.id
+    : undefined;
+  const [withTitle, setWithTitle] = useState(true);
+  const manuscript = bookManuscript(whole, bookId);
   /** Null until main says what was left unticked last time. */
   const [unticked, setUnticked] = useState<ExportUnticked | null>(null);
   const { filter, setFilter, inUse } = useFilter('export-manuscript');
@@ -59,7 +72,10 @@ export function ExportManuscriptDialog({
     if (!unticked) return;
     // Gone at once, not on the close event, which would come after a quick reopen.
     onClose();
-    void window.shell.exportManuscript(unticked);
+    void window.shell.exportManuscript(
+      unticked,
+      bookId === undefined ? undefined : { id: bookId, title: withTitle },
+    );
   }
 
   return (
@@ -75,6 +91,32 @@ export function ExportManuscriptDialog({
         Tick the Scenes and Chapters to export. The file type you save as sets
         Word or Markdown.
       </p>
+      {books && bookId !== undefined && (
+        <div className="export-book">
+          <label>
+            Book{' '}
+            <select
+              aria-label="Book"
+              value={bookId}
+              onChange={(event) => setChosenBook(event.target.value)}
+            >
+              {books.map((b) => (
+                <option key={b.id} value={b.id}>
+                  {b.title}
+                </option>
+              ))}
+            </select>
+          </label>
+          <label className="setting">
+            <input
+              type="checkbox"
+              checked={withTitle}
+              onChange={(event) => setWithTitle(event.target.checked)}
+            />
+            Book title as a heading
+          </label>
+        </div>
+      )}
       {unticked && (
         <FilterControl
           filter={filter}

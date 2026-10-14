@@ -1,8 +1,18 @@
 import type { Conflict } from '../../shared/api';
-import { customValues, type CustomField } from '../../shared/custom-field';
+import {
+  customValue,
+  fieldsOfType,
+  type CustomField,
+} from '../../shared/custom-field';
 import { entryTitle } from '../../shared/entry';
-import type { StoryBibleChoice } from '../../shared/export-choice';
-import { matchesFilter, type Filter } from '../../shared/filter';
+import {
+  appearsAfter,
+  entryAsOf,
+  summaryAsOf,
+  type TitledBook,
+} from '../../shared/evolution';
+import { ALL_BOOKS, type StoryBibleChoice } from '../../shared/export-choice';
+import { matchesFilter } from '../../shared/filter';
 import {
   COMMON_LABELS,
   TYPE_FIELDS,
@@ -17,6 +27,7 @@ import {
   type EntrySummary,
   type EntryValue,
   type ImageRef,
+  type Manuscript,
   type PrivateRef,
   type ProseLanguage,
   type ValueOf,
@@ -39,11 +50,13 @@ import {
 // type's fields, then its Custom fields, those with something in them; its
 // image in Word, if asked;
 // and its private notes, if asked. Visibility plays no part: it concerns
-// only the Assistant.
+// only the Assistant. In a Series, the Entries are as of a chosen Book, or
+// with every Evolution under its field.
 
 /** What a Story Bible Export reads the Project through. */
 export type StoryBibleSource = {
   language: ProseLanguage;
+  manuscript(): Manuscript;
   listEntries(): EntrySummary[];
   listCustomFields(): CustomField[];
   read<R extends EntryRef | PrivateRef>(ref: R): Promise<ValueOf<R>>;
@@ -66,15 +79,45 @@ type ExportedEntry = {
 type ExportedGroup = { title: string; entries: ExportedEntry[] };
 
 /**
- * The Entries `filter` matches, by type in the Story Bible's order and by
- * name within each.
+ * How a Story Bible Export sees the Series: its Books in order, and the one
+ * the Entries are as of, if any; `every`, with each Evolution instead.
+ * Without Books, a Project of one Book.
+ */
+type SeriesView = { books: TitledBook[]; asOf?: string; every: boolean };
+
+/**
+ * The Series as `choice` sees it: as of its Book, or the last when that is
+ * no longer one.
+ */
+function seriesView(
+  manuscript: Manuscript,
+  choice: StoryBibleChoice,
+): SeriesView {
+  const books = (manuscript.books ?? []).map(({ id, title }) => ({
+    id,
+    title,
+  }));
+  if (books.length === 0) return { books, every: false };
+  if (choice.book === ALL_BOOKS) return { books, every: true };
+  const asOf = books.find((b) => b.id === choice.book) ?? books.at(-1)!;
+  return { books, asOf: asOf.id, every: false };
+}
+
+/**
+ * The Entries the choice's Filter matches, as of its Book, by type in the
+ * Story Bible's order and by name within each. As of a Book, those that
+ * first appear in a later one are left out.
  */
 function includedEntries(
   entries: readonly EntrySummary[],
-  filter: Filter,
+  choice: StoryBibleChoice,
+  { books, asOf }: SeriesView,
 ): EntrySummary[] {
+  const ids = books.map((b) => b.id);
   return entries
-    .filter((entry) => matchesFilter(filter, entry))
+    .filter((entry) => !appearsAfter(entry, ids, asOf))
+    .map((entry) => summaryAsOf(entry, ids, asOf))
+    .filter((entry) => matchesFilter(choice.filter, entry))
     .sort(
       (a, b) =>
         ENTRY_TYPES.indexOf(a.type) - ENTRY_TYPES.indexOf(b.type) ||
@@ -91,23 +134,32 @@ export async function exportStoryBible(
 ): Promise<Uint8Array> {
   const withImages = choice.images && format === 'docx';
   const customFields = source.listCustomFields();
+  const series = seriesView(source.manuscript(), choice);
+  const ids = series.books.map((b) => b.id);
   const entries = await Promise.all(
-    includedEntries(source.listEntries(), choice.filter).map(
+    includedEntries(source.listEntries(), choice, series).map(
       async ({ id }): Promise<[EntryValue, ExportedEntry]> => {
         const value = await source.read({ kind: 'entry', id });
+        const { entry: shown, from } = entryAsOf(value, ids, series.asOf);
         const privateNotes = choice.privateNotes
           ? (await source.read({ kind: 'private', id })).body
           : '';
         const image =
-          withImages && value.image
-            ? await source.readImage({ kind: 'entry', id })
+          withImages && shown.image
+            ? await source.readImage({
+                kind: 'entry',
+                id,
+                ...(from.image !== undefined && { book: from.image }),
+              })
             : null;
         return [
           value,
           {
-            name: entryTitle(value),
+            name: entryTitle(shown),
             image,
-            blocks: entryBlocks(value, customFields, privateNotes),
+            blocks: series.every
+              ? evolvedBlocks(value, series.books, customFields, privateNotes)
+              : entryBlocks(shown, customFields, privateNotes),
           },
         ];
       },
@@ -130,37 +182,124 @@ export async function exportStoryBible(
 }
 
 /**
- * An Entry's paragraphs, those with something in them: its type, aliases and
- * Tags, then its description and fields in the order the Entry view shows
- * them, its Custom fields among `customFields` last, then `privateNotes`.
+ * A field of an Entry as exported, under the key its Evolutions are told
+ * by, and the label it goes by; the description has none.
+ */
+type ExportedField = { key: string; label?: string; blocks: Block[] };
+
+/**
+ * An Entry's fields: its type, aliases and Tags, then its description and
+ * fields in the order the Entry view shows them, its Custom fields among
+ * `customFields` last, then `privateNotes`.
+ */
+function entryFields(
+  value: EntryValue,
+  customFields: readonly CustomField[],
+  privateNotes: string,
+): ExportedField[] {
+  const labelled = (key: string, label: string, text: string) => ({
+    key,
+    label,
+    blocks: [{ label, text }],
+  });
+  const fields = TYPE_FIELDS[value.type];
+  const field = ({ label, text }: LabelledField) =>
+    labelled(label, label, text(value.fields));
+  return [
+    labelled('type', COMMON_LABELS.type, ENTRY_TYPE_LABELS[value.type]),
+    labelled('aliases', COMMON_LABELS.aliases, value.aliases.join(', ')),
+    labelled('tags', COMMON_LABELS.tags, (value.tags ?? []).join(', ')),
+    ...fields.filter((f) => f.beforeDescription).map(field),
+    {
+      key: 'description',
+      blocks: value.description
+        .split(/\n[ \t]*\n/)
+        .map((text): Block => ({ text })),
+    },
+    ...fields.filter((f) => !f.beforeDescription).map(field),
+    ...fieldsOfType(customFields, value.type).map(({ id, label }) =>
+      labelled(`custom:${id}`, label, customValue(value, id)),
+    ),
+    labelled('privateNotes', COMMON_LABELS.privateNotes, privateNotes),
+  ];
+}
+
+/** The blocks with something in them, trimmed. */
+function filled(blocks: readonly Block[]): Block[] {
+  return blocks
+    .map((block) => ({ ...block, text: block.text.trim() }))
+    .filter((block) => block.text !== '');
+}
+
+/**
+ * An Entry's paragraphs, those with something in them, as `entryFields`
+ * orders them.
  */
 function entryBlocks(
   value: EntryValue,
   customFields: readonly CustomField[],
   privateNotes: string,
 ): Block[] {
-  const description = value.description
-    .split(/\n[ \t]*\n/)
-    .map((text): Block => ({ text }));
-  const fields = TYPE_FIELDS[value.type];
-  const field = ({ label, text }: LabelledField): Block => ({
-    label,
-    text: text(value.fields),
-  });
+  return entryFields(value, customFields, privateNotes).flatMap(({ blocks }) =>
+    filled(blocks),
+  );
+}
+
+/**
+ * An Entry's paragraphs with every Evolution: its own values, each field
+ * followed by the value it takes from each Book on, as in “From Book 2:
+ * Rebels”, in the Books' order, and a new name first. A field with no value
+ * of its own keeps its label, for them to go under. An Evolution that
+ * changes nothing shown, or of a Book not among `books`, is left out.
+ */
+function evolvedBlocks(
+  value: EntryValue,
+  books: readonly TitledBook[],
+  customFields: readonly CustomField[],
+  privateNotes: string,
+): Block[] {
+  const ids = books.map((b) => b.id);
+  const evolved = new Map<string, Block[]>();
+  const add = (key: string, blocks: Block[]) =>
+    evolved.set(key, [...(evolved.get(key) ?? []), ...blocks]);
+  const textOf = ({ blocks }: ExportedField) =>
+    filled(blocks)
+      .map((b) => b.text)
+      .join('\n\n');
+  let before = value;
+  for (const book of books) {
+    if (!value.evolutions?.[book.id]) continue;
+    const after = entryAsOf(value, ids, book.id).entry;
+    const label = `From ${book.title}`;
+    if (entryTitle(after) !== entryTitle(before)) {
+      add('name', [{ label, text: entryTitle(after) }]);
+    }
+    const was = new Map(
+      entryFields(before, customFields, '').map((f) => [f.key, textOf(f)]),
+    );
+    for (const field of entryFields(after, customFields, '')) {
+      if (textOf(field) === was.get(field.key)) continue;
+      const [first, ...rest] = filled(field.blocks);
+      add(field.key, [
+        { label, text: first?.text ?? '' },
+        ...rest.map(({ text }) => ({ text })),
+      ]);
+    }
+    before = after;
+  }
   return [
-    { label: COMMON_LABELS.type, text: ENTRY_TYPE_LABELS[value.type] },
-    { label: COMMON_LABELS.aliases, text: value.aliases.join(', ') },
-    { label: COMMON_LABELS.tags, text: (value.tags ?? []).join(', ') },
-    ...fields.filter((f) => f.beforeDescription).map(field),
-    ...description,
-    ...fields.filter((f) => !f.beforeDescription).map(field),
-    ...customValues(value, customFields).map(
-      ({ field, value }): Block => ({ label: field.label, text: value }),
-    ),
-    { label: COMMON_LABELS.privateNotes, text: privateNotes },
-  ]
-    .map((block) => ({ ...block, text: block.text.trim() }))
-    .filter((block) => block.text !== '');
+    ...(evolved.get('name') ?? []),
+    ...entryFields(value, customFields, privateNotes).flatMap((field) => {
+      const own = filled(field.blocks);
+      const later = evolved.get(field.key);
+      if (!later) return own;
+      const kept =
+        own.length > 0 || field.label === undefined
+          ? own
+          : [{ label: field.label, text: '' }];
+      return [...kept, ...later];
+    }),
+  ];
 }
 
 // --- Markdown ---
@@ -172,7 +311,8 @@ function markdownOf(groups: ExportedGroup[]): string {
       commonMarkHeading(2, name),
       ...blocks.map(({ label, text }) =>
         oneParagraph(
-          (label ? `**${escapeCommonMark(label)}:** ` : '') +
+          // A label alone, with what evolved from it under it.
+          (label ? `**${escapeCommonMark(label)}:**${text ? ' ' : ''}` : '') +
             escapeCommonMark(text),
         ),
       ),
@@ -219,13 +359,15 @@ function run(text: string, bold = false): DocxRun {
 // --- Conflicts ---
 
 /**
- * The names of the included Entries in Conflict, in the Export's order: in
- * their fields, or in their private notes when those go in.
+ * The names of the included Entries in Conflict, in the Export's order and,
+ * in a Series, as of its Book: in their fields, or in their private notes
+ * when those go in.
  */
 export function conflictedEntries(
   entries: readonly EntrySummary[],
   conflicts: readonly Conflict[],
   choice: StoryBibleChoice,
+  manuscript: Manuscript,
 ): string[] {
   const ids = new Set(
     conflicts
@@ -236,7 +378,7 @@ export function conflictedEntries(
       )
       .map(({ ref }) => ref.id),
   );
-  return includedEntries(entries, choice.filter)
+  return includedEntries(entries, choice, seriesView(manuscript, choice))
     .filter((entry) => ids.has(entry.id))
     .map(entryTitle);
 }

@@ -16,7 +16,11 @@ import type {
   ValueOf,
   Visibility,
 } from './project-types';
-import type { ExportUnticked, StoryBibleChoice } from './export-choice';
+import type {
+  ExportBook,
+  ExportUnticked,
+  StoryBibleChoice,
+} from './export-choice';
 import type { BibleView } from './bible-view';
 import type { CorkboardView } from './corkboard-view';
 import type { Filter, FilterPlace, Filters } from './filter';
@@ -318,6 +322,12 @@ export interface ProjectApi {
    * Book becomes a Series, its Manuscript Book 1.
    */
   createBook(index?: number, title?: string): Promise<Created>;
+  /**
+   * Adds a Book after the last holding `file`, split by `convention` and
+   * titled as the file is named, as one step: `undo` moves it to Trash. A
+   * Project of one Book becomes a Series, its Manuscript Book 1.
+   */
+  importBook(file: ImportFile, convention: ImportConvention): Promise<Created>;
   renameBook(bookId: string, title: string): Promise<Changed>;
   /** Moves a Book to `index` among the Books. */
   moveBook(bookId: string, index: number): Promise<Changed>;
@@ -895,11 +905,12 @@ export interface ShellApi {
    */
   exportChoice(): Promise<ExportUnticked>;
   /**
-   * Remembers `unticked`, then exports the rest of the Manuscript where the
-   * Author chooses, once they have agreed to export the main version of
-   * ticked Scenes in Conflict. Resolves when done or cancelled.
+   * Remembers `unticked`, then exports the rest of the Manuscript, in a
+   * Series of `book` alone, where the Author chooses, once they have agreed
+   * to export the main version of ticked Scenes in Conflict. Resolves when
+   * done or cancelled.
    */
-  exportManuscript(unticked: ExportUnticked): Promise<void>;
+  exportManuscript(unticked: ExportUnticked, book?: ExportBook): Promise<void>;
   /**
    * Whether the last Story Bible Export of this window's Project had
    * images, on this computer; they go in until the Author says otherwise.
@@ -1139,6 +1150,7 @@ export const projectMethods = {
   movePart: 'invoke',
   trashPart: 'invoke',
   createBook: 'invoke',
+  importBook: 'invoke',
   renameBook: 'invoke',
   moveBook: 'invoke',
   trashBook: 'invoke',

@@ -2,8 +2,10 @@ import path from 'node:path';
 import type { Conflict } from '../../shared/api';
 import {
   pickedManuscript,
+  type ExportBook,
   type ExportUnticked,
 } from '../../shared/export-choice';
+import { bookManuscript } from '../../shared/manuscript-order';
 import type {
   Manuscript,
   ProseLanguage,
@@ -25,10 +27,11 @@ import {
 } from './common-mark';
 import { docx, type DocxParagraph, type DocxRun } from './docx';
 
-// The Manuscript Export: the Prose of the Scenes the Author ticked, for others
-// to read. Chapter titles are headings, a Part's title a heading one level
-// above them, and Scenes are separated by a break; nothing else from the
-// Project goes in, not even Scene titles.
+// The Manuscript Export: the Prose of the Scenes the Author ticked, of one
+// Book, for others to read. Chapter titles are headings, a Part's title a
+// heading one level above them, the Book's title, if asked, one level above
+// all, and Scenes are separated by a break; nothing else from the Project
+// goes in, not even Scene titles.
 
 export type ExportFormat = 'docx' | 'markdown';
 
@@ -58,24 +61,37 @@ const SCENE_BREAK = '***';
 type ExportedChapter = { title: string; scenes: Paragraph[][]; part?: string };
 
 /**
- * The Chapters as exported: a Chapter heading is level 1, or 2 when the
- * Export holds a Part, whose heading is then level 1.
+ * The Chapters as exported, under the Book's `title` if it heads them: a
+ * Part's heading is one level below the title's, or level 1 without one,
+ * and a Chapter's one level below that when the Export holds a Part.
  */
-type Exported = { chapters: ExportedChapter[]; level: 1 | 2 };
+type Exported = {
+  title?: string;
+  chapters: ExportedChapter[];
+  partLevel: 1 | 2;
+  chapterLevel: 1 | 2 | 3;
+};
 
 /**
- * The Prose of the ticked part of the Manuscript as a file of `format`.
- * Empty, Missing and Unplaced Scenes are left out, as are Unplaced
- * Chapters; a Chapter that goes in has its heading even with no Prose.
+ * The Prose of the ticked part of the Manuscript as a file of `format`: in
+ * a Series, of `book` alone. Empty, Missing and Unplaced Scenes are left
+ * out, as are Unplaced Chapters; a Chapter that goes in has its heading
+ * even with no Prose.
  */
 export async function exportManuscript(
   source: ExportSource,
   format: ExportFormat,
   unticked: ExportUnticked,
+  book?: ExportBook,
 ): Promise<Uint8Array> {
+  const manuscript = source.manuscript();
+  const title = book?.title
+    ? manuscript.books?.find((b) => b.id === book.id)?.title
+    : undefined;
   const exported = await readChapters(
     source,
-    pickedManuscript(source.manuscript(), unticked),
+    pickedManuscript(bookManuscript(manuscript, book?.id), unticked),
+    title,
   );
   return format === 'markdown'
     ? Buffer.from(markdownOf(exported), 'utf8')
@@ -85,6 +101,7 @@ export async function exportManuscript(
 async function readChapters(
   source: ExportSource,
   manuscript: Manuscript,
+  title: string | undefined,
 ): Promise<Exported> {
   const parts = new Map(manuscript.parts?.map((p) => [p.id, p]));
   const chapters = await Promise.all(
@@ -112,20 +129,32 @@ async function readChapters(
       };
     }),
   );
-  return { chapters, level: parts.size > 0 ? 2 : 1 };
+  const partLevel = title === undefined ? 1 : 2;
+  return {
+    ...(title !== undefined && { title }),
+    chapters,
+    partLevel,
+    chapterLevel: parts.size > 0 ? ((partLevel + 1) as 2 | 3) : partLevel,
+  };
 }
 
 // --- Markdown ---
 
-function markdownOf({ chapters, level }: Exported): string {
+function markdownOf({
+  title: book,
+  chapters,
+  partLevel,
+  chapterLevel,
+}: Exported): string {
   const blocks = chapters.flatMap(({ title, scenes, part }) => [
-    ...(part !== undefined ? [commonMarkHeading(1, part)] : []),
-    commonMarkHeading(level, title),
+    ...(part !== undefined ? [commonMarkHeading(partLevel, part)] : []),
+    commonMarkHeading(chapterLevel, title),
     ...scenes.flatMap((paragraphs, i) => [
       ...(i > 0 ? [SCENE_BREAK] : []),
       ...markdownBlocks(paragraphs),
     ]),
   ]);
+  if (book !== undefined) blocks.unshift(commonMarkHeading(1, book));
   return blocks.join('\n\n') + '\n';
 }
 
@@ -246,12 +275,17 @@ function lastsUntil(spans: Span[], start: number, mark: Mark): number {
 
 // --- .docx ---
 
-function docxParagraphs({ chapters, level }: Exported): DocxParagraph[] {
-  return chapters.flatMap(({ title, scenes, part }) => [
+function docxParagraphs({
+  title: book,
+  chapters,
+  partLevel,
+  chapterLevel,
+}: Exported): DocxParagraph[] {
+  const body = chapters.flatMap(({ title, scenes, part }) => [
     ...(part !== undefined
-      ? [{ style: 'heading1' as const, runs: [plain(part)] }]
+      ? [{ style: `heading${partLevel}` as const, runs: [plain(part)] }]
       : []),
-    { style: `heading${level}` as const, runs: [plain(title)] },
+    { style: `heading${chapterLevel}` as const, runs: [plain(title)] },
     ...scenes.flatMap((paragraphs, i) => [
       ...(i > 0
         ? [{ align: 'centre' as const, runs: [plain(SCENE_BREAK)] }]
@@ -267,6 +301,9 @@ function docxParagraphs({ chapters, level }: Exported): DocxParagraph[] {
       })),
     ]),
   ]);
+  return book === undefined
+    ? body
+    : [{ style: 'heading1' as const, runs: [plain(book)] }, ...body];
 }
 
 function plain(text: string): DocxRun {
@@ -313,16 +350,21 @@ export function insideProjectMessage(displayName: string): {
 
 // --- Conflicts ---
 
-/** The titles of the ticked Scenes that are in Conflict, in order. */
+/**
+ * The titles of the ticked Scenes that are in Conflict, in order: in a
+ * Series, of Book `bookId` alone.
+ */
 export function conflictedScenes(
   manuscript: Manuscript,
   conflicts: Conflict[],
   unticked: ExportUnticked,
+  bookId?: string,
 ): string[] {
   const ids = new Set(
     conflicts.filter((c) => c.ref.kind === 'scene').map((c) => c.ref.id),
   );
-  return pickedManuscript(manuscript, unticked).chapters.flatMap((chapter) =>
+  const picked = pickedManuscript(bookManuscript(manuscript, bookId), unticked);
+  return picked.chapters.flatMap((chapter) =>
     chapter.scenes.filter((scene) => ids.has(scene.id)).map((s) => s.title),
   );
 }

@@ -3494,6 +3494,15 @@ legend .show-in-peek {
   width: min(32rem, 90vw);
 }
 
+/* The Book of a Series an Export is of, or as of. */
+.export-book {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 1rem;
+  margin: 0 0 0.75rem;
+}
+
 .export-tree {
   max-height: 50vh;
   overflow-y: auto;

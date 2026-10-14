@@ -9,6 +9,7 @@ import {
   type ProjectApi,
 } from '../shared/api';
 import type { Handlers } from '../shared/bridge';
+import { splitManuscript } from '../shared/manuscript-import';
 import {
   ENTRY_GROUP_TITLES,
   ENTRY_TYPE_LABELS,
@@ -19,6 +20,7 @@ import {
 } from '../shared/project-types';
 import { createConversationEngine } from './assistant/conversation-engine';
 import { createImagePrompts } from './assistant/image-prompt';
+import { newManuscript } from './import/manuscript-import';
 import { emit, register } from './electron-transport';
 import { entryImageOf, imageDataUrl } from './entry-image';
 import { systemClock } from './project-store/clock';
@@ -60,6 +62,11 @@ const projectHandlers: Handlers<
     store.movePart(partId, index, bookId),
   trashPart: ({ store }, partId) => store.trashPart(partId),
   createBook: ({ store }, index, title) => store.createBook(index, title),
+  importBook: ({ store }, file, convention) =>
+    store.importBook(
+      file.name,
+      newManuscript(splitManuscript(file.blocks, convention)),
+    ),
   renameBook: ({ store }, bookId, title) => store.renameBook(bookId, title),
   moveBook: ({ store }, bookId, index) => store.moveBook(bookId, index),
   trashBook: ({ store }, bookId) => store.trashBook(bookId),
