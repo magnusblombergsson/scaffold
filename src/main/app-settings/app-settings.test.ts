@@ -100,6 +100,40 @@ describe('saving', () => {
     expect((await load()).highlightMentions()).toBe(false);
   });
 
+  it('makes Backups automatically into the default folder until the Author changes either, and remembers that', async () => {
+    const settings = await load();
+    expect(settings.autoBackup()).toBe(true);
+    expect(settings.backupFolder()).toBeNull();
+
+    const folder = path.join(dir, 'Elsewhere');
+    settings.setAutoBackup(false);
+    settings.setBackupFolder(folder);
+    await settings.flush();
+
+    const loaded = await load();
+    expect(loaded.autoBackup()).toBe(false);
+    expect(loaded.backupFolder()).toBe(folder);
+    const { global } = JSON.parse(await readFile(file, 'utf8'));
+    expect(global).toMatchObject({ autoBackup: false, backupFolder: folder });
+  });
+
+  it.each([
+    ['a relative folder', { autoBackup: 'yes', backupFolder: 'Backups' }],
+    ['an empty folder', { autoBackup: 1, backupFolder: '' }],
+    ['no folder', { autoBackup: null, backupFolder: 42 }],
+  ])(
+    'reads the Backup defaults from %s and a value that is no switch',
+    async (_, global) => {
+      await writeFile(
+        file,
+        JSON.stringify({ version: 1, global, projects: {}, recent: [] }),
+      );
+      const settings = await load();
+      expect(settings.autoBackup()).toBe(true);
+      expect(settings.backupFolder()).toBeNull();
+    },
+  );
+
   it('keeps the Todos dock folded, showing All, until the Author changes it, and remembers that', async () => {
     const settings = await load();
     expect(settings.todoDock()).toEqual(DEFAULT_TODO_DOCK);

@@ -29,6 +29,7 @@ export function TrashView({
   onRestore,
   onMove,
   onEmpty,
+  emptying = false,
 }: {
   place?: Place;
   items: TrashItem[];
@@ -44,6 +45,8 @@ export function TrashView({
   onMove(item: TrashItem): void;
   /** Trash only: the Drawer is never emptied. */
   onEmpty?(): void;
+  /** Set while Trash is being emptied, which can't be asked for again then. */
+  emptying?: boolean;
 }) {
   const other = place === 'trash' ? 'drawer' : 'trash';
   const name = place === 'trash' ? 'Trash' : 'Drawer';
@@ -96,7 +99,11 @@ export function TrashView({
         ))}
       </ol>
       {onEmpty && (
-        <button className="trash-empty-button" onClick={onEmpty}>
+        <button
+          className="trash-empty-button"
+          disabled={emptying}
+          onClick={onEmpty}
+        >
           Empty Trash…
         </button>
       )}

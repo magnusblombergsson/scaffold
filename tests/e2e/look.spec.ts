@@ -167,7 +167,10 @@ for (const theme of ['light', 'dark'] as const) {
       await expect(settings.getByLabel('Anthropic status')).toHaveText(
         'Connected',
       );
-      await expect(settings).toHaveScreenshot(`settings-${theme}.png`);
+      // The Backup folder is in this run's own temp directory.
+      await expect(settings).toHaveScreenshot(`settings-${theme}.png`, {
+        mask: [settings.getByLabel('Backup folder', { exact: true })],
+      });
     } finally {
       await app.close();
     }

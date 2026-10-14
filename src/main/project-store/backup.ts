@@ -99,24 +99,31 @@ async function onlineOnlyInBackup(
 /**
  * Writes a Backup of the Project folder at `target`, reading its files as
  * they are, without pausing sync: a change landing meanwhile may be partly
- * in. Refuses while any file is online-only, writing nothing; a failure
- * leaves nothing at `target`.
+ * in. Refuses while any file is online-only, writing nothing; a failure,
+ * or `signal` aborting, leaves nothing at `target`.
  */
 export async function backUpProject(
   projectPath: string,
   target: string,
   fs: Pick<FileSystem, 'onlineOnly'>,
+  signal?: AbortSignal,
 ): Promise<void> {
   const name = path.basename(projectPath);
-  if ((await onlineOnlyInBackup(projectPath, fs)).length > 0) {
+  const onlineOnly = await onlineOnlyInBackup(projectPath, fs);
+  signal?.throwIfAborted();
+  if (onlineOnly.length > 0) {
     throw new ProjectError(
       'online-only',
       `Some files of ${name} are only online. Make the Project available offline in your sync client, then Back Up again.`,
     );
   }
   try {
-    await writeZip(target, await backupInputs(projectPath), { comment: name });
+    await writeZip(target, await backupInputs(projectPath), {
+      comment: name,
+      signal,
+    });
   } catch (error) {
+    if (signal?.aborted) throw signal.reason;
     throw new ProjectError(
       'unwritable',
       `Can't back up ${name}: ${error instanceof ZipError ? error.message : writeFailureReason(error)}.`,

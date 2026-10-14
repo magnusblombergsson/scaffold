@@ -45,6 +45,13 @@ export function launch(dir: string, options: LaunchOptions = {}) {
   });
 }
 
+/** The app's Documents folder, which holds the default Backup folder, in `dir`. */
+export function documentsIn(dir: string): string {
+  const documents = path.join(dir, 'documents');
+  mkdirSync(documents, { recursive: true });
+  return documents;
+}
+
 /** The environment the app runs in, with its settings in `dir`. */
 export function appEnv(
   dir: string,
@@ -70,6 +77,8 @@ export function appEnv(
   return {
     ...(env as Record<string, string>),
     SCAFFOLD_USER_DATA: userData,
+    // Automatic Backups go here, never into the real Documents.
+    SCAFFOLD_DOCUMENTS: documentsIn(dir),
     // Never the real Anthropic or OpenRouter: a port nothing listens on,
     // unless a test runs a fake one.
     SCAFFOLD_ANTHROPIC_URL: anthropicUrl ?? 'http://127.0.0.1:9',

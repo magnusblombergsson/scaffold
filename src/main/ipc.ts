@@ -19,13 +19,14 @@ import {
 } from '../shared/project-types';
 import { createConversationEngine } from './assistant/conversation-engine';
 import { createImagePrompts } from './assistant/image-prompt';
-import { register } from './electron-transport';
+import { emit, register } from './electron-transport';
 import { entryImageOf, imageDataUrl } from './entry-image';
 import { systemClock } from './project-store/clock';
 import type { ProjectStore } from './project-store/project-store';
 import { isModel } from '../shared/models';
 import {
   assistantProvider,
+  autoBackUp,
   defaultModel,
   lastFolder,
   projectWindows,
@@ -343,13 +344,20 @@ function withArticle(label: string): string {
   return `${/^[aeiou]/i.test(label) ? 'an' : 'a'} ${label}`;
 }
 
-/** Empties Trash once the Author confirms it; there is no undo. */
+/** The Projects whose Trash is being emptied, which isn't emptied again meanwhile. */
+const emptying = new WeakSet<ProjectStore>();
+
+/**
+ * Empties Trash once the Author confirms it; there is no undo. An automatic
+ * Backup is made first, Trash and all, and Trash is emptied whether it is
+ * or not, unless the Project closed meanwhile.
+ */
 async function emptyTrash(
   sender: WebContents,
   store: ProjectStore,
 ): Promise<boolean> {
   const count = store.listTrash().length;
-  if (count === 0) return false;
+  if (count === 0 || emptying.has(store)) return false;
   const options = {
     type: 'warning' as const,
     buttons: ['Empty Trash', 'Cancel'],
@@ -362,9 +370,18 @@ async function emptyTrash(
   const { response } = window
     ? await dialog.showMessageBox(window, options)
     : await dialog.showMessageBox(options);
-  if (response !== 0) return false;
-  await store.emptyTrash();
-  return true;
+  if (response !== 0 || emptying.has(store)) return false;
+  emptying.add(store);
+  try {
+    const backup = await autoBackUp(store, 'emptyTrash', (on) =>
+      emit(sender, 'shell', 'onBackingUp', on),
+    );
+    if (backup && 'cancelled' in backup) return false;
+    await store.emptyTrash();
+    return true;
+  } finally {
+    emptying.delete(store);
+  }
 }
 
 /**

@@ -19,6 +19,8 @@ export type ZipOptions = {
   comment?: string;
   /** Writes Zip64 records even where 32 bits would do, as tests do to try them. */
   forceZip64?: boolean;
+  /** Stops the writing once aborted, rejecting with its reason. */
+  signal?: AbortSignal;
 };
 
 /** A zip that can't be read, or that holds what this reader doesn't: it is never extracted. */
@@ -66,23 +68,29 @@ type Written = {
 
 /**
  * Writes a zip of `inputs` at `target`, file data streamed from each
- * `source`. It is written beside `target` first, so a failure leaves no zip
- * there, and a zip that was there stays.
+ * `source`. It is written beside `target` first, so a failure or an abort
+ * leaves no zip there, and a zip that was there stays.
  */
 export async function writeZip(
   target: string,
   inputs: ZipInput[],
   options: ZipOptions = {},
 ): Promise<void> {
+  const { signal } = options;
+  signal?.throwIfAborted();
   const temp = path.join(
     path.dirname(target),
     `${path.basename(target)}.${randomUUID()}.tmp`,
   );
   const handle = await open(temp, 'w');
   try {
-    const writer = new Writer(handle, options.forceZip64 ?? false);
-    for (const input of inputs) await writer.add(input);
+    const writer = new Writer(handle, options.forceZip64 ?? false, signal);
+    for (const input of inputs) {
+      signal?.throwIfAborted();
+      await writer.add(input);
+    }
     await writer.finish(Buffer.from(options.comment ?? '', 'utf8'));
+    signal?.throwIfAborted();
     await handle.sync();
     await handle.close();
     await rename(temp, target);
@@ -100,6 +108,7 @@ class Writer {
   constructor(
     private readonly handle: FileHandle,
     private readonly forceZip64: boolean,
+    private readonly signal: AbortSignal | undefined,
   ) {}
 
   async add({ name, source }: ZipInput): Promise<void> {
@@ -151,15 +160,17 @@ class Writer {
     const sink = async (chunks: AsyncIterable<Buffer>) => {
       for await (const chunk of chunks) await this.write(chunk);
     };
+    const options = this.signal ? { signal: this.signal } : {};
     if (entry.method === DEFLATE) {
       await pipeline(
         createReadStream(source),
         counted,
         createDeflateRaw(),
         sink,
+        options,
       );
     } else {
-      await pipeline(createReadStream(source), counted, sink);
+      await pipeline(createReadStream(source), counted, sink, options);
     }
     entry.compressedSize = this.position - start;
   }

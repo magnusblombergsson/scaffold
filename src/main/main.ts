@@ -8,7 +8,11 @@ import {
   OLD_APP_NAME,
 } from './user-data/copy-old-user-data';
 
-// End-to-end tests give each run its own settings and single-instance lock.
+// End-to-end tests give each run its own settings and single-instance lock,
+// and a Documents folder for automatic Backups that isn't the Author's.
+if (process.env.SCAFFOLD_DOCUMENTS) {
+  app.setPath('documents', process.env.SCAFFOLD_DOCUMENTS);
+}
 if (process.env.SCAFFOLD_USER_DATA) {
   app.setPath('userData', process.env.SCAFFOLD_USER_DATA);
 } else if (!started) {

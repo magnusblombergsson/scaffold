@@ -3554,6 +3554,11 @@ legend .show-in-peek {
   gap: 0.75rem;
 }
 
+/* A long path wraps rather than widening Settings. */
+.backup-folder code {
+  overflow-wrap: anywhere;
+}
+
 .key-kept {
   color: var(--muted);
   font-size: 0.85rem;
