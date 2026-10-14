@@ -46,9 +46,13 @@ test('Import… previews the split, lets the Author change it, and creates a new
   await page.getByRole('button', { name: 'Import…' }).click();
 
   const dialog = page.getByRole('dialog', { name: 'Import Draft' });
-  await expect(dialog.getByText('2 Chapters, 3 Scenes, 10 words')).toBeVisible();
+  await expect(
+    dialog.getByText('2 Chapters, 3 Scenes, 10 words'),
+  ).toBeVisible();
   await dialog.getByLabel('New Scene at').selectOption('none');
-  await expect(dialog.getByText('2 Chapters, 2 Scenes, 11 words')).toBeVisible();
+  await expect(
+    dialog.getByText('2 Chapters, 2 Scenes, 11 words'),
+  ).toBeVisible();
   await dialog.getByLabel('New Scene at').selectOption('separator');
   await dialog.getByRole('button', { name: 'Create Project…' }).click();
 
