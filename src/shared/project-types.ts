@@ -1,5 +1,6 @@
 import type { Mode } from './conversation';
 import type { CustomValues } from './custom-field';
+import type { Orphaned } from './proposal';
 
 // Types shared by main, preload and renderer. The renderer never sees paths or
 // file formats, only these values.
@@ -299,9 +300,26 @@ export type ImageHolder = ImageRef & { title: string };
 
 /**
  * An image another unit can take a copy of: one file, or several identical
- * ones, with the units holding it; it is read from the first.
+ * ones, with the units holding it, those in the Drawer marked; it is read
+ * from the first.
  */
-export type ProjectImage = { holders: ImageHolder[] };
+export type ProjectImage = { holders: (ImageHolder & { drawer?: true })[] };
+
+/**
+ * The other units holding an image identical to a unit's own, as
+ * `ProjectImage` counts them one: those live, and how many in the Drawer or
+ * Trash.
+ */
+export type ImageMatches = { live: ImageHolder[]; elsewhere: number };
+
+/** Why a unit's image wasn't replaced: it is in Trash or the Drawer, gone, or couldn't be saved. */
+export type ImageSkip = Exclude<Orphaned, 'field'> | 'unwritable';
+
+/** The units an image was replaced on, and those skipped, with why. */
+export type ImagesReplaced = {
+  replaced: ImageRef[];
+  skipped: { ref: ImageRef; reason: ImageSkip }[];
+};
 
 export type SceneNode = { id: string; title: string };
 export type ChapterNode = { id: string; title: string; scenes: SceneNode[] };

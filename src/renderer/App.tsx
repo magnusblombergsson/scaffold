@@ -1480,6 +1480,7 @@ function ProjectView({
   return (
     <ProjectContexts
       readOnly={readOnly !== null}
+      partLabel={manuscript.partLabel}
       customFields={customFields}
       keyFields={keyFields}
       composerHeight={composerHeight}

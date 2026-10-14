@@ -95,6 +95,19 @@ const projectHandlers: Handlers<
   },
   copyImage: ({ store, sender }, ref, source) =>
     takeImage(sender, () => store.copyImage(ref, source)),
+  imageMatches: ({ store }, ref) => store.imageMatches(ref),
+  pickImage: async ({ sender }) => {
+    const image = await askForImage(sender);
+    if (!image) return null;
+    picked.set(sender, image);
+    return imageDataUrl(image);
+  },
+  replaceImages: ({ store, sender }, refs) => {
+    const image = picked.get(sender);
+    if (!image) throw new Error('No image picked to replace with');
+    picked.delete(sender);
+    return store.replaceImages(refs, image);
+  },
   removeImage: ({ store }, ref) => store.removeImage(ref),
   image: async ({ store }, ref) => {
     const image = await store.readImage(ref);
@@ -392,6 +405,30 @@ async function chooseImage(
   sender: WebContents,
   use: (image: EntryImage) => Promise<void>,
 ): Promise<boolean> {
+  const image = await askForImage(sender);
+  return image !== null && takeImage(sender, () => use(image));
+}
+
+/** The image `pickImage` kept for each window, for `replaceImages`. */
+const picked = new WeakMap<WebContents, EntryImage>();
+
+/**
+ * Asks for an image, scaled down as `chooseImage` would store it; null if
+ * the Author cancels, or it can't be read, which they are told.
+ */
+async function askForImage(sender: WebContents): Promise<EntryImage | null> {
+  const file = await askForImageFile(sender);
+  if (!file) return null;
+  try {
+    return entryImageOf(nativeImage.createFromPath(file));
+  } catch (error) {
+    await warnUnusable(sender, error);
+    return null;
+  }
+}
+
+/** The JPEG or PNG the Author chooses; null if they cancel. */
+async function askForImageFile(sender: WebContents): Promise<string | null> {
   const window = BrowserWindow.fromWebContents(sender);
   const options = {
     title: 'Choose Image',
@@ -403,11 +440,9 @@ async function chooseImage(
   const { canceled, filePaths } = window
     ? await dialog.showOpenDialog(window, options)
     : await dialog.showOpenDialog(options);
-  if (canceled || filePaths.length === 0) return false;
+  if (canceled || filePaths.length === 0) return null;
   rememberFolder('images', path.dirname(filePaths[0]));
-  return takeImage(sender, () =>
-    use(entryImageOf(nativeImage.createFromPath(filePaths[0]))),
-  );
+  return filePaths[0];
 }
 
 /**
@@ -418,23 +453,31 @@ async function takeImage(
   sender: WebContents,
   use: () => Promise<void>,
 ): Promise<boolean> {
-  const window = BrowserWindow.fromWebContents(sender);
   try {
     await use();
     return true;
   } catch (error) {
-    console.error(`Can't set the image:`, error);
-    const warning = {
-      type: 'warning' as const,
-      buttons: ['OK'],
-      message: "The image can't be used.",
-      detail: error instanceof Error ? error.message : String(error),
-    };
-    await (window
-      ? dialog.showMessageBox(window, warning)
-      : dialog.showMessageBox(warning));
+    await warnUnusable(sender, error);
     return false;
   }
+}
+
+/** Tells the Author an image can't be read or stored, and why. */
+async function warnUnusable(
+  sender: WebContents,
+  error: unknown,
+): Promise<void> {
+  console.error(`Can't set the image:`, error);
+  const window = BrowserWindow.fromWebContents(sender);
+  const warning = {
+    type: 'warning' as const,
+    buttons: ['OK'],
+    message: "The image can't be used.",
+    detail: error instanceof Error ? error.message : String(error),
+  };
+  await (window
+    ? dialog.showMessageBox(window, warning)
+    : dialog.showMessageBox(warning));
 }
 
 /** Sets the Prose language, warning the Author when it can't be saved. */

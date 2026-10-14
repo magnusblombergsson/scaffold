@@ -204,8 +204,8 @@ describe('the Project’s images', () => {
     await store.moveToDrawer('chapter', chapter.id);
 
     expect(await store.projectImages(later)).toEqual([
-      { holders: [{ ...chapter, title: 'Chapter One' }] },
-      { holders: [{ ...one, title: 'One' }] },
+      { holders: [{ ...chapter, title: 'Chapter One', drawer: true }] },
+      { holders: [{ ...one, title: 'One', drawer: true }] },
     ]);
   });
 

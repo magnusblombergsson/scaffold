@@ -4,6 +4,7 @@ import type {
   ManuscriptBook,
   ManuscriptPart,
   ManuscriptScene,
+  PartLabel,
 } from '../shared/project-types';
 import type { CustomField } from '../shared/custom-field';
 import type { KeyFieldChoices } from '../shared/key-fields';
@@ -46,6 +47,7 @@ const KeyFieldsContext = createContext<KeyFieldChoices>(NO_KEY_FIELDS);
  */
 export function ProjectContexts({
   readOnly,
+  partLabel,
   statusAndTags,
   customFields,
   keyFields,
@@ -53,6 +55,8 @@ export function ProjectContexts({
   children,
 }: {
   readOnly: boolean;
+  /** What the Project calls a Part. */
+  partLabel?: PartLabel;
   statusAndTags: StatusAndTags;
   customFields: CustomField[];
   keyFields: KeyFieldChoices;
@@ -65,7 +69,9 @@ export function ProjectContexts({
         <CustomFieldsContext.Provider value={customFields}>
           <KeyFieldsContext.Provider value={keyFields}>
             <ComposerHeightContext.Provider value={composerHeight}>
-              <ImagePickerProvider>{children}</ImagePickerProvider>
+              <ImagePickerProvider partLabel={partLabel}>
+                {children}
+              </ImagePickerProvider>
             </ComposerHeightContext.Provider>
           </KeyFieldsContext.Provider>
         </CustomFieldsContext.Provider>
