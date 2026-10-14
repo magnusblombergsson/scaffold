@@ -207,6 +207,10 @@ _Avoid_: Preference, option
 A choice that holds for the whole app on this computer, whichever Project is open, such as a Provider's credential or Model shortlist.
 _Avoid_: Preference, Project setting (when meaning these)
 
+**Typewriter scrolling**:
+A Setting that keeps the line holding the caret at the vertical middle of a Scene's Prose while the Author writes. Typing, deleting, pasting, undo and moving the caret by key re-centre it, as do opening a Scene and jumping to a quote; a click, a drag or the wheel never scrolls it back. Blank space above the first line and below the last lets either reach the middle; it is layout only, never part of the Prose. Only the Prose scrolls: pinned notes, the Floating image, the panes and the header stay put.
+_Avoid_: Focus mode (which would dim the rest of the text)
+
 ### The Assistant's models
 
 **Model**:

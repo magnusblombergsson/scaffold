@@ -30,12 +30,15 @@ export type ViewSettings = {
   theme: Theme;
   /** Its language follows the Project's Prose language. */
   spellCheck: boolean;
+  /** Keeps the line being written at the middle of the Prose. */
+  typewriter: boolean;
 };
 
 export const DEFAULT_VIEW_SETTINGS: ViewSettings = {
   writingWidth: 'narrow',
   theme: 'system',
   spellCheck: true,
+  typewriter: false,
 };
 
 /** The width after `width`, as Ctrl+Shift+W cycles them. */
@@ -48,12 +51,16 @@ export function nextWritingWidth(width: WritingWidth): WritingWidth {
 /** The valid settings of `raw`, as a window or a file gives them; the rest left out. */
 export function parseViewSettings(raw: unknown): Partial<ViewSettings> {
   if (typeof raw !== 'object' || raw === null) return {};
-  const { writingWidth, theme, spellCheck } = raw as Record<string, unknown>;
+  const { writingWidth, theme, spellCheck, typewriter } = raw as Record<
+    string,
+    unknown
+  >;
   return {
     ...(WRITING_WIDTHS.includes(writingWidth as WritingWidth) && {
       writingWidth: writingWidth as WritingWidth,
     }),
     ...(THEMES.includes(theme as Theme) && { theme: theme as Theme }),
     ...(typeof spellCheck === 'boolean' && { spellCheck }),
+    ...(typeof typewriter === 'boolean' && { typewriter }),
   };
 }

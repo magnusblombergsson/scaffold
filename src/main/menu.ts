@@ -255,6 +255,15 @@ export function menuTemplate(
           click: () =>
             actions.setViewSettings({ spellCheck: !view.spellCheck }),
         },
+        // Ctrl+Shift+T, which the window takes, toggles it in Writing.
+        {
+          label: 'Typewriter Scrolling',
+          type: 'checkbox',
+          checked: view.typewriter,
+          ...windowKey(SHORTCUTS.typewriter),
+          click: () =>
+            actions.setViewSettings({ typewriter: !view.typewriter }),
+        },
         { type: 'separator' },
         { role: 'resetZoom' },
         { role: 'zoomIn' },

@@ -257,7 +257,7 @@ describe('menuTemplate', () => {
     });
   });
 
-  it('has View in its order: Rooms, zen and panes, width, theme and spell check, zoom, full screen', () => {
+  it('has View in its order: Rooms, zen and panes, width, theme, spell check and typewriter scrolling, zoom, full screen', () => {
     const view = menu(build(writable).template, 'View');
     expect(view.map((i) => i.label ?? i.role ?? i.type)).toEqual([
       'Writing',
@@ -273,6 +273,7 @@ describe('menuTemplate', () => {
       'separator',
       'Theme',
       'Spell Check',
+      'Typewriter Scrolling',
       'separator',
       'resetZoom',
       'zoomIn',
@@ -346,6 +347,28 @@ describe('menuTemplate', () => {
     });
     click(item(menu(off.template, 'View'), 'Spell Check'));
     expect(off.viewChanges).toEqual([{ spellCheck: true }]);
+  });
+
+  it('turns typewriter scrolling on and off from View, a check item showing the key the window takes', () => {
+    const off = build(noProject);
+    const typewriter = item(menu(off.template, 'View'), 'Typewriter Scrolling');
+    expect(typewriter).toMatchObject({
+      type: 'checkbox',
+      checked: false,
+      accelerator: 'CmdOrCtrl+Shift+T',
+      registerAccelerator: false,
+    });
+    click(typewriter);
+    expect(off.viewChanges).toEqual([{ typewriter: true }]);
+
+    const on = build({
+      ...writable,
+      view: { ...DEFAULT_VIEW_SETTINGS, typewriter: true },
+    });
+    const checked = item(menu(on.template, 'View'), 'Typewriter Scrolling');
+    expect(checked.checked).toBe(true);
+    click(checked);
+    expect(on.viewChanges).toEqual([{ typewriter: false }]);
   });
 
   it('adds a Book from Insert, which makes a Project of one Book a Series', () => {

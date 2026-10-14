@@ -67,6 +67,8 @@ export type Command = (
   | { type: 'zen' }
   /** Narrow, Wide, Full, Narrow: Ctrl+Shift+W in Writing. */
   | { type: 'cycleWritingWidth' }
+  /** Typewriter scrolling on or off: Ctrl+Shift+T in Writing. */
+  | { type: 'toggleTypewriter' }
   /** Formats the Prose where it has focus; the Prose takes the keys itself. */
   | { type: 'format'; format: ProseFormat }
 ) & { byKey?: true };
@@ -98,6 +100,7 @@ export const SHORTCUTS = {
   leftPane: 'CmdOrCtrl+Shift+M',
   assistant: 'CmdOrCtrl+Shift+A',
   writingWidth: 'CmdOrCtrl+Shift+W',
+  typewriter: 'CmdOrCtrl+Shift+T',
   // In the Prose, while it has focus.
   bold: 'CmdOrCtrl+B',
   italic: 'CmdOrCtrl+I',
@@ -118,6 +121,7 @@ const SHIFT_LETTERS: Record<string, Command> = {
   m: { type: 'togglePane', pane: 'left' },
   a: { type: 'togglePane', pane: 'assistant' },
   w: { type: 'cycleWritingWidth' },
+  t: { type: 'toggleTypewriter' },
   k: { type: 'splitScene', toNextChapter: true },
 };
 
@@ -139,8 +143,9 @@ type KeyPress = {
 
 /**
  * The command a key press in a window asks for, if any: the create chords,
- * Ctrl+E, Ctrl+T, the split keys, Ctrl+1/2/3/4, zen, the pane keys and the
- * width key, which apply where a Project is shown, and Ctrl+/.
+ * Ctrl+E, Ctrl+T, the split keys, Ctrl+1/2/3/4, zen, the pane keys, the
+ * width key and the typewriter key, which apply where a Project is shown,
+ * and Ctrl+/.
  * Ctrl is ⌘ on macOS. The menus take the others.
  */
 export function commandForKey(press: KeyPress, mac: boolean): Command | null {
@@ -330,6 +335,11 @@ export const CHEAT_SHEET: {
       {
         keys: [SHORTCUTS.writingWidth],
         action: 'Writing width: Narrow, Wide or Full, in turn',
+      },
+      {
+        keys: [SHORTCUTS.typewriter],
+        action:
+          'Typewriter scrolling: keep the line being written at the middle',
       },
     ],
   },
