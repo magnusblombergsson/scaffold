@@ -126,6 +126,10 @@ type SettingsFile = {
     lastFolders?: Partial<Record<FolderSlot, string>>;
     /** The height the Author dragged the Assistant's message box to. */
     composerHeight?: number;
+    /** Whether the app makes Backups on its own; on unless turned off. */
+    autoBackup?: boolean;
+    /** Where automatic Backups go, an absolute path; the default without one. */
+    backupFolder?: string;
   } & Partial<ViewSettings> &
     Record<string, unknown>;
   projects: Record<string, ProjectSettings & Record<string, unknown>>;
@@ -199,6 +203,13 @@ function parseSettings(text: string): SettingsFile | null {
     delete global.lastFolders;
   }
   if (!isFiniteNumber(global.composerHeight)) delete global.composerHeight;
+  if (typeof global.autoBackup !== 'boolean') delete global.autoBackup;
+  if (
+    typeof global.backupFolder !== 'string' ||
+    !path.isAbsolute(global.backupFolder)
+  ) {
+    delete global.backupFolder;
+  }
   const view = parseViewSettings(global);
   delete global.writingWidth;
   delete global.theme;
@@ -639,6 +650,28 @@ export class AppSettings {
     if (height === null) delete this.data.global.composerHeight;
     else if (isFiniteNumber(height)) this.data.global.composerHeight = height;
     else return;
+    this.changed();
+  }
+
+  /** Whether the app makes Backups of each Project on its own; on by default. */
+  autoBackup(): boolean {
+    return this.data.global.autoBackup ?? true;
+  }
+
+  setAutoBackup(on: boolean): void {
+    this.data.global.autoBackup = on;
+    this.changed();
+  }
+
+  /** The folder automatic Backups go in; null for the default. */
+  backupFolder(): string | null {
+    return this.data.global.backupFolder ?? null;
+  }
+
+  /** Keeps an absolute path; whether it is a fit place is the caller's to check. */
+  setBackupFolder(folder: string): void {
+    if (!path.isAbsolute(folder)) return;
+    this.data.global.backupFolder = folder;
     this.changed();
   }
 

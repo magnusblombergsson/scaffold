@@ -279,6 +279,83 @@ describe('Back Up and Restore', () => {
   });
 });
 
+describe('An automatic Back Up', () => {
+  it('saves pending edits first, and restores to a Project identical to the original', async () => {
+    const store = await fullProject();
+    const [scene] = store.manuscript().chapters[0].scenes;
+    const ref = { kind: 'scene', id: scene.id } as const;
+    // Not flushed: a manual Back Up would wait for it too, or refuse.
+    void store.write(ref, {
+      ...(await store.read(ref)),
+      markdown: 'Written just before.',
+    });
+    const zipPath = path.join(dir, 'auto.zip');
+    await store.backUp(zipPath, { automatic: true });
+
+    const restored = path.join(dir, 'Restored');
+    await restoreBackup(zipPath, restored);
+    expect(await filesIn(restored)).toEqual(
+      new Map(
+        [...(await filesIn(projectPath))].filter(([name]) => inBackup(name)),
+      ),
+    );
+    const copy = await open(restored);
+    expect((await copy.read(ref)).markdown).toBe('Written just before.');
+  });
+
+  it('is abandoned when the Project closes, which never waits for it, and leaves no zip', async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const fs: FileSystem = {
+      ...nodeFileSystem,
+      onlineOnly: async () => {
+        await gate;
+        return [];
+      },
+    };
+    const store = await createProject(projectPath, deps(fs));
+    await store.startSession();
+    const zipPath = path.join(dir, 'auto.zip');
+    const backingUp = store.backUp(zipPath, { automatic: true });
+    backingUp.catch(() => {});
+    await store.close();
+    release();
+    await expect(backingUp).rejects.toMatchObject({ name: 'AbortError' });
+    expect(await readdir(dir)).toEqual(['My Novel']);
+  });
+
+  it('is never started once the Project is closed', async () => {
+    const store = await fullProject();
+    await store.close();
+    await expect(
+      store.backUp(path.join(dir, 'auto.zip'), { automatic: true }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(await readdir(dir)).toEqual(['My Novel']);
+  });
+});
+
+describe('writeZip', () => {
+  it('stops when its signal is aborted, leaving nothing at or beside the target', async () => {
+    await (await fullProject()).close();
+    const controller = new AbortController();
+    const zipPath = path.join(dir, 'out', 'cut.zip');
+    await mkdir(path.dirname(zipPath));
+    const writing = writeZip(
+      zipPath,
+      [
+        {
+          name: 'project.json',
+          source: path.join(projectPath, 'project.json'),
+        },
+      ],
+      { signal: controller.signal },
+    );
+    controller.abort();
+    await expect(writing).rejects.toMatchObject({ name: 'AbortError' });
+    expect(await readdir(path.dirname(zipPath))).toEqual([]);
+  });
+});
+
 describe('Restore refuses, writing nothing,', () => {
   const target = () => path.join(dir, 'Restored');
 

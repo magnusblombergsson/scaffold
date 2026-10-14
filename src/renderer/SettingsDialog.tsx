@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import type { KeyKeeping, ProviderResult, ProvidersView } from '../shared/api';
+import type {
+  BackupSettings,
+  KeyKeeping,
+  ProviderResult,
+  ProvidersView,
+} from '../shared/api';
 import {
   PROVIDER_IDS,
   PROVIDER_NAMES,
@@ -23,8 +28,9 @@ const KEPT_LABELS: Record<KeyKeeping, string> = {
 
 /**
  * Settings for every Project on this computer: the Providers, each with its
- * key shown only masked, whether it answers, and its Model shortlist. All
- * apply from the Assistant's next call; each Conversation chooses its Model.
+ * key shown only masked, whether it answers, and its Model shortlist, which
+ * apply from the Assistant's next call, as each Conversation chooses its
+ * Model; then automatic Backups.
  */
 export function SettingsDialog({ onClose }: { onClose(): void }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -55,10 +61,72 @@ export function SettingsDialog({ onClose }: { onClose(): void }) {
             <ProviderRow key={id} id={id} view={view} />
           ))}
       </section>
+      <BackupsSection />
       <div className="settings-close">
         <button onClick={() => dialogRef.current?.close()}>Done</button>
       </div>
     </dialog>
+  );
+}
+
+/**
+ * Whether the app makes Backups on its own, and where they go, on this
+ * computer; a folder inside a Project is refused by main, which says why.
+ */
+function BackupsSection() {
+  const [backups, setBackups] = useState<BackupSettings>();
+
+  useEffect(() => {
+    let current = true;
+    void window.settings.backups().then((backups) => {
+      if (current) setBackups(backups);
+    });
+    return () => {
+      current = false;
+    };
+  }, []);
+
+  return (
+    <section aria-labelledby="backups-heading">
+      <h3 id="backups-heading">Backups</h3>
+      {backups && (
+        <>
+          <label className="setting">
+            <input
+              type="checkbox"
+              checked={backups.automatic}
+              onChange={(event) => {
+                const automatic = event.target.checked;
+                setBackups({ ...backups, automatic });
+                void window.settings.setAutoBackup(automatic).then(setBackups);
+              }}
+            />
+            Make Backups automatically
+          </label>
+          <p className="field-hint">
+            Once a day and before Trash is emptied, kept on this computer
+            outside every Project: the 7 newest of each Project, and one from
+            each of the 4 weeks before.
+          </p>
+          <p className="key-status backup-folder">
+            <code aria-label="Backup folder">{backups.folder}</code>
+          </p>
+          <div className="settings-actions">
+            <button
+              aria-label="Change Backup folder"
+              onClick={() =>
+                void window.settings.chooseBackupFolder().then(setBackups)
+              }
+            >
+              Change…
+            </button>
+            <button onClick={() => void window.settings.showBackupFolder()}>
+              Show in folder
+            </button>
+          </div>
+        </>
+      )}
+    </section>
   );
 }
 

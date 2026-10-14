@@ -10,9 +10,11 @@ import {
   shell,
   type WebContents,
 } from 'electron';
-import { access, realpath, writeFile } from 'node:fs/promises';
+import { access, mkdir, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type {
+  BackupSettings,
+  BackupSkip,
   ImportChoice,
   ProvidersView,
   OpenedProject,
@@ -91,6 +93,12 @@ import {
   insideFolder,
   restoreBackup,
 } from './project-store/backup';
+import {
+  findProjectBackupFolder,
+  makeAutoBackup,
+  type AutoBackupOutcome,
+  type AutoBackupReason,
+} from './project-store/auto-backups';
 import { writeFailureReason } from './project-store/safe-write';
 import { menuTemplate, proseMenuTemplate, type MenuState } from './menu';
 import { menuWindow } from './menu-window';
@@ -333,6 +341,123 @@ function attach(contents: WebContents, store: ProjectStore): void {
   updateMenu();
   void store.startSession();
   spellcheckIn(contents, store.language);
+  // Soon after it opens, unless it has one from today already.
+  setTimeout(() => {
+    if (projectWindows.stores().includes(store)) {
+      void autoBackUp(store, 'daily');
+    }
+  }, DAILY_BACKUP_DELAY_MS);
+}
+
+/** How long after a Project opens its daily automatic Backup is made. */
+const DAILY_BACKUP_DELAY_MS = 5000;
+
+/** The folder automatic Backups go in: the Author's choice, or `Documents/Scaffold Backups`. */
+function backupFolder(): string {
+  return (
+    settings.backupFolder() ??
+    path.join(app.getPath('documents'), 'Scaffold Backups')
+  );
+}
+
+function backupSettings(): BackupSettings {
+  return { automatic: settings.autoBackup(), folder: backupFolder() };
+}
+
+/** The automatic Backup of each Project running last; the next one waits for it. */
+const backupRuns = new WeakMap<ProjectStore, Promise<unknown>>();
+/** The Projects the Author was told this session that their daily Backup wasn't made. */
+const backupsTold = new Set<string>();
+
+/**
+ * Makes an automatic Backup of `store` once any running is done, unless
+ * automatic Backups are off, as null says; `busy` hears when it starts and
+ * ends. The window showing it is told when one isn't made: every time
+ * before emptying Trash, otherwise once per Project per session.
+ */
+export async function autoBackUp(
+  store: ProjectStore,
+  reason: AutoBackupReason,
+  busy?: (on: boolean) => void,
+): Promise<AutoBackupOutcome | null> {
+  if (!settings.autoBackup()) return null;
+  busy?.(true);
+  const run = (backupRuns.get(store) ?? Promise.resolve()).then(() =>
+    makeAutoBackup(store, backupFolder(), reason, new Date()),
+  );
+  backupRuns.set(
+    store,
+    run.catch(() => {}),
+  );
+  let outcome: AutoBackupOutcome;
+  try {
+    outcome = await run;
+  } finally {
+    busy?.(false);
+  }
+  if ('skipped' in outcome) tellBackupSkipped(store, reason, outcome.skipped);
+  return outcome;
+}
+
+function tellBackupSkipped(
+  store: ProjectStore,
+  reason: AutoBackupReason,
+  skip: BackupSkip,
+): void {
+  const contents = projectWindows.showing(store.path);
+  if (!contents) return;
+  if (reason === 'daily') {
+    if (backupsTold.has(store.id)) return;
+    backupsTold.add(store.id);
+  }
+  emit(contents, 'shell', 'onBackupNotice', {
+    message: `${
+      reason === 'emptyTrash'
+        ? 'Trash was emptied without a Backup.'
+        : `No automatic Backup of ${store.displayName} was made.`
+    } ${skip.message}`,
+    // Another folder may help; files only online are the sync client's.
+    offerSettings: skip.reason !== 'online-only',
+  });
+}
+
+/**
+ * Where Restore asks for a Backup: among the automatic ones of the
+ * window's Project, or the Backup folder, or the folder last restored from.
+ */
+async function restoreFolder(sender: WebContents): Promise<string | undefined> {
+  const folder = backupFolder();
+  const store = projectWindows.find(sender);
+  const found = store && (await findProjectBackupFolder(folder, store.id));
+  if (found) return found;
+  return (await exists(folder)) ? folder : await lastFolder('backups');
+}
+
+function exists(target: string): Promise<boolean> {
+  return access(target).then(
+    () => true,
+    () => false,
+  );
+}
+
+/** A path as it is on disk, so that a link into a Project folder is seen as inside it. */
+function real(target: string): Promise<string> {
+  return realpath(target).catch(() => target);
+}
+
+/** The name of a recent or open Project whose folder holds `folder`, if any. */
+async function projectHolding(folder: string): Promise<string | null> {
+  const chosen = await real(folder);
+  const projects = [
+    ...settings.recent().map((record) => record.path),
+    ...projectWindows.stores().map((store) => store.path),
+  ];
+  for (const projectPath of projects) {
+    if (insideFolder(chosen, await real(projectPath))) {
+      return path.basename(projectPath);
+    }
+  }
+  return null;
 }
 
 /**
@@ -560,8 +685,6 @@ const shellHandlers: Handlers<ShellApi, typeof shellMethods, WindowContext> = {
       properties: ['createDirectory', 'showOverwriteConfirmation'],
     });
     if (canceled || !filePath) return null;
-    // Real paths, so that a link into the Project folder is seen as inside it.
-    const real = (target: string) => realpath(target).catch(() => target);
     const target = path.join(
       await real(path.dirname(filePath)),
       path.basename(filePath),
@@ -592,7 +715,7 @@ const shellHandlers: Handlers<ShellApi, typeof shellMethods, WindowContext> = {
     const chosen = await dialog.showOpenDialog(window, {
       title: 'Restore Project from Backup',
       buttonLabel: 'Restore',
-      defaultPath: await lastFolder('backups'),
+      defaultPath: await restoreFolder(ctx.sender),
       filters: [{ name: 'Backup', extensions: ['zip'] }],
       properties: ['openFile'],
     });
@@ -797,9 +920,44 @@ const settingsHandlers: Handlers<
     }
   },
   defaultModel: () => defaultModel(),
+  backups: () => backupSettings(),
+  setAutoBackup: (_ctx, on) => {
+    if (typeof on === 'boolean') settings.setAutoBackup(on);
+    return backupSettings();
+  },
+  chooseBackupFolder: async (ctx) => {
+    const window = windowOf(ctx);
+    const folder = backupFolder();
+    const { canceled, filePaths } = await dialog.showOpenDialog(window, {
+      title: 'Choose Backup Folder',
+      buttonLabel: 'Choose',
+      defaultPath: (await exists(folder)) ? folder : app.getPath('documents'),
+      properties: ['openDirectory', 'createDirectory'],
+    });
+    if (canceled || filePaths.length === 0) return backupSettings();
+    const project = await projectHolding(filePaths[0]);
+    if (project) {
+      await dialog.showMessageBox(window, {
+        type: 'warning',
+        buttons: ['OK'],
+        message: 'Choose a place outside the Project folder',
+        detail: `Backups are never saved inside ${project}, where they would be synced and backed up again.`,
+      });
+    } else {
+      settings.setBackupFolder(filePaths[0]);
+    }
+    return backupSettings();
+  },
+  showBackupFolder: async () => {
+    const folder = backupFolder();
+    // Made as a Backup would make it: never a parent that is gone.
+    await mkdir(folder).catch(() => {});
+    const failure = await shell.openPath(folder);
+    if (failure) console.error(`Can't show ${folder}: ${failure}`);
+  },
 };
 
-/** Settings for every Project on this computer: the welcome, the Providers and the Model. */
+/** Settings for every Project on this computer: the welcome, the Providers, the Model and Backups. */
 export function registerSettingsIpc(): void {
   register('settings', settingsHandlers, windowContext);
 }
@@ -991,11 +1149,7 @@ function exportFrom(
     },
     fs: {
       realpath,
-      exists: (target) =>
-        access(target).then(
-          () => true,
-          () => false,
-        ),
+      exists,
       writeFile: (target, data) => writeFile(target, data),
     },
     flush: () => requestRendererFlush(window.webContents),

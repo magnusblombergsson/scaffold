@@ -726,6 +726,30 @@ export type ModelListing =
   | { ok: true; models: ListedModel[] }
   | { ok: false; status: ProviderStatus };
 
+/** How the app makes Backups on its own on this computer. */
+export type BackupSettings = {
+  /** Whether it makes them: once a day, and before Trash is emptied. */
+  automatic: boolean;
+  /** The folder they go in, one subfolder per Project. */
+  folder: string;
+};
+
+/** Why an automatic Backup wasn't made, and what to tell the Author. */
+export type BackupSkip = {
+  reason: 'online-only' | 'folder-unavailable' | 'write-failed';
+  message: string;
+};
+
+/**
+ * An automatic Backup that wasn't made, told to the Author: each time
+ * before emptying Trash, otherwise once per Project per session.
+ */
+export type BackupNotice = {
+  message: string;
+  /** Whether to offer Settings, as to choose another folder. */
+  offerSettings: boolean;
+};
+
 /** Why the Author is welcomed: the first launch, or a saved key that couldn't be read. */
 export type WelcomeReason = 'firstLaunch' | 'keyUnreadable';
 
@@ -767,6 +791,18 @@ export interface SettingsApi {
    * shortlisted.
    */
   defaultModel(): Promise<Model>;
+  /** How the app makes Backups on its own on this computer. */
+  backups(): Promise<BackupSettings>;
+  /** Turns automatic Backups on or off, for every Project on this computer. */
+  setAutoBackup(on: boolean): Promise<BackupSettings>;
+  /**
+   * Asks for a folder for automatic Backups and keeps it, unless it is
+   * inside a Project, as the Author is then told. Resolves with the settings
+   * as they are after.
+   */
+  chooseBackupFolder(): Promise<BackupSettings>;
+  /** Shows the Backup folder in the file manager, making it if its parent is there. */
+  showBackupFolder(): Promise<void>;
 }
 
 /** A Word or Markdown file read for an Import: its name without extension, and its blocks. */
@@ -861,9 +897,21 @@ export interface ShellApi {
   backUpProject(): Promise<string | null>;
   /**
    * Asks for a Backup and checks it, then asks for a new folder, restores
-   * the Project there and opens it, as Open Project does.
+   * the Project there and opens it, as Open Project does. It asks in this
+   * window's Project's automatic Backups, or without one, the Backup folder.
    */
   restoreBackup(): Promise<OpenResult>;
+  /**
+   * Calls `listener` with true as an automatic Backup before emptying Trash
+   * starts in this window, and false once it is done. Returns an
+   * unsubscribe function.
+   */
+  onBackingUp(listener: (on: boolean) => void): () => void;
+  /**
+   * Calls `listener` when an automatic Backup of this window's Project
+   * wasn't made. Returns an unsubscribe function.
+   */
+  onBackupNotice(listener: (notice: BackupNotice) => void): () => void;
   /** Opens a Project from the recent list. */
   openRecent(path: string): Promise<OpenResult>;
   /** Asks where a recent Project that wasn't found is now, and opens it. */
@@ -1165,6 +1213,10 @@ export const settingsMethods = {
   shortlists: 'invoke',
   setShortlist: 'invoke',
   defaultModel: 'invoke',
+  backups: 'invoke',
+  setAutoBackup: 'invoke',
+  chooseBackupFolder: 'invoke',
+  showBackupFolder: 'invoke',
 } as const satisfies MethodTable<SettingsApi>;
 
 export const shellMethods = {
@@ -1185,6 +1237,8 @@ export const shellMethods = {
   exportStoryBible: 'invoke',
   backUpProject: 'invoke',
   restoreBackup: 'invoke',
+  onBackingUp: 'event',
+  onBackupNotice: 'event',
   openRecent: 'invoke',
   locateProject: 'invoke',
   recentProjects: 'invoke',

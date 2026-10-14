@@ -10,6 +10,7 @@ import {
 import { createPortal } from 'react-dom';
 import type { Editor } from '@tiptap/core';
 import type {
+  BackupNotice,
   Changed,
   Created,
   FloatingImage,
@@ -303,6 +304,7 @@ export function App() {
           error={error}
           onError={setError}
           onAddProvider={openSettings}
+          onOpenSettings={openSettings}
         />
       ) : welcome ? (
         <Welcome reason={welcome} onDone={() => setWelcome(null)} />
@@ -339,6 +341,8 @@ const NOTICE_MS = 4000;
 /** How long a structure change can be undone from its toast. */
 const UNDO_TOAST_MS = 10_000;
 const RELOADED_TOAST_MS = 5000;
+/** Long enough to read why a Backup wasn't made. */
+const BACKUP_TOAST_MS = 12_000;
 /** How long the cursor rests before where it is gets remembered. */
 const CURSOR_REPORT_MS = 1000;
 
@@ -347,12 +351,15 @@ function ProjectView({
   error,
   onError,
   onAddProvider,
+  onOpenSettings,
 }: {
   project: OpenedProject;
   error: string | null;
   onError(message: string | null): void;
   /** Opens Settings to add an API key for the Assistant. */
   onAddProvider(): void;
+  /** Opens Settings, as to choose another Backup folder. */
+  onOpenSettings(): void;
 }) {
   const [mirror] = useState(() => new ProjectMirror(window.project, project));
   useEffect(() => mirror.start(), [mirror]);
@@ -1123,6 +1130,23 @@ function ProjectView({
     return () => clearTimeout(timer);
   }, [notice]);
 
+  /** Whether an automatic Backup before emptying Trash is being made. */
+  const [backingUp, setBackingUp] = useState(false);
+  useEffect(() => window.shell.onBackingUp(setBackingUp), []);
+  /** The latest automatic Backup that wasn't made; `count` starts its toast's time over. */
+  const [backupNotice, setBackupNotice] = useState<
+    BackupNotice & { count: number }
+  >();
+  const backupNotices = useRef(0);
+  const closeBackupNotice = useCallback(() => setBackupNotice(undefined), []);
+  useEffect(
+    () =>
+      window.shell.onBackupNotice((notice) =>
+        setBackupNotice({ ...notice, count: ++backupNotices.current }),
+      ),
+    [],
+  );
+
   /** The Part, Chapter or Scene whose title the Binder is editing, if any. */
   const [renaming, setRenaming] = useState<string | null>(null);
   /**
@@ -1439,10 +1463,17 @@ function ProjectView({
     );
   }
 
+  /** Whether Trash is being emptied, which can't be asked for again meanwhile. */
+  const [emptying, setEmptying] = useState(false);
   async function emptyTrash() {
-    if (await mirror.emptyTrash()) {
-      // Nothing before it can be undone.
-      changeLatest(undefined);
+    setEmptying(true);
+    try {
+      if (await mirror.emptyTrash()) {
+        // Nothing before it can be undone.
+        changeLatest(undefined);
+      }
+    } finally {
+      setEmptying(false);
     }
   }
 
@@ -1713,7 +1744,10 @@ function ProjectView({
                           movedText(item, to),
                         );
                       }}
-                      {...(tab === 'trash' && { onEmpty: emptyTrash })}
+                      {...(tab === 'trash' && {
+                        onEmpty: emptyTrash,
+                        emptying,
+                      })}
                     />
                   )}
                 </div>
@@ -2043,7 +2077,9 @@ function ProjectView({
         </div>
         <StatusBar
           saveStatus={saveStatus}
-          notice={notice?.text}
+          notice={
+            backingUp ? 'Backing up before emptying Trash…' : notice?.text
+          }
           {...statusCounts({
             manuscript,
             scenes: sceneCounts,
@@ -2197,6 +2233,17 @@ function ProjectView({
               ms={UNDO_TOAST_MS}
               action={{ label: 'Undo', run: () => undo(latest.step) }}
               onClose={closeToast}
+            />
+          )}
+          {backupNotice && (
+            <Toast
+              key={`backup-${backupNotice.count}`}
+              message={backupNotice.message}
+              ms={BACKUP_TOAST_MS}
+              {...(backupNotice.offerSettings && {
+                action: { label: 'Open Settings', run: onOpenSettings },
+              })}
+              onClose={closeBackupNotice}
             />
           )}
         </div>

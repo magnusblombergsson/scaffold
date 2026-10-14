@@ -1034,6 +1034,10 @@ export class ProjectStore {
   private readonly sessions: Sessions;
   /** Stops watching the folder, while the session lasts. */
   private stopWatching: (() => Promise<void>) | null = null;
+  /** The automatic Backups being written, each abandoned as the Project closes. */
+  private readonly automaticBackups = new Set<AbortController>();
+  /** Set once closed: no automatic Backup starts after. */
+  private closed = false;
 
   constructor(
     readonly path: string,
@@ -1207,17 +1211,36 @@ export class ProjectStore {
 
   /**
    * Writes a Backup of the Project at `target` once every edit is on disk;
-   * refuses while any isn't, or while any file is online-only.
+   * refuses while any isn't, or while any file is online-only. An
+   * `automatic` one has the edits saved but doesn't refuse for one that
+   * can't be, and is abandoned, rejecting with an AbortError, when the
+   * Project closes.
    */
-  async backUp(target: string): Promise<void> {
-    await this.flush();
-    if (this.hasUnsaved()) {
-      throw new ProjectError(
-        'unsaved',
-        `${this.displayName} can't be backed up yet: some changes aren't saved. Back Up again once they are, so that the Backup holds them.`,
-      );
+  async backUp(
+    target: string,
+    { automatic = false }: { automatic?: boolean } = {},
+  ): Promise<void> {
+    if (!automatic) {
+      await this.flush();
+      if (this.hasUnsaved()) {
+        throw new ProjectError(
+          'unsaved',
+          `${this.displayName} can't be backed up yet: some changes aren't saved. Back Up again once they are, so that the Backup holds them.`,
+        );
+      }
+      await backUpProject(this.path, target, this.deps.fs);
+      return;
     }
-    await backUpProject(this.path, target, this.deps.fs);
+    const controller = new AbortController();
+    if (this.closed) controller.abort();
+    this.automaticBackups.add(controller);
+    try {
+      controller.signal.throwIfAborted();
+      await this.flush();
+      await backUpProject(this.path, target, this.deps.fs, controller.signal);
+    } finally {
+      this.automaticBackups.delete(controller);
+    }
   }
 
   /** A watcher event: checks the files once the burst it belongs to is over. */
@@ -4128,6 +4151,9 @@ export class ProjectStore {
         `${this.displayName} can't close: some changes aren't saved yet`,
       );
     }
+    // Never waited for: what they wrote goes with them.
+    this.closed = true;
+    for (const backup of this.automaticBackups) backup.abort();
     if (this.sessions.active) {
       this.sessions.stop();
       await this.stopWatching?.();
