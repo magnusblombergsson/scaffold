@@ -101,7 +101,7 @@ export class SyncedRecords<F extends string, T extends Synced<F>> {
    * read now, it reads on a later call.
    */
   async read(): Promise<boolean> {
-    const before = this.snapshot();
+    const before = this.liveState();
     const names = (await this.fs.readdir(this.dir)).filter((name) =>
       name.endsWith('.json'),
     );
@@ -128,7 +128,7 @@ export class SyncedRecords<F extends string, T extends Synced<F>> {
       record && name !== fileName(record.id) ? [{ name, record }] : [],
     );
     for (const copy of copies) await this.mergeCopy(copy.name, copy.record);
-    return !isDeepStrictEqual(before, this.snapshot());
+    return !isDeepStrictEqual(before, this.liveState());
   }
 
   /** Deletes the markers of records deleted longer ago than `MARKER_MS`. */
@@ -197,7 +197,7 @@ export class SyncedRecords<F extends string, T extends Synced<F>> {
   }
 
   /** The live records, as compared to tell whether a read changed them. */
-  private snapshot(): unknown {
+  private liveState(): unknown {
     return this.live()
       .sort((a, b) => (a.id < b.id ? -1 : 1))
       .map((record): unknown => ({ ...record, editedAt: null }));

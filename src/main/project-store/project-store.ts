@@ -139,6 +139,8 @@ import { Switches } from './switches';
 import { TODOS, Todos } from './todos';
 import { CUSTOM_FIELDS, CustomFields } from './custom-fields';
 import { RELATIONS, Relations } from './relations';
+import { SNAPSHOTS, Snapshots } from './snapshots';
+import { beforeRestoringName, type Snapshot } from '../../shared/snapshot';
 import {
   customSuggestions,
   customValue,
@@ -476,6 +478,7 @@ export async function openProject(
   await store.readCustomFields();
   await store.readKeyFields();
   await store.readRelations();
+  await store.readSnapshots();
   return store;
 }
 
@@ -693,6 +696,7 @@ async function sweepTempFiles(projectPath: string, fs: FileSystem) {
     CUSTOM_FIELDS,
     KEY_FIELDS,
     RELATIONS,
+    SNAPSHOTS,
   ].map((d) => path.join(projectPath, d));
   for (const dir of [projectPath, ...dirs]) {
     for (const name of await fs.readdir(dir)) {
@@ -1049,6 +1053,8 @@ export class ProjectStore {
   private readonly customFields: CustomFields;
   /** The Relations between Entries in `relations/`, as last read or written. */
   private readonly relations: Relations;
+  /** The Snapshots of Scenes in `snapshots/`, as last read or written. */
+  private readonly snapshots: Snapshots;
   /** What versions of `project.json` that met as the Project opened lost, until told. */
   private dropped: Dropped[];
   /**
@@ -1115,6 +1121,7 @@ export class ProjectStore {
     this.keyFields = keyFieldsOf(path, this.deps);
     this.customFields = customFieldsOf(path, this.deps);
     this.relations = relationsOf(path, this.deps);
+    this.snapshots = snapshotsOf(path, this.deps);
     this.host = hostOf(this.deps);
     this.trash = new Trash(
       {
@@ -1317,6 +1324,7 @@ export class ProjectStore {
         if (await this.customFields.read()) this.emitCustomFields();
         if (await this.keyFields.read()) this.emitKeyFields();
         if (await this.relations.read()) this.emitRelations();
+        if (await this.snapshots.read()) this.emitSnapshots();
         for (const change of tagChanges(tagsBefore, this.tagsByUnit())) {
           this.emitVocabulary(change);
         }
@@ -2670,6 +2678,101 @@ export class ProjectStore {
     this.emit({ type: 'relationsChanged', relations: this.relations.list() });
   }
 
+  /** The Scene's Snapshots not in Trash, newest first. */
+  listSnapshots(sceneId: string): Snapshot[] {
+    return this.snapshots.of(sceneId);
+  }
+
+  /** Reads the Snapshots as the Project opens, merging their copies, and sweeps old delete markers. */
+  async readSnapshots(): Promise<void> {
+    await this.snapshots.read();
+    await this.snapshots.sweep();
+  }
+
+  /**
+   * Takes a Snapshot of a Scene's Prose as it is, the Author's edits main
+   * has accepted included, named `name`; resolves with its id. Refused for
+   * a Scene that is Missing, in Trash or the Drawer, or in Conflict.
+   */
+  async takeSnapshot(sceneId: string, name: string): Promise<string> {
+    let id = '';
+    await this.changeSnapshots(async () => {
+      const markdown = await this.snapshotProse(
+        sceneId,
+        "A Scene in Conflict can't take a Snapshot",
+      );
+      id = await this.snapshots.take(sceneId, snapshotName(name), markdown);
+    });
+    return id;
+  }
+
+  /** Gives a Snapshot another name, which may not be empty. */
+  renameSnapshot(id: string, name: string): Promise<void> {
+    return this.changeSnapshots(() =>
+      this.snapshots.rename(id, snapshotName(name)),
+    );
+  }
+
+  /** Moves a Snapshot to Trash, from which it can be restored until Trash is emptied. */
+  trashSnapshot(id: string): Promise<void> {
+    return this.changeSnapshots(() => this.snapshots.trash(id));
+  }
+
+  /**
+   * Replaces a Scene's Prose with a Snapshot's, after taking a Snapshot of
+   * the Prose it replaces, so nothing is lost. Refused as taking one is.
+   */
+  restoreSnapshot(id: string): Promise<void> {
+    return this.changeSnapshots(async () => {
+      const snapshot = this.snapshots.get(id);
+      if (!snapshot || this.snapshots.trashed().some((s) => s.id === id)) {
+        throw new Error(`No Snapshot ${id}`);
+      }
+      const { sceneId, markdown } = snapshot;
+      const current = await this.snapshotProse(
+        sceneId,
+        "A Scene in Conflict can't be restored from a Snapshot",
+      );
+      await this.snapshots.take(
+        sceneId,
+        beforeRestoringName(snapshot.name),
+        current,
+      );
+      const ref = sceneRef(sceneId);
+      const value = { id: sceneId, markdown };
+      await this.write(ref, value);
+      await this.unitWriter.settled(unitKey(ref));
+      this.emit({ type: 'unitReloaded', ref, value, byRestore: true });
+    });
+  }
+
+  /** A Scene's Prose to take a Snapshot of; refused as `takeSnapshot` says. */
+  private async snapshotProse(
+    sceneId: string,
+    inConflict: string,
+  ): Promise<string> {
+    const ref = sceneRef(sceneId);
+    this.refuseUnavailable(ref);
+    this.refuseConflict(sceneId, inConflict);
+    return (await this.read(ref)).markdown;
+  }
+
+  /**
+   * Changes the Snapshots, then tells the window. They aren't in the tree,
+   * so another computer's tree is no reason to wait.
+   */
+  private changeSnapshots(change: () => Promise<void>): Promise<void> {
+    return this.enqueueStructure(async () => {
+      await this.passFormatGate();
+      await change();
+      this.emitSnapshots();
+    });
+  }
+
+  private emitSnapshots(): void {
+    this.emit({ type: 'snapshotsChanged' });
+  }
+
   tree(): ProjectTree {
     return structuredClone(this.manifest.tree);
   }
@@ -2769,9 +2872,28 @@ export class ProjectStore {
         type,
       }),
     );
-    return [...this.trash.list(), ...fields].sort(
+    // Those of a Scene in Trash or the Drawer are with it, and those of a
+    // Scene not here yet are kept till it is.
+    const snapshots = this.snapshots
+      .trashed()
+      .filter((s) => this.files.has(s.sceneId))
+      .map(
+        ({ id, name, trashedAt, sceneId }): TrashItem => ({
+          kind: 'snapshot',
+          id,
+          title: name,
+          trashedAt,
+          sceneTitle: this.sceneTitle(sceneId),
+        }),
+      );
+    return [...this.trash.list(), ...fields, ...snapshots].sort(
       (a, b) => b.trashedAt - a.trashedAt,
     );
+  }
+
+  /** A live Scene's title, as the Binder shows it. */
+  private sceneTitle(id: string): string {
+    return tryFindScene(this.manifest.tree, id)?.scene.title ?? UNPLACED_TITLE;
   }
 
   /** The Entries in the Story Bible, by type in the order of `ENTRY_TYPES`, then by name. */
@@ -3687,6 +3809,9 @@ export class ProjectStore {
     if (this.customFields.trashed().some((field) => field.id === id)) {
       return this.step(() => this.restoreCustomField(id));
     }
+    if (this.snapshots.trashed().some((s) => s.id === id)) {
+      return this.step(() => this.untrashSnapshot(id));
+    }
     return this.step(() => this.trash.restore(id));
   }
 
@@ -3703,6 +3828,16 @@ export class ProjectStore {
     return async () => {
       await this.customFields.trash(id, this.deps.clock.now());
       this.emitCustomFields();
+    };
+  }
+
+  /** Brings a Snapshot back from Trash. Undo moves it to Trash again. */
+  private async untrashSnapshot(id: string): Promise<() => Promise<void>> {
+    await this.snapshots.untrash(id);
+    this.emitSnapshots();
+    return async () => {
+      await this.snapshots.trash(id);
+      this.emitSnapshots();
     };
   }
 
@@ -3855,7 +3990,20 @@ export class ProjectStore {
           .filter((item) => item.kind === 'entry')
           .map((item) => item.id),
       );
+      const withSnapshots = [...this.snapshots.scenes()].filter(
+        (id) => this.trash.where(id) === 'trash',
+      );
       await this.trash.empty();
+      // A Scene's Snapshots go with it, unless it is in the Drawer too; those
+      // in Trash on their own go if listed there.
+      const scenesGone = new Set(
+        withSnapshots.filter(
+          (id) => !this.trash.where(id) && !this.files.has(id),
+        ),
+      );
+      if (await this.snapshots.empty((id) => this.files.has(id), scenesGone)) {
+        this.emitSnapshots();
+      }
       // Their Relations go with them, unless they are in the Drawer too.
       const gone = new Set(
         [...entries].filter(
@@ -4481,6 +4629,17 @@ function keyFieldsOf(projectPath: string, deps: StoreDeps): Switches {
 
 function relationsOf(projectPath: string, deps: StoreDeps): Relations {
   return new Relations(path.join(projectPath, RELATIONS), deps.fs, deps.clock);
+}
+
+function snapshotsOf(projectPath: string, deps: StoreDeps): Snapshots {
+  return new Snapshots(path.join(projectPath, SNAPSHOTS), deps.fs, deps.clock);
+}
+
+/** A Snapshot's name, trimmed; there must be one. */
+function snapshotName(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error('A Snapshot needs a name');
+  return trimmed;
 }
 
 function customFieldsOf(projectPath: string, deps: StoreDeps): CustomFields {

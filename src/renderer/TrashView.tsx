@@ -111,9 +111,13 @@ export function TrashView({
   );
 }
 
-/** Whether an item can be in both Trash and the Drawer: not a set-aside version or a Custom field. */
+/** Whether an item can be in both Trash and the Drawer: not a set-aside version, a Custom field or a Snapshot. */
 function movable(item: TrashItem): boolean {
-  return item.kind !== 'version' && item.kind !== 'custom-field';
+  return (
+    item.kind !== 'version' &&
+    item.kind !== 'custom-field' &&
+    item.kind !== 'snapshot'
+  );
 }
 
 /** What the toast says once an item has moved to `place`. */
@@ -132,6 +136,7 @@ function detail(item: TrashItem, partLabel?: PartLabel): string {
   if (item.kind === 'custom-field') {
     return `Field of every ${ENTRY_TYPE_LABELS[item.type]}, with its values`;
   }
+  if (item.kind === 'snapshot') return `Snapshot of ${item.sceneTitle}`;
   if (item.kind === 'conversation') {
     return `${MODE_LABELS[item.mode]} Conversation`;
   }

@@ -1032,6 +1032,37 @@ describe('Todos', () => {
   });
 });
 
+describe('Snapshots', () => {
+  it('never reach the context, in any Mode and focus', async () => {
+    const project = await fixture();
+    const { store, scenes } = project;
+    for (const id of Object.values(scenes)) {
+      const now = await store.read({ kind: 'scene', id });
+      await store.write(
+        { kind: 'scene', id },
+        { id, markdown: 'SNAPSHOT-SENTINEL prose' },
+      );
+      await store.takeSnapshot(id, 'SNAPSHOT-SENTINEL name');
+      await store.write({ kind: 'scene', id }, now);
+    }
+
+    for (const request of everyRequest(project)) {
+      const text = sent(await buildContext(project.view, request));
+      expect(text).toContain('Her sister.');
+      expect(text).not.toContain('SNAPSHOT-SENTINEL');
+    }
+    const writing = sent(
+      await buildContext(project.view, {
+        mode: 'writing',
+        command: 'question',
+        sceneId: scenes.harbour,
+        messages: [message('author', 'Hi')],
+      }),
+    );
+    expect(writing).toContain('Annie waited on the quay.');
+  });
+});
+
 describe('Role note and Appearance', () => {
   it('reach the context with the Entry, in every Mode and focus', async () => {
     const project = await fixture();

@@ -645,8 +645,8 @@ function fencedProposal(json: object): string {
 }
 
 // Where a Proposal stands, and what accepting or undoing it writes: decided
-// here from what the log says of it and a snapshot of its target, which the
-// store reads and writes.
+// here from what the log says of it and its basis, its target as the store
+// read it, which the store reads and writes.
 
 /**
  * What the log says of a Proposal: undecided, accepted with the value it
@@ -709,7 +709,7 @@ export type NewEntryPlace =
   | { where: 'gone' };
 
 /** A Proposal's target as the store read it: a Target, or where a new Entry is. */
-export type Snapshot = Target | NewEntryPlace;
+export type ProposalBasis = Target | NewEntryPlace;
 
 /** Why a Proposal can't be accepted or undone now, in words for the Author. */
 export type Refusal = {
@@ -738,13 +738,13 @@ const NOT_LOGGED = 'It was found applied, so what it replaced is not known.';
  */
 export function stateOf(
   logged: DecidedProposal,
-  snapshot: Snapshot,
+  basis: ProposalBasis,
 ): ProposalState {
   const { decision } = logged;
   if (decision.kind === 'rejected') return { kind: 'rejected' };
   return decision.kind === 'accepted'
-    ? acceptedState(logged, decision, snapshot)
-    : undecidedState(logged, decision.undid, snapshot);
+    ? acceptedState(logged, decision, basis)
+    : undecidedState(logged, decision.undid, basis);
 }
 
 /**
@@ -757,14 +757,14 @@ export function stateOf(
  */
 export function accept(
   logged: DecidedProposal,
-  snapshot: Snapshot,
+  basis: ProposalBasis,
   value: ProposedValue,
   {
     anyway = false,
     append = false,
   }: { anyway?: boolean; append?: boolean } = {},
 ): { wrote: ProposedValue } | Refusal {
-  const state = stateOf(logged, snapshot);
+  const state = stateOf(logged, basis);
   if (state.kind !== 'pending') return alreadyDecided(state);
   if (append && !canAppend(logged)) {
     return {
@@ -781,7 +781,7 @@ export function accept(
       };
     }
     if ('orphaned' in state) {
-      const place = placeOf(snapshot);
+      const place = placeOf(basis);
       const { name } = place.where === 'gone' ? entry : place.entry;
       return {
         refused: 'orphaned',
@@ -836,9 +836,9 @@ export function accept(
  */
 export function reject(
   logged: DecidedProposal,
-  snapshot: Snapshot,
+  basis: ProposalBasis,
 ): { rejected: true } | Refusal {
-  const state = stateOf(logged, snapshot);
+  const state = stateOf(logged, basis);
   return state.kind === 'pending' ? { rejected: true } : alreadyDecided(state);
 }
 
@@ -850,9 +850,9 @@ export function reject(
  */
 export function undo(
   logged: DecidedProposal,
-  snapshot: Snapshot,
+  basis: ProposalBasis,
 ): { restore: FieldValue } | { trash: true } | Refusal {
-  const state = stateOf(logged, snapshot);
+  const state = stateOf(logged, basis);
   if (state.kind !== 'accepted') {
     return { refused: 'not-accepted', text: "The Proposal isn't accepted" };
   }
@@ -868,7 +868,7 @@ export function undo(
 function acceptedState(
   logged: DecidedProposal,
   decision: Extract<Decision, { kind: 'accepted' }>,
-  snapshot: Snapshot,
+  basis: ProposalBasis,
 ): ProposalState {
   const appendedAsProposed = wasAppended(
     logged,
@@ -887,14 +887,14 @@ function acceptedState(
     ...(undoBlocked && { undoBlocked }),
   });
   if (logged.kind === 'new-entry') {
-    const place = placeOf(snapshot);
+    const place = placeOf(basis);
     const wrote = decision.wrote as NewEntry;
     if (place.where === 'trash' && asCreated(place, wrote)) {
       return undecidedState(logged, wrote, place);
     }
     return accepted(newEntryUndoBlocked(place, wrote));
   }
-  const target = heldIn(snapshot);
+  const target = heldIn(basis);
   if ('orphaned' in target) {
     return accepted(orphanedText(logged, target.orphaned));
   }
@@ -915,7 +915,7 @@ function acceptedState(
 function undecidedState(
   logged: DecidedProposal,
   undid: ProposedValue | undefined,
-  snapshot: Snapshot,
+  basis: ProposalBasis,
 ): ProposalState {
   const applied: ProposalState = {
     kind: 'accepted',
@@ -923,7 +923,7 @@ function undecidedState(
     undoBlocked: NOT_LOGGED,
   };
   if (logged.kind === 'new-entry') {
-    const place = placeOf(snapshot);
+    const place = placeOf(basis);
     if (place.where === 'bible') return applied;
     const pending: ProposalState = {
       kind: 'pending',
@@ -940,7 +940,7 @@ function undecidedState(
       ? pending
       : { kind: 'pending', orphaned: 'trashed' };
   }
-  const target = heldIn(snapshot);
+  const target = heldIn(basis);
   if ('orphaned' in target) {
     return { kind: 'pending', orphaned: target.orphaned };
   }
@@ -1033,18 +1033,18 @@ function targetOf(
   return change.kind === 'field' ? change.field : 'outline';
 }
 
-/** A new Entry's snapshot: where its Entry is. */
-function placeOf(snapshot: Snapshot): NewEntryPlace {
-  if (!('where' in snapshot)) {
-    throw new Error('A new Entry’s snapshot says where its Entry is');
+/** A new Entry's basis: where its Entry is. */
+function placeOf(basis: ProposalBasis): NewEntryPlace {
+  if (!('where' in basis)) {
+    throw new Error('A new Entry’s basis says where its Entry is');
   }
-  return snapshot;
+  return basis;
 }
 
-/** A field's or an Outline's snapshot: what it holds. */
-function heldIn(snapshot: Snapshot): Target {
-  if ('where' in snapshot) {
-    throw new Error('A snapshot of a field or an Outline is what it holds');
+/** A field's or an Outline's basis: what it holds. */
+function heldIn(basis: ProposalBasis): Target {
+  if ('where' in basis) {
+    throw new Error('A basis of a field or an Outline is what it holds');
   }
-  return snapshot;
+  return basis;
 }
