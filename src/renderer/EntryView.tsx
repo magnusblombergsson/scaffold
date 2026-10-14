@@ -725,6 +725,7 @@ export function EntryView({
         <RelationsSection
           entryId={entryId}
           view={relations}
+          books={books}
           onOpen={onOpenEntry}
         />
         <section className="plain-text-field private-notes">

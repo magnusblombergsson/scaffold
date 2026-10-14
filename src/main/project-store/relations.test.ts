@@ -389,3 +389,103 @@ describe('Relations and Trash', () => {
     expect(store.listRelations()).toHaveLength(2);
   });
 });
+
+describe('Relations in a Series', () => {
+  /** A Series of three Books; resolves with their ids in order. */
+  async function series(store: ProjectStore): Promise<string[]> {
+    await store.createBook();
+    await store.createBook();
+    return store.manuscript().books!.map((b) => b.id);
+  }
+  const asOfBook = (store: ProjectStore, id: string, book: string) =>
+    entryRelations(
+      relationsView(store.listRelations(), store.listEntries(), {
+        books: store.manuscript().books!.map((b) => b.id),
+        book,
+      }),
+      id,
+    ).map((r) => r.parts.join(' — '));
+
+  it('hold from the Book the Author sets, kept on reopening', async () => {
+    const store = await open();
+    const [b1, b2, b3] = await series(store);
+    const { Clark, Superman } = await make(
+      store,
+      'character',
+      'Clark',
+      'Superman',
+    );
+    await store.addRelation(Clark!, Superman!, { kind: 'same-as' });
+    const group = store.listRelations()[0]!.id;
+
+    await store.setRelationBook(group, b3!);
+    await store.close();
+
+    const reopened = await open();
+    expect(reopened.listRelations()[0]).toMatchObject({ book: b3 });
+    expect(asOfBook(reopened, Clark!, b2!)).toEqual([]);
+    expect(asOfBook(reopened, Clark!, b3!)).toEqual([
+      'Clark — same as — Superman',
+    ]);
+    await reopened.setRelationBook(group, null);
+    expect(asOfBook(reopened, Clark!, b1!)).toEqual([
+      'Clark — same as — Superman',
+    ]);
+  });
+
+  it('refuse a Book the Project doesn’t have', async () => {
+    const store = await open();
+    await series(store);
+    const { A, B } = await make(store, 'other', 'A', 'B');
+    const id = await store.addRelation(A!, B!, {
+      kind: 'label',
+      label: 'rival of',
+    });
+
+    await expect(store.setRelationBook(id, 'nowhere')).rejects.toThrow();
+  });
+
+  it('merge the Book on its own: one sets it while the other relabels', async () => {
+    const [ids, books, id] = await on('ALPHA', 1000, async (s) => {
+      const books = await series(s);
+      const ids = await make(s, 'other', 'A', 'B');
+      const id = await s.addRelation(ids.A!, ids.B!, {
+        kind: 'label',
+        label: 'rival of',
+      });
+      return [ids, books, id] as const;
+    });
+    const base = await readFile(relationPath(id), 'utf8');
+    await on('ALPHA', 2000, (s) => s.setRelationBook(id, books[1]!));
+    const alphas = await readFile(relationPath(id), 'utf8');
+    await writeFile(relationPath(id), base);
+    await on('BETA', 3000, (s) => s.relabelRelation(id, 'friend of'));
+    await writeFile(relationPath(id, `${id}-ALPHA.json`), alphas);
+
+    const store = await open();
+
+    expect(store.listRelations()).toEqual([
+      expect.objectContaining({ label: 'friend of', book: books[1] }),
+    ]);
+    expect(asOfBook(store, ids.A!, books[0]!)).toEqual([]);
+  });
+
+  it('go when Trash is emptied with their Book', async () => {
+    const store = await open();
+    const [, b2] = await series(store);
+    const { A, B } = await make(store, 'other', 'A', 'B');
+    const id = await store.addRelation(A!, B!, {
+      kind: 'label',
+      label: 'rival of',
+    });
+    await store.addRelation(B!, A!, { kind: 'label', label: 'owes' });
+    await store.setRelationBook(id, b2!);
+
+    await store.trashBook(b2!);
+    await store.emptyTrash();
+
+    expect(store.listRelations()).toEqual([
+      expect.objectContaining({ label: 'owes' }),
+    ]);
+  });
+});

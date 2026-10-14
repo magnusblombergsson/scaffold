@@ -620,6 +620,11 @@ export interface ProjectApi {
   ): Promise<string>;
   /** Gives a free-text Relation another label. */
   relabelRelation(id: string, label: string): Promise<void>;
+  /**
+   * In a Series, has a Relation hold from a Book, or with null, in every
+   * Book; a Same as group's is set on the whole group.
+   */
+  setRelationBook(id: string, book: string | null): Promise<void>;
   /** Removes a free-text or Part of Relation. */
   removeRelation(id: string): Promise<void>;
   /** Takes an Entry out of its Same as group, the others staying together. */
@@ -1251,6 +1256,7 @@ export const projectMethods = {
   listRelations: 'invoke',
   addRelation: 'invoke',
   relabelRelation: 'invoke',
+  setRelationBook: 'invoke',
   removeRelation: 'invoke',
   leaveSameAs: 'invoke',
 } as const satisfies MethodTable<ProjectApi>;

@@ -1732,6 +1732,33 @@ describe('Series', () => {
     }
   });
 
+  it('sends a Relation only in a Book it holds in, never before its Book', async () => {
+    const { store, view, books, entries } = await series();
+    const id = await store.addRelation(entries.anna, entries.mira, {
+      kind: 'label',
+      label: 'sister of',
+    });
+    await store.addRelation(entries.anna, entries.master, { kind: 'same-as' });
+    await store.setRelationBook(id, books.two);
+    const group = store.listRelations().find((r) => r.kind === 'same-as')!;
+    await store.setRelationBook(group.id, books.two);
+    const asked = async (book: string) =>
+      sent(
+        await buildContext(view, {
+          mode: 'brainstorm',
+          book,
+          messages: [message('author', 'Anna, Mira and the Harbour master.')],
+        }),
+      );
+
+    const one = await asked(books.one);
+    expect(one).not.toContain('sister of');
+    expect(one).not.toContain('under different faces');
+    const two = await asked(books.two);
+    expect(two).toContain('“Anna” is sister of “Mira”.');
+    expect(two).toContain('under different faces');
+  });
+
   it('a Project of one Book ignores a Book it is given', async () => {
     const { view } = await fixture();
     const messages = [message('author', 'Hm.')];

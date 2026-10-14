@@ -18,13 +18,14 @@ import {
 /** The folder of Relation files, which older apps never look in (ADR 0006, 0013). */
 export const RELATIONS = 'relations';
 
-const FIELDS = ['kind', 'from', 'to', 'label', 'faces'] as const;
+const FIELDS = ['kind', 'from', 'to', 'label', 'faces', 'book'] as const;
 type Field = (typeof FIELDS)[number];
 
 /**
  * One Relation's file (ADR 0013): a pair names its two Entries in order,
  * and a free-text one its label; a Same as group holds its faces as
- * switches. What a shape doesn't use is null.
+ * switches. In a Series, each may hold from a Book (ADR 0012). What a shape
+ * doesn't use is null.
  */
 type RelationFile = Synced<Field> & {
   kind: Relation['kind'];
@@ -33,13 +34,15 @@ type RelationFile = Synced<Field> & {
   label: string | null;
   /** A group's faces by Entry id, each switched on or off. */
   faces: Record<string, Toggle>;
+  /** The Book it holds from, by id; null in every Book. */
+  book: string | null;
 };
 
 const RELATION: RecordKind<Field, RelationFile> = {
   noun: 'Relation',
   fields: FIELDS,
   switches: ['faces'],
-  parse({ kind, from, to, label, faces, ...unknown }) {
+  parse({ kind, from, to, label, faces, book, ...unknown }) {
     if (!RELATION_KINDS.includes(kind as Relation['kind'])) return null;
     const pair = kind !== 'same-as';
     if (pair && (typeof from !== 'string' || typeof to !== 'string')) {
@@ -53,6 +56,7 @@ const RELATION: RecordKind<Field, RelationFile> = {
         to: pair ? (to as string) : null,
         label: kind === 'label' ? (label as string) : null,
         faces: pair ? {} : readToggles(faces),
+        book: typeof book === 'string' ? book : null,
       },
       unknown,
     };
@@ -87,11 +91,14 @@ export class Relations {
       .flatMap((record): Relation[] => {
         const at = Math.max(...FIELDS.map((f) => record.editedAt[f]));
         const { id } = record;
+        const book = record.book !== null ? { book: record.book } : {};
         if (record.kind === 'same-as') {
           const faces = onFaces(record);
-          return faces.length > 1 ? [{ kind: 'same-as', id, faces, at }] : [];
+          return faces.length > 1
+            ? [{ kind: 'same-as', id, faces, at, ...book }]
+            : [];
         }
-        const ends = { id, from: record.from!, to: record.to!, at };
+        const ends = { id, from: record.from!, to: record.to!, at, ...book };
         return [
           record.kind === 'label'
             ? { kind: 'label', ...ends, label: record.label! }
@@ -123,6 +130,7 @@ export class Relations {
       to,
       label: choice.kind === 'label' ? choice.label : null,
       faces: {},
+      book: null,
     });
     return id;
   }
@@ -133,6 +141,30 @@ export class Relations {
       return Promise.reject(new Error(`No free-text Relation ${id}`));
     }
     return this.records.change(id, { label });
+  }
+
+  /**
+   * Has the Relation `id` hold from `book`, or with null, in every Book. A
+   * group's is set on it whole, the groups sharing a face with it written
+   * as one.
+   */
+  async setBook(id: string, book: string | null): Promise<void> {
+    const record = this.records.get(id);
+    if (!record || !this.list().some((r) => r.id === id)) {
+      throw new Error(`No Relation ${id}`);
+    }
+    const kept =
+      record.kind === 'same-as' ? await this.group(onFaces(record), []) : id;
+    await this.records.change(kept, { book });
+  }
+
+  /** Deletes the Relations holding from `books`, emptied from Trash. */
+  async dropBooks(books: ReadonlySet<string>): Promise<void> {
+    for (const record of this.records.live()) {
+      if (record.book !== null && books.has(record.book)) {
+        await this.records.delete(record.id);
+      }
+    }
   }
 
   /** Deletes a pair, leaving a marker. */
@@ -195,6 +227,7 @@ export class Relations {
         faces: Object.fromEntries(
           [...all].map((face) => [face, { on: true, at }]),
         ),
+        book: null,
       });
       return id;
     }

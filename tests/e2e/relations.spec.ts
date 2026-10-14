@@ -1,6 +1,12 @@
 import { expect, test, type Page } from '@playwright/test';
 import path from 'node:path';
-import { answerDialogs, launch, roomButton, useTempDir } from './app';
+import {
+  answerDialogs,
+  chooseMenu,
+  launch,
+  roomButton,
+  useTempDir,
+} from './app';
 
 // Relations (ADR 0013): made, relabelled and removed from an Entry's page,
 // the same sentence on both Entries; Places nest by Part of in the list.
@@ -52,6 +58,8 @@ test('the Author relates Entries, and Places nest by Part of', async () => {
   await page.getByLabel('Other Entry').selectOption({ label: 'Martha' });
   await page.getByRole('button', { name: 'Add', exact: true }).click();
   await expect(relations(page)).toHaveText(['Martha — mother of — Clark']);
+  // One Book: nothing to hold from.
+  await expect(page.getByLabel('Holds from')).toHaveCount(0);
 
   await open(page, 'Martha');
   await expect(relations(page)).toHaveText(['Martha — mother of — Clark']);
@@ -95,5 +103,34 @@ test('the Author relates Entries, and Places nest by Part of', async () => {
   await expect(relations(page)).toHaveText(['Martha — aunt of — Clark']);
   await page.getByRole('button', { name: 'Remove' }).click();
   await expect(relations(page)).toHaveCount(0);
+  await app.close();
+});
+
+test('in a Series, a Relation holds from the Book the Author sets', async () => {
+  const projectPath = path.join(tempDir(), 'My Series');
+  const { app, page } = await newProject(projectPath);
+  await chooseMenu(app, ['Insert', 'New Book'], page);
+  await page.getByLabel('Title').fill('Reveal');
+  await page.keyboard.press('Enter');
+  await newEntry(page, 'Character', 'Superman');
+  await newEntry(page, 'Character', 'Clark');
+  const asOf = page.getByLabel('As of');
+  await asOf.selectOption({ label: 'Book 1' });
+
+  await page.getByRole('button', { name: '+ Add a Relation' }).click();
+  await page.getByLabel('Kind of Relation').selectOption('same-as');
+  await page.getByLabel('Other Entry').selectOption({ label: 'Superman' });
+  await page.getByRole('button', { name: 'Add', exact: true }).click();
+  await expect(relations(page)).toHaveText(['Clark — same as — Superman']);
+  await expect(page.getByLabel('Holds from')).toHaveValue('');
+
+  // Revealed only in the second Book: hidden as of the first.
+  await page.getByLabel('Holds from').selectOption({ label: 'From Reveal' });
+  await expect(relations(page)).toHaveCount(0);
+  await asOf.selectOption({ label: 'Reveal' });
+  await expect(relations(page)).toHaveText(['Clark — same as — Superman']);
+  await expect(
+    page.getByLabel('Holds from').locator('option:checked'),
+  ).toHaveText('From Reveal');
   await app.close();
 });

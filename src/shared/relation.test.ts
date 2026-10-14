@@ -5,6 +5,7 @@ import {
   nestedByPartOf,
   relationRefusal,
   relationsView,
+  type AsOfBook,
   type Relation,
 } from './relation';
 
@@ -52,8 +53,9 @@ function sentences(
   relations: Relation[],
   entries: EntrySummary[],
   id: string,
+  asOf?: AsOfBook,
 ): string[] {
-  return entryRelations(relationsView(relations, entries), id).map((r) =>
+  return entryRelations(relationsView(relations, entries, asOf), id).map((r) =>
     r.parts.join(' — '),
   );
 }
@@ -229,6 +231,103 @@ describe('Same as', () => {
     ]);
     expect(v.warnings.get('superman')).toHaveLength(1);
     expect(v.warnings.get('clark')).toBeUndefined();
+  });
+});
+
+describe('In a Series', () => {
+  const books = ['b1', 'b2', 'b3'];
+  const asOf = (book: string | undefined, order = books) => ({
+    books: order,
+    book,
+  });
+  const fromBook3: Relation = { ...motherOf, book: 'b3' };
+
+  it('a Relation holds from its own Book on', () => {
+    const shown = (book: string) =>
+      sentences([fromBook3], [martha, clark], 'clark', asOf(book));
+
+    expect(shown('b1')).toEqual([]);
+    expect(shown('b2')).toEqual([]);
+    expect(shown('b3')).toEqual(['Martha — mother of — Clark']);
+  });
+
+  it('holds from an Entry’s first appearance when that is later', () => {
+    const fromBook1: Relation = { ...motherOf, book: 'b1' };
+    const late = { ...clark, firstAppears: 'b2' };
+    const shown = (book: string) =>
+      sentences([fromBook1], [martha, late], 'martha', asOf(book));
+
+    expect(shown('b1')).toEqual([]);
+    expect(shown('b2')).toEqual(['Martha — mother of — Clark']);
+  });
+
+  it('moves with its Book as the Books are reordered', () => {
+    const shown = (order: string[]) =>
+      sentences([fromBook3], [martha, clark], 'clark', asOf('b2', order));
+
+    expect(shown(['b1', 'b2', 'b3'])).toEqual([]);
+    expect(shown(['b1', 'b3', 'b2'])).toEqual(['Martha — mother of — Clark']);
+  });
+
+  it('is hidden while its Book is in Trash or the Drawer', () => {
+    expect(
+      sentences(
+        [fromBook3],
+        [martha, clark],
+        'clark',
+        asOf('b2', ['b1', 'b2']),
+      ),
+    ).toEqual([]);
+  });
+
+  it('a Same as group has the faces that have appeared', () => {
+    const late = { ...superman, firstAppears: 'b3' };
+    const group = sameAs('g1', 'clark', 'superman', 'malone');
+    const shown = (book: string) =>
+      sentences([group], [clark, late, malone], 'clark', asOf(book));
+
+    expect(shown('b2')).toEqual(['Clark — same as — Malone']);
+    expect(shown('b3')).toEqual(['Clark — same as — Superman, Malone']);
+  });
+
+  it('refuses a second parent while the one it has holds from a later Book', () => {
+    const v = relationsView(
+      [{ ...partOf('p1', 'basement', 'house'), book: 'b3' }],
+      [house, basement, town],
+      asOf('b1'),
+    );
+
+    expect(v.parents.size).toBe(0);
+    expect(relationRefusal(v, 'basement', 'town', { kind: 'part-of' })).toBe(
+      '“The Basement” is part of an Entry from a later Book already: an Entry is part of one at most',
+    );
+  });
+
+  it('refuses joining a group that holds from a later Book', () => {
+    const v = relationsView(
+      [{ ...sameAs('g1', 'clark', 'superman'), book: 'b3' }],
+      [clark, superman, malone],
+      asOf('b1'),
+    );
+
+    expect(relationRefusal(v, 'malone', 'clark', { kind: 'same-as' })).toBe(
+      '“Clark” is in a Same as group from a later Book already: add to it as of that Book',
+    );
+  });
+
+  it('refuses joining two groups that hold from different Books', () => {
+    const v = relationsView(
+      [
+        { ...sameAs('g1', 'clark', 'superman'), book: 'b2' },
+        sameAs('g2', 'malone', 'martha'),
+      ],
+      [clark, superman, malone, martha],
+      asOf('b3'),
+    );
+
+    expect(relationRefusal(v, 'malone', 'clark', { kind: 'same-as' })).toBe(
+      '“Malone” and “Clark” are in Same as groups holding from different Books: give them one Book first',
+    );
   });
 });
 

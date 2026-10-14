@@ -191,6 +191,7 @@ const projectHandlers: Handlers<
   addRelation: ({ store }, from, to, choice) =>
     store.addRelation(from, to, choice),
   relabelRelation: ({ store }, id, label) => store.relabelRelation(id, label),
+  setRelationBook: ({ store }, id, book) => store.setRelationBook(id, book),
   removeRelation: ({ store }, id) => store.removeRelation(id),
   leaveSameAs: ({ store }, entryId) => store.leaveSameAs(entryId),
   setFoldedNoteImage: ({ store, sender }, on) =>

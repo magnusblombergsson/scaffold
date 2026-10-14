@@ -462,10 +462,14 @@ function ProjectView({
     () => entries.map((e) => summaryAsOf(e, bookIds, bibleAsOf)),
     [entries, bookIds, bibleAsOf],
   );
-  /** The Relations among the Entries in the Story Bible, named as of its Book. */
+  /** The Relations among the Entries in the Story Bible in effect as of its Book, named as of it. */
   const bibleRelations = useMemo(
-    () => relationsView(relations, entriesAsOfBible),
-    [relations, entriesAsOfBible],
+    () =>
+      relationsView(relations, entriesAsOfBible, {
+        books: bookIds,
+        book: bibleAsOf,
+      }),
+    [relations, entriesAsOfBible, bookIds, bibleAsOf],
   );
   /** What the Project Outline is called: in a Series, the Series Outline. */
   const projectOutlineName = manuscript.books

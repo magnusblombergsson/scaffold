@@ -2624,6 +2624,22 @@ export class ProjectStore {
     });
   }
 
+  /**
+   * In a Series, has a Relation hold from `book`, one of its Books, or with
+   * null, in every Book; a Same as group's is set on the whole group.
+   */
+  setRelationBook(id: string, book: string | null): Promise<void> {
+    return this.changeRelations(async () => {
+      if (book !== null && !isBook(this.manifest.tree, book)) {
+        throw new ProjectError(
+          'relation-refused',
+          'A Relation can hold only from a Book of this Project',
+        );
+      }
+      await this.relations.setBook(id, book);
+    });
+  }
+
   /** Removes a free-text or Part of Relation. */
   removeRelation(id: string): Promise<void> {
     return this.changeRelations(() => this.relations.remove(id));
@@ -3850,8 +3866,14 @@ export class ProjectStore {
         await this.relations.drop(gone);
         this.emitRelations();
       }
-      // Their Evolutions go with them, unless the Book is in the Drawer too.
-      await this.dropEvolutions(books.filter((id) => !this.trash.where(id)));
+      // Their Evolutions and Relations go with them, unless the Book is in
+      // the Drawer too.
+      const goneBooks = books.filter((id) => !this.trash.where(id));
+      await this.dropEvolutions(goneBooks);
+      if (goneBooks.length > 0) {
+        await this.relations.dropBooks(new Set(goneBooks));
+        this.emitRelations();
+      }
       // Their values stay in the Entries, never shown.
       if (this.customFields.trashed().length > 0) {
         await this.customFields.empty();

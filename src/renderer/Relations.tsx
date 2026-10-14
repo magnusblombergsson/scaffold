@@ -1,6 +1,7 @@
 import { useContext, useEffect, useRef, useState, type ReactNode } from 'react';
 import type { CallFailure } from '../shared/api';
 import { entryTitle } from '../shared/entry';
+import type { TitledBook } from '../shared/evolution';
 import {
   ENTRY_GROUP_TITLES,
   ENTRY_TYPES,
@@ -20,16 +21,20 @@ import { ReadOnlyContext } from './read-only';
  * An Entry's Relations: each one it is in, from either side, as one
  * sentence, the same on both Entries' pages; the warnings for rules that
  * merging copies broke; and a way to add one. A free-text Relation can be
- * relabelled, and a pair removed; a face can leave its Same as group.
+ * relabelled, and a pair removed; a face can leave its Same as group. In a
+ * Series, each says from which Book it holds.
  */
 export function RelationsSection({
   entryId,
   view,
+  books = [],
   onOpen,
 }: {
   entryId: string;
   /** The Relations among the Entries in the Story Bible. */
   view: RelationsView;
+  /** In a Series, the Books in reading order; none otherwise. */
+  books?: readonly TitledBook[];
   /** Opens another Entry, as clicking its name does. */
   onOpen(id: string): void;
 }) {
@@ -95,6 +100,7 @@ export function RelationsSection({
               line={line}
               entryId={entryId}
               name={name}
+              books={books}
               readOnly={readOnly}
               run={run}
             />
@@ -131,23 +137,37 @@ function RelationLine({
   line,
   entryId,
   name,
+  books,
   readOnly,
   run,
 }: {
   line: EntryRelation;
   entryId: string;
   name(id: string): ReactNode;
+  books: readonly TitledBook[];
   readOnly: boolean;
   run(command: () => Promise<unknown>): Promise<boolean>;
 }) {
   const [relabelling, setRelabelling] = useState(false);
+  const id = line.kind === 'pair' ? line.relation.id : line.id;
+  const holdsFrom = books.length > 1 && (
+    <HoldsFrom
+      books={books}
+      book={line.kind === 'pair' ? line.relation.book : line.book}
+      disabled={readOnly}
+      onChange={(book) =>
+        void run(() => window.project.setRelationBook(id, book))
+      }
+    />
+  );
   if (line.kind === 'same-as') {
     return (
       <li className="relation">
         <span className="relation-sentence">
           {name(entryId)} — <em>same as</em> —{' '}
-          {line.others.map((id, index) => [index > 0 && ', ', name(id)])}
+          {line.others.map((other, index) => [index > 0 && ', ', name(other)])}
         </span>
+        {holdsFrom}
         <button
           type="button"
           className="link-button"
@@ -177,6 +197,7 @@ function RelationLine({
         )}{' '}
         — {name(relation.to)}
       </span>
+      {holdsFrom}
       {relation.kind === 'label' && !relabelling && (
         <button
           type="button"
@@ -198,6 +219,39 @@ function RelationLine({
         Remove
       </button>
     </li>
+  );
+}
+
+/**
+ * The Book a Relation holds from, in a Series: every Book, or one from which
+ * on.
+ */
+function HoldsFrom({
+  books,
+  book,
+  disabled,
+  onChange,
+}: {
+  books: readonly TitledBook[];
+  book: string | undefined;
+  disabled: boolean;
+  onChange(book: string | null): void;
+}) {
+  return (
+    <select
+      className="relation-book"
+      aria-label="Holds from"
+      value={book ?? ''}
+      disabled={disabled}
+      onChange={(event) => onChange(event.target.value || null)}
+    >
+      <option value="">In every Book</option>
+      {books.map((b) => (
+        <option key={b.id} value={b.id}>
+          From {b.title}
+        </option>
+      ))}
+    </select>
   );
 }
 

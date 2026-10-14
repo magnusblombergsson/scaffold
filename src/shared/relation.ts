@@ -1,4 +1,5 @@
 import { entryTitle } from './entry';
+import { appearsAfter } from './evolution';
 import {
   ENTRY_TYPE_LABELS,
   type EntrySummary,
@@ -12,9 +13,10 @@ import {
 /**
  * A Relation as the Project holds it, hidden ones too: *part of* and a
  * free-text one read from one Entry to another; a *same as* group lists
- * the faces switched on in it. `at` is its latest edit.
+ * the faces switched on in it. `at` is its latest edit. In a Series, `book`
+ * is the Book it holds from; without one, it holds in every Book.
  */
-export type Relation =
+export type Relation = (
   | { kind: 'part-of'; id: string; from: string; to: string; at: number }
   | {
       kind: 'label';
@@ -24,7 +26,52 @@ export type Relation =
       label: string;
       at: number;
     }
-  | { kind: 'same-as'; id: string; faces: string[]; at: number };
+  | { kind: 'same-as'; id: string; faces: string[]; at: number }
+) & { book?: string };
+
+/** In a Series, the Books' ids in reading order, and the one Relations are seen as of. */
+export type AsOfBook = { books: readonly string[]; book: string | undefined };
+
+/**
+ * Whether a Relation from `from`, a Book's id, holds as of `book` among
+ * `books`: one without a Book always; one from a Book in Trash or the Drawer,
+ * in no order, never; otherwise from its Book on, or in every Book without a
+ * Book to see it as of.
+ */
+function holdsFrom(
+  from: string | undefined,
+  { books, book }: AsOfBook,
+): boolean {
+  if (from === undefined) return true;
+  const index = books.indexOf(from);
+  if (index === -1) return false;
+  return book === undefined || index <= books.indexOf(book);
+}
+
+/**
+ * The Relations of `relations` in effect as of a Book: each from the later
+ * of its own Book and each Entry's first appearance, `entries` saying when
+ * each first appears. A *same as* group has only the faces in effect then.
+ * Worked out when read, so reordering the Books needs no rewrite.
+ */
+export function relationsAsOf(
+  relations: readonly Relation[],
+  entries: readonly EntrySummary[],
+  asOf: AsOfBook,
+): Relation[] {
+  const byId = new Map(entries.map((e) => [e.id, e]));
+  const appeared = (id: string) => {
+    const entry = byId.get(id);
+    return !entry || !appearsAfter(entry, asOf.books, asOf.book);
+  };
+  return relations.flatMap((r): Relation[] => {
+    if (!holdsFrom(r.book, asOf)) return [];
+    if (r.kind !== 'same-as') {
+      return appeared(r.from) && appeared(r.to) ? [r] : [];
+    }
+    return [{ ...r, faces: r.faces.filter(appeared) }];
+  });
+}
 
 /** A Relation read one way, from one Entry to another. */
 export type PairRelation = Exclude<Relation, { kind: 'same-as' }>;
@@ -53,8 +100,12 @@ export const NESTING_TYPES: readonly EntryType[] = ['place', 'item'];
 export type RelationsView = {
   entries: ReadonlyMap<string, EntrySummary>;
   pairs: PairRelation[];
-  /** Groups that share a face show as one; `ids` are its records. */
-  groups: { ids: string[]; faces: string[] }[];
+  /**
+   * Groups that share a face show as one; `ids` are its records in order,
+   * the first the one the next change writes, and `book` the Book it holds
+   * from, that first record's.
+   */
+  groups: { ids: string[]; faces: string[]; book?: string }[];
   /** Each nesting Entry's parent by *part of*, by child id. */
   parents: ReadonlyMap<string, string>;
   /**
@@ -62,22 +113,32 @@ export type RelationsView = {
    * may not have another parent: it would be a second once that one is back.
    */
   hiddenParent: ReadonlySet<string>;
+  /** In a Series, the Entries *part of* one from a later Book, which may not have another parent. */
+  laterParent: ReadonlySet<string>;
+  /**
+   * In a Series, the Entries in a *same as* group from a later Book, or one
+   * in Trash or the Drawer, to which a face added here would be added.
+   */
+  laterGroup: ReadonlySet<string>;
   /** Each Entry's warnings, by id. */
   warnings: ReadonlyMap<string, string[]>;
 };
 
 /**
- * The view of `relations` among `entries`, those in the Story Bible. A
+ * The view of `all` the Relations among `entries`, those in the Story Bible. A
  * Relation naming an Entry not among them, in Trash, in the Drawer or not
  * there at all, is hidden; a group shows while two of its faces are there,
- * in the order of `entries`.
+ * in the order of `entries`. In a Series, it is as of a Book: a Relation not
+ * in effect in it, as `relationsAsOf` says, is hidden too.
  * An Entry *part of* two parents nests under the one from the later edit;
  * the Entries of a *part of* loop show at top level.
  */
 export function relationsView(
-  relations: readonly Relation[],
+  all: readonly Relation[],
   entries: readonly EntrySummary[],
+  asOf?: AsOfBook,
 ): RelationsView {
+  const relations = asOf ? relationsAsOf(all, entries, asOf) : all;
   const byId = new Map(entries.map((e) => [e.id, e]));
   const warnings = new Map<string, string[]>();
   const warn = (id: string, warning: string) => {
@@ -87,12 +148,31 @@ export function relationsView(
   const name = (id: string) => `“${entryTitle(byId.get(id)!)}”`;
 
   const hiddenParent = new Set(
-    relations.flatMap((r) =>
+    all.flatMap((r) =>
       r.kind === 'part-of' && byId.has(r.from) && !byId.has(r.to)
         ? [r.from]
         : [],
     ),
   );
+  const held = new Set(relations.map((r) => r.id));
+  const laterParent = new Set(
+    all.flatMap((r) =>
+      r.kind === 'part-of' &&
+      !held.has(r.id) &&
+      byId.has(r.from) &&
+      byId.has(r.to)
+        ? [r.from]
+        : [],
+    ),
+  );
+  const laterGroup = new Set(
+    all.flatMap((r) =>
+      r.kind === 'same-as' && asOf && !holdsFrom(r.book, asOf)
+        ? r.faces.filter((face) => byId.has(face))
+        : [],
+    ),
+  );
+  const bookOf = new Map(all.map((r) => [r.id, r.book]));
   const pairs = relations.filter(
     (r): r is PairRelation =>
       r.kind !== 'same-as' && byId.has(r.from) && byId.has(r.to),
@@ -146,10 +226,21 @@ export function relationsView(
         warn(face, 'Same as joins only Entries of one type');
       }
     }
-    return [{ ids, faces: shown }];
+    const sorted = [...ids].sort();
+    const book = bookOf.get(sorted[0]!);
+    return [{ ids: sorted, faces: shown, ...(book !== undefined && { book }) }];
   });
 
-  return { entries: byId, pairs, groups, parents, hiddenParent, warnings };
+  return {
+    entries: byId,
+    pairs,
+    groups,
+    parents,
+    hiddenParent,
+    laterParent,
+    laterGroup,
+    warnings,
+  };
 }
 
 /** One line of an Entry's Relations section. */
@@ -162,8 +253,12 @@ export type EntryRelation =
     }
   | {
       kind: 'same-as';
+      /** Its group's first record, as the next change writes it. */
+      id: string;
       /** The other faces of its group. */
       others: string[];
+      /** In a Series, the Book it holds from; none in every Book. */
+      book?: string;
       parts: [string, string, string];
     };
 
@@ -188,7 +283,9 @@ export function entryRelations(
       ? [
           {
             kind: 'same-as' as const,
+            id: group.ids[0]!,
             others,
+            ...(group.book !== undefined && { book: group.book }),
             parts: [title(id), 'same as', others.map(title).join(', ')] as [
               string,
               string,
@@ -271,10 +368,19 @@ export function relationRefusal(
     if (a.type !== b.type) {
       return `Same as joins only Entries of one type: “${entryTitle(b)}” is a ${ENTRY_TYPE_LABELS[b.type]}`;
     }
-    return view.groups.some(
-      (g) => g.faces.includes(from) && g.faces.includes(to),
-    )
-      ? `“${entryTitle(a)}” and “${entryTitle(b)}” are the same already`
+    const groupOf = (id: string) =>
+      view.groups.find((g) => g.faces.includes(id));
+    const [ga, gb] = [groupOf(from), groupOf(to)];
+    if (ga && ga === gb) {
+      return `“${entryTitle(a)}” and “${entryTitle(b)}” are the same already`;
+    }
+    for (const e of [a, b]) {
+      if (view.laterGroup.has(e.id)) {
+        return `“${entryTitle(e)}” is in a Same as group from a later Book already: add to it as of that Book`;
+      }
+    }
+    return ga && gb && ga.book !== gb.book
+      ? `“${entryTitle(a)}” and “${entryTitle(b)}” are in Same as groups holding from different Books: give them one Book first`
       : null;
   }
   if (!nests(a.type, b.type)) {
@@ -289,6 +395,9 @@ export function relationRefusal(
   }
   if (view.hiddenParent.has(from)) {
     return `“${entryTitle(a)}” is part of an Entry in Trash or the Drawer already: an Entry is part of one at most`;
+  }
+  if (view.laterParent.has(from)) {
+    return `“${entryTitle(a)}” is part of an Entry from a later Book already: an Entry is part of one at most`;
   }
   for (let at: string | undefined = to; at; at = view.parents.get(at)) {
     if (at === from) {
