@@ -32,6 +32,14 @@ import {
   type ProseLanguage,
   type ValueOf,
 } from '../../shared/project-types';
+import {
+  entryRelations,
+  relationBook,
+  relationSentence,
+  relationsView,
+  type Relation,
+  type RelationsView,
+} from '../../shared/relation';
 import { imageSize } from '../entry-image';
 import {
   commonMarkHeading,
@@ -47,8 +55,8 @@ import {
 
 // The Story Bible Export: the chosen Entries, for others to read, under a
 // heading per type. Each has its name, type, aliases, Tags, description and
-// type's fields, then its Custom fields, those with something in them; its
-// image in Word, if asked;
+// type's fields, then its Custom fields, those with something in them, and
+// its Relations; its image in Word, if asked;
 // and its private notes, if asked. Visibility plays no part: it concerns
 // only the Assistant. In a Series, the Entries are as of a chosen Book, or
 // with every Evolution under its field.
@@ -59,9 +67,17 @@ export type StoryBibleSource = {
   manuscript(): Manuscript;
   listEntries(): EntrySummary[];
   listCustomFields(): CustomField[];
+  /** Every Relation held; `relationsView` hides those it may not see. */
+  listRelations(): Relation[];
   read<R extends EntryRef | PrivateRef>(ref: R): Promise<ValueOf<R>>;
   readImage(ref: ImageRef): Promise<EntryImage | null>;
 };
+
+/**
+ * The label an Entry's Relations go under: not among `COMMON_LABELS`, as a
+ * Story Bible Import doesn't read them back.
+ */
+const RELATIONS_LABEL = 'Relations';
 
 /** An image's width in Word: about a third of the page's text. */
 const IMAGE_WIDTH = 2 * EMU_PER_INCH;
@@ -136,8 +152,16 @@ export async function exportStoryBible(
   const customFields = source.listCustomFields();
   const series = seriesView(source.manuscript(), choice);
   const ids = series.books.map((b) => b.id);
+  const all = source.listEntries();
+  // Among all the Entries in the Story Bible, ticked or not, so that each
+  // names the other Entry; with every Evolution, by their own names.
+  const relations = relationsView(
+    source.listRelations(),
+    all.map((entry) => summaryAsOf(entry, ids, series.asOf)),
+    { books: ids, book: series.asOf },
+  );
   const entries = await Promise.all(
-    includedEntries(source.listEntries(), choice, series).map(
+    includedEntries(all, choice, series).map(
       async ({ id }): Promise<[EntryValue, ExportedEntry]> => {
         const value = await source.read({ kind: 'entry', id });
         const { entry: shown, from } = entryAsOf(value, ids, series.asOf);
@@ -152,14 +176,18 @@ export async function exportStoryBible(
                 ...(from.image !== undefined && { book: from.image }),
               })
             : null;
+        const blocks = series.every
+          ? evolvedBlocks(value, series.books, customFields, privateNotes)
+          : entryBlocks(shown, customFields, privateNotes);
         return [
           value,
           {
             name: entryTitle(shown),
             image,
-            blocks: series.every
-              ? evolvedBlocks(value, series.books, customFields, privateNotes)
-              : entryBlocks(shown, customFields, privateNotes),
+            blocks: withRelations(
+              blocks,
+              relationsBlock(relations, id, series),
+            ),
           },
         ];
       },
@@ -179,6 +207,36 @@ export async function exportStoryBible(
   return format === 'markdown'
     ? Buffer.from(markdownOf(groups), 'utf8')
     : docx(docxParagraphs(groups), source.language);
+}
+
+/**
+ * An Entry's Relations as one paragraph, a sentence to a line; none without
+ * any. With every Evolution, one holding from a Book after the first says
+ * so, as in “From Book 2: …”.
+ */
+function relationsBlock(
+  view: RelationsView,
+  id: string,
+  { books, every }: SeriesView,
+): Block[] {
+  const lines = entryRelations(view, id).map((line) => {
+    const sentence = relationSentence(line);
+    const from = relationBook(line);
+    const book = every ? books.find((b) => b.id === from) : undefined;
+    return book && book !== books[0]
+      ? `From ${book.title}: ${sentence}`
+      : sentence;
+  });
+  return lines.length === 0
+    ? []
+    : [{ label: RELATIONS_LABEL, text: lines.join('\n') }];
+}
+
+/** An Entry's paragraphs with its Relations after its fields, before its private notes. */
+function withRelations(blocks: Block[], relations: Block[]): Block[] {
+  const notes = blocks.findIndex((b) => b.label === COMMON_LABELS.privateNotes);
+  const at = notes === -1 ? blocks.length : notes;
+  return [...blocks.slice(0, at), ...relations, ...blocks.slice(at)];
 }
 
 /**

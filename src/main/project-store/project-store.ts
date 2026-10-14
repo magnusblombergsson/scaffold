@@ -138,12 +138,22 @@ import {
 import { Switches } from './switches';
 import { TODOS, Todos } from './todos';
 import { CUSTOM_FIELDS, CustomFields } from './custom-fields';
+import { RELATIONS, Relations } from './relations';
 import {
   customSuggestions,
   customValue,
   labelRefusal,
   type CustomField,
 } from '../../shared/custom-field';
+import {
+  RELATION_KINDS,
+  relationLabelRefusal,
+  relationRefusal,
+  relationsView,
+  type Relation,
+  type RelationChoice,
+  type RelationsView,
+} from '../../shared/relation';
 import {
   isChoosable,
   isKeyField,
@@ -288,6 +298,8 @@ export interface AssistantView {
   listEntries(): EntrySummary[];
   /** The Project's Custom fields, which the Assistant sees like any other field. */
   customFields(): CustomField[];
+  /** Every Relation held; `relationsView` hides those it may not see. */
+  listRelations(): Relation[];
   read<R extends AssistantRef>(ref: R): Promise<ValueOf<R>>;
 }
 
@@ -463,6 +475,7 @@ export async function openProject(
   await store.readStars();
   await store.readCustomFields();
   await store.readKeyFields();
+  await store.readRelations();
   return store;
 }
 
@@ -679,6 +692,7 @@ async function sweepTempFiles(projectPath: string, fs: FileSystem) {
     STARS,
     CUSTOM_FIELDS,
     KEY_FIELDS,
+    RELATIONS,
   ].map((d) => path.join(projectPath, d));
   for (const dir of [projectPath, ...dirs]) {
     for (const name of await fs.readdir(dir)) {
@@ -1033,6 +1047,8 @@ export class ProjectStore {
   private readonly keyFields: Switches;
   /** The Custom fields in `custom-fields/`, as last read or written. */
   private readonly customFields: CustomFields;
+  /** The Relations between Entries in `relations/`, as last read or written. */
+  private readonly relations: Relations;
   /** What versions of `project.json` that met as the Project opened lost, until told. */
   private dropped: Dropped[];
   /**
@@ -1098,6 +1114,7 @@ export class ProjectStore {
     this.stars = starsOf(path, this.deps);
     this.keyFields = keyFieldsOf(path, this.deps);
     this.customFields = customFieldsOf(path, this.deps);
+    this.relations = relationsOf(path, this.deps);
     this.host = hostOf(this.deps);
     this.trash = new Trash(
       {
@@ -1299,6 +1316,7 @@ export class ProjectStore {
         }
         if (await this.customFields.read()) this.emitCustomFields();
         if (await this.keyFields.read()) this.emitKeyFields();
+        if (await this.relations.read()) this.emitRelations();
         for (const change of tagChanges(tagsBefore, this.tagsByUnit())) {
           this.emitVocabulary(change);
         }
@@ -2553,6 +2571,105 @@ export class ProjectStore {
     this.emit({ type: 'keyFieldsChanged', choices: this.keyFieldChoices() });
   }
 
+  /**
+   * Every Relation held, those naming an Entry in Trash, in the Drawer or
+   * not here too, which `relationsView` hides.
+   */
+  listRelations(): Relation[] {
+    return this.relations.list();
+  }
+
+  /** Reads the Relations as the Project opens, merging their copies, and sweeps old delete markers. */
+  async readRelations(): Promise<void> {
+    await this.relations.read();
+    await this.relations.sweep();
+  }
+
+  /**
+   * Relates the Entry `from` to `to` as `choice` says; resolves with the
+   * Relation's id. Refused as `relationRefusal` refuses it.
+   */
+  async addRelation(
+    from: string,
+    to: string,
+    choice: RelationChoice,
+  ): Promise<string> {
+    let id = '';
+    await this.changeRelations(async () => {
+      if (
+        !RELATION_KINDS.includes(choice.kind) ||
+        (choice.kind === 'label' && typeof choice.label !== 'string')
+      ) {
+        throw new Error(`No Relation can be made of ${JSON.stringify(choice)}`);
+      }
+      const refusal = relationRefusal(this.relationsView(), from, to, choice);
+      if (refusal) throw new ProjectError('relation-refused', refusal);
+      id = await this.relations.add(
+        from,
+        to,
+        choice.kind === 'label'
+          ? { kind: 'label', label: choice.label.trim() }
+          : choice,
+      );
+    });
+    return id;
+  }
+
+  /** Gives a free-text Relation another label, which may not be empty. */
+  relabelRelation(id: string, label: string): Promise<void> {
+    return this.changeRelations(async () => {
+      const refusal = relationLabelRefusal(label);
+      if (refusal) throw new ProjectError('relation-refused', refusal);
+      await this.relations.relabel(id, label.trim());
+    });
+  }
+
+  /**
+   * In a Series, has a Relation hold from `book`, one of its Books, or with
+   * null, in every Book; a Same as group's is set on the whole group.
+   */
+  setRelationBook(id: string, book: string | null): Promise<void> {
+    return this.changeRelations(async () => {
+      if (book !== null && !isBook(this.manifest.tree, book)) {
+        throw new ProjectError(
+          'relation-refused',
+          'A Relation can hold only from a Book of this Project',
+        );
+      }
+      await this.relations.setBook(id, book);
+    });
+  }
+
+  /** Removes a free-text or Part of Relation. */
+  removeRelation(id: string): Promise<void> {
+    return this.changeRelations(() => this.relations.remove(id));
+  }
+
+  /** Takes an Entry out of its Same as group, the others staying together. */
+  leaveSameAs(entryId: string): Promise<void> {
+    return this.changeRelations(() => this.relations.leave(entryId));
+  }
+
+  private relationsView(): RelationsView {
+    return relationsView(this.relations.list(), this.listEntries());
+  }
+
+  /**
+   * Changes the Relations, then tells the window. They aren't in the tree,
+   * so another computer's tree is no reason to wait.
+   */
+  private changeRelations(change: () => Promise<void>): Promise<void> {
+    return this.enqueueStructure(async () => {
+      await this.passFormatGate();
+      await change();
+      this.emitRelations();
+    });
+  }
+
+  private emitRelations(): void {
+    this.emit({ type: 'relationsChanged', relations: this.relations.list() });
+  }
+
   tree(): ProjectTree {
     return structuredClone(this.manifest.tree);
   }
@@ -3732,9 +3849,31 @@ export class ProjectStore {
             item.kind === 'book' && !isBook(this.manifest.tree, item.id),
         )
         .map((item) => item.id);
+      const entries = new Set(
+        this.trash
+          .list()
+          .filter((item) => item.kind === 'entry')
+          .map((item) => item.id),
+      );
       await this.trash.empty();
-      // Their Evolutions go with them, unless the Book is in the Drawer too.
-      await this.dropEvolutions(books.filter((id) => !this.trash.where(id)));
+      // Their Relations go with them, unless they are in the Drawer too.
+      const gone = new Set(
+        [...entries].filter(
+          (id) => !this.trash.where(id) && !this.entries.has(id),
+        ),
+      );
+      if (gone.size > 0) {
+        await this.relations.drop(gone);
+        this.emitRelations();
+      }
+      // Their Evolutions and Relations go with them, unless the Book is in
+      // the Drawer too.
+      const goneBooks = books.filter((id) => !this.trash.where(id));
+      await this.dropEvolutions(goneBooks);
+      if (goneBooks.length > 0) {
+        await this.relations.dropBooks(new Set(goneBooks));
+        this.emitRelations();
+      }
       // Their values stay in the Entries, never shown.
       if (this.customFields.trashed().length > 0) {
         await this.customFields.empty();
@@ -3989,6 +4128,7 @@ export class ProjectStore {
       statuses: () => this.statuses(),
       listEntries: () => this.listEntries().map(forAssistant),
       customFields: () => this.customFields.list(),
+      listRelations: () => this.listRelations(),
       read: async (ref) => {
         // Refused at run time too, whatever a caller's types say.
         if ((ref as UnitRef).kind === 'private') {
@@ -4337,6 +4477,10 @@ const KEY_FIELDS = 'key-fields';
 
 function keyFieldsOf(projectPath: string, deps: StoreDeps): Switches {
   return new Switches(path.join(projectPath, KEY_FIELDS), deps.fs, deps.clock);
+}
+
+function relationsOf(projectPath: string, deps: StoreDeps): Relations {
+  return new Relations(path.join(projectPath, RELATIONS), deps.fs, deps.clock);
 }
 
 function customFieldsOf(projectPath: string, deps: StoreDeps): CustomFields {

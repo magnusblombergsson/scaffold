@@ -13,11 +13,13 @@ import {
 /**
  * A part of an Entry that may be a Key field: `description`, `aliases`,
  * `role` (with its Role note), a built-in field by its key, such as
- * `voice.traits`, or a Custom field as `custom:<id>`.
+ * `voice.traits`, its Relations as `relations`, or a Custom field as
+ * `custom:<id>`.
  */
 export type KeyFieldItem =
   | Exclude<BuiltInField, 'roleNote'>
   | 'voice.examples'
+  | 'relations'
   | CustomFieldKey;
 
 /**
@@ -30,7 +32,17 @@ export type KeyFieldChoices = Partial<
 >;
 
 /** What every Entry has that may be a Key field, whatever its type. */
-const EVERY_ENTRY: readonly KeyFieldItem[] = ['description', 'aliases'];
+const EVERY_ENTRY: readonly KeyFieldItem[] = [
+  'description',
+  'aliases',
+  'relations',
+];
+
+/** What every Entry shows by default: Relations only for a Place, which is often part of another. */
+const SHOWN_FOR_EVERY_ENTRY: readonly KeyFieldItem[] = [
+  'description',
+  'aliases',
+];
 
 /** The built-in fields of each type that may be Key fields; the Role brings its note. */
 const BUILT_IN: Record<EntryType, readonly KeyFieldItem[]> = {
@@ -56,15 +68,20 @@ const BUILT_IN: Record<EntryType, readonly KeyFieldItem[]> = {
   other: [],
 };
 
-/** The Key fields of each type while the Author has chosen none: the Peek as it always was. */
+/** The Key fields of each type while the Author has chosen none: the Peek as it always was, and a Place’s Relations. */
 const DEFAULTS: Record<EntryType, readonly KeyFieldItem[]> = {
-  character: [...EVERY_ENTRY, 'role', 'appearance', 'voice.traits'],
-  place: [...EVERY_ENTRY, 'senses.atmosphere', 'senses.sight'],
-  'plot-thread': [...EVERY_ENTRY, 'status'],
-  item: EVERY_ENTRY,
-  'world-rule': EVERY_ENTRY,
-  theme: EVERY_ENTRY,
-  other: EVERY_ENTRY,
+  character: [...SHOWN_FOR_EVERY_ENTRY, 'role', 'appearance', 'voice.traits'],
+  place: [
+    ...SHOWN_FOR_EVERY_ENTRY,
+    'relations',
+    'senses.atmosphere',
+    'senses.sight',
+  ],
+  'plot-thread': [...SHOWN_FOR_EVERY_ENTRY, 'status'],
+  item: SHOWN_FOR_EVERY_ENTRY,
+  'world-rule': SHOWN_FOR_EVERY_ENTRY,
+  theme: SHOWN_FOR_EVERY_ENTRY,
+  other: SHOWN_FOR_EVERY_ENTRY,
 };
 
 /** Whether `item` is a Key field of `type`, as stored, or by default. */

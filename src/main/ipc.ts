@@ -187,6 +187,13 @@ const projectHandlers: Handlers<
   listKeyFields: async ({ store }) => store.keyFieldChoices(),
   setKeyField: ({ store }, type, item, on) =>
     store.setKeyField(type, item, on === true),
+  listRelations: async ({ store }) => store.listRelations(),
+  addRelation: ({ store }, from, to, choice) =>
+    store.addRelation(from, to, choice),
+  relabelRelation: ({ store }, id, label) => store.relabelRelation(id, label),
+  setRelationBook: ({ store }, id, book) => store.setRelationBook(id, book),
+  removeRelation: ({ store }, id) => store.removeRelation(id),
+  leaveSameAs: ({ store }, entryId) => store.leaveSameAs(entryId),
   setFoldedNoteImage: ({ store, sender }, on) =>
     saveProjectSetting(
       sender,

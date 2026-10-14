@@ -35,11 +35,23 @@ export type Synced<F extends string> = {
   unknown: Record<string, unknown>;
 } & Record<F, unknown>;
 
+/**
+ * One of a set of switches a property holds, as a Same as group's faces:
+ * on or off, and when it was last set.
+ */
+export type Toggle = { on: boolean; at: number };
+
 /** What a kind of record is: its properties, and how its file is read. */
 export type RecordKind<F extends string, T extends Synced<F>> = {
   /** What the Author calls one, as in log lines: `Todo`. */
   noun: string;
   fields: readonly F[];
+  /**
+   * The properties that hold a set of switches, `Record<string, Toggle>`,
+   * merged switch by switch rather than as a whole; each one's stamp is its
+   * latest switch's.
+   */
+  switches?: readonly F[];
   /**
    * The properties of a record from its file's keys other than `id`,
    * `editedAt` and `deleted`, and the keys it doesn't know; null if it
@@ -156,6 +168,23 @@ export class SyncedRecords<F extends string, T extends Synced<F>> {
     );
   }
 
+  /**
+   * Sets the switch `key` of the switches property `field`, merged first
+   * with the record's file as it is now; nothing is written if it is so.
+   */
+  toggle(id: string, field: F, key: string, on: boolean): Promise<void> {
+    return this.update(id, (record) => {
+      const toggles = record[field] as Record<string, Toggle>;
+      if ((toggles[key]?.on ?? false) === on) return record;
+      const at = this.stamp(record);
+      return {
+        ...record,
+        [field]: { ...toggles, [key]: { on, at } },
+        editedAt: { ...record.editedAt, [field]: at },
+      };
+    });
+  }
+
   /** Deletes a record, leaving a marker in its file. */
   delete(id: string): Promise<void> {
     return this.update(id, (record) => ({
@@ -185,7 +214,9 @@ export class SyncedRecords<F extends string, T extends Synced<F>> {
     const onDisk = await this.readOwn(id);
     if (onDisk === undefined) throw new Error(`Can't read the ${noun} ${id}`);
     const base =
-      known && onDisk ? merged(fields, known, onDisk) : (known ?? onDisk);
+      known && onDisk
+        ? merged(fields, known, onDisk, this.kind.switches)
+        : (known ?? onDisk);
     if (!base) throw new Error(`No ${noun} ${id}`);
     const next = settled(fields, edit(base));
     // Already so: nothing to save, nor to sync.
@@ -204,7 +235,9 @@ export class SyncedRecords<F extends string, T extends Synced<F>> {
     try {
       const own = await this.readOwn(copy.id);
       if (own === undefined) return;
-      await this.write(own ? merged(this.kind.fields, own, copy) : copy);
+      await this.write(
+        own ? merged(this.kind.fields, own, copy, this.kind.switches) : copy,
+      );
       await this.fs.unlink(path.join(this.dir, name));
       this.files.delete(name);
     } catch (error) {
@@ -294,6 +327,7 @@ export function merged<F extends string, T extends Synced<F>>(
   fields: readonly F[],
   a: T,
   b: T,
+  switches: readonly F[] = [],
 ): T {
   const next: T = {
     ...a,
@@ -301,7 +335,15 @@ export function merged<F extends string, T extends Synced<F>>(
     unknown: { ...b.unknown, ...a.unknown },
   };
   for (const field of fields) {
-    if (editedLater(b, a, field)) {
+    if (switches.includes(field)) {
+      Object.assign(next, {
+        [field]: mergedToggles(
+          a[field] as Record<string, Toggle>,
+          b[field] as Record<string, Toggle>,
+        ),
+      });
+      next.editedAt[field] = Math.max(a.editedAt[field], b.editedAt[field]);
+    } else if (editedLater(b, a, field)) {
       Object.assign(next, { [field]: b[field] });
       next.editedAt[field] = b.editedAt[field];
     }
@@ -310,6 +352,25 @@ export function merged<F extends string, T extends Synced<F>>(
     .filter((d) => d !== undefined)
     .sort((x, y) => y.seen - x.seen || y.at - x.at)[0];
   return settled(fields, { ...next, deleted });
+}
+
+/** Two sets of switches merged: each as the one that set it later has it, a tie going to on. */
+function mergedToggles(
+  a: Record<string, Toggle>,
+  b: Record<string, Toggle>,
+): Record<string, Toggle> {
+  const next = { ...a };
+  for (const [key, toggle] of Object.entries(b)) {
+    const mine = next[key];
+    if (
+      !mine ||
+      toggle.at > mine.at ||
+      (toggle.at === mine.at && toggle.on && !mine.on)
+    ) {
+      next[key] = toggle;
+    }
+  }
+  return next;
 }
 
 /** Whether `a` edited `field` later than `b`; a tie goes to the greater value, the same on every computer. */

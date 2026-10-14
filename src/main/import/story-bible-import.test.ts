@@ -284,6 +284,7 @@ describe('an Export imported back', () => {
     manuscript: () => ({ chapters: [], unplaced: [] }),
     listEntries: () => entries,
     listCustomFields: () => customFields,
+    listRelations: () => [],
     read: async <R extends EntryRef | PrivateRef>(ref: R) =>
       (ref.kind === 'entry'
         ? entries.find((e) => e.id === ref.id)!

@@ -100,6 +100,18 @@ describe('Key fields', () => {
     });
   });
 
+  it('switches Relations for any type, keeping them like the other Key fields', async () => {
+    const store = await open();
+    await store.setKeyField('character', 'relations', true);
+    await store.setKeyField('place', 'relations', false);
+    await store.close();
+
+    expect((await open('BETA', 20_000)).keyFieldChoices()).toEqual({
+      character: { relations: true },
+      place: { relations: false },
+    });
+  });
+
   it('merges a sync copy: toggles of different items on two computers both survive', async () => {
     const base = await open('ALPHA', 10_000);
     await base.setKeyField('character', 'voice.says', true);

@@ -10,6 +10,7 @@ import type {
 } from '../shared/api';
 import type { CustomField } from '../shared/custom-field';
 import type { KeyFieldChoices } from '../shared/key-fields';
+import type { Relation } from '../shared/relation';
 import type { Status } from '../shared/status';
 import type { Todo } from '../shared/todo';
 import type {
@@ -35,6 +36,8 @@ export type ProjectSnapshot = {
   customFields: CustomField[];
   /** What the Author has chosen as each Entry type's Key fields. */
   keyFields: KeyFieldChoices;
+  /** Every Relation held, those `relationsView` hides too. */
+  relations: Relation[];
   conflicts: Conflict[];
   /** The Project's Status list, which Project Settings or another computer may change. */
   statuses: Status[];
@@ -78,7 +81,12 @@ export class ProjectMirror {
   private readonly eventListeners = new Set<(event: MirrorEvent) => void>();
   /** The slices main has told us of since the load began, which a load leaves be. */
   private told = new Set<
-    'entries' | 'todos' | 'customFields' | 'keyFields' | 'conflicts'
+    | 'entries'
+    | 'todos'
+    | 'customFields'
+    | 'keyFields'
+    | 'relations'
+    | 'conflicts'
   >();
 
   constructor(
@@ -94,6 +102,7 @@ export class ProjectMirror {
       todos: [],
       customFields: [],
       keyFields: {},
+      relations: [],
       conflicts: [],
       statuses: opened.statuses,
       language: opened.language,
@@ -125,12 +134,13 @@ export class ProjectMirror {
   }
 
   private async load(): Promise<void> {
-    const [entries, todos, customFields, keyFields, conflicts] =
+    const [entries, todos, customFields, keyFields, relations, conflicts] =
       await Promise.all([
         this.api.listEntries(),
         this.api.listTodos(),
         this.api.listCustomFields(),
         this.api.listKeyFields(),
+        this.api.listRelations(),
         this.api.listConflicts(),
         this.refreshTrash(),
       ]);
@@ -139,6 +149,7 @@ export class ProjectMirror {
     if (!this.told.has('todos')) this.set({ todos });
     if (!this.told.has('customFields')) this.set({ customFields });
     if (!this.told.has('keyFields')) this.set({ keyFields });
+    if (!this.told.has('relations')) this.set({ relations });
     if (!this.told.has('conflicts')) this.set({ conflicts });
   }
 
@@ -221,6 +232,10 @@ export class ProjectMirror {
       case 'keyFieldsChanged':
         this.told.add('keyFields');
         this.set({ keyFields: event.choices });
+        break;
+      case 'relationsChanged':
+        this.told.add('relations');
+        this.set({ relations: event.relations });
         break;
       case 'readOnly':
         this.emit({ type: 'readOnlyStarted' });

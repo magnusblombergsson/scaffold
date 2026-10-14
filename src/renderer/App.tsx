@@ -45,6 +45,7 @@ import {
 } from '../shared/manuscript-order';
 import { entryAsOf, namesUpTo, summaryAsOf } from '../shared/evolution';
 import { ROOM_LABELS, ROOMS, type Room } from '../shared/room';
+import { relationsView } from '../shared/relation';
 import { ProjectMirror } from './project-mirror';
 import { useProject } from './use-project';
 import type { Cut } from '../shared/prose-split';
@@ -92,6 +93,7 @@ import { PanelResizer, type PaneSize } from './PanelResizer';
 import { ProjectSettingsDialog } from './ProjectSettingsDialog';
 import { ProposalTargetContext } from './ProposalCard';
 import { ProposalPeek, type TargetPeek } from './ProposalPeek';
+import { PeekRelationsContext } from './PeekCard';
 import { PinnedNotes } from './PinnedNotes';
 import { FloatingImagePanel, OutlineBarImage } from './FloatingImage';
 import { applyImageChange, floatImage } from './floating-image';
@@ -386,6 +388,7 @@ function ProjectView({
     todos,
     customFields,
     keyFields,
+    relations,
     conflicts,
     statuses,
     language,
@@ -448,6 +451,15 @@ function ProjectView({
     () => entries.map((e) => summaryAsOf(e, bookIds, bookBeingWritten)),
     [entries, bookIds, bookBeingWritten],
   );
+  /** The Relations among the Entries as of the Book being written, as a Peek and the Pinned notes show them. */
+  const writtenRelations = useMemo(
+    () =>
+      relationsView(relations, entriesAsWritten, {
+        books: bookIds,
+        book: bookBeingWritten,
+      }),
+    [relations, entriesAsWritten, bookIds, bookBeingWritten],
+  );
   /** The Book the Story Bible Room shows the Entries as of, if the Author chose one. */
   const [bibleBook, setBibleBook] = useState<string | null>(null);
   /** In a Series, the Book the Story Bible Room shows the Entries as of: the one chosen, or the Book being written. */
@@ -459,6 +471,15 @@ function ProjectView({
   const entriesAsOfBible = useMemo(
     () => entries.map((e) => summaryAsOf(e, bookIds, bibleAsOf)),
     [entries, bookIds, bibleAsOf],
+  );
+  /** The Relations among the Entries in the Story Bible in effect as of its Book, named as of it. */
+  const bibleRelations = useMemo(
+    () =>
+      relationsView(relations, entriesAsOfBible, {
+        books: bookIds,
+        book: bibleAsOf,
+      }),
+    [relations, entriesAsOfBible, bookIds, bibleAsOf],
   );
   /** What the Project Outline is called: in a Series, the Series Outline. */
   const projectOutlineName = manuscript.books
@@ -1985,6 +2006,7 @@ function ProjectView({
                 <div className="left-pane-list">
                   <StoryBible
                     entries={entriesAsOfBible}
+                    relations={bibleRelations}
                     books={seriesBooks}
                     asOf={bibleAsOf}
                     onAsOf={setBibleBook}
@@ -2036,6 +2058,8 @@ function ProjectView({
                   key={`${openEntry.id}:${openEntry.type}:${resolutions}:${bibleAsOf}:${bookIds.join()}`}
                   entry={summaryAsOf(openEntry, bookIds, bibleAsOf)}
                   entries={entriesAsOfBible}
+                  relations={bibleRelations}
+                  onOpenEntry={showEntry}
                   language={language}
                   books={seriesBooks}
                   asOf={bibleAsOf}
@@ -2140,63 +2164,73 @@ function ProjectView({
             onClose={() => setPickingEntryType(false)}
           />
         )}
-        {peek && (
-          <MentionPeek
-            peek={peek}
-            asWritten={asWritten}
-            pinned={pinnedNotes.map((note) => note.entryId)}
-            onOpen={showEntry}
-            onTogglePin={(id, card) =>
-              changePinnedNotes(
-                togglePin(notesNow.current, id, { x: card.left, y: card.top }),
-              )
-            }
-            onClose={closePeek}
-          />
-        )}
-        {targetPeek && room !== 'writing' && (
-          <ProposalPeek
-            peek={targetPeek}
-            onOpen={() => goToTarget(targetPeek.target, targetPeek.proposalId)}
-            onClose={closeTargetPeek}
-          />
-        )}
-        {/* Writing only: hidden in the other Rooms, back on return. */}
-        {room === 'writing' && (
-          <PinnedNotes
-            notes={pinnedNotes}
-            entries={entriesAsWritten}
-            asWritten={asWritten}
-            foldedImage={foldedNoteImage}
-            onChange={(entryId, change, save) => {
-              if (change.type === 'raise') setImageOnTop(false);
-              changePinnedNotes(
-                applyChange(notesNow.current, entryId, change),
-                save,
-              );
-            }}
-            onOpen={showEntry}
-          >
-            {/* While a Scene is open: not on a Corkboard or an Entry. */}
-            {floatingImage?.on &&
-              !resolvingConflict &&
-              open &&
-              !open.scene.missing && (
-                <FloatingImagePanel
-                  image={floatingImage}
-                  scene={open.scene}
-                  onTop={imageOnTop}
-                  onChange={(change, save) => {
-                    const now = floatingNow.current;
-                    if (now) {
-                      changeFloatingImage(applyImageChange(now, change), save);
-                    }
-                  }}
-                  onRaise={() => setImageOnTop(true)}
-                />
-              )}
-          </PinnedNotes>
-        )}
+        <PeekRelationsContext.Provider value={writtenRelations}>
+          {peek && (
+            <MentionPeek
+              peek={peek}
+              asWritten={asWritten}
+              pinned={pinnedNotes.map((note) => note.entryId)}
+              onOpen={showEntry}
+              onTogglePin={(id, card) =>
+                changePinnedNotes(
+                  togglePin(notesNow.current, id, {
+                    x: card.left,
+                    y: card.top,
+                  }),
+                )
+              }
+              onClose={closePeek}
+            />
+          )}
+          {targetPeek && room !== 'writing' && (
+            <ProposalPeek
+              peek={targetPeek}
+              onOpen={() =>
+                goToTarget(targetPeek.target, targetPeek.proposalId)
+              }
+              onClose={closeTargetPeek}
+            />
+          )}
+          {/* Writing only: hidden in the other Rooms, back on return. */}
+          {room === 'writing' && (
+            <PinnedNotes
+              notes={pinnedNotes}
+              entries={entriesAsWritten}
+              asWritten={asWritten}
+              foldedImage={foldedNoteImage}
+              onChange={(entryId, change, save) => {
+                if (change.type === 'raise') setImageOnTop(false);
+                changePinnedNotes(
+                  applyChange(notesNow.current, entryId, change),
+                  save,
+                );
+              }}
+              onOpen={showEntry}
+            >
+              {/* While a Scene is open: not on a Corkboard or an Entry. */}
+              {floatingImage?.on &&
+                !resolvingConflict &&
+                open &&
+                !open.scene.missing && (
+                  <FloatingImagePanel
+                    image={floatingImage}
+                    scene={open.scene}
+                    onTop={imageOnTop}
+                    onChange={(change, save) => {
+                      const now = floatingNow.current;
+                      if (now) {
+                        changeFloatingImage(
+                          applyImageChange(now, change),
+                          save,
+                        );
+                      }
+                    }}
+                    onRaise={() => setImageOnTop(true)}
+                  />
+                )}
+            </PinnedNotes>
+          )}
+        </PeekRelationsContext.Provider>
         {taggingUnit && (
           <TagsDialog
             unitName={`${unitKindName(taggingUnit.kind, partNamed)} “${taggingUnit.node.title}”`}

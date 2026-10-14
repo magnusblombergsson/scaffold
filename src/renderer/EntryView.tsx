@@ -48,9 +48,11 @@ import {
   type Visibility,
   type Voice,
 } from '../shared/project-types';
+import type { RelationsView } from '../shared/relation';
 import { AddCustomField, CustomFieldHeading } from './CustomFields';
 import { CustomFieldSuggestions } from './CustomFieldSuggestions';
 import { useCustomFields } from './StatusAndTags';
+import { RelationsSection } from './Relations';
 import { ShowInPeek } from './ShowInPeek';
 import { EntryImageSection, EvolvedMark } from './UnitImage';
 import { entryBody, type BodyField } from './entry-layout';
@@ -185,6 +187,8 @@ type Loaded = { entry: EntryValue; privateNotes: PrivateValue };
 export function EntryView({
   entry: summary,
   entries,
+  relations,
+  onOpenEntry,
   language,
   books = [],
   asOf,
@@ -200,6 +204,10 @@ export function EntryView({
   entry: EntrySummary;
   /** Every Entry in the Story Bible, to warn of names they share. */
   entries: EntrySummary[];
+  /** The Relations among the Entries in the Story Bible. */
+  relations: RelationsView;
+  /** Opens another Entry, as from its name in a Relation. */
+  onOpenEntry(id: string): void;
   language: ProseLanguage;
   /** In a Series, the Books in reading order; none otherwise. */
   books?: readonly TitledBook[];
@@ -714,6 +722,13 @@ export function EntryView({
           );
         })}
         <AddCustomField type={summary.type} fields={customFields} />
+        <RelationsSection
+          entryId={entryId}
+          type={summary.type}
+          view={relations}
+          books={books}
+          onOpen={onOpenEntry}
+        />
         <section className="plain-text-field private-notes">
           <h3>Private notes</h3>
           <p className="private-notes-warning">

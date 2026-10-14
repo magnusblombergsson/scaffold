@@ -32,6 +32,7 @@ import type { Todo, TodoChange, TodoLink } from './todo';
 import type { TodoDock } from './todo-dock';
 import type { CustomField } from './custom-field';
 import type { KeyFieldChoices, KeyFieldItem } from './key-fields';
+import type { Relation, RelationChoice } from './relation';
 import type { ImportBlock, ImportConvention } from './manuscript-import';
 import type { Cut } from './prose-split';
 import type { ListedModel, Model, ProviderId, ProviderStatus } from './models';
@@ -225,6 +226,15 @@ export type KeyFieldsChanged = {
   choices: KeyFieldChoices;
 };
 
+/**
+ * The Relations changed, here or on another computer: `relations` is every
+ * one held now, those `relationsView` hides too.
+ */
+export type RelationsChanged = {
+  type: 'relationsChanged';
+  relations: Relation[];
+};
+
 /** A newer app upgraded the Project; `host` is the computer it did so on, when known. */
 export type Upgrade = { host?: string };
 
@@ -256,6 +266,7 @@ export type ProjectEvent =
   | TodosChanged
   | CustomFieldsChanged
   | KeyFieldsChanged
+  | RelationsChanged
   | ConflictsChanged
   | EntriesChanged
   | ImageChanged
@@ -592,6 +603,32 @@ export interface ProjectApi {
    * an item the type can't show. Follows as a `keyFieldsChanged`.
    */
   setKeyField(type: EntryType, item: KeyFieldItem, on: boolean): Promise<void>;
+  /**
+   * Every Relation held, those naming an Entry in Trash, in the Drawer or
+   * not here too, which `relationsView` hides.
+   */
+  listRelations(): Promise<Relation[]>;
+  /**
+   * Relates the Entry `from` to `to`; resolves with the Relation's id.
+   * Refused as `relationRefusal` refuses it. Each change to the Relations
+   * follows as a `relationsChanged`.
+   */
+  addRelation(
+    from: string,
+    to: string,
+    choice: RelationChoice,
+  ): Promise<string>;
+  /** Gives a free-text Relation another label. */
+  relabelRelation(id: string, label: string): Promise<void>;
+  /**
+   * In a Series, has a Relation hold from a Book, or with null, in every
+   * Book; a Same as group's is set on the whole group.
+   */
+  setRelationBook(id: string, book: string | null): Promise<void>;
+  /** Removes a free-text or Part of Relation. */
+  removeRelation(id: string): Promise<void>;
+  /** Takes an Entry out of its Same as group, the others staying together. */
+  leaveSameAs(entryId: string): Promise<void>;
 }
 
 /**
@@ -1216,6 +1253,12 @@ export const projectMethods = {
   customFieldSuggestions: 'invoke',
   listKeyFields: 'invoke',
   setKeyField: 'invoke',
+  listRelations: 'invoke',
+  addRelation: 'invoke',
+  relabelRelation: 'invoke',
+  setRelationBook: 'invoke',
+  removeRelation: 'invoke',
+  leaveSameAs: 'invoke',
 } as const satisfies MethodTable<ProjectApi>;
 
 export const assistantMethods = {

@@ -21,6 +21,11 @@ import {
   summaryAsOf,
 } from '../../shared/evolution';
 import { mentionMatcher } from '../../shared/mentions';
+import {
+  relationPhrase,
+  relationsView,
+  type AsOfBook,
+} from '../../shared/relation';
 import { statusOf } from '../../shared/status';
 import {
   bookIds,
@@ -253,9 +258,48 @@ async function storyBible(
       ...(entries.length === 0
         ? ['(No Entries for this turn.)']
         : entries.map((entry) => entryText(entry, fields))),
+      ...relationsText(view, summaries, entries, { books, book }),
     ].join('\n\n'),
     ids: seen.map((e) => e.id),
   };
+}
+
+/**
+ * The Relations among the `sent` Entries, each a sentence by their names as
+ * sent; nothing when there are none. One naming an Entry not sent is left
+ * out, as the Assistant doesn't see it, and in a Series, one not in effect
+ * in the Book the turn is about.
+ */
+function relationsText(
+  view: AssistantView,
+  summaries: readonly EntrySummary[],
+  sent: readonly EntryValue[],
+  asOf: AsOfBook,
+): string[] {
+  const names = new Map(sent.map((e) => [e.id, e.name]));
+  const name = (id: string) => `“${names.get(id)}”`;
+  const { pairs, groups } = relationsView(
+    view.listRelations(),
+    summaries,
+    asOf,
+  );
+  const sentences = [
+    ...groups.flatMap(({ faces }) => {
+      const seen = faces.filter((face) => names.has(face)).map(name);
+      if (seen.length < 2) return [];
+      const listed = `${seen.slice(0, -1).join(', ')} and ${seen.at(-1)}`;
+      return [
+        `- ${listed} are one person or thing under different faces. Keep each Entry’s facts, fields and Voice to that Entry: never let one face’s details leak into another’s, in replies or in Proposals.`,
+      ];
+    }),
+    ...pairs
+      .filter((r) => names.has(r.from) && names.has(r.to))
+      .map((r) => `- ${name(r.from)} is ${relationPhrase(r)} ${name(r.to)}.`),
+  ];
+  if (sentences.length === 0) return [];
+  return [
+    ['How the Author has said these Entries relate:', ...sentences].join('\n'),
+  ];
 }
 
 /**
@@ -347,9 +391,6 @@ function entryText(entry: EntryValue, fields: readonly CustomField[]): string {
   }
   return lines.join('\n');
 }
-
-/** In a Series, the Book a turn is about, among the Books' ids in reading order. */
-type AsOfBook = { books: readonly string[]; book: string | undefined };
 
 /**
  * In a Series, the Book a turn is about: in Writing, the one holding the

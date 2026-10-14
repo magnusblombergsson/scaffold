@@ -13,6 +13,7 @@ import type {
   PrivateRef,
   ValueOf,
 } from '../../shared/project-types';
+import type { Relation } from '../../shared/relation';
 import {
   conflictedEntries,
   exportStoryBible,
@@ -99,7 +100,7 @@ const ONE_BOOK: Manuscript = { chapters: [], unplaced: [] };
 
 /**
  * A Project holding `entries`, their private notes and images by id, and
- * those from a Book on by `<id>.<book id>`.
+ * those from a Book on by `<id>.<book id>`, and `relations`.
  */
 function source(
   entries: EntryValue[],
@@ -107,11 +108,13 @@ function source(
   images: Record<string, EntryImage> = {},
   customFields: CustomField[] = [],
   manuscript: Manuscript = ONE_BOOK,
+  relations: Relation[] = [],
 ): StoryBibleSource {
   return {
     language: 'sv-SE',
     manuscript: () => manuscript,
     listCustomFields: () => customFields,
+    listRelations: () => relations,
     listEntries: () =>
       entries.map(
         ({
@@ -502,6 +505,95 @@ describe('Exporting Custom fields', () => {
   });
 });
 
+describe('Exporting the Relations of the Story Bible', () => {
+  const kista = entry('e5', 'place', 'Kista');
+  const partOf: Relation = {
+    kind: 'part-of',
+    id: 'r1',
+    from: 'e5',
+    to: 'e3',
+    at: 1,
+  };
+
+  async function relationsMarkdown(
+    entries: EntryValue[],
+    relations: Relation[],
+    choice: StoryBibleChoice = ALL,
+  ) {
+    const file = await exportStoryBible(
+      source(entries, {}, {}, [], ONE_BOOK, relations),
+      'markdown',
+      choice,
+    );
+    return Buffer.from(file).toString('utf8');
+  }
+
+  it('lists a Place’s Relations under it, as its page reads them, leaving the others as they were', async () => {
+    expect(await relationsMarkdown([kista, harbour, crossing], [partOf])).toBe(
+      [
+        '# Places',
+        '## Harbour',
+        '**Type:** Place',
+        '**Tags:** ferry',
+        '**Sound:** Gulls.',
+        '**Smells:** Tar.',
+        '**Relations:** Kista — part of — Harbour',
+        '## Kista',
+        '**Type:** Place',
+        '**Relations:** Kista — part of — Harbour',
+        '# Plot Threads',
+        '## The crossing',
+        '**Type:** Plot Thread',
+        '**Status:** Open',
+      ].join('\n\n') + '\n',
+    );
+  });
+
+  it('names the other Entry of a Relation when it isn’t ticked for Export', async () => {
+    const text = await relationsMarkdown([kista, harbour], [partOf], {
+      ...ALL,
+      filter: { types: ['place'], tags: ['ferry'] },
+    });
+    expect(text).not.toContain('## Kista');
+    expect(text).toContain('**Relations:** Kista — part of — Harbour');
+  });
+
+  it('leaves out a Relation naming an Entry in Trash or the Drawer', async () => {
+    const binned: Relation = { ...partOf, id: 'r2', to: 'gone' };
+    expect(await relationsMarkdown([kista], [binned])).not.toContain(
+      'Relations',
+    );
+  });
+
+  it('lists each Relation on a line of its own, in Markdown and Word', async () => {
+    const relations: Relation[] = [
+      { kind: 'same-as', id: 'r3', faces: ['e1', 'e2'], at: 1 },
+      {
+        kind: 'label',
+        id: 'r4',
+        from: 'e1',
+        to: 'e3',
+        label: 'owns a house in',
+        at: 1,
+      },
+    ];
+    const lines = 'Mara — same as — Bram\nMara — owns a house in — Harbour';
+    expect(await relationsMarkdown([mara, bram, harbour], relations)).toContain(
+      `**Relations:** ${lines.replace('\n', '\\\n')}`,
+    );
+    const files = unzip(
+      await exportStoryBible(
+        source([mara, bram, harbour], {}, {}, [], ONE_BOOK, relations),
+        'docx',
+        ALL,
+      ),
+    );
+    expect(paragraphs(files['word/document.xml'].toString('utf8'))).toContain(
+      `Relations: ${lines}`,
+    );
+  });
+});
+
 describe('Exporting the Story Bible of a Series', () => {
   const fields: CustomField[] = [
     { id: 'f-allegiance', type: 'character', label: 'Allegiance' },
@@ -595,6 +687,64 @@ describe('Exporting the Story Bible of a Series', () => {
         '**From The Second:** Rebels',
       ].join('\n\n') + '\n',
     );
+  });
+
+  describe('with Relations', () => {
+    const quay = entry('e3', 'place', 'Quay');
+    const crate = entry('e4', 'item', 'Crate');
+    const relations: Relation[] = [
+      { kind: 'same-as', id: 'r1', faces: ['e1', 'e2'], at: 1, book: 'b3' },
+      {
+        kind: 'label',
+        id: 'r2',
+        from: 'e1',
+        to: 'e3',
+        label: 'works at',
+        at: 1,
+        book: 'b2',
+      },
+      {
+        kind: 'label',
+        id: 'r3',
+        from: 'e1',
+        to: 'e4',
+        label: 'owns',
+        at: 1,
+        book: 'b1',
+      },
+    ];
+
+    /** The Relations paragraph under the Entry `name`, as of `book`. */
+    async function relationsOf(book: string, name: string) {
+      const file = await exportStoryBible(
+        source([vane, ghost, quay, crate], {}, {}, fields, series, relations),
+        'markdown',
+        { ...ALL, book, filter: { types: ['character'] } },
+      );
+      const text = Buffer.from(file).toString('utf8');
+      const under = text.split(`## ${name}\n\n`)[1]?.split('\n\n## ')[0];
+      return /\*\*Relations:\*\* (.*?)(\n\n|\n?$)/s.exec(under ?? '')?.[1];
+    }
+
+    it('lists only those in effect as of the chosen Book, by the names as of it', async () => {
+      expect(await relationsOf('b1', 'Mara')).toBe('Mara — owns — Crate');
+      expect(await relationsOf('b2', 'Mara Vane')).toBe(
+        'Mara Vane — works at — Quay\\\nMara Vane — owns — Crate',
+      );
+      expect(await relationsOf('b3', 'Ghost')).toBe(
+        'Ghost — same as — Mara Vane',
+      );
+    });
+
+    it('lists every one with all Books, marking those from a later Book', async () => {
+      expect(await relationsOf(ALL_BOOKS, 'Mara')).toBe(
+        [
+          'From Book 3: Mara — same as — Ghost',
+          'From The Second: Mara — works at — Quay',
+          'Mara — owns — Crate',
+        ].join('\\\n'),
+      );
+    });
   });
 
   it('names only the Entries it holds in Conflict', () => {
