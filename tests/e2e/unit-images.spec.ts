@@ -5,7 +5,7 @@ import {
   type Locator,
   type Page,
 } from '@playwright/test';
-import { readdir, writeFile } from 'node:fs/promises';
+import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { answerDialogs, launch, useTempDir } from './app';
 
@@ -24,16 +24,18 @@ function image(scope: Page | Locator, of: string) {
 }
 
 /** Writes a small grey PNG and has every Open dialog from now choose it. */
-async function offerImage(app: ElectronApplication) {
-  const imagePath = path.join(tempDir(), 'picture.png');
-  const png = await app.evaluate(({ nativeImage }) =>
-    nativeImage
-      .createFromBitmap(Buffer.alloc(64 * 48 * 4, 0x80), {
-        width: 64,
-        height: 48,
-      })
-      .toPNG()
-      .toString('base64'),
+async function offerImage(app: ElectronApplication, shade = 0x80) {
+  const imagePath = path.join(tempDir(), `picture-${shade}.png`);
+  const png = await app.evaluate(
+    ({ nativeImage }, shade) =>
+      nativeImage
+        .createFromBitmap(Buffer.alloc(64 * 48 * 4, shade), {
+          width: 64,
+          height: 48,
+        })
+        .toPNG()
+        .toString('base64'),
+    shade,
   );
   await writeFile(imagePath, Buffer.from(png, 'base64'));
   await app.evaluate(({ dialog }, file) => {
@@ -137,5 +139,80 @@ test('Scene and Chapter images are added, shown, opened and removed on cards, ro
     .toHaveLength(1);
   await button(binder, 'Chapter 1').click();
   await expect(image(card(page, 'Scene 1'), 'Scene 1')).toBeVisible();
+  await app.close();
+});
+
+test('Replace everywhere… replaces an image on the ticked units holding an identical copy', async () => {
+  const projectPath = path.join(tempDir(), 'My Novel');
+  const app = await launch(tempDir());
+  await answerDialogs(app, projectPath);
+  const page = await app.firstWindow();
+  await button(page, 'New Project…').click();
+  await expect(page.getByLabel('Prose')).toBeFocused();
+  await offerImage(app);
+  const binder = page.getByRole('navigation', { name: 'Manuscript' });
+  const menu = async (of: string, item: string) => {
+    await button(binder, of).click({ button: 'right' });
+    await page.getByRole('menuitem', { name: item, exact: true }).click();
+  };
+  await button(binder, 'Chapter actions: Chapter 1').click();
+  await page.getByRole('menuitem', { name: 'New Scene', exact: true }).click();
+  await expect(button(binder, 'Scene 2')).toBeVisible();
+
+  // One image alone is shared with no one.
+  await menu('Scene 1', 'Add image…');
+  await button(binder, 'Scene 1').click({ button: 'right' });
+  await expect(
+    page.getByRole('menuitem', { name: 'Replace everywhere…' }),
+  ).toHaveCount(0);
+  await page.keyboard.press('Escape');
+
+  // Scene 2 and the Chapter take identical copies.
+  await menu('Scene 2', 'Add image…');
+  await menu('Chapter 1', 'Add image…');
+  const images = path.join(projectPath, 'images');
+  await expect.poll(() => readdir(images)).toHaveLength(3);
+  const bytes = async () =>
+    Promise.all(
+      (await readdir(images))
+        .sort()
+        .map(async (name) =>
+          (await readFile(path.join(images, name))).toString('base64'),
+        ),
+    );
+  const before = await bytes();
+  expect(new Set(before).size).toBe(1);
+
+  // Cancelling the checklist changes nothing.
+  await offerImage(app, 0x20);
+  await menu('Scene 1', 'Replace everywhere…');
+  const dialog = page.getByRole('dialog', { name: 'Replace everywhere' });
+  await expect(dialog.getByLabel('Scene: Scene 2')).toBeChecked();
+  await expect(dialog.getByLabel('Chapter: Chapter 1')).toBeChecked();
+  await expect(dialog.getByLabel('Scene: Scene 1')).toHaveCount(0);
+  await expect(
+    dialog.getByRole('img', { name: 'The new image' }),
+  ).toBeVisible();
+  await button(dialog, 'Cancel').click();
+  await expect(dialog).toBeHidden();
+  expect(await bytes()).toEqual(before);
+
+  // Unticked, the Chapter keeps the old image; the Scenes take the new.
+  await menu('Scene 1', 'Replace everywhere…');
+  await dialog.getByLabel('Chapter: Chapter 1').uncheck();
+  await button(dialog, 'Replace').click();
+  await expect(dialog).toBeHidden();
+  await expect.poll(async () => new Set(await bytes()).size).toBe(2);
+  // Each still in its own file.
+  const after = await bytes();
+  expect(after).toHaveLength(3);
+  expect(after.filter((b) => b === before[0])).toHaveLength(1);
+
+  // The Chapter's image is now its own.
+  await button(binder, 'Chapter 1').click({ button: 'right' });
+  await expect(
+    page.getByRole('menuitem', { name: 'Replace everywhere…' }),
+  ).toHaveCount(0);
+  await page.keyboard.press('Escape');
   await app.close();
 });

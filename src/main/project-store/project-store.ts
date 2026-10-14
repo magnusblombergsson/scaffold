@@ -28,6 +28,8 @@ import {
   type NotesRef,
   type OutlineRef,
   type PrivateRef,
+  type ImageMatches,
+  type ImagesReplaced,
   type ProjectImage,
   type ProjectTree,
   type ProseLanguage,
@@ -2891,16 +2893,76 @@ export class ProjectStore {
    * `except`'s own, nor any identical to it.
    */
   async projectImages(except?: ImageRef): Promise<ProjectImage[]> {
-    const images = new Map<string, ImageHolder[]>();
+    const images = new Map<string, ProjectImage['holders']>();
     for (const { holder, file } of await this.imageFiles()) {
-      if (!(await this.deps.fs.exists(file))) continue;
-      const data = await this.deps.fs.readBytes(file);
-      const key = `${path.extname(file)} ${createHash('sha256').update(data).digest('hex')}`;
-      images.set(key, [...(images.get(key) ?? []), holder]);
+      const key = await this.imageKey(file);
+      if (key) images.set(key, [...(images.get(key) ?? []), holder]);
     }
     return [...images.values()]
       .filter((holders) => !holders.some((h) => h.id === except?.id))
       .map((holders) => ({ holders }));
+  }
+
+  /**
+   * What makes image files one image to `projectImages`: their extension
+   * and bytes. None while the file isn't here.
+   */
+  private async imageKey(file: string): Promise<string | undefined> {
+    if (!(await this.deps.fs.exists(file))) return undefined;
+    const data = await this.deps.fs.readBytes(file);
+    return `${path.extname(file)} ${createHash('sha256').update(data).digest('hex')}`;
+  }
+
+  /**
+   * The other units holding an image identical to `ref`'s own, as
+   * `projectImages` would group them: the live ones, in its order, and how
+   * many in the Drawer or Trash. None while `ref`'s file isn't here, and
+   * for an Evolution's image.
+   */
+  async imageMatches(ref: ImageRef): Promise<ImageMatches> {
+    const live = this.liveImageFiles();
+    const own = live.find((h) => h.holder.id === ref.id);
+    const key =
+      evolvedBook(ref) === undefined && own && (await this.imageKey(own.file));
+    if (!key) return { live: [], elsewhere: 0 };
+    const matching = async (files: HeldImageFile[]) => {
+      const holders: ImageHolder[] = [];
+      for (const { holder, file } of files) {
+        if (holder.id === ref.id) continue;
+        if ((await this.imageKey(file)) === key) holders.push(holder);
+      }
+      return holders;
+    };
+    const elsewhere = await matching([
+      ...(await this.trash.imagesIn('drawer')),
+      ...(await this.trash.imagesIn('trash')),
+    ]);
+    return { live: await matching(live), elsewhere: elsewhere.length };
+  }
+
+  /**
+   * Sets the same image on each of `refs`, as `setImage` would, each in its
+   * own file. A unit that can't take it, as one since moved to Trash, is
+   * skipped, saying why, and the rest still are.
+   */
+  async replaceImages(
+    refs: ImageRef[],
+    image: EntryImage,
+  ): Promise<ImagesReplaced> {
+    const result: ImagesReplaced = { replaced: [], skipped: [] };
+    for (const ref of refs) {
+      try {
+        await this.setImage(ref, image);
+        result.replaced.push(ref);
+      } catch (error) {
+        console.error(`Can't replace the image of ${ref.id}:`, error);
+        const reason = this.isAvailable(this.detailUnit(ref))
+          ? 'unwritable'
+          : orphanedIn(this.trash.where(ref.id));
+        result.skipped.push({ ref, reason });
+      }
+    }
+    return result;
   }
 
   /** The image of a unit `projectImages` offers, wherever it is kept; null without one. */
@@ -2924,11 +2986,28 @@ export class ProjectStore {
   }
 
   /**
-   * The image file each Part, Chapter, Scene and Entry names, in the
-   * Manuscript's order, then the Unplaced Scenes, the Entries and the
-   * Drawer's; whether or not it is here yet.
+   * The image file of each unit `projectImages` offers, wherever it is
+   * kept, those in the Drawer marked.
    */
-  private async imageFiles(): Promise<HeldImageFile[]> {
+  private async imageFiles(): Promise<
+    { holder: ProjectImage['holders'][number]; file: string }[]
+  > {
+    const drawer = await this.trash.imagesIn('drawer');
+    return [
+      ...this.liveImageFiles(),
+      ...drawer.map((h) => ({
+        ...h,
+        holder: { ...h.holder, drawer: true as const },
+      })),
+    ];
+  }
+
+  /**
+   * The image file each live Book, Part, Chapter, Scene and Entry names, in
+   * the Manuscript's order, then the Unplaced Scenes and the Entries;
+   * whether or not it is here yet.
+   */
+  private liveImageFiles(): HeldImageFile[] {
     const { books = [], parts = [], chapters, unplaced } = this.manuscript();
     const named =
       (kind: ImageHolder['kind']) =>
@@ -2952,7 +3031,6 @@ export class ProjectStore {
       ...this.listEntries().flatMap((entry) =>
         named('entry')({ ...entry, title: entryTitle(entry) }),
       ),
-      ...(await this.trash.imagesIn('drawer')),
     ];
   }
 

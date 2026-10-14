@@ -6,20 +6,41 @@ import {
   useState,
   type ReactNode,
 } from 'react';
-import type { ImageRef, ProjectImage } from '../shared/project-types';
-import { holdersLabel, imagesMatching, offersImage } from './image-picker';
+import type {
+  ImageHolder,
+  ImageMatches,
+  ImageRef,
+  PartLabel,
+  ProjectImage,
+} from '../shared/project-types';
+import {
+  holderLabel,
+  holdersLabel,
+  imagesMatching,
+  offersImage,
+  sharesImage,
+  skipMessage,
+} from './image-picker';
 import { useImageUrl } from './ImageView';
 
-/** Choose from Project…: whether a unit has an image to pick, and picking one. */
+/**
+ * Choose from Project…: whether a unit has an image to pick, and picking
+ * one. Replace everywhere…: whether another live unit holds an identical
+ * image, and replacing it on them.
+ */
 export type ImagePicker = {
   offers(ref: ImageRef): boolean;
   choose(ref: ImageRef): void;
+  shares(ref: ImageRef): boolean;
+  replaceEverywhere(ref: ImageRef): Promise<void>;
 };
 
 /** Without a Project, nothing to pick. */
 const ImagePickerContext = createContext<ImagePicker>({
   offers: () => false,
   choose: () => {},
+  shares: () => false,
+  replaceEverywhere: async () => {},
 });
 
 export function useImagePicker(): ImagePicker {
@@ -32,9 +53,29 @@ export function useImagePicker(): ImagePicker {
  * image changes, and as units are renamed or moved, to the Drawer too.
  * Not on other unit details, as each asking reads every image.
  */
-export function ImagePickerProvider({ children }: { children: ReactNode }) {
+export function ImagePickerProvider({
+  partLabel,
+  children,
+}: {
+  partLabel?: PartLabel;
+  children: ReactNode;
+}) {
   const [images, setImages] = useState<ProjectImage[]>([]);
   const [target, setTarget] = useState<ImageRef | null>(null);
+  /** The unit Replace everywhere… is for, and the new image picked for it. */
+  const [replacing, setReplacing] = useState<{
+    start: ImageHolder;
+    url: string;
+  } | null>(null);
+
+  async function replaceEverywhere(ref: ImageRef) {
+    const url = await window.project.pickImage();
+    if (!url) return;
+    const held = images
+      .flatMap((image) => image.holders)
+      .find((h) => h.id === ref.id);
+    setReplacing({ start: { ...ref, title: held?.title ?? '' }, url });
+  }
 
   useEffect(() => {
     let current = true;
@@ -61,11 +102,24 @@ export function ImagePickerProvider({ children }: { children: ReactNode }) {
 
   return (
     <ImagePickerContext.Provider
-      value={{ offers: (ref) => offersImage(images, ref), choose: setTarget }}
+      value={{
+        offers: (ref) => offersImage(images, ref),
+        choose: setTarget,
+        shares: (ref) => sharesImage(images, ref),
+        replaceEverywhere,
+      }}
     >
       {children}
       {target && (
         <ImagePickerDialog target={target} onClose={() => setTarget(null)} />
+      )}
+      {replacing && (
+        <ReplaceEverywhereDialog
+          start={replacing.start}
+          url={replacing.url}
+          partLabel={partLabel}
+          onClose={() => setReplacing(null)}
+        />
       )}
     </ImagePickerContext.Provider>
   );
@@ -163,5 +217,162 @@ function ImageTile({ image, onPick }: { image: ProjectImage; onPick(): void }) {
       {url ? <img src={url} alt="" /> : <span className="image-picker-blank" />}
       <span className="image-picker-label">{label}</span>
     </button>
+  );
+}
+
+/**
+ * Replace everywhere…, once the new image is picked: the old image and the
+ * new, and the other live units holding the old, each ticked to take the
+ * new too; `start` always does. Those in the Drawer or Trash are only
+ * counted, as they keep the old. Units that couldn't take it are listed
+ * once it is done; Cancel or Escape changes nothing.
+ */
+function ReplaceEverywhereDialog({
+  start,
+  url,
+  partLabel,
+  onClose,
+}: {
+  start: ImageHolder;
+  /** The new image. */
+  url: string;
+  partLabel?: PartLabel;
+  onClose(): void;
+}) {
+  const dialogRef = useRef<HTMLDialogElement>(null);
+  /** Where focus was, to go back to. */
+  const opener = useRef(document.activeElement);
+  const [matches, setMatches] = useState<ImageMatches | null>(null);
+  const [unticked, setUnticked] = useState<ReadonlySet<string>>(new Set());
+  const [replacing, setReplacing] = useState(false);
+  /** Why units weren't changed, once it is done and some weren't. */
+  const [skipped, setSkipped] = useState<string[] | null>(null);
+  // The old image as the dialog opened, kept once it is replaced.
+  const old = useImageUrl(
+    start.id,
+    () => window.project.image(start),
+    () => false,
+  );
+
+  useEffect(() => {
+    dialogRef.current?.showModal();
+    let current = true;
+    window.project.imageMatches(start).then(
+      (found) => current && setMatches(found),
+      (error: unknown) => console.error("Can't find the matches:", error),
+    );
+    return () => {
+      current = false;
+    };
+  }, [start]);
+
+  function toggle(id: string) {
+    const next = new Set(unticked);
+    if (!next.delete(id)) next.add(id);
+    setUnticked(next);
+  }
+
+  async function replace() {
+    const holders = [
+      start,
+      ...(matches?.live.filter((h) => !unticked.has(h.id)) ?? []),
+    ];
+    setReplacing(true);
+    try {
+      const { skipped } = await window.project.replaceImages(
+        // Never an Evolution's image, which shares none.
+        holders.map(({ kind, id }) => ({ kind, id }) as ImageRef),
+      );
+      if (skipped.length === 0) return dialogRef.current?.close();
+      setSkipped(
+        skipped.map(({ ref, reason }) =>
+          skipMessage(
+            holders.find((h) => h.id === ref.id) ?? { ...ref, title: ref.id },
+            reason,
+          ),
+        ),
+      );
+    } catch (error) {
+      console.error("Can't replace the images:", error);
+      setSkipped(["The image couldn't be replaced."]);
+    }
+  }
+
+  return (
+    <dialog
+      ref={dialogRef}
+      className="settings replace-everywhere"
+      aria-labelledby="replace-everywhere-heading"
+      // Escape closes it.
+      onClose={() => {
+        if (opener.current instanceof HTMLElement) opener.current.focus();
+        onClose();
+      }}
+    >
+      <h2 id="replace-everywhere-heading">Replace everywhere</h2>
+      {skipped ? (
+        <>
+          <p>Not every image was replaced:</p>
+          <ul className="replace-everywhere-skipped">
+            {skipped.map((message) => (
+              <li key={message}>{message}</li>
+            ))}
+          </ul>
+          <div className="settings-close">
+            <button onClick={() => dialogRef.current?.close()} autoFocus>
+              OK
+            </button>
+          </div>
+        </>
+      ) : (
+        <>
+          <div className="replace-everywhere-images">
+            <figure>
+              {old ? (
+                <img src={old} alt="The old image" />
+              ) : (
+                <span className="image-picker-blank" />
+              )}
+              <figcaption>Old</figcaption>
+            </figure>
+            <span aria-hidden="true">→</span>
+            <figure>
+              <img src={url} alt="The new image" />
+              <figcaption>New</figcaption>
+            </figure>
+          </div>
+          <p>Also replace it on:</p>
+          <ul className="replace-everywhere-units">
+            {matches?.live.map((holder) => (
+              <li key={holder.id}>
+                <label>
+                  <input
+                    type="checkbox"
+                    checked={!unticked.has(holder.id)}
+                    onChange={() => toggle(holder.id)}
+                  />
+                  {holderLabel(holder, partLabel)}
+                </label>
+              </li>
+            ))}
+          </ul>
+          {matches && matches.elsewhere > 0 && (
+            <p className="field-hint">
+              {matches.elsewhere} more in the Drawer or Trash{' '}
+              {matches.elsewhere === 1 ? 'keeps' : 'keep'} the old image
+            </p>
+          )}
+          <div className="settings-close">
+            <button onClick={() => dialogRef.current?.close()}>Cancel</button>
+            <button
+              disabled={!matches || replacing}
+              onClick={() => void replace()}
+            >
+              Replace
+            </button>
+          </div>
+        </>
+      )}
+    </dialog>
   );
 }

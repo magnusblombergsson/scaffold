@@ -220,7 +220,7 @@ export function UnitCardImage({ unit }: { unit: Unit }) {
   );
 }
 
-/** Add image… or Replace image…, Choose from Project… and Remove image, as buttons. */
+/** Add image… or Replace image…, Replace everywhere…, Choose from Project… and Remove image, as buttons. */
 export function UnitImageButtons({ unit }: { unit: Unit }) {
   const readOnly = useContext(ReadOnlyContext);
   const imagePicker = useImagePicker();
@@ -288,7 +288,8 @@ function imageItems(
 }
 
 /**
- * Add image… or Replace image…, as the unit names an image or not, and
+ * Add image… or Replace image…, as the unit names an image or not,
+ * Replace everywhere… when another live unit holds an identical image, and
  * Choose from Project… when another unit has an image it could copy.
  */
 function imageAddItems(
@@ -303,6 +304,15 @@ function imageAddItems(
       disabled: readOnly,
       run: () => window.project.chooseImage(ref),
     },
+    ...(image && imagePicker.shares(ref)
+      ? [
+          {
+            label: 'Replace everywhere…',
+            disabled: readOnly,
+            run: () => imagePicker.replaceEverywhere(ref),
+          },
+        ]
+      : []),
     ...(imagePicker.offers(ref)
       ? [
           {

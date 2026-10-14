@@ -1,7 +1,9 @@
 import type {
   EntrySummary,
   EntryType,
+  ImageMatches,
   ImageRef,
+  ImagesReplaced,
   ProjectImage,
   Manuscript,
   PartLabel,
@@ -405,6 +407,24 @@ export interface ProjectApi {
    * no undo.
    */
   copyImage(ref: ImageRef, source: ImageRef): Promise<boolean>;
+  /**
+   * The other units holding an image identical to `ref`'s own: those live,
+   * and how many in the Drawer or Trash, which Replace everywhere… leaves
+   * alone.
+   */
+  imageMatches(ref: ImageRef): Promise<ImageMatches>;
+  /**
+   * Asks the Author for a JPEG or PNG, as `chooseImage` does, and keeps it,
+   * scaled down, for `replaceImages`; it as a `data:` URL, or null if they
+   * cancel or it can't be read, which main has told them.
+   */
+  pickImage(): Promise<string | null>;
+  /**
+   * Makes the image `pickImage` last kept the image of each of `refs`, each
+   * in its own file, skipping those that can't take it, as one since moved
+   * to Trash. There is no undo.
+   */
+  replaceImages(refs: ImageRef[]): Promise<ImagesReplaced>;
   /** Puts a Trash or Drawer item back where it was, as near as the Manuscript allows. */
   restore(id: string): Promise<Changed>;
   /** Reverts `step` if it is still the latest structure operation. */
@@ -1142,6 +1162,9 @@ export const projectMethods = {
   projectImages: 'invoke',
   projectImage: 'invoke',
   copyImage: 'invoke',
+  imageMatches: 'invoke',
+  pickImage: 'invoke',
+  replaceImages: 'invoke',
   restore: 'invoke',
   undo: 'invoke',
   listTrash: 'invoke',
