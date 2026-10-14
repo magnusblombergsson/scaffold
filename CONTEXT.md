@@ -21,7 +21,7 @@ One story (a novel or short story), or a Series of them, with its own Story Bibl
 _Avoid_: Workspace, document, book (that is one volume of it)
 
 **Book**:
-One volume of a Project, with its own Manuscript. A Project's Books are in reading order, and Scenes, Chapters and Parts can move between them, keeping their Outline, Notes and details. A Book has the same details as a Part: a title, Status, Tags, its own Word target, image, Outline and Notes. Prose language, the Part label, Statuses, Custom fields and Key fields are the Project's, shared by every Book. In Writing, the Book is the one holding the Scene in focus.
+One volume of a Project, with its own Manuscript. A Project's Books are in reading order, and Scenes, Chapters and Parts can move between them, keeping their Outline, Notes and details. A Book has the same details as a Part: a title, Status, Tags, its own Word target, image, Outline and Notes. Prose language, the Part label, Statuses, Custom fields and Key fields are the Project's, shared by every Book. In Writing, the Book is the one holding the Scene in focus. The Author may also add a Book from a Backup of another Project: its Books, Story Bible, Trash, Drawer and Conversations come into this Project, and the Author then chooses which of its Entries to Combine with those already here.
 _Avoid_: Volume, installment, novel (when meaning one of the Series)
 
 **Series**:
@@ -100,8 +100,12 @@ A free-text field the Author adds to one Entry type in one Project, such as a Ch
 _Avoid_: Attribute, property, trait
 
 **Relation**:
-A connection the Author records between two Entries, either of a built-in kind or with a free-text label such as "mother of" or "rival of". The built-in kinds are *same as*, joining two Entries of one type that are the same person or thing under different faces (Clark Kent and Superman), and *part of*, putting a Place inside a Place or an Item inside an Item (the basement and its house). A free-text Relation may join Entries of any types and reads one way, shown as the same sentence on both Entries. *Part of* reads one way too, gives an Entry at most one parent and never makes a loop; *same as* has no direction and joins every face it reaches into one group. Unlike an alias, which is another name for one Entry, *same as* keeps two full Entries, and the Assistant is told to keep each face's facts to it. A Relation is not an Evolution: in a Series it may say from which Book it holds. While either Entry is in Trash or the Drawer the Relation is hidden, and it comes back with that Entry.
+A connection the Author records between two Entries, either of a built-in kind or with a free-text label such as "mother of" or "rival of". The built-in kinds are _same as_, joining two Entries of one type that are the same person or thing under different faces (Clark Kent and Superman), and _part of_, putting a Place inside a Place or an Item inside an Item (the basement and its house). A free-text Relation may join Entries of any types and reads one way, shown as the same sentence on both Entries. _Part of_ reads one way too, gives an Entry at most one parent and never makes a loop; _same as_ has no direction and joins every face it reaches into one group. Unlike an alias, which is another name for one Entry, _same as_ keeps two full Entries, and the Assistant is told to keep each face's facts to it. A Relation is not an Evolution: in a Series it may say from which Book it holds. While either Entry is in Trash or the Drawer the Relation is hidden, and it comes back with that Entry.
 _Avoid_: Link (that is a highlighted name's tie to its Entry), connection, association
+
+**Combine**:
+Making two Entries of one type into one. The Author keeps one; the other's name becomes an alias of it, its aliases and Tags are added, its private notes appended, and for each other field that differs the Author picks one value, or in a Series may keep the other's from a given Book on, as an Evolution. What pointed to the other now points to the kept one, and the other goes to Trash as it was.
+_Avoid_: Merge (that is how synced copies come together), join (that is _same as_), dedupe
 
 **Image prompt**:
 A description of an Entry, written by the Assistant on request from what the Entry says it looks, sounds, smells and feels like, for the Author to paste into an image generator elsewhere. It describes only: no narration, new dialogue or story moment, so it is not Prose, though it may quote the Author's own lines. It isn't kept.
@@ -136,7 +140,7 @@ A few words beside a Character's Role saying what they are to the story, such as
 _Avoid_: Tagline, role description
 
 **Proposal**:
-A change to the Story Bible or an Outline suggested by the Assistant during a Conversation; it takes effect only when the Author accepts it, optionally after editing it. A Proposal to a field or Outline either replaces its text, appends text to it, or adds an item to a list; an append or add lands on whatever the target holds when accepted. The Author may also append a replacing Proposal's text instead of replacing. A replacing Proposal is stale when its target has changed since it was made. An accepted Proposal can be undone while its target still holds the accepted values; it then becomes pending again. A reply the Assistant didn't finish (cut short, failed partway, or empty) makes no Proposals. In a Series, a Proposal lands where the value the Conversation's Book sees comes from, the Entry's own value or the Evolution in effect, unless the Author accepts it "from this Book on", making it an Evolution; the Assistant never chooses that. Proposals never touch Prose, Notes, or private notes.
+A change to the Story Bible or an Outline suggested by the Assistant during a Conversation; it takes effect only when the Author accepts it, optionally after editing it. A Proposal to a field or Outline either replaces its text, appends text to it, or adds an item to a list; an append or add lands on whatever the target holds when accepted. The Author may also append a replacing Proposal's text instead of replacing. A replacing Proposal is stale when its target has changed since it was made. A Proposal may also add a Relation between two Entries already in the Story Bible; it never goes stale, but can be accepted only while the Relation's rules allow it, and of its parts only a free-text label can be edited. An accepted Proposal can be undone while its target still holds the accepted values; it then becomes pending again. A reply the Assistant didn't finish (cut short, failed partway, or empty) makes no Proposals. In a Series, a Proposal lands where the value the Conversation's Book sees comes from, the Entry's own value or the Evolution in effect, unless the Author accepts it "from this Book on", making it an Evolution; the Assistant never chooses that. Proposals never touch Prose, Notes, or private notes.
 _Avoid_: Suggestion (when meaning a Story Bible change), auto-save
 
 **Outline**:
@@ -184,7 +188,7 @@ A copy written outside the Project for others to read, of either the Manuscript'
 _Avoid_: Compile, publish, backup
 
 **Backup**:
-One file holding a whole Project as it was when it was made, Trash and Drawer included, from which the Author can restore it as a new Project. Besides those the Author makes, the app makes its own on each computer, at most once a day and before Trash is emptied, kept outside every Project so they are never synced.
+One file holding a whole Project as it was when it was made, Trash and Drawer included, from which the Author can restore it as a new Project. Besides those the Author makes, the app makes its own on each computer, at most once a day and before Trash is emptied, kept outside every Project so they are never synced. Before upgrading a Project to a newer format it always makes one there too, kept for good, and upgrades only once it is made. A Backup can also be added to another Project as a new Book.
 _Avoid_: Snapshot (that is one Scene's Prose), archive, copy
 
 **Snapshot**:

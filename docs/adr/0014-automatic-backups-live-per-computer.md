@@ -12,5 +12,5 @@ We chose this because sync is what a Backup must survive: a Backup inside the Pr
 ## Consequences
 
 - Each computer keeps its own history. A Project that is written on two computers gets a Backup on each, and neither sees the other's.
-- ADR 0004 still puts the format-upgrade backup inside the Project. That conflict is left to [#260](https://github.com/magnusblombergsson/scaffold/issues/260), to settle before the upgrade flow is built.
+- The format-upgrade Backup (ADR 0004) goes to the same folder, kept for good and made even when automatic Backups are off, so no Backup is ever written inside a Project. Decided in [#260](https://github.com/magnusblombergsson/scaffold/issues/260).
 - Turning automatic Backups off, or a folder that isn't available, leaves a Project with no automatic Backup. The app says so and never falls back silently to another location.
