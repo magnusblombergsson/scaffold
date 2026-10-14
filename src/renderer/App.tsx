@@ -305,13 +305,19 @@ export function App() {
           onError={setError}
           onAddProvider={openSettings}
           onOpenSettings={openSettings}
+          importing={importing}
+          onImportProject={(file, convention) =>
+            void importProject(file, convention)
+          }
+          onCloseImport={() => setImporting(null)}
         />
       ) : welcome ? (
         <Welcome reason={welcome} onDone={() => setWelcome(null)} />
       ) : (
         <StartScreen actions={startButtons} error={error} onOpen={open} />
       )}
-      {importing && (
+      {/* With a Project open, its window offers a new Book too. */}
+      {importing && !project && (
         <ImportDialog
           file={importing}
           onImport={(convention) => void importProject(importing, convention)}
@@ -352,6 +358,9 @@ function ProjectView({
   onError,
   onAddProvider,
   onOpenSettings,
+  importing,
+  onImportProject,
+  onCloseImport,
 }: {
   project: OpenedProject;
   error: string | null;
@@ -360,6 +369,11 @@ function ProjectView({
   onAddProvider(): void;
   /** Opens Settings, as to choose another Backup folder. */
   onOpenSettings(): void;
+  /** The manuscript file being imported, while the Author previews its split. */
+  importing: ImportFile | null;
+  /** Imports it into a new Project, as with no Project open. */
+  onImportProject(file: ImportFile, convention: ImportConvention): void;
+  onCloseImport(): void;
 }) {
   const [mirror] = useState(() => new ProjectMirror(window.project, project));
   useEffect(() => mirror.start(), [mirror]);
@@ -1197,6 +1211,21 @@ function ProjectView({
     onError(null);
     const { ok: _, ...file } = choice;
     setStoryBibleImport(file);
+  }
+
+  /**
+   * Adds the manuscript file as a new Book after the last, as one step the
+   * Author can undo.
+   */
+  async function importBook(file: ImportFile, convention: ImportConvention) {
+    onCloseImport();
+    const id = await create(
+      () => window.project.importBook(file, convention),
+      `Imported ${file.name} as a new Book`,
+    );
+    if (!id) return;
+    switchRoom('writing');
+    setTab('manuscript');
   }
 
   /** Adds the Entries the Author ticked, as one step they can undo. */
@@ -2189,7 +2218,20 @@ function ProjectView({
         {exportOpen && (
           <ExportManuscriptDialog
             manuscript={manuscript}
+            book={bookBeingWritten}
             onClose={() => setExportOpen(false)}
+          />
+        )}
+        {importing && (
+          <ImportDialog
+            file={importing}
+            onImport={(convention) => onImportProject(importing, convention)}
+            onImportBook={
+              readOnly === null
+                ? (convention) => void importBook(importing, convention)
+                : undefined
+            }
+            onClose={onCloseImport}
           />
         )}
         {storyBibleImport && (
@@ -2204,6 +2246,8 @@ function ProjectView({
         {storyBibleExportOpen && (
           <ExportStoryBibleDialog
             entries={entries}
+            books={manuscript.books}
+            book={bookBeingWritten}
             onClose={() => setStoryBibleExportOpen(false)}
           />
         )}

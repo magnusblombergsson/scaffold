@@ -33,6 +33,7 @@ import {
 import type { Handlers } from '../shared/bridge';
 import {
   TICK_ALL,
+  type ExportBook,
   type ExportUnticked,
   type StoryBibleChoice,
 } from '../shared/export-choice';
@@ -644,10 +645,12 @@ const shellHandlers: Handlers<ShellApi, typeof shellMethods, WindowContext> = {
     const store = projectWindows.find(sender);
     return (store && settings.project(store.id).exportUnticked) ?? TICK_ALL;
   },
-  exportManuscript: async (ctx, unticked) => {
+  exportManuscript: async (ctx, unticked, book) => {
     const store = projectWindows.of(ctx.sender);
-    await exportFrom(windowOf(ctx), manuscriptExport(store, unticked), () =>
-      settings.updateProject(store.id, { exportUnticked: unticked }),
+    await exportFrom(
+      windowOf(ctx),
+      manuscriptExport(store, unticked, book),
+      () => settings.updateProject(store.id, { exportUnticked: unticked }),
     );
   },
   storyBibleExportImages: (ctx) => {
@@ -1015,25 +1018,31 @@ function updateMenu(): void {
   if (store) spellcheckIn(window.webContents, store.language);
 }
 
-/** The ticked part of the Manuscript, as an Export. */
+/**
+ * The ticked part of the Manuscript, as an Export: in a Series, of `book`
+ * alone, offered under the Book's title.
+ */
 function manuscriptExport(
   store: ProjectStore,
   unticked: ExportUnticked,
+  book: ExportBook | undefined,
 ): ExportJob {
+  const title = store.manuscript().books?.find((b) => b.id === book?.id)?.title;
   return {
     projectPath: store.path,
     projectName: store.displayName,
     title: 'Export Manuscript',
-    name: store.displayName,
+    name: title ?? store.displayName,
     conflictQuestion: () => {
       const titles = conflictedScenes(
         store.manuscript(),
         store.listConflicts(),
         unticked,
+        book?.id,
       );
       return titles.length > 0 ? exportConflictQuestion(titles) : null;
     },
-    write: (format) => exportManuscript(store, format, unticked),
+    write: (format) => exportManuscript(store, format, unticked, book),
   };
 }
 
@@ -1091,6 +1100,7 @@ function storyBibleExport(
         store.listEntries(),
         store.listConflicts(),
         choice,
+        store.manuscript(),
       );
       return names.length > 0 ? storyBibleConflictQuestion(names) : null;
     },

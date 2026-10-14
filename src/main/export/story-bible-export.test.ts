@@ -2,12 +2,14 @@ import { inflateRawSync } from 'node:zlib';
 import { describe, expect, it } from 'vitest';
 import type { Conflict } from '../../shared/api';
 import type { CustomField } from '../../shared/custom-field';
-import type { StoryBibleChoice } from '../../shared/export-choice';
+import { ALL_BOOKS, type StoryBibleChoice } from '../../shared/export-choice';
 import { newEntryValue } from '../../shared/entry';
+import { evolutionSummaries } from '../../shared/evolution';
 import type {
   EntryImage,
   EntryRef,
   EntryValue,
+  Manuscript,
   PrivateRef,
   ValueOf,
 } from '../../shared/project-types';
@@ -92,26 +94,50 @@ const harbour = entry('e3', 'place', 'Harbour', {
 });
 const crossing = entry('e4', 'plot-thread', 'The crossing');
 
-/** A Project holding `entries`, their private notes and images by id. */
+/** A Project of one Book. */
+const ONE_BOOK: Manuscript = { chapters: [], unplaced: [] };
+
+/**
+ * A Project holding `entries`, their private notes and images by id, and
+ * those from a Book on by `<id>.<book id>`.
+ */
 function source(
   entries: EntryValue[],
   privateNotes: Record<string, string> = {},
   images: Record<string, EntryImage> = {},
   customFields: CustomField[] = [],
+  manuscript: Manuscript = ONE_BOOK,
 ): StoryBibleSource {
   return {
     language: 'sv-SE',
+    manuscript: () => manuscript,
     listCustomFields: () => customFields,
     listEntries: () =>
-      entries.map(({ id, type, name, aliases, visibility, image, tags }) => ({
-        id,
-        type,
-        name,
-        aliases,
-        visibility,
-        image,
-        tags,
-      })),
+      entries.map(
+        ({
+          id,
+          type,
+          name,
+          aliases,
+          visibility,
+          image,
+          tags,
+          firstAppears,
+          evolutions,
+          evolvedImages,
+        }) => ({
+          id,
+          type,
+          name,
+          aliases,
+          visibility,
+          image,
+          tags,
+          firstAppears,
+          evolved: evolutionSummaries(evolutions),
+          evolvedImages,
+        }),
+      ),
     read: async <R extends EntryRef | PrivateRef>(
       ref: R,
     ): Promise<ValueOf<R>> => {
@@ -120,7 +146,10 @@ function source(
       }
       return entries.find((e) => e.id === ref.id) as ValueOf<R>;
     },
-    readImage: async (ref) => images[ref.id ?? ''] ?? null,
+    readImage: async (ref) =>
+      images[
+        ref.kind === 'entry' && ref.book ? `${ref.id}.${ref.book}` : ref.id
+      ] ?? null,
   };
 }
 
@@ -388,7 +417,7 @@ describe('Exporting the Story Bible while Entries are in Conflict', () => {
       conflict({ kind: 'entry', id: 'e1' }),
       conflict({ kind: 'scene', id: 'e2' }),
     ];
-    expect(conflictedEntries(entries, conflicts, ALL)).toEqual([
+    expect(conflictedEntries(entries, conflicts, ALL, ONE_BOOK)).toEqual([
       'Mara',
       'Harbour',
     ]);
@@ -397,18 +426,28 @@ describe('Exporting the Story Bible while Entries are in Conflict', () => {
   it('leaves out Entries the Filter leaves out', () => {
     const conflicts = [conflict({ kind: 'entry', id: 'e3' })];
     expect(
-      conflictedEntries(entries, conflicts, {
-        ...ALL,
-        filter: { types: ['character'] },
-      }),
+      conflictedEntries(
+        entries,
+        conflicts,
+        {
+          ...ALL,
+          filter: { types: ['character'] },
+        },
+        ONE_BOOK,
+      ),
     ).toEqual([]);
   });
 
   it('counts a Conflict in private notes only when they go in', () => {
     const conflicts = [conflict({ kind: 'private', id: 'e2' })];
-    expect(conflictedEntries(entries, conflicts, ALL)).toEqual([]);
+    expect(conflictedEntries(entries, conflicts, ALL, ONE_BOOK)).toEqual([]);
     expect(
-      conflictedEntries(entries, conflicts, { ...ALL, privateNotes: true }),
+      conflictedEntries(
+        entries,
+        conflicts,
+        { ...ALL, privateNotes: true },
+        ONE_BOOK,
+      ),
     ).toEqual(['Bram']);
   });
 
@@ -460,5 +499,112 @@ describe('Exporting Custom fields', () => {
     expect(paragraphs(files['word/document.xml'].toString('utf8'))).toContain(
       'Allegiance: The Crown',
     );
+  });
+});
+
+describe('Exporting the Story Bible of a Series', () => {
+  const fields: CustomField[] = [
+    { id: 'f-allegiance', type: 'character', label: 'Allegiance' },
+  ];
+  const series: Manuscript = {
+    chapters: [],
+    unplaced: [],
+    books: [
+      { id: 'b1', title: 'Book 1', top: [] },
+      { id: 'b2', title: 'The Second', top: [] },
+      { id: 'b3', title: 'Book 3', top: [] },
+    ],
+  };
+  const vane = entry('e1', 'character', 'Mara', {
+    aliases: ['M'],
+    description: 'She runs the ferry.',
+    custom: { 'f-allegiance': 'The Crown' },
+    image: 'e1.png',
+    evolutions: {
+      b2: {
+        name: 'Mara Vane',
+        aliases: ['M', 'Vane'],
+        appearance: 'Scarred.',
+        'custom:f-allegiance': 'Rebels',
+      },
+      b3: { description: 'She sank the ferry.' },
+      gone: { description: 'Of a Book in Trash.' },
+    },
+    evolvedImages: { b2: 'e1.b2.png' },
+  });
+  const ghost = entry('e2', 'character', 'Ghost', { firstAppears: 'b3' });
+
+  async function seriesMarkdown(book: string) {
+    const file = await exportStoryBible(
+      source([vane, ghost], {}, {}, fields, series),
+      'markdown',
+      { ...ALL, book },
+    );
+    return Buffer.from(file).toString('utf8');
+  }
+
+  it('shows each Entry as of the chosen Book, leaving out those that first appear later', async () => {
+    expect(await seriesMarkdown('b2')).toBe(
+      [
+        '# Characters',
+        '## Mara Vane',
+        '**Type:** Character',
+        '**Aliases:** M, Vane',
+        'She runs the ferry.',
+        '**Appearance:** Scarred.',
+        '**Allegiance:** Rebels',
+      ].join('\n\n') + '\n',
+    );
+    expect(await seriesMarkdown('b3')).toContain('## Ghost');
+  });
+
+  it('gives an Entry the image it has as of the chosen Book in Word', async () => {
+    const files = unzip(
+      await exportStoryBible(
+        source(
+          [vane],
+          {},
+          { e1: png(400, 200), 'e1.b2': jpeg(100, 100) },
+          fields,
+          series,
+        ),
+        'docx',
+        { ...ALL, book: 'b2' },
+      ),
+    );
+    expect(Object.keys(files)).toContain('word/media/image1.jpg');
+    expect(Object.keys(files)).not.toContain('word/media/image1.png');
+  });
+
+  it('lists every Evolution under its field, from the Book it takes effect, with all Books', async () => {
+    expect(await seriesMarkdown(ALL_BOOKS)).toBe(
+      [
+        '# Characters',
+        '## Ghost',
+        '**Type:** Character',
+        '## Mara',
+        '**From The Second:** Mara Vane',
+        '**Type:** Character',
+        '**Aliases:** M',
+        '**From The Second:** M, Vane',
+        'She runs the ferry.',
+        '**From Book 3:** She sank the ferry.',
+        '**Appearance:**',
+        '**From The Second:** Scarred.',
+        '**Allegiance:** The Crown',
+        '**From The Second:** Rebels',
+      ].join('\n\n') + '\n',
+    );
+  });
+
+  it('names only the Entries it holds in Conflict', () => {
+    const conflicts: Conflict[] = ['e1', 'e2'].map((id) => ({
+      ref: { kind: 'entry', id },
+      versions: [],
+    }));
+    const entries = source([vane, ghost]).listEntries();
+    expect(
+      conflictedEntries(entries, conflicts, { ...ALL, book: 'b2' }, series),
+    ).toEqual(['Mara Vane']);
   });
 });

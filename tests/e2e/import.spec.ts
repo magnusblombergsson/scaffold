@@ -1,7 +1,14 @@
 import { expect, test, type ElectronApplication } from '@playwright/test';
+import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { launch, useTempDir } from './app';
+import {
+  answerDialogs,
+  chooseMenu,
+  launch,
+  openExportManuscript,
+  useTempDir,
+} from './app';
 
 const tempDir = useTempDir();
 
@@ -86,5 +93,48 @@ test('Import… of a file that is not Word or Markdown says so and creates nothi
     "Draft.txt can't be imported: only Word (.docx) and Markdown (.md) files can.",
   );
   await expect(page.getByRole('dialog')).toHaveCount(0);
+  await app.close();
+});
+
+test('Import Manuscript… adds the file as a new Book of the open Project, which Export Manuscript… exports alone', async () => {
+  const projectPath = path.join(tempDir(), 'My Series');
+  const file = path.join(tempDir(), 'Sequel.md');
+  const exportPath = path.join(tempDir(), 'Sequel Export.md');
+  await writeFile(file, ['# Return', 'Home at last.'].join('\n\n'));
+  const app = await launch(tempDir());
+  await answerDialogs(app, projectPath);
+  const page = await app.firstWindow();
+  await page.getByRole('button', { name: 'New Project…' }).click();
+  await expect(page.getByLabel('Prose')).toBeFocused();
+  await page.keyboard.type('It was a dark night.');
+
+  await answerImport(app, file, exportPath);
+  await chooseMenu(app, ['File', 'Import Manuscript…'], page);
+  const dialog = page.getByRole('dialog', { name: 'Import Sequel' });
+  await dialog.getByRole('button', { name: 'Add as New Book' }).click();
+
+  await expect(dialog).toBeHidden();
+  await expect(
+    page
+      .getByRole('navigation', { name: 'Manuscript' })
+      .locator('.binder-title'),
+  ).toHaveText([
+    'Book 1',
+    'Chapter 1',
+    'Scene 1',
+    'Sequel',
+    'Return',
+    'Scene 1',
+  ]);
+
+  await openExportManuscript(app);
+  const exporting = page.getByRole('dialog', { name: 'Export Manuscript' });
+  await exporting
+    .getByLabel('Book', { exact: true })
+    .selectOption({ label: 'Sequel' });
+  await exporting.getByRole('button', { name: 'Export…' }).click();
+  await expect
+    .poll(() => existsSync(exportPath) && readFile(exportPath, 'utf8'))
+    .toBe('# Sequel\n\n## Return\n\nHome at last.\n');
   await app.close();
 });

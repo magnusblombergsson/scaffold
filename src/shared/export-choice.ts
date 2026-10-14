@@ -13,6 +13,12 @@ import type { Status } from './status';
 /** The ids of the Chapters and Scenes the Author left unticked. */
 export type ExportUnticked = { chapters: string[]; scenes: string[] };
 
+/**
+ * In a Series, the Book a Manuscript Export is of, and whether the Book's
+ * title heads it.
+ */
+export type ExportBook = { id: string; title: boolean };
+
 /** Everything ticked. */
 export const TICK_ALL: ExportUnticked = { chapters: [], scenes: [] };
 
@@ -181,12 +187,17 @@ export function pickedManuscript(
   };
 }
 
+/** A Story Bible Export of a Series with every Evolution, as of no one Book. */
+export const ALL_BOOKS = 'all';
+
 /**
  * What a Story Bible Export holds: the Entries `filter` matches, all with
- * none on, and their images and private notes if chosen.
+ * none on, and their images and private notes if chosen. In a Series,
+ * `book` is the Book they are as of, or `ALL_BOOKS`.
  */
 export type StoryBibleChoice = {
   filter: Filter;
   images: boolean;
   privateNotes: boolean;
+  book?: string;
 };

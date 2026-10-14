@@ -4,7 +4,7 @@ import { ALIGN_NAME, type Alignment } from '../../shared/prose-markdown';
 import { MEDIA_TYPES } from '../entry-image';
 
 // A minimal .docx: one document part, its images, and a styles part holding
-// Word's built-in Normal, Heading 1 and Heading 2, so the reader's Word
+// Word's built-in Normal and Heading 1 to 3, so the reader's Word
 // restyles it as they like, and a Quote of our own, as Word's own is italic
 // and centred.
 
@@ -22,11 +22,11 @@ export type DocxImage = {
 };
 
 /**
- * A paragraph of text: Normal, Heading 1 or 2, or Quote, and how it is
+ * A paragraph of text: Normal, Heading 1 to 3, or Quote, and how it is
  * aligned if not left.
  */
 export type DocxTextParagraph = {
-  style?: 'heading1' | 'heading2' | 'quote';
+  style?: 'heading1' | 'heading2' | 'heading3' | 'quote';
   align?: Alignment;
   runs: DocxRun[];
 };
@@ -101,6 +101,7 @@ function documentXml(
 const STYLE_IDS: Record<NonNullable<DocxTextParagraph['style']>, string> = {
   heading1: 'Heading1',
   heading2: 'Heading2',
+  heading3: 'Heading3',
   quote: 'Quote',
 };
 
@@ -182,6 +183,10 @@ function stylesXml(language: ProseLanguage): string {
     '<w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:uiPriority w:val="9"/><w:unhideWhenUsed/><w:qFormat/>' +
     '<w:pPr><w:keepNext/><w:keepLines/><w:spacing w:before="360" w:after="160"/><w:outlineLvl w:val="1"/></w:pPr>' +
     '<w:rPr><w:b/><w:bCs/><w:sz w:val="28"/><w:szCs w:val="28"/></w:rPr></w:style>' +
+    '<w:style w:type="paragraph" w:styleId="Heading3"><w:name w:val="heading 3"/>' +
+    '<w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:uiPriority w:val="9"/><w:unhideWhenUsed/><w:qFormat/>' +
+    '<w:pPr><w:keepNext/><w:keepLines/><w:spacing w:before="240" w:after="120"/><w:outlineLvl w:val="2"/></w:pPr>' +
+    '<w:rPr><w:b/><w:bCs/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr></w:style>' +
     // Indented half an inch on both sides.
     '<w:style w:type="paragraph" w:styleId="Quote"><w:name w:val="Quote"/>' +
     '<w:basedOn w:val="Normal"/><w:next w:val="Normal"/><w:uiPriority w:val="29"/><w:qFormat/>' +

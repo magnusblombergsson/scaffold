@@ -281,6 +281,7 @@ describe('an Export imported back', () => {
   const images: Record<string, EntryImage> = { e1: png(4, 2) };
   const source: StoryBibleSource = {
     language: 'en-US',
+    manuscript: () => ({ chapters: [], unplaced: [] }),
     listEntries: () => entries,
     listCustomFields: () => customFields,
     read: async <R extends EntryRef | PrivateRef>(ref: R) =>

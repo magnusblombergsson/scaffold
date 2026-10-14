@@ -342,6 +342,88 @@ describe('Exporting a Manuscript with Parts', () => {
   });
 });
 
+describe('Exporting one Book of a Series', () => {
+  const series: Manuscript = {
+    chapters: [
+      { ...chapter('c1', 'Arrival', 's1'), book: 'b1' },
+      { ...chapter('c2', 'The Storm', 's2'), part: 'p1', book: 'b2' },
+      { ...chapter('c3', 'Interlude', 's3'), book: 'b2' },
+    ],
+    parts: [{ id: 'p1', title: 'Act One', chapters: ['c2'], book: 'b2' }],
+    top: ['c1', 'p1', 'c3'],
+    books: [
+      { id: 'b1', title: 'The First', top: ['c1'] },
+      { id: 'b2', title: 'The Second', top: ['p1', 'c3'] },
+    ],
+    unplaced: [],
+  };
+  const text = { s1: 'Before.', s2: 'Rain.', s3: 'Between.' };
+
+  async function bookMarkdown(book: { id: string; title: boolean }) {
+    const file = await exportManuscript(
+      source(series, text),
+      'markdown',
+      TICK_ALL,
+      book,
+    );
+    return Buffer.from(file).toString('utf8');
+  }
+
+  it('holds only that Book', async () => {
+    expect(await bookMarkdown({ id: 'b1', title: false })).toBe(
+      '# Arrival\n\nBefore.\n',
+    );
+  });
+
+  it("puts the Book's title above everything, one level above the rest, when asked", async () => {
+    expect(await bookMarkdown({ id: 'b2', title: true })).toBe(
+      [
+        '# The Second',
+        '## Act One',
+        '### The Storm',
+        'Rain.',
+        '### Interlude',
+        'Between.',
+      ].join('\n\n') + '\n',
+    );
+  });
+
+  it('writes the levels as Heading 1 to 3 in .docx', async () => {
+    const file = await exportManuscript(
+      source(series, text),
+      'docx',
+      TICK_ALL,
+      {
+        id: 'b2',
+        title: true,
+      },
+    );
+    expect(
+      paragraphs(unzip(file)['word/document.xml']).map((p) => p.style),
+    ).toEqual([
+      'Heading1',
+      'Heading2',
+      'Heading3',
+      undefined,
+      'Heading3',
+      undefined,
+    ]);
+    expect(unzip(file)['word/styles.xml']).toContain(
+      '<w:style w:type="paragraph" w:styleId="Heading3"><w:name w:val="heading 3"/>',
+    );
+  });
+
+  it('names only the Scenes of that Book in Conflict', () => {
+    const conflicts: Conflict[] = ['s1', 's2'].map((id) => ({
+      ref: { kind: 'scene', id },
+      versions: [],
+    }));
+    expect(conflictedScenes(series, conflicts, TICK_ALL, 'b2')).toEqual([
+      'Title s2',
+    ]);
+  });
+});
+
 describe('Italic and bold in a Markdown Export', () => {
   const markdownOfProse = async (s1: string) =>
     (

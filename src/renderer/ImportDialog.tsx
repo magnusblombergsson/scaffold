@@ -24,16 +24,19 @@ const OPENING_WORDS = 12;
 /**
  * The preview of an Import: the Parts, Chapters and Scenes the file splits
  * into, and where it splits them, which the Author can change before the new
- * Project is created. Parts are offered only when the file has Heading 1s
- * and Heading 2s, and never chosen for the Author.
+ * Project is created, or with `onImportBook`, a new Book after the last of
+ * the open Project. Parts are offered only when the file has Heading 1s and
+ * Heading 2s, and never chosen for the Author.
  */
 export function ImportDialog({
   file,
   onImport,
+  onImportBook,
   onClose,
 }: {
   file: ImportFile;
   onImport(convention: ImportConvention): void;
+  onImportBook?(convention: ImportConvention): void;
   onClose(): void;
 }) {
   const dialogRef = useRef<HTMLDialogElement>(null);
@@ -75,8 +78,9 @@ export function ImportDialog({
     >
       <h2 id="import-heading">Import {file.name}</h2>
       <p className="import-hint">
-        Check where the file is split. Nothing is written until you create the
-        new Project.
+        {onImportBook
+          ? 'Check where the file is split. Nothing is written until you add it as a new Book after the last, or create a new Project.'
+          : 'Check where the file is split. Nothing is written until you create the new Project.'}
       </p>
       <div className="import-convention">
         <label>
@@ -155,6 +159,11 @@ export function ImportDialog({
       </ol>
       <div className="settings-close">
         <button onClick={() => dialogRef.current?.close()}>Cancel</button>
+        {onImportBook && (
+          <button onClick={() => onImportBook(convention)}>
+            Add as New Book
+          </button>
+        )}
         <button onClick={() => onImport(convention)}>Create Project…</button>
       </div>
     </dialog>

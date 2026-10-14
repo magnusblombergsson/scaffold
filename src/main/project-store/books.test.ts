@@ -420,3 +420,84 @@ describe('Books', () => {
     expect(store.listTodos()[0].link).toEqual({ kind: 'book', id: second });
   });
 });
+
+describe('Importing a manuscript as a new Book', () => {
+  const sequel = [
+    { title: 'Prologue', scenes: [{ title: 'Scene 1', markdown: 'Dawn.' }] },
+    {
+      title: 'Part One',
+      chapters: [
+        {
+          title: 'Chapter 1',
+          scenes: [
+            { title: 'Scene 1', markdown: 'Rain.' },
+            { title: 'Scene 2', markdown: 'Calm.' },
+          ],
+        },
+      ],
+    },
+  ];
+
+  it('adds it after the last Book, with its Parts, Chapters and Prose', async () => {
+    const { projectPath, store } = await newSeries();
+
+    const { id } = await store.importBook('The Sequel', sequel);
+
+    const manuscript = store.manuscript();
+    expect(manuscript.books!.at(-1)!.id).toBe(id);
+    expect(shape(manuscript)).toEqual([
+      { 'Book 1': ['Chapter 1', 'Two'] },
+      { 'Book 2': ['Three'] },
+      { 'The Sequel': ['Prologue', { 'Part One': ['Chapter 1'] }] },
+    ]);
+    const scenes = manuscript.chapters
+      .filter((c) => c.book === id)
+      .flatMap((c) => c.scenes);
+    const prose = await Promise.all(
+      scenes.map(
+        async ({ id }) => (await store.read({ kind: 'scene', id })).markdown,
+      ),
+    );
+    expect(prose).toEqual(['Dawn.', 'Rain.', 'Calm.']);
+    expect((await openProject(projectPath, deps())).manuscript()).toEqual(
+      manuscript,
+    );
+  });
+
+  it("makes a Project of one Book a Series, Book 1 taking the Manuscript's Word target", async () => {
+    const { store } = await newProject();
+    await store.setWordTarget(PROJECT_OUTLINE, 90000);
+
+    const { step } = await store.importBook('The Sequel', sequel);
+
+    expect(shape(store.manuscript())).toEqual([
+      { 'Book 1': ['Chapter 1', 'Two', 'Three'] },
+      { 'The Sequel': ['Prologue', { 'Part One': ['Chapter 1'] }] },
+    ]);
+    expect(store.manuscript().books![0].wordTarget).toBe(90000);
+
+    // Undone, it stays a Series of Book 1, which keeps the Word target.
+    await store.undo(step);
+    expect(shape(store.manuscript())).toEqual([
+      { 'Book 1': ['Chapter 1', 'Two', 'Three'] },
+    ]);
+    expect(store.manuscript().books![0].wordTarget).toBe(90000);
+  });
+
+  it('moves the Book to Trash when undone, its Prose with it', async () => {
+    const { store } = await newSeries();
+    const before = store.manuscript();
+
+    const { id, step } = await store.importBook('The Sequel', sequel);
+    await store.undo(step);
+
+    expect(store.manuscript()).toEqual(before);
+    expect(store.listTrash().map((item) => [item.kind, item.id])).toEqual([
+      ['book', id],
+    ]);
+    await store.restore(id);
+    expect(shape(store.manuscript()).at(-1)).toEqual({
+      'The Sequel': ['Prologue', { 'Part One': ['Chapter 1'] }],
+    });
+  });
+});
