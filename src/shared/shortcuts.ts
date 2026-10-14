@@ -41,6 +41,8 @@ export type Command = (
   | { type: 'backUp' }
   /** File › Restore Project from Backup…, into a new Project. */
   | { type: 'restoreBackup' }
+  /** File › Add a Book from a Backup…, of another Project, into the open one. */
+  | { type: 'addBookFromBackup' }
   | { type: 'settings' }
   | { type: 'projectSettings' }
   /** The Keyboard Shortcuts cheat sheet. */

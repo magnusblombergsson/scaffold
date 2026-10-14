@@ -21,6 +21,7 @@ import type {
   ExportUnticked,
   StoryBibleChoice,
 } from './export-choice';
+import type { CombineChoices } from './combine';
 import type { BibleView } from './bible-view';
 import type { CorkboardView } from './corkboard-view';
 import type { Filter, FilterPlace, Filters } from './filter';
@@ -81,6 +82,17 @@ export type Changed = { manuscript: Manuscript; step: number };
 export type Created = Changed & { id: string };
 
 /**
+ * Another Project added from a Backup: its name, its Books by their new
+ * ids, in order, and each Entry added to the Story Bible by its new id and
+ * the id it had in the Backup.
+ */
+export type AddedFromBackup = Changed & {
+  name: string;
+  books: string[];
+  entries: { id: string; original: string }[];
+};
+
+/**
  * Where main is with saving a unit: `failed` keeps its value unsaved in
  * memory, and main tries it again, waiting longer each time.
  */
@@ -111,6 +123,11 @@ export type UnitReloaded = {
    * it sent before is in the Snapshot taken first.
    */
   byRestore?: true;
+  /**
+   * Set when combining two Entries here, or undoing that, wrote it: an
+   * editor shows it, as what it sent before is in it.
+   */
+  byCombine?: true;
 };
 
 /**
@@ -352,6 +369,14 @@ export interface ProjectApi {
    * Project of one Book becomes a Series, its Manuscript Book 1.
    */
   importBook(file: ImportFile, convention: ImportConvention): Promise<Created>;
+  /**
+   * Asks for a Backup of another Project and adds it after the last Book,
+   * once a Backup of this one is made or the Author chose to go on
+   * without, as one step: `undo` moves the added Books and Entries to
+   * Trash. Null when the Author cancels or it is refused, which they are
+   * told.
+   */
+  addBookFromBackup(): Promise<AddedFromBackup | null>;
   renameBook(bookId: string, title: string): Promise<Changed>;
   /** Moves a Book to `index` among the Books. */
   moveBook(bookId: string, index: number): Promise<Changed>;
@@ -411,6 +436,16 @@ export interface ProjectApi {
    * changing none, as one step: `undo` moves them all to Trash.
    */
   importEntries(entries: NewEntry[]): Promise<Changed & { ids: string[] }>;
+  /**
+   * Combines the Entry `otherId` into `keptId`, of one type, as the Author
+   * chose, as one step: `undo` puts both back, and what pointed to the
+   * other. `dropped` says which Relations broke a rule and were dropped.
+   */
+  combineEntries(
+    keptId: string,
+    otherId: string,
+    choices: CombineChoices,
+  ): Promise<Changed & { dropped: string[] }>;
   /** Sets when the Assistant sees an Entry, as a step that `undo` reverts. */
   setEntryVisibility(entryId: string, visibility: Visibility): Promise<Changed>;
   /**
@@ -1219,6 +1254,7 @@ export const projectMethods = {
   trashPart: 'invoke',
   createBook: 'invoke',
   importBook: 'invoke',
+  addBookFromBackup: 'invoke',
   renameBook: 'invoke',
   moveBook: 'invoke',
   trashBook: 'invoke',
@@ -1236,6 +1272,7 @@ export const projectMethods = {
   moveToDrawer: 'invoke',
   moveBetweenTrashAndDrawer: 'invoke',
   importEntries: 'invoke',
+  combineEntries: 'invoke',
   setEntryVisibility: 'invoke',
   setEntryType: 'invoke',
   chooseImage: 'invoke',

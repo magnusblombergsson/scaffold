@@ -197,6 +197,13 @@ export function menuTemplate(
           label: 'Restore Project from Backup…',
           ...sending({ type: 'restoreBackup' }),
         },
+        // The window explains first, then lists Entries to Combine after.
+        {
+          id: 'addBookFromBackup',
+          label: 'Add a Book from a Backup…',
+          enabled: writable,
+          ...sending({ type: 'addBookFromBackup' }),
+        },
         { type: 'separator' },
         mac ? { role: 'close' } : { role: 'quit' },
       ],

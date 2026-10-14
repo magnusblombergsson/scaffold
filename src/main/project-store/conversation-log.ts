@@ -33,6 +33,15 @@ import {
   type ProposedValue,
 } from '../../shared/proposal';
 import {
+  RELATION_KINDS,
+  type Relation,
+  type RelationChoice,
+} from '../../shared/relation';
+import type {
+  RelationAddition,
+  RelationWritten,
+} from '../../shared/relation-proposal';
+import {
   isModel,
   isProviderId,
   loggedModel,
@@ -88,10 +97,29 @@ export type OfferedEvent = {
 };
 
 /**
+ * A Relation proposed between two Entries, `from` one `to` the other, by
+ * their ids: its kind, and a free-text one's label. In a Series, `book` is
+ * the Book whose Conversation made it. Apps from before Relation Proposals
+ * skip it, and so its accept, reject and undo, so they never misapply it
+ * (ADR 0006).
+ */
+export type RelatedEvent = {
+  type: 'proposal.related';
+  id: string;
+  from: string;
+  to: string;
+  relation: Relation['kind'];
+  label?: string;
+  book?: string;
+  at: number;
+};
+
+/**
  * An accept as logged: per field, the value it replaced and the one it
  * wrote, whatever its operation; a new Entry replaced nothing. In a Series,
  * one that landed on an Evolution says from which Book `on`, and whether it
- * `evolved` it, making that Evolution (ADR 0012).
+ * `evolved` it, making that Evolution (ADR 0012). An accept of a Relation
+ * changes no field: it says what it wrote to the Relations as `related`.
  */
 export type AcceptedEvent = {
   type: 'proposal.accepted';
@@ -99,6 +127,7 @@ export type AcceptedEvent = {
   fields: Record<string, { replaced?: FieldValue; wrote: FieldValue }>;
   on?: string;
   evolved?: true;
+  related?: RelationWritten;
   at: number;
 };
 
@@ -184,6 +213,28 @@ export type RenamedEvent = { type: 'renamed'; title: string; at: number };
  */
 export type TrashMoveEvent = { type: 'trashed' | 'restored'; at: number };
 
+/**
+ * The Entry `other` was combined into `kept` (#273): from here on, what the
+ * log said before of `other` it says of `kept`, a Proposal's target and an
+ * Interview's focus, until `entries.combined.undone` names its `id`. A new
+ * Entry a Proposal made keeps its id, as Undo of its accept takes that Entry
+ * away. Apps from before Combine skip it and see `other` in Trash.
+ */
+export type CombinedEvent = {
+  type: 'entries.combined';
+  id: string;
+  kept: string;
+  other: string;
+  at: number;
+};
+
+/** The Combine of `id` was undone: what it moved names the other Entry again. */
+export type CombineUndoneEvent = {
+  type: 'entries.combined.undone';
+  id: string;
+  at: number;
+};
+
 /** An event this app writes. */
 export type ConversationEvent =
   | MessageEvent
@@ -197,9 +248,12 @@ export type ConversationEvent =
   | TrashMoveEvent
   | ProposedEvent
   | OfferedEvent
+  | RelatedEvent
   | AcceptedEvent
   | RejectedEvent
-  | UndoneEvent;
+  | UndoneEvent
+  | CombinedEvent
+  | CombineUndoneEvent;
 
 /** A Proposal in a log: the message it came with, by index, and the latest decision on it. */
 export type LoggedProposal = Proposal & { message: number; decision: Decision };
@@ -281,8 +335,20 @@ export function parseLog(log: string): LoggedConversation | null {
   let book: string | undefined;
   let { title } = header;
   let trashedAt: number | undefined;
+  /** Each Combine logged, by id: what puts back what it moved. */
+  const combines = new Map<string, () => void>();
   for (const line of rest) {
     const event = parseLine(line) as { type?: unknown; id?: unknown } | null;
+    if (isCombined(event)) {
+      const { id, kept, other } = event;
+      combines.set(id, combine(proposals, focusChanges, other, kept));
+      continue;
+    }
+    if (isCombineUndone(event)) {
+      combines.get(event.id)?.();
+      combines.delete(event.id);
+      continue;
+    }
     if (isRenamed(event)) {
       title = event.title;
       continue;
@@ -324,12 +390,15 @@ export function parseLog(log: string): LoggedConversation | null {
     const known = proposals.get(event.id);
     if (
       event.type === 'proposal.proposed' ||
-      event.type === 'proposal.offered'
+      event.type === 'proposal.offered' ||
+      event.type === 'proposal.related'
     ) {
       const proposal =
         event.type === 'proposal.proposed'
           ? loggedProposal(event as Partial<ProposedEvent>)
-          : loggedOffer(event as Partial<OfferedEvent>);
+          : event.type === 'proposal.offered'
+            ? loggedOffer(event as Partial<OfferedEvent>)
+            : loggedRelation(event as Partial<RelatedEvent>);
       if (proposal && !known && messages.length > 0) {
         proposals.set(proposal.id, {
           ...proposal,
@@ -366,12 +435,75 @@ export function parseLog(log: string): LoggedConversation | null {
   };
 }
 
-/** The event that logs a Proposal the Assistant made: an Append or an Add as offered. */
+/**
+ * Has what `proposals` and `focusChanges` say of `other` say it of `kept`,
+ * as a Combine logged does; returns what has them name `other` again, the
+ * rest of what was logged since kept.
+ */
+function combine(
+  proposals: Map<string, LoggedProposal>,
+  focusChanges: FocusChange[],
+  other: string,
+  kept: string,
+): () => void {
+  const back: (() => void)[] = [];
+  for (const [id, proposal] of proposals) {
+    if (proposal.kind === 'field' && proposal.entryId === other) {
+      proposals.set(id, { ...proposal, entryId: kept });
+      back.push(() => {
+        const now = proposals.get(id) as typeof proposal;
+        proposals.set(id, { ...now, entryId: other });
+      });
+    } else if (
+      proposal.kind === 'relation' &&
+      (proposal.from === other || proposal.to === other)
+    ) {
+      // The ends that named `other`, naming `by`.
+      const ends = (by: string) => ({
+        ...(proposal.from === other && { from: by }),
+        ...(proposal.to === other && { to: by }),
+      });
+      proposals.set(id, { ...proposal, ...ends(kept) });
+      back.push(() => {
+        const now = proposals.get(id) as typeof proposal;
+        proposals.set(id, { ...now, ...ends(other) });
+      });
+    }
+  }
+  focusChanges.forEach((change, i) => {
+    if (change.focus.kind !== 'entry' || change.focus.id !== other) return;
+    focusChanges[i] = { ...change, focus: { kind: 'entry', id: kept } };
+    back.push(() => {
+      focusChanges[i] = { ...focusChanges[i], focus: change.focus };
+    });
+  });
+  return () => {
+    for (const put of back) put();
+  };
+}
+
+/**
+ * The event that logs a Proposal the Assistant made: an Append or an Add as
+ * offered, a Relation as related.
+ */
 export function proposedEvent(
   proposal: Proposal,
   at: number,
-): ProposedEvent | OfferedEvent {
+): ProposedEvent | OfferedEvent | RelatedEvent {
   const { id } = proposal;
+  if (proposal.kind === 'relation') {
+    const { from, to, proposed, book } = proposal;
+    return {
+      type: 'proposal.related',
+      id,
+      from,
+      to,
+      relation: proposed.kind,
+      ...(proposed.kind === 'label' && { label: proposed.label }),
+      ...(book !== undefined && { book }),
+      at,
+    };
+  }
   if (isAppending(proposal)) {
     const { operation, proposed } = proposal;
     const [kind, targetId, field] =
@@ -471,6 +603,15 @@ export function acceptedEvent(
   };
 }
 
+/** The event that logs an accept of a Relation Proposal, which wrote `related`. */
+export function relationAcceptedEvent(
+  id: string,
+  related: RelationWritten,
+  at: number,
+): AcceptedEvent {
+  return { type: 'proposal.accepted', id, fields: {}, related, at };
+}
+
 /**
  * Where an accept of a field landed in a Series: on the Evolution from the
  * Book `on`, which it `evolved` when it made it; on the Entry's own value
@@ -568,6 +709,64 @@ function loggedOffer(event: Partial<OfferedEvent>): Proposal | null {
     : null;
 }
 
+/**
+ * The Relation Proposal an event logs, if this app can take it: two
+ * Entries, a kind of Relation, and a free-text one's label.
+ */
+function loggedRelation(event: Partial<RelatedEvent>): Proposal | null {
+  const { id, from, to, relation, label } = event;
+  if (typeof id !== 'string' || typeof from !== 'string') return null;
+  if (typeof to !== 'string' || !RELATION_KINDS.includes(relation!)) {
+    return null;
+  }
+  if (relation === 'label' && (typeof label !== 'string' || !label.trim())) {
+    return null;
+  }
+  const proposed: RelationChoice =
+    relation === 'label'
+      ? { kind: 'label', label: label! }
+      : { kind: relation! };
+  const addition: RelationAddition = {
+    kind: 'relation',
+    from,
+    to,
+    proposed,
+    ...bookOf(event),
+  };
+  return { ...addition, id };
+}
+
+/** What an accept of a Relation Proposal logs it wrote, if it can be read. */
+function relationWrittenOf(value: unknown): RelationWritten | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const { pair, group, faces, label, book, created, joined } = value as Record<
+    string,
+    unknown
+  >;
+  const fromBook = typeof book === 'string' && book ? { book } : {};
+  if (typeof pair === 'string') {
+    return {
+      pair,
+      ...(typeof label === 'string' && { label }),
+      ...fromBook,
+    };
+  }
+  if (
+    typeof group !== 'string' ||
+    !Array.isArray(faces) ||
+    !faces.every((face) => typeof face === 'string')
+  ) {
+    return null;
+  }
+  return {
+    group,
+    faces: faces as string[],
+    ...(created === true && { created }),
+    ...(joined === true && { joined }),
+    ...fromBook,
+  };
+}
+
 /** The accept, reject or undo an event logs of `proposal`, if it can be read. */
 function decisionEventOf(
   proposal: Proposal,
@@ -584,6 +783,10 @@ function acceptedOf(
   proposal: Proposal,
   event: Partial<AcceptedEvent>,
 ): Extract<Decision, { kind: 'accepted' }> | null {
+  if (proposal.kind === 'relation') {
+    const wrote = relationWrittenOf(event.related);
+    return wrote && { kind: 'accepted', wrote };
+  }
   const { fields } = event;
   if (!fields) return null;
   if (proposal.kind === 'new-entry') {
@@ -781,6 +984,23 @@ function isRenamed(value: unknown): value is RenamedEvent {
     event?.type === 'renamed' &&
     typeof event.title === 'string' &&
     event.title.trim() !== ''
+  );
+}
+
+function isCombined(value: unknown): value is CombinedEvent {
+  const event = value as Partial<CombinedEvent> | null;
+  return (
+    event?.type === 'entries.combined' &&
+    typeof event.id === 'string' &&
+    typeof event.kept === 'string' &&
+    typeof event.other === 'string'
+  );
+}
+
+function isCombineUndone(value: unknown): value is CombineUndoneEvent {
+  const event = value as Partial<CombineUndoneEvent> | null;
+  return (
+    event?.type === 'entries.combined.undone' && typeof event.id === 'string'
   );
 }
 

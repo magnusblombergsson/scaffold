@@ -23,13 +23,13 @@ const AUTO_NAME = /^.+ auto (\d{4})-(\d\d)-(\d\d) (\d\d)(\d\d)(\d\d)\.zip$/;
 /** What an automatic Backup cut off leaves: written beside its name first. */
 const PARTIAL_NAME = /^.+ auto \d{4}-\d\d-\d\d \d{6}\.zip\.[^.]+\.tmp$/;
 
-/** Why the app backs a Project up on its own. */
-export type AutoBackupReason = 'daily' | 'emptyTrash';
+/** Why the app backs a Project up on its own: daily, or before emptying Trash or adding a Book from a Backup. */
+export type AutoBackupReason = 'daily' | 'emptyTrash' | 'addBook';
 
 /** What an automatic Backup came to. */
 export type AutoBackupOutcome =
   | { made: string }
-  /** There is one from today, or from the last 10 minutes before emptying Trash. */
+  /** There is one from today, or from the last 10 minutes before emptying Trash or adding a Book. */
   | { notNeeded: true }
   /** Abandoned as the Project closed; nothing is left of it. */
   | { cancelled: true }

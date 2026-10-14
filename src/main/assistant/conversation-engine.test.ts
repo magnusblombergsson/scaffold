@@ -1625,3 +1625,173 @@ describe('Compaction of a long Conversation', () => {
     expect(conversation.unusedSummaries).toBeUndefined();
   });
 });
+
+describe('Relation Proposals in a reply', () => {
+  const block = (json: object) =>
+    `\`\`\`proposal\n${JSON.stringify(json)}\n\`\`\``;
+
+  /** A Project with the Places The Inn and The Cellar, the Characters Mara and Tobin, and a reply of `blocks`. */
+  async function withEntries(reply: (ids: Record<string, string>) => object[]) {
+    const ids: Record<string, string> = {};
+    const setup = await setUp(() => reply(ids).map(block));
+    for (const [type, name] of [
+      ['place', 'The Inn'],
+      ['place', 'The Cellar'],
+      ['character', 'Mara'],
+      ['character', 'Tobin'],
+    ] as const) {
+      ids[name] = (await setup.store.createEntry(type, name)).id;
+    }
+    return { ...setup, ids };
+  }
+
+  it('turns a block relating two Entries into a pending Relation Proposal, shown as one sentence', async () => {
+    const { store, engine, ids } = await withEntries((ids) => [
+      { from: ids['The Cellar'], to: ids['The Inn'], relation: 'part-of' },
+    ]);
+    const { id } = await store.startConversation('brainstorm', 'The Inn');
+
+    await engine.askAssistant(
+      id,
+      'The cellar is under the inn.',
+      { sceneId: null },
+      () => {},
+    );
+
+    const [, replied] = (await store.readConversation(id)).messages;
+    expect(replied.unreadable).toBeUndefined();
+    expect(replied.proposals).toEqual([
+      {
+        kind: 'relation',
+        id: expect.any(String),
+        from: ids['The Cellar'],
+        to: ids['The Inn'],
+        proposed: { kind: 'part-of' },
+        name: 'The Cellar is part of The Inn',
+        names: { from: 'The Cellar', to: 'The Inn' },
+        state: { kind: 'pending', current: null, stale: false },
+      },
+    ]);
+  });
+
+  it('reads a free-text Relation and Same as in an Interview, saying which way each reads', async () => {
+    const { store, engine } = await withEntries((ids) => [
+      { from: ids.Mara, to: ids.Tobin, label: '  mother   of ' },
+      { from: ids.Tobin, to: ids.Mara, relation: 'same-as' },
+    ]);
+    const { id } = await store.startConversation('interview', 'Mara');
+
+    await engine.askAssistant(
+      id,
+      'Mara is his mother.',
+      { sceneId: null },
+      () => {},
+    );
+
+    const [, replied] = (await store.readConversation(id)).messages;
+    expect(replied.proposals?.map((p) => [p.name, p.proposed])).toEqual([
+      ['Mara is mother of Tobin', { kind: 'label', label: 'mother of' }],
+      ['Tobin is the same as Mara', { kind: 'same-as' }],
+    ]);
+  });
+
+  it('counts a Relation the rules refuse, to an Entry not in the Story Bible, or of no kind as unreadable, and one held already as nothing', async () => {
+    const { store, engine, ids } = await withEntries((ids) => [
+      { from: ids.Mara, to: ids['The Inn'], relation: 'part-of' },
+      { from: ids.Mara, to: ids['The Inn'], relation: 'same-as' },
+      { from: ids.Mara, to: ids.Mara, label: 'herself' },
+      { from: ids.Mara, to: 'nobody', label: 'mother of' },
+      { from: ids.Mara, to: ids.Tobin, label: '' },
+      { from: ids.Mara, to: ids.Tobin, relation: 'friend' },
+      { from: ids['The Cellar'], to: ids['The Inn'], relation: 'part-of' },
+      { from: ids.Mara, to: ids.Tobin, label: 'Mother Of' },
+    ]);
+    await store.addRelation(ids['The Cellar']!, ids['The Inn']!, {
+      kind: 'part-of',
+    });
+    await store.addRelation(ids.Mara!, ids.Tobin!, {
+      kind: 'label',
+      label: 'mother of',
+    });
+    const { id } = await store.startConversation('brainstorm', 'Mara');
+
+    const result = await engine.askAssistant(
+      id,
+      'Hm.',
+      { sceneId: null },
+      () => {},
+    );
+
+    expect(result.reply?.unreadable).toBe(6);
+    expect(result.reply?.proposals ?? []).toEqual([]);
+    const [, replied] = (await store.readConversation(id)).messages;
+    expect(replied.proposals).toBeUndefined();
+  });
+
+  it('never proposes a Relation in Writing', async () => {
+    const { store, engine } = await withEntries((ids) => [
+      { from: ids['The Cellar'], to: ids['The Inn'], relation: 'part-of' },
+    ]);
+    const { id } = await store.startConversation('writing', 'The Inn');
+
+    const result = await engine.askAssistant(
+      id,
+      'Hm.',
+      { sceneId: null },
+      () => {},
+    );
+
+    expect(result.reply?.unreadable).toBe(1);
+  });
+
+  it('in a Series, checks a Relation as of the Conversation’s Book, logging it, never to an Entry first appearing later', async () => {
+    const { store, engine, ids } = await withEntries((ids) => [
+      { from: ids['The Cellar'], to: ids['The Inn'], relation: 'part-of' },
+      { from: ids.Mara, to: ids.Tobin, label: 'mother of' },
+    ]);
+    const { id: two } = await store.createBook();
+    const [one] = store.manuscript().books!.map((b) => b.id);
+    await store.setFirstAppears(ids.Tobin!, two);
+    const { id } = await store.startConversation('brainstorm', 'The Inn');
+    await store.chooseBook(id, one!);
+
+    const result = await engine.askAssistant(
+      id,
+      'Hm.',
+      { sceneId: null },
+      () => {},
+    );
+
+    expect(result.reply?.unreadable).toBe(1);
+    const [, replied] = (await store.readConversation(id)).messages;
+    expect(replied.proposals).toEqual([
+      expect.objectContaining({ kind: 'relation', book: one }),
+    ]);
+  });
+
+  it('tells the Assistant how to propose a Relation in Brainstorm and Interview, never in Writing', async () => {
+    const { store, engine, provider, ids } = await withEntries(() => []);
+    for (const id of Object.values(ids)) {
+      const entry = await store.read({ kind: 'entry', id });
+      await store.write(
+        { kind: 'entry', id },
+        { ...entry, visibility: 'always' },
+      );
+    }
+    for (const mode of ['brainstorm', 'interview', 'writing'] as const) {
+      const { id } = await store.startConversation(mode, 'Mara');
+      await engine.askAssistant(id, 'Hm.', { sceneId: null }, () => {});
+    }
+
+    const [brainstorm, interview, writing] = provider.requests.map((r) =>
+      r.system.map((b) => b.text).join('\n'),
+    );
+    for (const asked of [brainstorm, interview]) {
+      expect(asked).toContain(
+        '{"from": "<Id>", "to": "<Id>", "label": "mother of"}',
+      );
+      expect(asked).toMatch(/"same-as" only when .* clearly supports it/);
+    }
+    expect(writing).not.toContain('"from": "<Id>"');
+  });
+});

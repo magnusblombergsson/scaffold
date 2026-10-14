@@ -5,6 +5,8 @@ import {
   type Relation,
   type RelationChoice,
 } from '../../shared/relation';
+import type { RelationStep } from '../../shared/combine';
+import type { RelationWritten } from '../../shared/relation-proposal';
 import type { Clock } from './clock';
 import type { FileSystem } from './file-system';
 import {
@@ -135,6 +137,66 @@ export class Relations {
     return id;
   }
 
+  /**
+   * Relates `from` to `to` for an accepted Proposal, from `book` on if
+   * given; resolves with what it wrote, for Undo to take exactly that away:
+   * a pair's new record, or the faces switched on in a new group, or in the
+   * group either is in, which keeps its Book.
+   */
+  async addAccepted(
+    from: string,
+    to: string,
+    choice: RelationChoice,
+    book: string | undefined,
+  ): Promise<RelationWritten> {
+    const fromBook = book !== undefined ? { book } : {};
+    if (choice.kind !== 'same-as') {
+      const id = randomUUID();
+      await this.records.create(id, {
+        kind: choice.kind,
+        from,
+        to,
+        label: choice.kind === 'label' ? choice.label : null,
+        faces: {},
+        book: book ?? null,
+      });
+      return {
+        pair: id,
+        ...(choice.kind === 'label' && { label: choice.label }),
+        ...fromBook,
+      };
+    }
+    const meeting = foldedGroups(this.list()).filter(
+      (g) => g.faces.includes(from) || g.faces.includes(to),
+    );
+    const before = new Set(meeting.flatMap((g) => g.faces));
+    const id = await this.group([from, to], [from, to]);
+    if (meeting.length === 0) {
+      if (book !== undefined) await this.records.change(id, { book });
+      return { group: id, faces: [from, to], created: true, ...fromBook };
+    }
+    const kept = this.records.get(id)?.book;
+    return {
+      group: id,
+      faces: [from, to].filter((face) => !before.has(face)),
+      ...(meeting.length > 1 && { joined: true as const }),
+      ...(kept != null && { book: kept }),
+    };
+  }
+
+  /**
+   * Takes away what an accepted Proposal relating `from` `wrote`: deletes
+   * its pair, leaving a marker, or a group it made, or switches off the
+   * faces it switched on.
+   */
+  async takeAway(wrote: RelationWritten, from: string): Promise<void> {
+    if ('pair' in wrote) return this.remove(wrote.pair);
+    // A group of the two alone goes once one of them leaves.
+    for (const face of wrote.created ? [from] : wrote.faces) {
+      await this.leave(face);
+    }
+  }
+
   /** Gives a free-text Relation another label. */
   relabel(id: string, label: string): Promise<void> {
     if (this.records.get(id)?.kind !== 'label') {
@@ -196,6 +258,59 @@ export class Relations {
         await this.records.delete(record.id);
       }
     }
+  }
+
+  /**
+   * Does what a Combine plans to the Relations, `steps`, as
+   * `combinedRelations` works them out; resolves with what undoes exactly
+   * that: each pair named again as it was, a deleted record brought back,
+   * each face switched as it was.
+   */
+  async combine(steps: readonly RelationStep[]): Promise<() => Promise<void>> {
+    const undo: (() => Promise<void>)[] = [];
+    const toggle = async (id: string, face: string, on: boolean) => {
+      const was = this.records.get(id)?.faces[face]?.on ?? false;
+      await this.records.toggle(id, 'faces', face, on);
+      undo.push(() => this.records.toggle(id, 'faces', face, was));
+    };
+    const remove = async (id: string) => {
+      await this.records.delete(id);
+      undo.push(() => this.records.revive(id));
+    };
+    /** Deletes the group `id` once it has fewer than two faces on. */
+    const settle = async (id: string) => {
+      const record = this.records.get(id);
+      if (record && onFaces(record).length < 2) await remove(id);
+    };
+    for (const step of steps) {
+      if (step.kind === 'move') {
+        const { from, to } = this.records.get(step.id)!;
+        await this.records.change(step.id, { from: step.from, to: step.to });
+        undo.push(() => this.records.change(step.id, { from, to }));
+      } else if (step.kind === 'remove') {
+        await remove(step.id);
+      } else if (step.kind === 'leave') {
+        await toggle(step.id, step.face, false);
+        await settle(step.id);
+      } else {
+        // Every group the kept one is in, written as this one.
+        const meeting = foldedGroups(this.list())
+          .filter((g) => g.faces.includes(step.on) && !g.ids.includes(step.id))
+          .flatMap((g) => g.ids);
+        await toggle(step.id, step.off, false);
+        await toggle(step.id, step.on, true);
+        for (const id of meeting) {
+          for (const face of onFaces(this.records.get(id)!)) {
+            await toggle(step.id, face, true);
+          }
+          await remove(id);
+        }
+        await settle(step.id);
+      }
+    }
+    return async () => {
+      for (const step of undo.reverse()) await step();
+    };
   }
 
   /** The folded group `face` is in, if any. */

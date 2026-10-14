@@ -187,8 +187,13 @@ export class ProjectMirror {
         break;
       }
       case 'unitReloaded':
-        // A reload by a Proposal, a Split or a restore shows in the editor already.
-        if (!event.byProposal && !event.bySplit && !event.byRestore) {
+        // A reload by a Proposal, a Split, a restore or a Combine shows in the editor already.
+        if (
+          !event.byProposal &&
+          !event.bySplit &&
+          !event.byRestore &&
+          !event.byCombine
+        ) {
           this.emit({ type: 'unitReloaded', ref: event.ref });
         }
         break;

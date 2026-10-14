@@ -139,6 +139,28 @@ export class Todos {
     }
   }
 
+  /**
+   * Links each Todo linked to the Entry `from` to the Entry `to` instead;
+   * resolves with what links them to `from` again, or null if none was.
+   */
+  async relinkEntry(
+    from: string,
+    to: string,
+  ): Promise<(() => Promise<void>) | null> {
+    const linked = this.records
+      .live()
+      .filter((todo) => todo.link?.kind === 'entry' && todo.link.id === from);
+    for (const todo of linked) {
+      await this.change(todo.id, { link: { kind: 'entry', id: to } });
+    }
+    if (linked.length === 0) return null;
+    return async () => {
+      for (const todo of linked) {
+        await this.change(todo.id, { link: { kind: 'entry', id: from } });
+      }
+    };
+  }
+
   /** Drops the link of each Todo linked to a unit `gone` says is; true if any had one. */
   async dropLinks(gone: (link: TodoLink) => boolean): Promise<boolean> {
     const linked = this.records

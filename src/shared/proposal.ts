@@ -20,11 +20,21 @@ import {
   withCustom,
   type CustomField,
 } from './custom-field';
+import type { RelationChoice } from './relation';
+import {
+  acceptRelation,
+  relationState,
+  undoRelation,
+  type RelationAddition,
+  type RelationBasis,
+  type RelationNames,
+  type RelationWritten,
+} from './relation-proposal';
 
 // Proposals (MVP spec §7): changes to the Story Bible or an Outline the
 // Assistant suggests in a reply, which take effect only when the Author
-// accepts them: a change to one field of an Entry, a new Entry, or a whole
-// Outline. This module knows which fields of an Entry a Proposal may change,
+// accepts them: a change to one field of an Entry, a new Entry, a whole
+// Outline, or a Relation between two Entries. This module knows which fields of an Entry a Proposal may change,
 // and how the Assistant writes one in its reply.
 
 /**
@@ -135,14 +145,18 @@ export type OutlineChange = {
   outlineId: string;
 } & Operation<string, 'append'>;
 
-/** What a Proposal changes: a field of an Entry, a new Entry, or an Outline. */
-export type ProposalChange = EntryFieldChange | EntryCreation | OutlineChange;
+/** What a Proposal changes: a field of an Entry, a new Entry, an Outline, or the Relations. */
+export type ProposalChange =
+  | EntryFieldChange
+  | EntryCreation
+  | OutlineChange
+  | RelationAddition;
 
 /** A Proposal as logged: its id and the change. */
 export type Proposal = ProposalChange & { id: string };
 
-/** What a Proposal writes: a field's value, a new Entry, or an Outline body. */
-export type ProposedValue = FieldValue | NewEntry;
+/** What a Proposal writes: a field's value, a new Entry, an Outline body, or a Relation. */
+export type ProposedValue = FieldValue | NewEntry | RelationChoice;
 
 /**
  * Why a Proposal's target is out of reach: its Entry, Chapter or Scene is in
@@ -154,8 +168,10 @@ export type Orphaned = 'trashed' | 'drawered' | 'gone' | 'field';
  * Where a Proposal stands. A pending one is `stale` when its target no
  * longer holds the base, and `orphaned` when its Entry, Chapter or Scene is
  * in Trash or gone, or the Entry is no longer of a type with the field; then
- * it can only be rejected. A new Entry is never either, and its `current`
- * value is null. An accepted one says whether the Author `edited` it first,
+ * it can only be rejected; for a Relation, `of` names the Entry out of
+ * reach. A Relation is `refused` while its rules refuse it, saying why,
+ * and then too it can only be rejected. A new Entry or a Relation is never
+ * stale, and its `current` value is null. An accepted one says whether the Author `edited` it first,
  * or `appended` it as proposed to what its target held; one found already
  * applied on load, as after a crash between writing the
  * target and logging the accept, counts as accepted. An accepted one can be
@@ -164,7 +180,8 @@ export type Orphaned = 'trashed' | 'drawered' | 'gone' | 'field';
  */
 export type ProposalState =
   | { kind: 'pending'; current: FieldValue; stale: boolean }
-  | { kind: 'pending'; orphaned: Orphaned }
+  | { kind: 'pending'; orphaned: Orphaned; of?: string }
+  | { kind: 'pending'; refused: string }
   | {
       kind: 'accepted';
       edited: boolean;
@@ -184,6 +201,8 @@ export type ProposalView = Proposal &
     name: string;
     state: ProposalState;
     evolvesFrom?: string;
+    /** A Relation's two Entries, by their names now; its `name` is the sentence it reads. */
+    names?: RelationNames;
   };
 
 /**
@@ -209,8 +228,9 @@ export function fieldLabel(
 export function orphanedText(
   proposal: Proposal & WithFieldLabel & { name: string },
   orphaned: Orphaned,
+  of?: string,
 ): string {
-  const { name } = proposal;
+  const name = of ?? proposal.name;
   if (orphaned === 'trashed') return `${name} is in Trash.`;
   if (orphaned === 'drawered') return `${name} is in the Drawer.`;
   if (orphaned === 'field' && proposal.kind === 'field') {
@@ -447,7 +467,7 @@ export type AppendingChange = Extract<
 
 /** Whether a Proposal is an Append or an Add rather than a Replace or a new Entry. */
 export function isAppending(change: ProposalChange): change is AppendingChange {
-  return change.kind !== 'new-entry' && change.operation !== undefined;
+  return 'operation' in change && change.operation !== undefined;
 }
 
 /** What accepting an Append or an Add writes to a target that holds `current`. */
@@ -478,7 +498,8 @@ function holdsAppended(change: AppendingChange, current: FieldValue): boolean {
  * Role, nor a new Entry. An Append or an Add appends already.
  */
 export function canAppend(change: ProposalChange): boolean {
-  if (change.kind === 'new-entry' || isAppending(change)) return false;
+  if (change.kind === 'new-entry' || change.kind === 'relation') return false;
+  if (isAppending(change)) return false;
   return change.kind === 'outline' || !isChoiceField(change.field);
 }
 
@@ -498,6 +519,8 @@ export type ProposalTarget =
 export function proposalTarget(proposal: ProposalView): ProposalTarget | null {
   const { state } = proposal;
   if (state.kind === 'pending' && 'orphaned' in state) return null;
+  // Its card links each of its two Entries.
+  if (proposal.kind === 'relation') return null;
   if (proposal.kind === 'new-entry') {
     return state.kind === 'accepted'
       ? { kind: 'entry', entryId: proposal.entryId }
@@ -552,7 +575,8 @@ function wasAppended(
   replaced: FieldValue | undefined,
   wrote: ProposedValue,
 ): boolean {
-  if (change.kind === 'new-entry' || !canAppend(change)) return false;
+  if (!canAppend(change) || isAppending(change)) return false;
+  if (change.kind !== 'field' && change.kind !== 'outline') return false;
   if (replaced === undefined) return false;
   const target = change.kind === 'field' ? change.field : 'outline';
   return (
@@ -628,6 +652,14 @@ export function proposalBlock(change: ProposalChange): string {
     const { type, name, description } = change.proposed;
     return fencedProposal({ create: type, name, description });
   }
+  if (change.kind === 'relation') {
+    const { from, to, proposed } = change;
+    return fencedProposal(
+      proposed.kind === 'label'
+        ? { from, to, label: proposed.label }
+        : { from, to, relation: proposed.kind },
+    );
+  }
   const target =
     change.kind === 'field'
       ? { entry: change.entryId, field: change.field }
@@ -654,14 +686,15 @@ function fencedProposal(json: object): string {
  * undone leaves it undecided again, with what that accept wrote as `undid`.
  * In a Series, an accept of a field that landed on an Evolution says from
  * which Book `on`, and whether it `evolved` it, making that Evolution;
- * one that landed on the Entry's own value says neither.
+ * one that landed on the Entry's own value says neither. An accept of a
+ * Relation says what it wrote, for Undo to take exactly that away.
  */
 export type Decision =
-  | { kind: 'pending'; undid?: ProposedValue }
+  | { kind: 'pending'; undid?: ProposedValue | RelationWritten }
   | {
       kind: 'accepted';
       replaced?: FieldValue;
-      wrote: ProposedValue;
+      wrote: ProposedValue | RelationWritten;
       on?: string;
       evolved?: true;
     }
@@ -708,8 +741,11 @@ export type NewEntryPlace =
     }
   | { where: 'gone' };
 
-/** A Proposal's target as the store read it: a Target, or where a new Entry is. */
-export type ProposalBasis = Target | NewEntryPlace;
+/**
+ * A Proposal's target as the store read it: a Target, where a new Entry
+ * is, or a Relation's Entries and the Relations held.
+ */
+export type ProposalBasis = Target | NewEntryPlace | RelationBasis;
 
 /** Why a Proposal can't be accepted or undone now, in words for the Author. */
 export type Refusal = {
@@ -721,7 +757,8 @@ export type Refusal = {
     | 'cannot-evolve'
     | 'orphaned'
     | 'not-accepted'
-    | 'changed';
+    | 'changed'
+    | 'refused';
   text: string;
 };
 
@@ -740,11 +777,14 @@ export function stateOf(
   logged: DecidedProposal,
   basis: ProposalBasis,
 ): ProposalState {
+  if (logged.kind === 'relation') {
+    return relationState(logged, basis as RelationBasis);
+  }
   const { decision } = logged;
   if (decision.kind === 'rejected') return { kind: 'rejected' };
   return decision.kind === 'accepted'
     ? acceptedState(logged, decision, basis)
-    : undecidedState(logged, decision.undid, basis);
+    : undecidedState(logged, decision.undid as ProposedValue, basis);
 }
 
 /**
@@ -764,6 +804,13 @@ export function accept(
     append = false,
   }: { anyway?: boolean; append?: boolean } = {},
 ): { wrote: ProposedValue } | Refusal {
+  if (logged.kind === 'relation') {
+    return acceptRelation(
+      logged,
+      basis as RelationBasis,
+      value === logged.proposed ? undefined : value,
+    );
+  }
   const state = stateOf(logged, basis);
   if (state.kind !== 'pending') return alreadyDecided(state);
   if (append && !canAppend(logged)) {
@@ -816,6 +863,7 @@ export function accept(
   if ('orphaned' in state) {
     return { refused: 'orphaned', text: orphanedText(logged, state.orphaned) };
   }
+  if ('refused' in state) return { refused: 'refused', text: state.refused };
   if (append || isAppending(logged)) {
     return {
       wrote: appended(targetOf(logged), state.current, value as FieldValue),
@@ -851,7 +899,14 @@ export function reject(
 export function undo(
   logged: DecidedProposal,
   basis: ProposalBasis,
-): { restore: FieldValue } | { trash: true } | Refusal {
+):
+  | { restore: FieldValue }
+  | { trash: true }
+  | { undo: RelationWritten }
+  | Refusal {
+  if (logged.kind === 'relation') {
+    return undoRelation(logged, basis as RelationBasis);
+  }
   const state = stateOf(logged, basis);
   if (state.kind !== 'accepted') {
     return { refused: 'not-accepted', text: "The Proposal isn't accepted" };
@@ -864,17 +919,17 @@ export function undo(
   return { restore: decision.replaced ?? null };
 }
 
+/** A Proposal as decided, of a field, a new Entry or an Outline: not a Relation. */
+type TargetProposal = Exclude<DecidedProposal, { kind: 'relation' }>;
+
 /** Where a Proposal the log says is accepted stands, as `stateOf`. */
 function acceptedState(
-  logged: DecidedProposal,
-  decision: Extract<Decision, { kind: 'accepted' }>,
+  logged: TargetProposal,
+  { wrote: written, ...decision }: Extract<Decision, { kind: 'accepted' }>,
   basis: ProposalBasis,
 ): ProposalState {
-  const appendedAsProposed = wasAppended(
-    logged,
-    decision.replaced,
-    decision.wrote,
-  );
+  const wrote = written as ProposedValue;
+  const appendedAsProposed = wasAppended(logged, decision.replaced, wrote);
   // What accepting as proposed would have written.
   const asProposed =
     isAppending(logged) && decision.replaced !== undefined
@@ -882,26 +937,26 @@ function acceptedState(
       : logged.proposed;
   const accepted = (undoBlocked: string | null): ProposalState => ({
     kind: 'accepted',
-    edited: !appendedAsProposed && !sameValue(decision.wrote, asProposed),
+    edited: !appendedAsProposed && !sameValue(wrote, asProposed),
     ...(appendedAsProposed && { appended: true }),
     ...(undoBlocked && { undoBlocked }),
   });
   if (logged.kind === 'new-entry') {
     const place = placeOf(basis);
-    const wrote = decision.wrote as NewEntry;
-    if (place.where === 'trash' && asCreated(place, wrote)) {
-      return undecidedState(logged, wrote, place);
+    const created = wrote as NewEntry;
+    if (place.where === 'trash' && asCreated(place, created)) {
+      return undecidedState(logged, created, place);
     }
-    return accepted(newEntryUndoBlocked(place, wrote));
+    return accepted(newEntryUndoBlocked(place, created));
   }
   const target = heldIn(basis);
   if ('orphaned' in target) {
     return accepted(orphanedText(logged, target.orphaned));
   }
   const { current } = target;
-  if (sameValue(current, decision.wrote)) return accepted(null);
+  if (sameValue(current, wrote)) return accepted(null);
   if (sameValue(current, decision.replaced)) {
-    return undecidedState(logged, decision.wrote, target);
+    return undecidedState(logged, wrote, target);
   }
   return accepted(`${targetLabel(logged)} has changed since it was accepted.`);
 }
@@ -913,7 +968,7 @@ function acceptedState(
  * only be rejected.
  */
 function undecidedState(
-  logged: DecidedProposal,
+  logged: TargetProposal,
   undid: ProposedValue | undefined,
   basis: ProposalBasis,
 ): ProposalState {
@@ -993,7 +1048,7 @@ function alreadyDecided(state: ProposalState): Refusal {
  * Whether two JSON values are equal, whatever order their keys are in, as
  * node:util's isDeepStrictEqual, which shared code can't use.
  */
-function sameJson(a: unknown, b: unknown): boolean {
+export function sameJson(a: unknown, b: unknown): boolean {
   if (a === b) return true;
   if (typeof a !== 'object' || typeof b !== 'object') return false;
   if (a === null || b === null || Array.isArray(a) !== Array.isArray(b)) {
@@ -1043,7 +1098,7 @@ function placeOf(basis: ProposalBasis): NewEntryPlace {
 
 /** A field's or an Outline's basis: what it holds. */
 function heldIn(basis: ProposalBasis): Target {
-  if ('where' in basis) {
+  if ('where' in basis || 'relations' in basis || 'name' in basis) {
     throw new Error('A basis of a field or an Outline is what it holds');
   }
   return basis;

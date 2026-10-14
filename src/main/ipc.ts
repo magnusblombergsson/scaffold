@@ -4,6 +4,7 @@ import {
   assistantMethods,
   projectMethods,
   replyTextChannel,
+  type AddedFromBackup,
   type AssistantApi,
   type Changed,
   type ProjectApi,
@@ -34,7 +35,10 @@ import {
   projectWindows,
   rememberFolder,
   rememberModel,
+  restoreFolder,
 } from './shell';
+import { checkBackup } from './project-store/backup';
+import { ProjectError } from './project-store/project-error';
 import { trashConversationQuestion } from './trash-question';
 
 /** What a `project` handler works with: the window's Project, and the window. */
@@ -62,6 +66,7 @@ const projectHandlers: Handlers<
     store.movePart(partId, index, bookId),
   trashPart: ({ store }, partId) => store.trashPart(partId),
   createBook: ({ store }, index, title) => store.createBook(index, title),
+  addBookFromBackup: ({ store, sender }) => addBookFromBackup(sender, store),
   importBook: ({ store }, file, convention) =>
     store.importBook(
       file.name,
@@ -90,6 +95,8 @@ const projectHandlers: Handlers<
   moveBetweenTrashAndDrawer: ({ store }, id, to) =>
     store.moveBetweenTrashAndDrawer(id, to),
   importEntries: ({ store }, entries) => store.importEntries(entries),
+  combineEntries: ({ store }, keptId, otherId, choices) =>
+    store.combineEntries(keptId, otherId, choices),
   setEntryVisibility: ({ store }, entryId, visibility) =>
     store.setEntryVisibility(entryId, visibility),
   setEntryType: ({ store }, entryId, type) => store.setEntryType(entryId, type),
@@ -414,6 +421,67 @@ async function emptyTrash(
   } finally {
     emptying.delete(store);
   }
+}
+
+/**
+ * Asks for a Backup of another Project and adds it as Books, as
+ * `addBookFromBackup` says; first checks it, refusing one that can't be
+ * restored, then backs up this Project by the rules of automatic Backups.
+ * When none is made, the Author is told why and asked whether to go on.
+ */
+async function addBookFromBackup(
+  sender: WebContents,
+  store: ProjectStore,
+): Promise<AddedFromBackup | null> {
+  const window = BrowserWindow.fromWebContents(sender);
+  const ask = (options: Electron.MessageBoxOptions) =>
+    window
+      ? dialog.showMessageBox(window, options)
+      : dialog.showMessageBox(options);
+  const options: Electron.OpenDialogOptions = {
+    title: 'Add a Book from a Backup',
+    buttonLabel: 'Add',
+    defaultPath: await restoreFolder(sender),
+    filters: [{ name: 'Backup', extensions: ['zip'] }],
+    properties: ['openFile'],
+  };
+  const chosen = window
+    ? await dialog.showOpenDialog(window, options)
+    : await dialog.showOpenDialog(options);
+  if (chosen.canceled || chosen.filePaths.length === 0) return null;
+  const zipPath = chosen.filePaths[0];
+  rememberFolder('backups', path.dirname(zipPath));
+  try {
+    await checkBackup(zipPath);
+  } catch (error) {
+    await ask({
+      type: 'warning',
+      buttons: ['OK'],
+      message:
+        error instanceof ProjectError
+          ? error.message
+          : `Can't read ${path.basename(zipPath)}.`,
+    });
+    return null;
+  }
+  const backup = await autoBackUp(store, 'addBook', (on) =>
+    emit(sender, 'shell', 'onBackingUp', on),
+  );
+  if (backup && 'cancelled' in backup) return null;
+  if (!backup || 'skipped' in backup) {
+    const { response } = await ask({
+      type: 'warning',
+      buttons: ['Add Without a Backup', 'Cancel'],
+      defaultId: 1,
+      cancelId: 1,
+      message: `No Backup of ${store.displayName} was made first.`,
+      detail: `${
+        backup ? backup.skipped.message : 'Automatic Backups are turned off.'
+      } Once Entries are combined after the add, a Backup is the only way back.`,
+    });
+    if (response !== 0) return null;
+  }
+  return store.addBookFromBackup(zipPath);
 }
 
 /**

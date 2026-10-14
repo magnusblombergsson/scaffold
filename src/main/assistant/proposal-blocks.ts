@@ -1,5 +1,6 @@
 import { randomUUID } from 'node:crypto';
-import { appearsAfter, entryAsOf } from '../../shared/evolution';
+import type { Mode } from '../../shared/conversation';
+import { appearsAfter, entryAsOf, summaryAsOf } from '../../shared/evolution';
 import { bookIds } from '../../shared/manuscript-order';
 import { PROJECT_OUTLINE } from '../../shared/project-types';
 import {
@@ -9,6 +10,8 @@ import {
   type Proposal,
   type ProposalChange,
 } from '../../shared/proposal';
+import { relationsView } from '../../shared/relation';
+import { relationAdditionOf } from '../../shared/relation-proposal';
 import type { AssistantView } from '../project-store/project-store';
 
 /**
@@ -17,17 +20,20 @@ import type { AssistantView } from '../project-store/project-store';
  * that proposes nothing this app takes, such as a change to Prose, Notes or
  * a Voice's example lines, is unreadable; one that proposes what its target
  * holds already is left out. In a Series, a change to a field is against
- * the Entry as of the `book` the turn was about, and made on it.
+ * the Entry as of the `book` the turn was about, and made on it, and a
+ * Relation is checked as of it. Only a Brainstorm or an Interview proposes
+ * a Relation.
  */
 export async function readProposals(
   view: AssistantView,
   blocks: unknown[],
   book?: string,
+  mode: Mode = 'brainstorm',
 ): Promise<{ proposals: Proposal[]; unreadable: number }> {
   const proposals: Proposal[] = [];
   let unreadable = 0;
   for (const block of blocks) {
-    const change = await changeOf(view, block, book);
+    const change = await changeOf(view, block, book, mode);
     if (change === null) unreadable++;
     else if (change !== 'unchanged') {
       proposals.push({ id: randomUUID(), ...change });
@@ -38,20 +44,23 @@ export async function readProposals(
 
 /**
  * What a block proposes: a new Entry, under the id it will get; a whole
- * Outline of a Part, Chapter or Scene in the Project, or of the story; or a
+ * Outline of a Part, Chapter or Scene in the Project, or of the story; a
  * change to a field of an Entry in the Story Bible, as of `book`, never one
- * first appearing after it. `'unchanged'` when it proposes what its target
- * holds; null when it can't be read as any.
+ * first appearing after it; or a Relation between two such Entries.
+ * `'unchanged'` when it proposes what its target holds; null when it can't
+ * be read as any.
  */
 async function changeOf(
   view: AssistantView,
   block: unknown,
   book: string | undefined,
+  mode: Mode,
 ): Promise<ProposalChange | 'unchanged' | null> {
-  const { entry: entryId, outline: outlineId } = (block ?? {}) as Record<
-    string,
-    unknown
-  >;
+  const {
+    entry: entryId,
+    outline: outlineId,
+    from,
+  } = (block ?? {}) as Record<string, unknown>;
   const proposed = newEntryOf(block);
   if (proposed) return { kind: 'new-entry', entryId: randomUUID(), proposed };
   if (typeof outlineId === 'string') {
@@ -69,6 +78,9 @@ async function changeOf(
     return outlineChangeOf(block, outline);
   }
   const books = bookIds(view.manuscript());
+  if (entryId === undefined && from !== undefined) {
+    return mode === 'writing' ? null : relationOf(view, block, books, book);
+  }
   const summary = view.listEntries().find((e) => e.id === entryId);
   if (!summary || appearsAfter(summary, books, book)) return null;
   const entry = await view.read({ kind: 'entry', id: entryId as string });
@@ -77,6 +89,37 @@ async function changeOf(
     entryAsOf(entry, books, book).entry,
     view.customFields(),
   );
+  return change && change !== 'unchanged' && book !== undefined
+    ? { ...change, book }
+    : change;
+}
+
+/**
+ * The Relation a block proposes adding between two Entries in the Story
+ * Bible, as the Relations are as of `book`; never to one first appearing
+ * after it.
+ */
+function relationOf(
+  view: AssistantView,
+  block: unknown,
+  books: readonly string[],
+  book: string | undefined,
+): ProposalChange | 'unchanged' | null {
+  const entries = view.listEntries();
+  const { from, to } = block as Record<string, unknown>;
+  const late = entries.some(
+    (e) => (e.id === from || e.id === to) && appearsAfter(e, books, book),
+  );
+  if (late) return null;
+  const relations =
+    book === undefined
+      ? relationsView(view.listRelations(), entries)
+      : relationsView(
+          view.listRelations(),
+          entries.map((e) => summaryAsOf(e, books, book)),
+          { books, book },
+        );
+  const change = relationAdditionOf(block, relations);
   return change && change !== 'unchanged' && book !== undefined
     ? { ...change, book }
     : change;

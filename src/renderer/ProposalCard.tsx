@@ -26,6 +26,7 @@ import {
   type ProposalView,
   type ProposedValue,
 } from '../shared/proposal';
+import { relationVerb } from '../shared/relation-proposal';
 import { fieldDiff, textDiff, type DiffPart } from '../shared/diff';
 import { flushPendingEdits } from './pending-edits';
 import { ReadOnlyContext } from './read-only';
@@ -35,8 +36,12 @@ export function proposalCardId(proposalId: string): string {
   return `proposal-${proposalId}`;
 }
 
-/** A Proposal's header: `Entry › Field`, `New <type> · <name>`, or `Scene “…” › Outline`. */
+/**
+ * A Proposal's header: `Entry › Field`, `New <type> · <name>`, `Scene “…” ›
+ * Outline`, or a Relation's sentence, as in `Mara is mother of Tobin`.
+ */
 export function proposalTitle(proposal: ProposalView): string {
+  if (proposal.kind === 'relation') return proposal.name;
   if (proposal.kind === 'field') {
     return `${proposal.name} › ${fieldLabel(proposal)}`;
   }
@@ -56,7 +61,11 @@ export const ProposalTargetContext = createContext<
   | null
 >(null);
 
-/** A Proposal's title, a link to its target while it has one to go to. */
+/**
+ * A Proposal's title, a link to its target while it has one to go to; a
+ * Relation's title is its sentence, each Entry's name opening it while both
+ * are in reach.
+ */
 function Title({
   proposal,
   as: Tag,
@@ -65,6 +74,33 @@ function Title({
   as: 'header' | 'span';
 }) {
   const goTo = useContext(ProposalTargetContext);
+  if (proposal.kind === 'relation' && proposal.names) {
+    const { state, names } = proposal;
+    const linked = goTo && !(state.kind === 'pending' && 'orphaned' in state);
+    const entry = (entryId: string, name: string) =>
+      linked ? (
+        <button
+          className="link-button proposal-title-link"
+          onClick={(event) =>
+            goTo(
+              proposal,
+              { kind: 'entry', entryId },
+              event.currentTarget.getBoundingClientRect(),
+            )
+          }
+        >
+          {name}
+        </button>
+      ) : (
+        <strong>{name}</strong>
+      );
+    return (
+      <Tag className="proposal-title">
+        {entry(proposal.from, names.from)} {relationVerb(proposal.proposed)}{' '}
+        {entry(proposal.to, names.to)}
+      </Tag>
+    );
+  }
   const title = proposalTitle(proposal);
   const target = proposalTarget(proposal);
   if (!goTo || !target) return <Tag className="proposal-title">{title}</Tag>;
@@ -102,7 +138,10 @@ type Draft = string | NewEntry;
  * goes to its target, as `ProposalTargetContext` has it. In a Series, a
  * change to a field made on a Book after the first may be accepted from
  * that Book on, as an Evolution; by default it lands where the value that
- * Book sees comes from.
+ * Book sees comes from. A Relation reads as one sentence, each Entry's name
+ * opening it; only a free-text one's words can be edited, and while its rules
+ * refuse it, it says why and can only be rejected. In a Series, it holds in
+ * every Book, or from its Conversation's Book on.
  */
 export function ProposalCard({
   conversationId,
@@ -187,6 +226,9 @@ export function ProposalCard({
   }
 
   const orphaned = 'orphaned' in state ? state.orphaned : null;
+  const refused = 'refused' in state ? state.refused : null;
+  const editable =
+    proposal.kind !== 'relation' || proposal.proposed.kind === 'label';
   const current = 'current' in state ? state.current : null;
   const stale = 'stale' in state && state.stale;
 
@@ -217,7 +259,7 @@ export function ProposalCard({
       id={proposalCardId(id)}
       className={[
         'proposal-card',
-        stale || orphaned ? 'warning' : '',
+        stale || orphaned || refused ? 'warning' : '',
         highlighted ? 'highlighted' : '',
       ]
         .filter(Boolean)
@@ -227,7 +269,16 @@ export function ProposalCard({
       <Title proposal={proposal} as="header" />
       {orphaned ? (
         <p className="proposal-warning">
-          {orphanedText(proposal, orphaned)} This Proposal can only be rejected.
+          {orphanedText(
+            proposal,
+            orphaned,
+            'of' in state ? state.of : undefined,
+          )}{' '}
+          This Proposal can only be rejected.
+        </p>
+      ) : refused ? (
+        <p className="proposal-warning">
+          {refused}. This Proposal can only be rejected.
         </p>
       ) : (
         <>
@@ -248,7 +299,7 @@ export function ProposalCard({
           {error}
         </p>
       )}
-      {!orphaned && proposal.evolvesFrom !== undefined && (
+      {!orphaned && !refused && proposal.evolvesFrom !== undefined && (
         <label className="proposal-from-book">
           <input
             type="checkbox"
@@ -283,7 +334,7 @@ export function ProposalCard({
           </>
         ) : (
           <>
-            {!orphaned && (
+            {!orphaned && !refused && (
               <>
                 <button
                   className="primary"
@@ -300,12 +351,14 @@ export function ProposalCard({
                     Append
                   </button>
                 )}
-                <button
-                  onClick={() => setDraft(draftOf(proposal))}
-                  disabled={readOnly || busy}
-                >
-                  Edit…
-                </button>
+                {editable && (
+                  <button
+                    onClick={() => setDraft(draftOf(proposal))}
+                    disabled={readOnly || busy}
+                  >
+                    Edit…
+                  </button>
+                )}
               </>
             )}
             <button onClick={() => void reject()} disabled={readOnly || busy}>
@@ -324,7 +377,7 @@ export function ProposalCard({
  * base body, struck through, and the proposed one side by side, or when
  * stale, its body now, the one proposed against and the one proposed; an
  * Append or an Add a diff from what its target holds now; a new Entry its
- * description.
+ * description. A Relation's title says it all.
  */
 function Change({
   proposal,
@@ -335,6 +388,7 @@ function Change({
   current: FieldValue;
   stale: boolean;
 }) {
+  if (proposal.kind === 'relation') return null;
   if (proposal.kind === 'new-entry') {
     return (
       <p className="proposal-diff" aria-label="Change">
@@ -420,8 +474,14 @@ function Diff({ parts }: { parts: DiffPart[] }) {
   );
 }
 
-/** The proposed value as the Author starts editing it: a choice by its option, else as text. */
+/**
+ * The proposed value as the Author starts editing it: a choice by its
+ * option, a Relation by its words, else as text.
+ */
 function draftOf(proposal: ProposalView): Draft {
+  if (proposal.kind === 'relation') {
+    return proposal.proposed.kind === 'label' ? proposal.proposed.label : '';
+  }
   if (proposal.kind !== 'field') return proposal.proposed;
   const { field, proposed } = proposal;
   if (field === 'role') return proposed === null ? ROLES[0] : String(proposed);
@@ -496,7 +556,13 @@ function EditValue({
       </select>
     );
   }
-  return <TextValue label="Edited value" text={draft} onChange={onChange} />;
+  return (
+    <TextValue
+      label={proposal.kind === 'relation' ? 'Edited words' : 'Edited value'}
+      text={draft}
+      onChange={onChange}
+    />
+  );
 }
 
 /** A text the Author edits in a textarea that grows with it, up to eight rows. */

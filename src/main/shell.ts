@@ -406,7 +406,8 @@ function tellBackupSkipped(
   skip: BackupSkip,
 ): void {
   const contents = projectWindows.showing(store.path);
-  if (!contents) return;
+  // Before adding a Book, the Author is asked instead.
+  if (!contents || reason === 'addBook') return;
   if (reason === 'daily') {
     if (backupsTold.has(store.id)) return;
     backupsTold.add(store.id);
@@ -426,7 +427,9 @@ function tellBackupSkipped(
  * Where Restore asks for a Backup: among the automatic ones of the
  * window's Project, or the Backup folder, or the folder last restored from.
  */
-async function restoreFolder(sender: WebContents): Promise<string | undefined> {
+export async function restoreFolder(
+  sender: WebContents,
+): Promise<string | undefined> {
   const folder = backupFolder();
   const store = projectWindows.find(sender);
   const found = store && (await findProjectBackupFolder(folder, store.id));

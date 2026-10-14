@@ -96,10 +96,16 @@ import { ProposalTargetContext } from './ProposalCard';
 import { ProposalPeek, type TargetPeek } from './ProposalPeek';
 import { PeekRelationsContext } from './PeekCard';
 import { PinnedNotes } from './PinnedNotes';
+import { CombineDialog } from './CombineDialog';
+import { AddFromBackupDialog } from './AddFromBackupDialog';
+import { pairChoices } from '../shared/combine-pairs';
+import type { AddedFromBackup } from '../shared/api';
+import type { CombineChoices } from '../shared/combine';
 import { FloatingImagePanel, OutlineBarImage } from './FloatingImage';
 import { applyImageChange, floatImage } from './floating-image';
 import {
   applyChange,
+  repointed,
   textWithoutImage,
   togglePin,
   withoutTrashed,
@@ -944,7 +950,18 @@ function ProjectView({
       : entries.find((e) => e.id === openEntryId);
   /** The latest structure change, while its toast offers to undo it. */
   const [latest, setLatest] = useState<{ message: string; step: number }>();
-  const closeToast = useCallback(() => setLatest(undefined), []);
+  /**
+   * The step of a Combine while its toast offers to undo it: Undo is
+   * offered only there, never later, as by Ctrl+Z once the toast is gone.
+   */
+  const undoOnlyInToast = useRef<number>(undefined);
+  const closeToast = useCallback(() => {
+    if (undoable.current === undoOnlyInToast.current) {
+      undoable.current = undefined;
+    }
+    undoOnlyInToast.current = undefined;
+    setLatest(undefined);
+  }, []);
   /**
    * The step Ctrl+Z in the Binder or Story Bible list undoes: the latest
    * structure change, while main can still undo it, its toast gone or not.
@@ -1314,6 +1331,11 @@ function ProjectView({
       void chooseStoryBibleImport();
       return true;
     }
+    if (command.type === 'addBookFromBackup') {
+      if (readOnly) return false;
+      setAddingFromBackup('choosing');
+      return true;
+    }
     if (command.type === 'backUp') {
       void window.shell.backUpProject().then((name) => {
         if (name) showNotice(`Backed up as ${name}`);
@@ -1482,6 +1504,110 @@ function ProjectView({
     flushPendingEdits();
     changeLatest(undefined);
     await mirror.undo(step);
+    // Undoing a Combine puts the Pinned notes back, its other Entry back too.
+    const combined = notesBeforeCombine.current;
+    if (combined?.step === step) changePinnedNotes(combined.notes);
+    notesBeforeCombine.current = undefined;
+  }
+
+  /** Add a Book from a Backup…, while its dialog is open: before the add, then what was added. */
+  const [addingFromBackup, setAddingFromBackup] = useState<
+    'choosing' | AddedFromBackup | null
+  >(null);
+
+  /** Adds the Backup the Author chooses, as one step they can undo from the dialog. */
+  async function addBookFromBackup() {
+    flushPendingEdits();
+    const added = await mirror.change(() => window.project.addBookFromBackup());
+    if (!added) return;
+    changeLatest({
+      message: `Added “${added.name}” as ${added.books.length === 1 ? 'a new Book' : `${added.books.length} new Books`}`,
+      step: added.step,
+    });
+    setAddingFromBackup(added);
+  }
+
+  /**
+   * Combines each pair the Author ticked after an add, the Entry here kept
+   * and what the added one says differently from the first added Book on;
+   * the way back is the Backup made before the add.
+   */
+  async function combineAdded(
+    pairs: { added: string; here: string }[],
+    firstBook: string,
+  ) {
+    flushPendingEdits();
+    let combined = 0;
+    const dropped: string[] = [];
+    for (const pair of pairs) {
+      const [here, added] = await Promise.all([
+        window.project.read({ kind: 'entry', id: pair.here }),
+        window.project.read({ kind: 'entry', id: pair.added }),
+      ]);
+      changePinnedNotes(repointed(notesNow.current, pair.added, pair.here));
+      const result = await mirror.change(() =>
+        window.project.combineEntries(
+          pair.here,
+          pair.added,
+          pairChoices(here, added, customFields, firstBook),
+        ),
+      );
+      if (!result) break;
+      combined++;
+      dropped.push(...result.dropped);
+    }
+    // Only the Backup made before the add undoes them.
+    changeLatest(undefined);
+    if (combined === 0) return;
+    showNotice(
+      `Combined ${combined === 1 ? 'a pair of Entries' : `${combined} pairs of Entries`}` +
+        (dropped.length > 0
+          ? `; dropped ${dropped.length === 1 ? 'a Relation' : `${dropped.length} Relations`} that broke a rule: ${dropped.join('; ')}`
+          : ''),
+    );
+  }
+
+  /** The Entry Combine with… is open on, if any. */
+  const [combining, setCombining] = useState<string | null>(null);
+  const combiningEntry = entries.find((e) => e.id === combining);
+  /** The Pinned notes before the latest Combine, by its step, for its Undo. */
+  const notesBeforeCombine = useRef<{ step: number; notes: PinnedNote[] }>(
+    undefined,
+  );
+
+  /**
+   * Combines `otherId` into `keptId`, as one step the Author can undo from
+   * its toast only; the other's Pinned note becomes the kept one's first,
+   * before it goes from the Story Bible.
+   */
+  async function combineEntries(
+    keptId: string,
+    otherId: string,
+    choices: CombineChoices,
+    names: { kept: string; other: string },
+  ) {
+    flushPendingEdits();
+    const notes = notesNow.current;
+    changePinnedNotes(repointed(notes, otherId, keptId));
+    const result = await mirror.change(() =>
+      window.project.combineEntries(keptId, otherId, choices),
+    );
+    if (!result) {
+      changePinnedNotes(notes);
+      return;
+    }
+    notesBeforeCombine.current = { step: result.step, notes };
+    undoOnlyInToast.current = result.step;
+    const { dropped } = result;
+    changeLatest({
+      message:
+        `Combined “${names.other}” into “${names.kept}”` +
+        (dropped.length > 0
+          ? `; dropped ${dropped.length === 1 ? 'a Relation' : `${dropped.length} Relations`} that broke a rule: ${dropped.join('; ')}`
+          : ''),
+      step: result.step,
+    });
+    showEntry(keptId);
   }
 
   /**
@@ -2062,6 +2188,7 @@ function ProjectView({
                     onAddTodo={(id) =>
                       startTodo('storyBible', { kind: 'entry', id })
                     }
+                    onCombine={setCombining}
                   />
                 </div>
                 <TodoDockPane
@@ -2309,6 +2436,43 @@ function ProjectView({
             customFields={customFields}
             onImport={(added, leftOut) => void importEntries(added, leftOut)}
             onClose={() => setStoryBibleImport(null)}
+          />
+        )}
+        {addingFromBackup && (
+          <AddFromBackupDialog
+            added={addingFromBackup === 'choosing' ? null : addingFromBackup}
+            entries={entries}
+            firstBookTitle={
+              addingFromBackup === 'choosing'
+                ? undefined
+                : seriesBooks.find((b) => b.id === addingFromBackup.books[0])
+                    ?.title
+            }
+            onChoose={() => void addBookFromBackup()}
+            onUndo={() => {
+              if (addingFromBackup !== 'choosing') {
+                void undo(addingFromBackup.step);
+              }
+              setAddingFromBackup(null);
+            }}
+            onCombine={(pairs) => {
+              if (addingFromBackup === 'choosing') return;
+              void combineAdded(pairs, addingFromBackup.books[0]);
+            }}
+            onClose={() => setAddingFromBackup(null)}
+          />
+        )}
+        {combiningEntry && (
+          <CombineDialog
+            entry={combiningEntry}
+            entries={entries}
+            relations={relations}
+            customFields={customFields}
+            books={seriesBooks}
+            onCombine={(keptId, otherId, choices, names) =>
+              void combineEntries(keptId, otherId, choices, names)
+            }
+            onClose={() => setCombining(null)}
           />
         )}
         {storyBibleExportOpen && (

@@ -47,6 +47,7 @@ import type {
   Conflict,
   AcceptOptions,
   ConflictVersion,
+  AddedFromBackup,
   Created,
   Dropped,
   ProjectEvent,
@@ -62,7 +63,18 @@ import {
   newEntryValue,
   revertEntryType,
 } from '../../shared/entry';
+import {
+  combinedEntry,
+  combinedFirstAppears,
+  combinedPrivateNotes,
+  combinedRelations,
+  combinedTags,
+  combineRefusal,
+  evolutionKey,
+  type CombineChoices,
+} from '../../shared/combine';
 import { withoutBook } from '../../shared/evolution';
+import { bookIds } from '../../shared/manuscript-order';
 import {
   type Orphaned,
   type PendingProposal,
@@ -113,6 +125,15 @@ import {
 } from './file-system';
 import { FormatUpgraded, GatedFileSystem } from './gated-file-system';
 import { backUpProject } from './backup';
+import {
+  addedFile,
+  entriesIn,
+  planAdd,
+  readBackupProject,
+  seriesOutline,
+  STARRED_CONVERSATIONS,
+  STARS,
+} from './add-from-backup';
 import { freeName, safeWrite } from './safe-write';
 import {
   markerHosts,
@@ -1178,6 +1199,9 @@ export class ProjectStore {
       },
       enqueueWrite: (operation) => this.enqueueWrite(operation),
       passFormatGate: () => this.passFormatGate(),
+      relations: () => this.relations.list(),
+      changeRelations: (change) =>
+        this.changeRelations(() => change(this.relations)),
     });
     this.sessions = new Sessions(
       {
@@ -1304,34 +1328,39 @@ export class ProjectStore {
     return this.enqueueStructure(async () => {
       // What a newer app writes, this one may misread.
       if (this.upgraded) return;
-      const tagsBefore = this.tagsByUnit();
       try {
-        await this.checkStructure();
-        if (this.upgraded) return;
-        await this.checkUnits();
-        await this.findConflicts();
-        await this.forkConversationCopies();
-        if (await this.readUnitDetails()) {
-          this.emit({
-            type: 'unitDetailsChanged',
-            manuscript: this.manuscript(),
-          });
-        }
-        if (await this.todos.read()) this.emitTodos();
-        if (await this.stars.read()) {
-          this.emit({ type: 'conversationsChanged' });
-        }
-        if (await this.customFields.read()) this.emitCustomFields();
-        if (await this.keyFields.read()) this.emitKeyFields();
-        if (await this.relations.read()) this.emitRelations();
-        if (await this.snapshots.read()) this.emitSnapshots();
-        for (const change of tagChanges(tagsBefore, this.tagsByUnit())) {
-          this.emitVocabulary(change);
-        }
+        await this.readChanges();
       } catch (error) {
         console.error(`Can't check ${this.path} for changes:`, error);
       }
     });
+  }
+
+  /** Takes in what changed on disk, as `checkForChanges` does, telling the window. */
+  private async readChanges(): Promise<void> {
+    const tagsBefore = this.tagsByUnit();
+    await this.checkStructure();
+    if (this.upgraded) return;
+    await this.checkUnits();
+    await this.findConflicts();
+    await this.forkConversationCopies();
+    if (await this.readUnitDetails()) {
+      this.emit({
+        type: 'unitDetailsChanged',
+        manuscript: this.manuscript(),
+      });
+    }
+    if (await this.todos.read()) this.emitTodos();
+    if (await this.stars.read()) {
+      this.emit({ type: 'conversationsChanged' });
+    }
+    if (await this.customFields.read()) this.emitCustomFields();
+    if (await this.keyFields.read()) this.emitKeyFields();
+    if (await this.relations.read()) this.emitRelations();
+    if (await this.snapshots.read()) this.emitSnapshots();
+    for (const change of tagChanges(tagsBefore, this.tagsByUnit())) {
+      this.emitVocabulary(change);
+    }
   }
 
   private async checkStructure(): Promise<void> {
@@ -2666,11 +2695,12 @@ export class ProjectStore {
    * Changes the Relations, then tells the window. They aren't in the tree,
    * so another computer's tree is no reason to wait.
    */
-  private changeRelations(change: () => Promise<void>): Promise<void> {
+  private changeRelations<T>(change: () => Promise<T>): Promise<T> {
     return this.enqueueStructure(async () => {
       await this.passFormatGate();
-      await change();
+      const changed = await change();
       this.emitRelations();
+      return changed;
     });
   }
 
@@ -2994,6 +3024,208 @@ export class ProjectStore {
     return this.step(async () => {
       return this.trash.move('entry', entryId);
     });
+  }
+
+  /**
+   * Combines the Entry `otherId` into `keptId`, which keeps its id: the
+   * other's name becomes an alias, its aliases and Tags are added, its
+   * private notes appended under a line naming it, and of each field, its
+   * image too, the kept one takes the other's where only that has one, or
+   * where both do, the one `choices` picks, the kept one's by default; in a
+   * Series, the other's may be kept from a Book after the first on, as an
+   * Evolution, and the two Entries' Evolutions are kept the same way. It
+   * first appears in the earlier of their Books. Then the Relations, Todos,
+   * Proposals and Interview focuses naming the other name the kept one, a
+   * Relation that would break a rule dropped, as `dropped` says, and the
+   * other goes to Trash as it was. Refused between Entries of different
+   * types, or while either is in Conflict.
+   *
+   * The kept one is written first and the other goes to Trash last, so a
+   * crash between leaves both Entries in the Story Bible and every
+   * reference naming one of them; a failure between puts back what it did.
+   * Undo, while it is the latest change, puts
+   * back both Entries and every reference it moved.
+   */
+  combineEntries(
+    keptId: string,
+    otherId: string,
+    choices: CombineChoices,
+  ): Promise<Changed & { dropped: string[] }> {
+    let dropped: string[] = [];
+    return this.step(async () => {
+      const [kept, other] = [keptId, otherId].map((id) => {
+        const entry = this.entries.get(id);
+        if (!entry)
+          throw new ProjectError(
+            'trashed',
+            'Both Entries must be in the Story Bible',
+          );
+        return entry;
+      });
+      const refusal = combineRefusal(kept, other);
+      if (refusal) throw new ProjectError('combine-refused', refusal);
+      for (const id of [keptId, otherId]) {
+        for (const ref of [entryRef(id), privateRef(id)]) {
+          this.refuseUnavailable(ref);
+          if (this.conflicts.has(unitKey(ref))) {
+            throw new ProjectError(
+              'in-conflict',
+              'An Entry in Conflict can’t be combined; choose a version first',
+            );
+          }
+        }
+      }
+      const books = bookIds(this.manuscript());
+      const picks = Object.values(choices.fields ?? {}).flatMap((pick) =>
+        typeof pick === 'object' ? [pick.from] : [],
+      );
+      if (picks.some((book) => books.indexOf(book) < 1)) {
+        throw new ProjectError(
+          'combine-refused',
+          'A value can be kept from a Book on only from a Book after the first',
+        );
+      }
+      const keptValue = await this.read(entryRef(keptId));
+      const otherValue = await this.read(entryRef(otherId));
+      const undo: (() => Promise<void>)[] = [];
+
+      const undoAll = async () => {
+        for (const step of [...undo].reverse()) await step();
+      };
+      try {
+        // The kept one first: a crash after leaves both, nothing lost.
+        const { before } = await this.changeEntry(keptId, () =>
+          combinedEntry(
+            keptValue,
+            otherValue,
+            choices,
+            this.customFields.list(),
+            books,
+          ),
+        );
+        undo.push(async () => {
+          await this.changeEntry(keptId, () => before);
+        });
+        const detail = { kind: 'entry', id: keptId } as const;
+        await this.setDetail(
+          detail,
+          'tags',
+          combinedTags(keptValue.tags ?? [], otherValue.tags ?? []),
+        );
+        await this.setDetail(
+          detail,
+          'firstAppears',
+          combinedFirstAppears(
+            keptValue.firstAppears,
+            otherValue.firstAppears,
+            books,
+          ),
+        );
+        undo.push(async () => {
+          await this.setDetail(detail, 'tags', before.tags);
+          await this.setDetail(detail, 'firstAppears', before.firstAppears);
+        });
+        undo.push(
+          ...(await this.combineImages(keptValue, otherValue, choices)),
+        );
+        const theirs = (await this.read(privateRef(otherId))).body;
+        const notes = await this.changeUnit(privateRef(keptId), (value) => ({
+          ...value,
+          body: combinedPrivateNotes(value.body, theirs, other.name),
+        }));
+        undo.push(async () => {
+          await this.changeUnit(privateRef(keptId), () => notes.before);
+        });
+
+        // What named the other names the kept one.
+        const plan = combinedRelations(
+          this.relations.list(),
+          this.listEntries(),
+          otherId,
+          keptId,
+        );
+        dropped = plan.dropped;
+        undo.push(await this.relations.combine(plan.steps));
+        this.emitRelations();
+        const relinked = await this.todos.relinkEntry(otherId, keptId);
+        if (relinked) {
+          this.emitTodos();
+          undo.push(async () => {
+            await relinked();
+            this.emitTodos();
+          });
+        }
+        undo.push(await this.conversations.combine(otherId, keptId));
+
+        // Last: the other, as it was.
+        undo.push(await this.trash.move('entry', otherId));
+      } catch (error) {
+        // All or none: what it did before failing is put back.
+        await undoAll().catch((undoing: unknown) =>
+          console.error("Can't put back a Combine that failed:", undoing),
+        );
+        throw error;
+      }
+      await this.reloadEntry(keptId);
+      return async () => {
+        await undoAll();
+        this.emitRelations();
+        await this.reloadEntry(keptId);
+      };
+    }).then((changed) => ({ ...changed, dropped }));
+  }
+
+  /**
+   * Gives the kept Entry the other's image where it has none, or where the
+   * Author picked the other's, from a Book on too, and the other's images
+   * from a Book on the same way; resolves with what puts back the kept
+   * one's as they were.
+   */
+  private async combineImages(
+    kept: EntryValue,
+    other: EntryValue,
+    choices: CombineChoices,
+  ): Promise<(() => Promise<void>)[]> {
+    const copies: { to: ImageRef; from: ImageRef }[] = [];
+    const own = choices.fields?.image ?? 'kept';
+    if (other.image && (!kept.image || own === 'other')) {
+      copies.push({
+        to: { kind: 'entry', id: kept.id },
+        from: { kind: 'entry', id: other.id },
+      });
+    } else if (other.image && typeof own === 'object') {
+      copies.push({
+        to: { kind: 'entry', id: kept.id, book: own.from },
+        from: { kind: 'entry', id: other.id },
+      });
+    }
+    for (const book of Object.keys(other.evolvedImages ?? {})) {
+      const pick = choices.evolutions?.[evolutionKey(book, 'image')];
+      if (kept.evolvedImages?.[book] && pick !== 'other') continue;
+      copies.push({
+        to: { kind: 'entry', id: kept.id, book },
+        from: { kind: 'entry', id: other.id, book },
+      });
+    }
+    const undo: (() => Promise<void>)[] = [];
+    for (const { to, from } of copies) {
+      const image = await this.readImage(from);
+      if (!image) continue;
+      const was = await this.readImage(to);
+      await this.writeImage(to, image);
+      undo.push(() =>
+        was ? this.writeImage(to, was) : this.changeImage(to, undefined),
+      );
+    }
+    return undo;
+  }
+
+  /** Tells an open view of the Entry and its private notes what a Combine, or its undo, wrote. */
+  private async reloadEntry(id: string): Promise<void> {
+    for (const ref of [entryRef(id), privateRef(id)]) {
+      const value = await this.read(ref);
+      this.emit({ type: 'unitReloaded', ref, value, byCombine: true });
+    }
   }
 
   /** Sets when the Assistant sees an Entry; undo sets it back. */
@@ -3479,6 +3711,96 @@ export class ProjectStore {
       };
     });
     return { id, ...changed };
+  }
+
+  /**
+   * Adds the Project in the Backup at `zipPath` after the last Book, as
+   * one step: each of its Books a new Book, in order, a Project of one
+   * Book becoming one titled as its folder, its Project Outline that
+   * Book's; its Story Bible beside this one's, each Entry first appearing
+   * in the first added Book unless it says a later one; its Trash, Drawer,
+   * Conversations, Todos, Relations, Snapshots and images. Everything
+   * added has a new id. Its Custom fields and Statuses join those here of
+   * the same label and type, or name; the rest are added. A Series's
+   * Series Outline is appended to this one's under a line naming it. Its
+   * settings stay behind. Refused, writing nothing, for a Backup that
+   * can't be restored. Undo moves the added Books and Entries to Trash.
+   */
+  async addBookFromBackup(zipPath: string): Promise<AddedFromBackup> {
+    const project = await readBackupProject(zipPath, this.deps.clock);
+    try {
+      let added: Omit<AddedFromBackup, keyof Changed> | undefined;
+      const changed = await this.step(async () => {
+        const plan = await planAdd(project, {
+          statuses: this.statuses(),
+          customFields: this.customFields.list(),
+        });
+        const now = this.deps.clock.now();
+        // Unit files first, the tree last.
+        for (const file of project.files) {
+          const comes = await addedFile(project, plan, file, now);
+          if (!comes) continue;
+          const target = path.join(this.path, ...comes.to.split('/'));
+          if (await this.deps.fs.exists(target)) {
+            console.error(`Not adding ${comes.to}: it is here already`);
+            continue;
+          }
+          await this.deps.fs.mkdir(path.dirname(target));
+          await safeWrite(this.deps.fs, this.deps.clock, target, comes.data);
+        }
+        if (plan.statuses.length > 0) {
+          await this.writeManifest({
+            ...this.manifest,
+            statuses: [...this.statuses(), ...plan.statuses],
+          });
+          this.emit({ type: 'statusesChanged', statuses: this.statuses() });
+        }
+        const [first, ...rest] = plan.books;
+        await this.addBook(first.id, undefined, first.title, (tree) => {
+          findBook(tree, first.id).top.push(...first.top);
+          tree.books.push(...rest);
+          tree.chapters.push(...plan.chapters);
+          tree.parts.push(...plan.parts);
+        });
+        await this.readChanges();
+        for (const id of project.starred) {
+          const starred = plan.ids.get(id);
+          if (starred)
+            await this.stars.set(STARRED_CONVERSATIONS, starred, true);
+        }
+        if (project.starred.size > 0)
+          this.emit({ type: 'conversationsChanged' });
+        const outline = (await seriesOutline(project)).trim();
+        if (plan.onlyBook === undefined && outline) {
+          await this.changeUnit(outlineRef(PROJECT_OUTLINE), (value) => ({
+            ...value,
+            body: [
+              value.body.replace(/\s+$/, ''),
+              `From “${project.folderName}”:`,
+              outline,
+            ]
+              .filter(Boolean)
+              .join('\n\n'),
+          }));
+        }
+        const entries = entriesIn(project).flatMap((original) => {
+          const id = plan.ids.get(original);
+          return id && this.entries.has(id) ? [{ id, original }] : [];
+        });
+        added = { name: project.folderName, books: plan.bookIds, entries };
+        return async () => {
+          for (const { id } of entries) {
+            if (this.entries.has(id)) await this.trash.move('entry', id);
+          }
+          for (const id of [...plan.bookIds].reverse()) {
+            if (isBook(this.tree(), id)) await this.trash.move('book', id);
+          }
+        };
+      });
+      return { ...changed, ...added! };
+    } finally {
+      await project.dispose();
+    }
   }
 
   /**
@@ -4607,11 +4929,6 @@ export class ProjectStore {
   }
 }
 
-/** The folder of switch files, which older apps never look in (ADR 0006). */
-const STARS = 'stars';
-/** The file in `stars/` holding the Starred Conversations. */
-const STARRED_CONVERSATIONS = 'conversations';
-
 function starsOf(projectPath: string, deps: StoreDeps): Switches {
   return new Switches(path.join(projectPath, STARS), deps.fs, deps.clock);
 }
@@ -4633,6 +4950,11 @@ function relationsOf(projectPath: string, deps: StoreDeps): Relations {
 
 function snapshotsOf(projectPath: string, deps: StoreDeps): Snapshots {
   return new Snapshots(path.join(projectPath, SNAPSHOTS), deps.fs, deps.clock);
+}
+
+/** The private notes of the Entry `id`. */
+function privateRef(id: string): PrivateRef {
+  return { kind: 'private', id };
 }
 
 /** A Snapshot's name, trimmed; there must be one. */

@@ -47,7 +47,7 @@ const EVERY_ENTRY = [
 ];
 
 /** A label as it is compared: without case or surrounding spaces. */
-function labelKey(label: string): string {
+export function labelKey(label: string): string {
   return label.trim().toLocaleLowerCase();
 }
 

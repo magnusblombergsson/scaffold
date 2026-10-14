@@ -226,6 +226,34 @@ it('an MVP app skips an Append or an Add, and its accept, applying nothing; it s
   ]);
 });
 
+it('an MVP app skips a Relation Proposal and its accept, applying nothing', async () => {
+  const store = await createProject(projectPath, deps());
+  const { id: cellar } = await store.createEntry('place', 'The Cellar');
+  const { id: inn } = await store.createEntry('place', 'The Inn');
+  const { id } = await store.startConversation('brainstorm', 'The Inn');
+  for (const role of ['author', 'assistant'] as const) {
+    await store.appendMessage(id, { role, text: 'Hm.', focus: [], at: 1 });
+  }
+  await store.appendProposal(id, {
+    kind: 'relation',
+    id: 'related',
+    from: cellar,
+    to: inn,
+    proposed: { kind: 'part-of' },
+  });
+  await store.acceptProposal(id, 'related');
+  await store.close();
+
+  const log = await readFile(
+    path.join(projectPath, 'conversations', `${id}.jsonl`),
+    'utf8',
+  );
+  expect(log).toContain('"type":"proposal.related"');
+  const read = mvpParseLog(log);
+  expect(read?.messages).toHaveLength(2);
+  expect(read?.proposals).toEqual([]);
+});
+
 it('an MVP app skips an empty reply, or a failed one, and a summary not used, counting the same messages, and reads the message of one cut short as interrupted', async () => {
   const store = await createProject(projectPath, deps());
   const { id } = await store.startConversation('writing', 'Anna');

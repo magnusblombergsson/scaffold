@@ -203,6 +203,7 @@ export function createConversationEngine({
           store.assistantView(),
           finished.proposals,
           context.book,
+          mode,
         );
     const proposals = made?.proposals ?? [];
     const unreadable = made ? finished.unreadable + made.unreadable : 0;

@@ -68,6 +68,7 @@ export function StoryBible({
   highlight,
   onHighlight,
   onAddTodo,
+  onCombine,
 }: {
   /** In a Series, as of the Book `asOf`. */
   entries: EntrySummary[];
@@ -96,6 +97,8 @@ export function StoryBible({
   onHighlight(on: boolean): void;
   /** Starts a Todo linked to an Entry. */
   onAddTodo(entryId: string): void;
+  /** Opens Combine with… on an Entry. */
+  onCombine(entryId: string): void;
 }) {
   const readOnly = useContext(ReadOnlyContext);
   const bookIds = books.map((book) => book.id);
@@ -189,6 +192,11 @@ export function StoryBible({
               run: () => setImagePromptFor(entry.id),
             },
             addTodoItem(readOnly, () => onAddTodo(entry.id)),
+            {
+              label: 'Combine with…',
+              disabled: readOnly,
+              run: () => onCombine(entry.id),
+            },
             {
               label: 'Move to Trash',
               run: () =>
