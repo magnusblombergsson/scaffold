@@ -92,7 +92,17 @@ const SAMPLES: Record<
   wordTarget: (store, ref) => store.setWordTarget(idOf(ref), 500),
   image: (store, ref) =>
     store.setImage(ref as ImageRef, { data: JPEG, extension: 'jpg' }),
+  firstAppears: (store, ref) =>
+    store.setFirstAppears(idOf(ref), firstBook(store)),
+  evolvedImages: (store, ref) =>
+    store.setImage(
+      { kind: 'entry', id: idOf(ref), book: firstBook(store) },
+      { data: JPEG, extension: 'jpg' },
+    ),
 };
+
+/** The Project's Book 1, by id. */
+const firstBook = (store: ProjectStore) => store.manuscript().books![0].id;
 
 const idOf = (ref: ImageRef | { kind: 'manuscript' }) =>
   ref.kind === 'manuscript' ? PROJECT_OUTLINE : ref.id;
@@ -179,7 +189,9 @@ describe('a Split', () => {
     async (row) => {
       const { store, sceneId } = await newProject();
       await SAMPLES[row.key](store, { kind: 'scene', id: sceneId });
-      const before = store.manuscript().chapters[0].scenes[0][row.key];
+      const detail = (scene: object) =>
+        (scene as Record<string, unknown>)[row.key];
+      const before = detail(store.manuscript().chapters[0].scenes[0]);
       expect(before).toBeDefined();
 
       const { id } = await store.splitScene(
@@ -193,9 +205,9 @@ describe('a Split', () => {
         scenes.find((s) => s.id === sceneId)!,
         scenes.find((s) => s.id === id)!,
       ];
-      expect(old[row.key]).toEqual(before);
-      if (row.split === 'carry') expect(created[row.key]).toEqual(before);
-      else expect(created[row.key]).toBeUndefined();
+      expect(detail(old)).toEqual(before);
+      if (row.split === 'carry') expect(detail(created)).toEqual(before);
+      else expect(detail(created)).toBeUndefined();
     },
   );
 });
@@ -204,7 +216,9 @@ describe('Trash', () => {
   const kinds = ['scene', 'chapter', 'part', 'book', 'entry'] as const;
   it.each(
     DETAILS.filter((row) => row.trash === 'moves').flatMap((row) =>
-      kinds.map((kind) => [row.key, kind] as const),
+      kinds
+        .filter((kind) => row.kinds.includes(kind))
+        .map((kind) => [row.key, kind] as const),
     ),
   )(
     'moves the %s file of a %s to Trash and back on restore',
@@ -220,7 +234,8 @@ describe('Trash', () => {
         entry: entryId,
       }[kind];
       await SAMPLES[key](store, { kind, id });
-      const name = `${id}.jpg`;
+      const name =
+        key === 'evolvedImages' ? `${id}.${firstBook(store)}.jpg` : `${id}.jpg`;
       const images = () => readdir(path.join(projectPath, 'images'));
       const trashed = () =>
         readdir(path.join(projectPath, 'trash')).catch(() => []);

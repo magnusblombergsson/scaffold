@@ -135,6 +135,8 @@ const projectHandlers: Handlers<
     ),
   tags: async ({ store }) => store.tags(),
   setTags: ({ store }, unitId, tags) => store.setTags(unitId, tags),
+  setFirstAppears: ({ store }, entryId, bookId) =>
+    store.setFirstAppears(entryId, bookId),
   changeEntryTags: ({ store }, entryId, change) =>
     store.changeEntryTags(entryId, change),
   tagUses: async ({ store }) => store.tagUses(),

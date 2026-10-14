@@ -384,6 +384,7 @@ export interface ProjectApi {
    * Asks the Author for a JPEG or PNG, then makes it the image of a Scene,
    * Chapter or Entry, scaled down, in place of any it had; false if they
    * cancel or it can't be read, which main has told them. There is no undo.
+   * With a Book, an Entry's image from that Book on.
    */
   chooseImage(ref: ImageRef): Promise<boolean>;
   /** Removes a Scene's, Chapter's or Entry's image; there is no undo. */
@@ -483,6 +484,12 @@ export interface ProjectApi {
    * as an `entriesChanged`.
    */
   setTags(unitId: string, tags: string[]): Promise<void>;
+  /**
+   * In a Series, says which Book an Entry first appears in, or with null
+   * that it isn't said; there is no undo. The Entries follow as an
+   * `entriesChanged`.
+   */
+  setFirstAppears(entryId: string, bookId: string | null): Promise<void>;
   /**
    * Adds a Tag to an Entry, or takes one off, or both, ignoring case, as a
    * step that `undo` reverts. The Entries showing it follow as an
@@ -1099,6 +1106,7 @@ export const projectMethods = {
   deleteStatus: 'invoke',
   tags: 'invoke',
   setTags: 'invoke',
+  setFirstAppears: 'invoke',
   changeEntryTags: 'invoke',
   tagUses: 'invoke',
   renameTag: 'invoke',

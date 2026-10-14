@@ -8,6 +8,7 @@ import type {
   ManuscriptPart,
   ManuscriptScene,
 } from '../shared/project-types';
+import type { TitledBook } from '../shared/evolution';
 import type { MenuItem } from './Binder';
 import { useImagePicker, type ImagePicker } from './ImagePicker';
 import { ImagePromptDialog } from './ImagePromptDialog';
@@ -33,9 +34,20 @@ function unitRef(unit: Unit): ImageRef {
   return { kind, id: unit.id };
 }
 
-/** The image ref of an Entry. */
-function entryRef({ id }: EntrySummary): ImageRef {
-  return { kind: 'entry', id };
+/**
+ * The image ref of an Entry's image file `image`: its own, or in a Series
+ * its image from the Book that `<id>.<book id>.<extension>` names.
+ */
+export function entryImageRef(id: string, image?: string): ImageRef {
+  const book = image?.startsWith(`${id}.`)
+    ? /^([^.]+)\.(jpg|png)$/.exec(image.slice(id.length + 1))?.[1]
+    : undefined;
+  return book ? { kind: 'entry', id, book } : { kind: 'entry', id };
+}
+
+/** The image ref of the image an Entry's summary shows. */
+function entryRef({ id, image }: EntrySummary): ImageRef {
+  return entryImageRef(id, image);
 }
 
 /**
@@ -73,13 +85,46 @@ export function EntryThumbnail({ entry }: { entry: EntrySummary }) {
  * its image's actions, and Image prompt…, which has the Assistant describe
  * the Entry for an image generator, stacked to its right. Without an image
  * a dashed frame keeps the portrait's place.
+ *
+ * In a Series it shows the image as of a Book (#243): one from an
+ * Evolution is marked, its actions land on that Evolution and Remove
+ * Evolution takes it off; seen as of any Book after the first, Change from
+ * that Book on… gives it an image from there.
  */
-export function EntryImageSection({ entry }: { entry: EntrySummary }) {
-  const ref = entryRef(entry);
-  const url = useUnitImage(ref, entry.image);
+export function EntryImageSection({
+  entry,
+  evolution,
+}: {
+  /** The Entry as of the Book it is seen as of, if any. */
+  entry: EntrySummary;
+  evolution?: {
+    /** The Book it is seen as of. */
+    asOf: TitledBook;
+    /** The Book whose Evolution gives the image shown, if one does. */
+    from?: TitledBook;
+    /** Whether a value can change from `asOf` on: it is not the first Book. */
+    evolves: boolean;
+  };
+}) {
+  const shown = entryRef(entry);
+  const from = evolution?.from;
+  const ref: ImageRef = from
+    ? { kind: 'entry', id: entry.id, book: from.id }
+    : { kind: 'entry', id: entry.id };
+  const url = useUnitImage(shown, entry.image);
   const readOnly = useContext(ReadOnlyContext);
   const imagePicker = useImagePicker();
   const [imagePrompt, setImagePrompt] = useState(false);
+  const items = imageItems(ref, entry.image, readOnly, imagePicker).map(
+    (item) =>
+      from && item.label === 'Remove image'
+        ? { ...item, label: 'Remove Evolution' }
+        : item,
+  );
+  const changes =
+    evolution?.evolves && from?.id !== evolution.asOf.id
+      ? evolution.asOf
+      : undefined;
   return (
     <section className="entry-image">
       {url ? (
@@ -92,9 +137,23 @@ export function EntryImageSection({ entry }: { entry: EntrySummary }) {
         <div className="entry-image-empty" />
       )}
       <div className="entry-image-actions">
-        <ImageItemButtons
-          items={imageItems(ref, entry.image, readOnly, imagePicker)}
-        />
+        {from && <EvolvedMark from={from} />}
+        <ImageItemButtons items={items} />
+        {changes && (
+          <button
+            type="button"
+            disabled={readOnly}
+            onClick={() =>
+              void window.project.chooseImage({
+                kind: 'entry',
+                id: entry.id,
+                book: changes.id,
+              })
+            }
+          >
+            Change from {changes.title} on…
+          </button>
+        )}
         <button type="button" onClick={() => setImagePrompt(true)}>
           Image prompt…
         </button>
@@ -107,6 +166,11 @@ export function EntryImageSection({ entry }: { entry: EntrySummary }) {
       )}
     </section>
   );
+}
+
+/** Marks a value that comes from an Evolution, as “From Book 2”. */
+export function EvolvedMark({ from }: { from: TitledBook }) {
+  return <span className="evolved-mark">From {from.title}</span>;
 }
 
 /**

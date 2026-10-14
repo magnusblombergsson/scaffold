@@ -1,7 +1,7 @@
 // A Filter narrows a list or view to the units matching chosen Entry types,
-// Statuses or Tags (v3 spec §2): any of the chosen values within a part, all
-// parts together. It changes only what the Author sees, never what the
-// Assistant does.
+// Statuses or Tags (v3 spec §2), or Entries by the Book they first appear
+// in: any of the chosen values within a part, all parts together. It
+// changes only what the Author sees, never what the Assistant does.
 
 import {
   ENTRY_TYPE_LABELS,
@@ -11,18 +11,20 @@ import {
   type ManuscriptChapter,
   type ManuscriptScene,
 } from './project-types';
+import type { TitledBook } from './evolution';
 import { statusOf, type Status } from './status';
 import { hasTag, tagKey, tagSpelling } from './tags';
 
 /**
  * The values chosen in each part; a part without any doesn't narrow. Null
- * is "No Status" among the Statuses, by id, and "No tags" among the Tags,
- * by spelling.
+ * is "No Status" among the Statuses, by id, "No tags" among the Tags, by
+ * spelling, and "Not said" among the Books an Entry first appears in, by id.
  */
 export type Filter = {
   types?: EntryType[];
   statuses?: (string | null)[];
   tags?: (string | null)[];
+  books?: (string | null)[];
 };
 
 export type FilterPart = keyof Filter;
@@ -39,8 +41,16 @@ export type FilterPlace = (typeof FILTER_PLACES)[number];
 
 export type Filters = Partial<Record<FilterPlace, Filter>>;
 
-/** What a Filter matches on: an Entry's type, a unit's Status id and Tags. */
-export type Filtered = { type?: EntryType; status?: string; tags?: string[] };
+/**
+ * What a Filter matches on: an Entry's type, a unit's Status id and Tags,
+ * and the Book an Entry first appears in.
+ */
+export type Filtered = {
+  type?: EntryType;
+  status?: string;
+  tags?: string[];
+  book?: string;
+};
 
 /** Whether any value is chosen, so the Filter narrows at all. */
 export function filterOn(filter: Filter): boolean {
@@ -52,11 +62,12 @@ export function filterOn(filter: Filter): boolean {
  * shows: none when its id isn't in the Status list.
  */
 export function matchesFilter(filter: Filter, unit: Filtered): boolean {
-  const { types = [], statuses = [], tags = [] } = filter;
+  const { types = [], statuses = [], tags = [], books = [] } = filter;
   const unitTags = unit.tags ?? [];
   return (
     (types.length === 0 || (!!unit.type && types.includes(unit.type))) &&
     (statuses.length === 0 || statuses.includes(unit.status ?? null)) &&
+    (books.length === 0 || books.includes(unit.book ?? null)) &&
     (tags.length === 0 ||
       tags.some((tag) =>
         tag === null ? unitTags.length === 0 : hasTag(unitTags, tag),
@@ -122,18 +133,23 @@ export function withValue<P extends FilterPart>(
 
 /**
  * The chosen values, as the Filter button shows them: Entry types in the
- * Story Bible's order, Statuses in the list's, then the Tags as chosen.
+ * Story Bible's order, Books in reading order, Statuses in the list's, then
+ * the Tags as chosen.
  */
 export function filterSummary(
   filter: Filter,
   statuses: readonly Status[] = [],
+  books: readonly TitledBook[] = [],
 ): string {
   const types = filter.types ?? [];
   const chosen = filter.statuses ?? [];
+  const chosenBooks = filter.books ?? [];
   return [
     ...ENTRY_TYPES.filter((type) => types.includes(type)).map(
       (type) => ENTRY_TYPE_LABELS[type],
     ),
+    ...books.filter((b) => chosenBooks.includes(b.id)).map((b) => b.title),
+    ...(chosenBooks.includes(null) ? ['Not said'] : []),
     ...statuses.filter((s) => chosen.includes(s.id)).map((s) => s.name),
     ...(chosen.includes(null) ? ['No Status'] : []),
     ...(filter.tags ?? []).filter((tag) => tag !== null),
@@ -167,13 +183,18 @@ export function renameTagInFilter(
 }
 
 /**
- * `filter` without the Tags no longer in use and, given the Status list,
- * the Statuses deleted from it; the Tags kept are spelled as in `tags`. A
- * Filter emptied this way is off.
+ * `filter` without the Tags no longer in use and, given the Status list or
+ * the Books, the Statuses deleted from it and the Books no longer in the
+ * Series; the Tags kept are spelled as in `tags`. A Filter emptied this way
+ * is off.
  */
 export function keepKnown(
   filter: Filter,
-  known: { tags: readonly string[]; statuses?: readonly Status[] },
+  known: {
+    tags: readonly string[];
+    statuses?: readonly Status[];
+    books?: readonly string[];
+  },
 ): Filter {
   const kept: Filter = { ...filter };
   if (filter.tags) {
@@ -187,6 +208,10 @@ export function keepKnown(
     kept.statuses = filter.statuses.filter(
       (id) => id === null || statusOf(statuses, id),
     );
+  }
+  if (filter.books && known.books) {
+    const books = known.books;
+    kept.books = filter.books.filter((id) => id === null || books.includes(id));
   }
   return normal(kept);
 }
@@ -213,6 +238,7 @@ export function readFilters(stored: unknown): Filters {
       ),
       statuses: values('statuses').filter(valid) as (string | null)[],
       tags: values('tags').filter(valid) as (string | null)[],
+      books: values('books').filter(valid) as (string | null)[],
     });
   }
   return filters;
@@ -220,7 +246,7 @@ export function readFilters(stored: unknown): Filters {
 
 /** `filter` without its empty parts, the parts in a fixed order. */
 function normal(filter: Filter): Filter {
-  const parts: FilterPart[] = ['types', 'statuses', 'tags'];
+  const parts: FilterPart[] = ['types', 'books', 'statuses', 'tags'];
   return Object.fromEntries(
     parts.flatMap((part) =>
       filter[part]?.length ? [[part, filter[part]]] : [],

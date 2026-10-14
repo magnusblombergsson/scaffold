@@ -10,6 +10,7 @@ import type { Changed } from '../shared/api';
 import type { BibleView } from '../shared/bible-view';
 import { filterOn, matchesFilter } from '../shared/filter';
 import { entryTitle } from '../shared/entry';
+import type { TitledBook } from '../shared/evolution';
 import {
   ENTRY_GROUP_TITLES,
   ENTRY_TYPE_LABELS,
@@ -45,10 +46,15 @@ import { ReadOnlyContext } from './read-only';
  * and whether their names are highlighted where the Prose, Outlines and
  * Notes mention them. Each group collapses; with Group by Tag on, each type
  * has a subgroup per Tag, and dragging an Entry onto one adds that Tag, or
- * with the move key moves it there from the Tag it was dragged from.
+ * with the move key moves it there from the Tag it was dragged from. In a
+ * Series a Book picker shows the Entries as of one Book, and the Filter
+ * narrows them by the Book they first appear in.
  */
 export function StoryBible({
   entries,
+  books = [],
+  asOf,
+  onAsOf,
   openId,
   conflicted,
   onOpen,
@@ -60,7 +66,14 @@ export function StoryBible({
   onHighlight,
   onAddTodo,
 }: {
+  /** In a Series, as of the Book `asOf`. */
   entries: EntrySummary[];
+  /** In a Series, the Books in reading order; none otherwise. */
+  books?: readonly TitledBook[];
+  /** The id of the Book the Entries are shown as of, in a Series. */
+  asOf?: string;
+  /** Shows the Entries as of another Book. */
+  onAsOf?(bookId: string): void;
   /** The Entry the centre shows, if any. */
   openId: string | null;
   /** The ids of Entries whose own file or private notes are in Conflict. */
@@ -80,9 +93,22 @@ export function StoryBible({
   onAddTodo(entryId: string): void;
 }) {
   const readOnly = useContext(ReadOnlyContext);
-  const { filter, setFilter, inUse } = useFilter('writing-bible');
+  const bookIds = books.map((book) => book.id);
+  const { filter, setFilter, inUse } = useFilter(
+    'writing-bible',
+    books.length > 0 ? bookIds : undefined,
+  );
   const [view, setView] = useBibleView();
-  const shown = entries.filter((e) => matchesFilter(filter, e));
+  // A first Book in Trash or the Drawer is as good as not said.
+  const shown = entries.filter((e) =>
+    matchesFilter(filter, {
+      ...e,
+      book:
+        e.firstAppears && bookIds.includes(e.firstAppears)
+          ? e.firstAppears
+          : undefined,
+    }),
+  );
   const groups = bibleGroups(shown, view);
   // The rows that show, in order; an Entry may show under each of its Tags.
   const rows = bibleRows(groups);
@@ -255,6 +281,18 @@ export function StoryBible({
           New Entry…
         </Menu>
       </div>
+      {books.length > 0 && onAsOf && (
+        <label className="story-bible-as-of">
+          As of
+          <select value={asOf} onChange={(event) => onAsOf(event.target.value)}>
+            {books.map((book) => (
+              <option key={book.id} value={book.id}>
+                {book.title}
+              </option>
+            ))}
+          </select>
+        </label>
+      )}
       <label className="story-bible-highlight">
         <input
           type="checkbox"
@@ -271,6 +309,7 @@ export function StoryBible({
             inUse={inUse}
             shown={shown.length}
             total={entries.length}
+            books={books}
           />
           <label className="story-bible-group-by">
             <input

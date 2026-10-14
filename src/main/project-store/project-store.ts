@@ -60,6 +60,7 @@ import {
   newEntryValue,
   revertEntryType,
 } from '../../shared/entry';
+import { withoutBook } from '../../shared/evolution';
 import {
   type Orphaned,
   type PendingProposal,
@@ -127,7 +128,6 @@ import {
 import {
   carriedOnSplit,
   forAssistant,
-  IMAGE_FILE,
   parseDetails,
   validateDetail,
   type DetailKey,
@@ -246,8 +246,7 @@ import {
   unitPath,
   unitValue,
   withEntryDetails,
-  withImage,
-  withTags,
+  type EntryDetails,
   type UnknownKeys,
 } from './unit-codec';
 
@@ -1834,7 +1833,7 @@ export class ProjectStore {
     // An Entry's are read as now on disk, so what another computer gave it is seen.
     const held =
       ref.kind === 'entry'
-        ? (await this.read(entryRef(ref.id)))[key as 'tags' | 'image']
+        ? (await this.read(entryRef(ref.id)))[key as keyof EntryDetails]
         : this.heldDetails(ref)?.[key];
     // Already so: nothing to save, nor to sync.
     if (isDeepStrictEqual(held, stored)) return false;
@@ -1904,6 +1903,21 @@ export class ProjectStore {
   setTags(unitId: string, tags: readonly string[]): Promise<void> {
     return this.enqueueWrite(async () => {
       await this.setDetail(this.detailRef(unitId), 'tags', tags);
+    });
+  }
+
+  /**
+   * Says which Book an Entry first appears in, or with null that it isn't
+   * said, in the header of its Entry file, a unit detail (ADR 0008). There
+   * is no undo.
+   */
+  setFirstAppears(entryId: string, bookId: string | null): Promise<void> {
+    return this.enqueueWrite(async () => {
+      await this.setDetail(
+        { kind: 'entry', id: entryId },
+        'firstAppears',
+        bookId,
+      );
     });
   }
 
@@ -2261,10 +2275,10 @@ export class ProjectStore {
 
   /** Notes an Entry's Tags and image as the header of its file holds them. */
   private noteEntryDetails(id: string, header: UnknownKeys): void {
-    const { tags, image } = parseDetails('entry', id, header);
+    const details = parseDetails('entry', id, header);
     this.setEntries(() => {
       const entry = this.entries.get(id);
-      if (entry) this.entries.set(id, withTags(withImage(entry, image), tags));
+      if (entry) this.entries.set(id, withEntryDetails(entry, details));
     });
   }
 
@@ -2777,9 +2791,23 @@ export class ProjectStore {
 
   /** `setImage`, within a write already enqueued. */
   private async writeImage(ref: ImageRef, image: EntryImage): Promise<void> {
-    const name = `${ref.id}.${image.extension}`;
+    const book = evolvedBook(ref);
+    const name =
+      book === undefined
+        ? `${ref.id}.${image.extension}`
+        : `${ref.id}.${book}.${image.extension}`;
     // Refused before any file is written.
-    validateDetail(ref.kind, ref.id, 'image', name, this.vocabulary(ref.id));
+    if (book === undefined) {
+      validateDetail(ref.kind, ref.id, 'image', name, this.vocabulary(ref.id));
+    } else {
+      validateDetail(
+        ref.kind,
+        ref.id,
+        'evolvedImages',
+        { [book]: name },
+        this.vocabulary(ref.id),
+      );
+    }
     this.refuseUnavailable(this.detailUnit(ref));
     await this.deps.fs.mkdir(path.join(this.path, IMAGES));
     await safeWrite(
@@ -2797,7 +2825,7 @@ export class ProjectStore {
       validateDetail(
         ref.kind,
         ref.id,
-        'image',
+        evolvedBook(ref) === undefined ? 'image' : 'evolvedImages',
         undefined,
         this.vocabulary(ref.id),
       );
@@ -2806,13 +2834,22 @@ export class ProjectStore {
   }
 
   /**
-   * The image a unit's header names; null without one, or while its file
-   * isn't here, as before it syncs. Other files in `images/`, such as a sync
-   * client's conflict copies, are never read.
+   * The image a unit's header names, or with a Book, an Entry's from that
+   * Book on; null without one, or while its file isn't here, as before it
+   * syncs. Other files in `images/`, such as a sync client's conflict
+   * copies, are never read.
    */
   readImage(ref: ImageRef): Promise<EntryImage | null> {
-    const name = this.heldDetails(ref)?.image;
+    const name = this.imageOf(ref);
     return this.readImageFile(name && imagePath(this.path, name));
+  }
+
+  /** The file a unit's header names as `ref`'s image. */
+  private imageOf(ref: ImageRef): string | undefined {
+    const book = evolvedBook(ref);
+    return book === undefined
+      ? this.heldDetails(ref)?.image
+      : this.entries.get(ref.id)?.evolvedImages?.[book];
   }
 
   /** The image file at `file`; null without one, or while it isn't here. */
@@ -2820,7 +2857,7 @@ export class ProjectStore {
     if (!file || !(await this.deps.fs.exists(file))) return null;
     return {
       data: await this.deps.fs.readBytes(file),
-      extension: IMAGE_FILE.exec(path.basename(file))![2] as ImageExtension,
+      extension: (file.endsWith('.png') ? 'png' : 'jpg') as ImageExtension,
     };
   }
 
@@ -2909,8 +2946,20 @@ export class ProjectStore {
     ref: ImageRef,
     image: string | undefined,
   ): Promise<void> {
-    const before = this.heldDetails(ref)?.image;
-    await this.setDetail(ref, 'image', image);
+    const before = this.imageOf(ref);
+    const book = evolvedBook(ref);
+    if (book === undefined) await this.setDetail(ref, 'image', image);
+    else {
+      // As now on disk, so what another computer gave it is kept.
+      const { [book]: _, ...others } =
+        (await this.read(entryRef(ref.id))).evolvedImages ?? {};
+      const images = image ? { ...others, [book]: image } : others;
+      await this.setDetail(
+        ref,
+        'evolvedImages',
+        Object.keys(images).length > 0 ? images : undefined,
+      );
+    }
     if (before && before !== image) {
       const file = imagePath(this.path, before);
       if (await this.deps.fs.exists(file)) await this.deps.fs.unlink(file);
@@ -3519,13 +3568,46 @@ export class ProjectStore {
   emptyTrash(): Promise<void> {
     return this.enqueueWrite(async () => {
       this.latest = null;
+      const books = this.trash
+        .list()
+        .filter(
+          (item) =>
+            item.kind === 'book' && !isBook(this.manifest.tree, item.id),
+        )
+        .map((item) => item.id);
       await this.trash.empty();
+      // Their Evolutions go with them, unless the Book is in the Drawer too.
+      await this.dropEvolutions(books.filter((id) => !this.trash.where(id)));
       // Their values stay in the Entries, never shown.
       if (this.customFields.trashed().length > 0) {
         await this.customFields.empty();
         this.emitCustomFields();
       }
     });
+  }
+
+  /**
+   * Takes the Evolutions of `books`, emptied from Trash, off every Entry:
+   * their values from the Entry's text, and their images with their files.
+   */
+  private async dropEvolutions(books: readonly string[]): Promise<void> {
+    if (books.length === 0) return;
+    for (const entry of this.listEntries()) {
+      const evolved = Object.keys(entry.evolved ?? {});
+      if (books.some((book) => evolved.includes(book))) {
+        await this.changeEntry(entry.id, (value) =>
+          books.reduce(withoutBook, value),
+        );
+      }
+      for (const book of books) {
+        if (entry.evolvedImages?.[book]) {
+          await this.changeImage(
+            { kind: 'entry', id: entry.id, book },
+            undefined,
+          );
+        }
+      }
+    }
   }
 
   /** Whether a Book, Part, Chapter or Scene of this id is in the Manuscript or Unplaced. */
@@ -4172,4 +4254,9 @@ function checkedStatus({ id, name, colour }: Status): Status {
   }
   if (!STATUS_COLOURS.includes(colour)) throw new Error(`No colour ${colour}`);
   return { id, name: name.trim(), colour };
+}
+
+/** The Book of an Entry's image from a Book on that `ref` names; undefined for a unit's own image. */
+function evolvedBook(ref: ImageRef): string | undefined {
+  return ref.kind === 'entry' ? ref.book : undefined;
 }

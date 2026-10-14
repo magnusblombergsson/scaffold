@@ -168,7 +168,54 @@ export type EntryValue = {
    * them; a write keeps the Tags the Entry has.
    */
   tags?: string[];
+  /**
+   * In a Series, the values it takes from a Book onward, by Book id; none
+   * when it has none. Entry text, as its fields are.
+   */
+  evolutions?: Evolutions;
+  /**
+   * The Book it first appears in, by id; none when not said. A unit
+   * detail: only `setFirstAppears` changes it.
+   */
+  firstAppears?: string;
+  /**
+   * Its image from a Book onward, by Book id: each a file in `images/`. A
+   * unit detail: only `setImage` and `removeImage` change them.
+   */
+  evolvedImages?: Record<string, string>;
 };
+
+/**
+ * A field of an Entry that may evolve from one Book to the next, as a
+ * Proposal names it, or its name or a Voice's example lines; its image
+ * evolves too, as a unit detail. Never its type, Tags or private notes.
+ */
+export type EvolvingField =
+  | 'name'
+  | 'voice.examples'
+  | 'description'
+  | 'aliases'
+  | 'role'
+  | 'roleNote'
+  | 'appearance'
+  | 'status'
+  | 'voice.traits'
+  | 'voice.says'
+  | 'voice.neverSays'
+  | 'senses.smells'
+  | 'senses.sight'
+  | 'senses.sound'
+  | 'senses.touch'
+  | 'senses.atmosphere'
+  | `custom:${string}`;
+
+/** The values an Evolution gives its fields: text, a list, or a Role, which may be unset. */
+export type Evolution = Partial<
+  Record<EvolvingField, string | string[] | null>
+>;
+
+/** An Entry's Evolutions, by the id of the Book each takes effect from. */
+export type Evolutions = Record<string, Evolution>;
 export type PrivateValue = { id: string; body: string };
 export type UnitValue =
   | SceneValue
@@ -209,6 +256,19 @@ export type EntrySummary = {
   image?: string;
   /** Its Tags, by spelling; none when it has none. */
   tags?: string[];
+  /** The Book it first appears in, by id; none when not said. */
+  firstAppears?: string;
+  /** Of each Book it has an Evolution from, by id: what the list and highlighting need. */
+  evolved?: Record<string, EvolutionSummary>;
+  /** Its image from a Book onward, by Book id. */
+  evolvedImages?: Record<string, string>;
+};
+
+/** An Evolution as the Story Bible lists it: the name and aliases it gives, and how many values it changes. */
+export type EvolutionSummary = {
+  name?: string;
+  aliases?: string[];
+  values: number;
 };
 
 /**
@@ -220,8 +280,13 @@ export type DetailRef =
   | { kind: 'scene' | 'chapter' | 'part' | 'book' | 'entry'; id: string }
   | { kind: 'manuscript' };
 
-/** What an image belongs to: any unit but the Manuscript. */
-export type ImageRef = Exclude<DetailRef, { kind: 'manuscript' }>;
+/**
+ * What an image belongs to: any unit but the Manuscript. With a `book`, an
+ * Entry's image from that Book on, in a Series: an Evolution's.
+ */
+export type ImageRef =
+  | { kind: 'scene' | 'chapter' | 'part' | 'book'; id: string }
+  | { kind: 'entry'; id: string; book?: string };
 
 /** The extensions an Entry's, Scene's or Chapter's image is stored with. */
 export type ImageExtension = 'jpg' | 'png';

@@ -2462,6 +2462,21 @@ header.entry-header {
   column-gap: 0.75rem;
 }
 
+/* In a Series, where a value of an Entry comes from, and changing it from a Book on. */
+.evolution-controls {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.75rem;
+  font-weight: normal;
+}
+
+.evolved-mark {
+  color: var(--accent);
+  font-style: italic;
+}
+
 .show-in-peek {
   display: inline-flex;
   align-items: center;
@@ -2787,6 +2802,7 @@ legend .show-in-peek {
   width: 100%;
 }
 
+.story-bible-as-of,
 .story-bible-highlight,
 .story-bible-group-by {
   display: flex;

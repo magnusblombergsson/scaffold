@@ -16,13 +16,18 @@ import {
   type UnitValue,
   type Visibility,
 } from '../../shared/project-types';
-import { readTags } from '../../shared/tags';
+import {
+  evolutionsFrontmatter,
+  evolutionSummaries,
+  readEvolutions,
+} from '../../shared/evolution';
 import {
   CUSTOM,
   entryFieldsFrontmatter,
+  EVOLUTIONS,
   readEntryFields,
 } from './entry-fields-file';
-import { DETAILS, imageFile } from './unit-details-catalogue';
+import { DETAILS, imageFile, parseDetails } from './unit-details-catalogue';
 import { KEYS_SAVED_AT } from './unit-details';
 import { formatUnitFile, type UnitFile } from './unit-file';
 
@@ -52,18 +57,36 @@ export function withTags<T extends { tags?: string[] }>(
   return (tags && tags.length > 0 ? { ...rest, tags: [...tags] } : rest) as T;
 }
 
-/** An Entry's unit details (ADR 0008): its image and its Tags. */
-export type EntryDetails = { image?: string; tags?: string[] };
+/**
+ * An Entry's unit details (ADR 0008): its image and its Tags, and in a
+ * Series the Book it first appears in and its images from a Book on.
+ */
+export type EntryDetails = {
+  image?: string;
+  tags?: string[];
+  firstAppears?: string;
+  evolvedImages?: Record<string, string>;
+};
 
 /**
  * An Entry's `value` with the unit details of `held`, as the store has
- * them: only setImage, removeImage and setTags change those.
+ * them: only setImage, removeImage, setTags and setFirstAppears change
+ * those.
  */
 export function withEntryDetails<T extends EntryDetails>(
   value: T,
   held: EntryDetails | undefined,
 ): T {
-  return withTags(withImage(value, held?.image), held?.tags);
+  const {
+    firstAppears: _,
+    evolvedImages: __,
+    ...rest
+  } = withTags(withImage(value, held?.image), held?.tags);
+  return {
+    ...rest,
+    ...(held?.firstAppears && { firstAppears: held.firstAppears }),
+    ...(held?.evolvedImages && { evolvedImages: { ...held.evolvedImages } }),
+  } as T;
 }
 
 /** An Entry's `value` without its unit details: its text alone. */
@@ -111,6 +134,10 @@ export function sceneFile(value: SceneValue, previous?: UnknownKeys): string {
 /** The header key of an Entry's Tags, by spelling, in its Entry file; see the details catalogue. */
 export const TAGS = 'tags';
 
+/** The header keys of the Book an Entry first appears in, and of its images by Book; see the details catalogue. */
+export const FIRST_APPEARS = 'firstAppears';
+export const EVOLVED_IMAGES = 'evolvedImages';
+
 /**
  * An Outline's metadata is the rest of its frontmatter, so it already holds
  * what this app doesn't know; any other unit's is kept from `previous`.
@@ -146,6 +173,9 @@ export function entryFile(
     image: previousImage,
     [TAGS]: _tags,
     [CUSTOM]: previousCustom,
+    [EVOLUTIONS]: previousEvolutions,
+    [FIRST_APPEARS]: _firstAppears,
+    [EVOLVED_IMAGES]: _evolvedImages,
     ...unknown
   } = previous;
   const { id, name, aliases, description } = value;
@@ -169,6 +199,10 @@ export function entryFile(
     rest,
   );
   const custom = customFrontmatter(value.custom, previousCustom);
+  const evolutions = evolutionsFrontmatter(
+    value.evolutions,
+    previousEvolutions,
+  );
   return formatUnitFile({
     frontmatter: {
       id,
@@ -179,8 +213,11 @@ export function entryFile(
       visibility,
       ...(image !== undefined && { image }),
       ...(value.tags && value.tags.length > 0 && { [TAGS]: value.tags }),
+      ...(value.firstAppears && { [FIRST_APPEARS]: value.firstAppears }),
+      ...(value.evolvedImages && { [EVOLVED_IMAGES]: value.evolvedImages }),
       ...fields,
       ...(custom && { [CUSTOM]: custom }),
+      ...(evolutions && { [EVOLUTIONS]: evolutions }),
     },
     body: description,
   });
@@ -261,9 +298,13 @@ export function entryValue(
   { frontmatter, body }: UnitFile,
 ): EntryValue {
   const { type, name, aliases, visibility } = frontmatter;
-  const image = imageFile(id, frontmatter.image);
-  const tags = readTags(frontmatter[TAGS]);
+  const { image, tags, firstAppears, evolvedImages } = parseDetails(
+    'entry',
+    id,
+    frontmatter,
+  );
   const custom = readCustom(frontmatter[CUSTOM]);
+  const evolutions = readEvolutions(frontmatter[EVOLUTIONS]);
   const entryType = ENTRY_TYPES.includes(type as EntryType)
     ? (type as EntryType)
     : 'other';
@@ -280,8 +321,11 @@ export function entryValue(
     description: body,
     fields: readEntryFields(entryType, frontmatter),
     ...(custom && { custom }),
+    ...(evolutions && { evolutions }),
     ...(image && { image }),
-    ...(tags.length > 0 && { tags }),
+    ...(tags && { tags }),
+    ...(firstAppears && { firstAppears }),
+    ...(evolvedImages && { evolvedImages }),
   };
 }
 
@@ -305,10 +349,23 @@ export function entrySummary({
   visibility,
   image,
   tags,
+  evolutions,
+  firstAppears,
+  evolvedImages,
 }: EntryValue): EntrySummary {
+  const summaries = evolutionSummaries(evolutions);
   return withTags(
     withImage<EntrySummary>(
-      { id, type, name, aliases: [...aliases], visibility },
+      {
+        id,
+        type,
+        name,
+        aliases: [...aliases],
+        visibility,
+        ...(firstAppears && { firstAppears }),
+        ...(summaries && { evolved: summaries }),
+        ...(evolvedImages && { evolvedImages: { ...evolvedImages } }),
+      },
       image,
     ),
     tags,

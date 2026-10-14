@@ -5,7 +5,7 @@ import {
   VISIBILITY_LABELS,
   type EntryValue,
 } from '../shared/project-types';
-import { useUnitImage } from './UnitImage';
+import { entryImageRef, useUnitImage } from './UnitImage';
 import { ViewableImage } from './ImageView';
 import { isKeyField, type KeyFieldItem } from '../shared/key-fields';
 import { entryFields, keyFields } from './card-fields';
@@ -40,7 +40,7 @@ export function PeekCard({
 }) {
   const card = useRef<HTMLElement>(null);
   const [expanded, setExpanded] = useState(false);
-  const image = useUnitImage({ kind: 'entry', id: entry.id }, entry.image);
+  const image = useUnitImage(entryImageRef(entry.id, entry.image), entry.image);
   const title = entryTitle(entry);
   const customFields = useCustomFields();
   const choices = useKeyFields();

@@ -211,3 +211,53 @@ describe('mergedEntry', () => {
     expect(() => mergedEntry([a, b], {}, 'Captain.')).toThrow(/appearance/);
   });
 });
+
+describe('Evolutions in Conflict', () => {
+  const books = [
+    { id: 'b1', title: 'Book 1' },
+    { id: 'b2', title: 'Ashes' },
+  ];
+
+  it('shows each Evolution as a part of its own, by its field and Book', () => {
+    const a = mara({ evolutions: { b2: { name: 'Queen Mara' } } });
+    const b = mara({
+      evolutions: { b2: { name: 'Lady Mara', appearance: 'Grey' } },
+    });
+
+    const parts = entryParts([a, b], [], books).filter((p) =>
+      p.key.startsWith('evolution:'),
+    );
+
+    expect(parts).toEqual([
+      {
+        key: 'evolution:b2:name',
+        label: 'Name from Ashes',
+        texts: ['Queen Mara', 'Lady Mara'],
+        differs: true,
+      },
+      {
+        key: 'evolution:b2:appearance',
+        label: 'Appearance from Ashes',
+        texts: [undefined, 'Grey'],
+        differs: true,
+      },
+    ]);
+  });
+
+  it('merges each Evolution from the version chosen for it, or none', () => {
+    const a = mara({ evolutions: { b2: { name: 'Queen Mara' } } });
+    const b = mara({
+      evolutions: { b2: { name: 'Lady Mara', appearance: 'Grey' } },
+    });
+
+    const merged = mergedEntry(
+      [a, b],
+      { 'evolution:b2:name': 1, 'evolution:b2:appearance': 0 },
+      'Captain.',
+      [],
+      books,
+    );
+
+    expect(merged.evolutions).toEqual({ b2: { name: 'Lady Mara' } });
+  });
+});

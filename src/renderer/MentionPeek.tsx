@@ -10,16 +10,20 @@ const PEEK_WIDTH = 340;
  * it, each with Read more, an icon that opens the full Entry and one that
  * pins it, or unpins it. Escape, a click elsewhere, or scrolling the
  * highlight away closes it; so does pinning its only Entry, whose Pinned
- * note is then where it was.
+ * note is then where it was. In a Series each shows as of the Book being
+ * written.
  */
 export function MentionPeek({
   peek,
+  asWritten = (entry) => entry,
   pinned,
   onOpen,
   onTogglePin,
   onClose,
 }: {
   peek: MentionClick;
+  /** An Entry as the Peek shows it: in a Series, as of the Book being written. */
+  asWritten?(entry: EntryValue): EntryValue;
   /** The ids of the Entries pinned. */
   pinned: readonly string[];
   onOpen(entryId: string): void;
@@ -48,7 +52,7 @@ export function MentionPeek({
       {entries?.map((entry) => (
         <PeekCard
           key={entry.id}
-          entry={entry}
+          entry={asWritten(entry)}
           onOpen={onOpen}
           pin={{
             pinned: pinned.includes(entry.id),
