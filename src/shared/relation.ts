@@ -301,7 +301,17 @@ export function entryRelations(
 
 /** The Relations `id` is in, as `view` shows them, each as the sentence its page reads. */
 export function relationSentences(view: RelationsView, id: string): string[] {
-  return entryRelations(view, id).map((line) => line.parts.join(' — '));
+  return entryRelations(view, id).map(relationSentence);
+}
+
+/** A line of an Entry's Relations as the sentence its page reads. */
+export function relationSentence(line: EntryRelation): string {
+  return line.parts.join(' — ');
+}
+
+/** In a Series, the Book a line of an Entry's Relations holds from; none in every Book. */
+export function relationBook(line: EntryRelation): string | undefined {
+  return line.kind === 'pair' ? line.relation.book : line.book;
 }
 
 /** What a pair Relation says `from` is to `to`, as in “part of”. */

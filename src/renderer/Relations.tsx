@@ -11,6 +11,7 @@ import {
 import {
   entryRelations,
   NESTING_TYPES,
+  relationBook,
   relationRefusal,
   type EntryRelation,
   type RelationChoice,
@@ -159,7 +160,7 @@ function RelationLine({
   const holdsFrom = books.length > 1 && (
     <HoldsFrom
       books={books}
-      book={line.kind === 'pair' ? line.relation.book : line.book}
+      book={relationBook(line)}
       disabled={readOnly}
       onChange={(book) =>
         void run(() => window.project.setRelationBook(id, book))
