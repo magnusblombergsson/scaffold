@@ -181,11 +181,7 @@ export function entryRelations(
   const pair = (relation: PairRelation): EntryRelation => ({
     kind: 'pair',
     relation,
-    parts: [
-      title(relation.from),
-      relation.kind === 'part-of' ? 'part of' : relation.label,
-      title(relation.to),
-    ],
+    parts: [title(relation.from), relationPhrase(relation), title(relation.to)],
   });
   return [
     ...(group
@@ -204,6 +200,11 @@ export function entryRelations(
     ...view.pairs.filter((r) => r.from === id).map(pair),
     ...view.pairs.filter((r) => r.to === id && r.from !== id).map(pair),
   ];
+}
+
+/** What a pair Relation says `from` is to `to`, as in “part of”. */
+export function relationPhrase(relation: PairRelation): string {
+  return relation.kind === 'part-of' ? 'part of' : relation.label;
 }
 
 /**

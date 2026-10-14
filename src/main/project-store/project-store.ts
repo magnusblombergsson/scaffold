@@ -298,6 +298,8 @@ export interface AssistantView {
   listEntries(): EntrySummary[];
   /** The Project's Custom fields, which the Assistant sees like any other field. */
   customFields(): CustomField[];
+  /** Every Relation held; `relationsView` hides those it may not see. */
+  listRelations(): Relation[];
   read<R extends AssistantRef>(ref: R): Promise<ValueOf<R>>;
 }
 
@@ -4104,6 +4106,7 @@ export class ProjectStore {
       statuses: () => this.statuses(),
       listEntries: () => this.listEntries().map(forAssistant),
       customFields: () => this.customFields.list(),
+      listRelations: () => this.listRelations(),
       read: async (ref) => {
         // Refused at run time too, whatever a caller's types say.
         if ((ref as UnitRef).kind === 'private') {

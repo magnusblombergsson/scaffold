@@ -1741,3 +1741,85 @@ describe('Series', () => {
     ).toEqual(await buildContext(view, { mode: 'brainstorm', messages }));
   });
 });
+
+describe('Relations', () => {
+  /** A Brainstorm whose message is `text`, everything it sends as one text. */
+  async function brainstorm(
+    view: Awaited<ReturnType<typeof fixture>>['view'],
+    text: string,
+  ): Promise<string> {
+    return sent(
+      await buildContext(view, {
+        mode: 'brainstorm',
+        messages: [message('author', text)],
+      }),
+    );
+  }
+
+  it('are sent as sentences among the Entries the Assistant sees', async () => {
+    const { store, view, entries } = await fixture();
+    await store.addRelation(entries.kista, entries.ferry, { kind: 'part-of' });
+    await store.addRelation(entries.anna, entries.mira, {
+      kind: 'label',
+      label: 'sister of',
+    });
+
+    const text = await brainstorm(view, 'Anna opens the kista.');
+
+    expect(text).toContain('“kista” is part of “Ferry”.');
+    expect(text).toContain('“Anna” is sister of “Mira”.');
+  });
+
+  it('name each Same as group’s faces, and tell the Assistant to keep each face’s facts to it', async () => {
+    const { store, view, entries } = await fixture();
+    await store.addRelation(entries.anna, entries.master, { kind: 'same-as' });
+    await store.addRelation(entries.mira, entries.anna, { kind: 'same-as' });
+
+    const text = await brainstorm(view, 'Anna meets the Harbour master.');
+
+    expect(text).toContain(
+      '“Anna”, “Harbour master” and “Mira” are one person or thing under different faces.',
+    );
+    expect(text).toMatch(/never let one face’s details leak into another’s/);
+  });
+
+  it('leave out an Entry the Assistant doesn’t see: in Trash, in the Drawer, or not sent', async () => {
+    const { store, view, entries } = await fixture();
+    await store.addRelation(entries.anna, entries.master, { kind: 'same-as' });
+    await store.addRelation(entries.mira, entries.anna, { kind: 'same-as' });
+    await store.addRelation(entries.mira, entries.master, {
+      kind: 'label',
+      label: 'afraid of',
+    });
+    await store.addRelation(entries.kista, entries.ferry, { kind: 'part-of' });
+    await store.addRelation(entries.anna, entries.pact, {
+      kind: 'label',
+      label: 'bound by',
+    });
+    await store.trashEntry(entries.master);
+    await store.moveToDrawer('entry', entries.ferry);
+
+    let text = await brainstorm(view, 'Anna, the Harbour master, the kista.');
+
+    expect(text).toContain(
+      '“Anna” and “Mira” are one person or thing under different faces.',
+    );
+    for (const hidden of ['afraid of', 'part of “', 'bound by']) {
+      expect(text).not.toContain(hidden);
+    }
+
+    // A group with one face seen is no group to the Assistant.
+    await store.moveToDrawer('entry', entries.mira);
+    text = await brainstorm(view, 'Anna, the Harbour master, the kista.');
+    expect(text).not.toContain('under different faces');
+    expect(text).not.toContain('How the Author has said');
+  });
+
+  it('send nothing new for a Project without any', async () => {
+    const { view } = await fixture();
+
+    const text = await brainstorm(view, 'Anna opens the kista.');
+
+    expect(text).not.toContain('How the Author has said');
+  });
+});
