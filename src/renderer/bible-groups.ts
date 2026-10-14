@@ -1,5 +1,10 @@
 import type { BibleView } from '../shared/bible-view';
 import {
+  nestedByPartOf,
+  NESTING_TYPES,
+  type RelationsView,
+} from '../shared/relation';
+import {
   ENTRY_TYPES,
   type EntrySummary,
   type EntryType,
@@ -13,6 +18,8 @@ export type TagGroup = {
   /** The Tag's `tagKey`, or '' for No Tag. */
   key: string;
   entries: EntrySummary[];
+  /** How deep each Entry nests by Part of, by id; at top level when not in it. */
+  depth: ReadonlyMap<string, number>;
   collapsed: boolean;
 };
 
@@ -20,6 +27,8 @@ export type TagGroup = {
 export type TypeGroup = {
   type: EntryType;
   entries: EntrySummary[];
+  /** How deep each Entry nests by Part of, by id; at top level when not in it. */
+  depth: ReadonlyMap<string, number>;
   collapsed: boolean;
   /** Null with Group by Tag off. */
   tags: TagGroup[] | null;
@@ -29,25 +38,38 @@ export type TypeGroup = {
  * The Story Bible list's groups for the Entries `shown`, as `view` has
  * them: one per type with Entries, in type order. By Tag, each type has a
  * subgroup per Tag its Entries have, alphabetically, then No Tag; an Entry
- * shows under each of its Tags. The Entries keep the order they come in.
+ * shows under each of its Tags. The Entries keep the order they come in,
+ * but that Places and Items, with `relations`, nest under their Part of
+ * parent in the same group or subgroup.
  */
 export function bibleGroups(
   shown: readonly EntrySummary[],
   view: BibleView,
+  relations?: RelationsView,
 ): TypeGroup[] {
   return ENTRY_TYPES.flatMap((type): TypeGroup[] => {
+    const nested = (of: EntrySummary[]) => {
+      if (!relations || !NESTING_TYPES.includes(type)) {
+        return { entries: of, depth: new Map<string, number>() };
+      }
+      const rows = nestedByPartOf(of, relations);
+      return {
+        entries: rows.map((row) => row.entry),
+        depth: new Map(rows.map((row) => [row.entry.id, row.depth])),
+      };
+    };
     const entries = shown.filter((e) => e.type === type);
     if (entries.length === 0) return [];
     const collapsedTags = new Set(view.collapsedTags?.[type]);
     const subgroup = (tag: string | null, of: EntrySummary[]): TagGroup => {
       const key = tag === null ? '' : tagKey(tag);
-      return { tag, key, entries: of, collapsed: collapsedTags.has(key) };
+      return { tag, key, ...nested(of), collapsed: collapsedTags.has(key) };
     };
     const untagged = entries.filter((e) => !e.tags?.length);
     return [
       {
         type,
-        entries,
+        ...nested(entries),
         collapsed: view.collapsedTypes?.includes(type) ?? false,
         tags: view.groupByTag
           ? [

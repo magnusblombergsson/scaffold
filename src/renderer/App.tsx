@@ -45,6 +45,7 @@ import {
 } from '../shared/manuscript-order';
 import { entryAsOf, namesUpTo, summaryAsOf } from '../shared/evolution';
 import { ROOM_LABELS, ROOMS, type Room } from '../shared/room';
+import { relationsView } from '../shared/relation';
 import { ProjectMirror } from './project-mirror';
 import { useProject } from './use-project';
 import type { Cut } from '../shared/prose-split';
@@ -386,6 +387,7 @@ function ProjectView({
     todos,
     customFields,
     keyFields,
+    relations,
     conflicts,
     statuses,
     language,
@@ -459,6 +461,11 @@ function ProjectView({
   const entriesAsOfBible = useMemo(
     () => entries.map((e) => summaryAsOf(e, bookIds, bibleAsOf)),
     [entries, bookIds, bibleAsOf],
+  );
+  /** The Relations among the Entries in the Story Bible, named as of its Book. */
+  const bibleRelations = useMemo(
+    () => relationsView(relations, entriesAsOfBible),
+    [relations, entriesAsOfBible],
   );
   /** What the Project Outline is called: in a Series, the Series Outline. */
   const projectOutlineName = manuscript.books
@@ -1985,6 +1992,7 @@ function ProjectView({
                 <div className="left-pane-list">
                   <StoryBible
                     entries={entriesAsOfBible}
+                    relations={bibleRelations}
                     books={seriesBooks}
                     asOf={bibleAsOf}
                     onAsOf={setBibleBook}
@@ -2036,6 +2044,8 @@ function ProjectView({
                   key={`${openEntry.id}:${openEntry.type}:${resolutions}:${bibleAsOf}:${bookIds.join()}`}
                   entry={summaryAsOf(openEntry, bookIds, bibleAsOf)}
                   entries={entriesAsOfBible}
+                  relations={bibleRelations}
+                  onOpenEntry={showEntry}
                   language={language}
                   books={seriesBooks}
                   asOf={bibleAsOf}

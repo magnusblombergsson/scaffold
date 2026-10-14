@@ -21,6 +21,7 @@ export class ProjectError extends Error {
       | 'newer-format'
       | 'read-only'
       | 'label-taken'
+      | 'relation-refused'
       // Why a Backup can't be made or restored.
       | 'online-only'
       | 'not-a-backup'

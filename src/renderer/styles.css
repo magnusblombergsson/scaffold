@@ -2527,6 +2527,63 @@ legend .show-in-peek {
   text-decoration: underline;
 }
 
+/* An Entry's Relations: one sentence each, its actions beside it. */
+.relation-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.25rem;
+}
+
+.relation {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.75rem;
+}
+
+.relation-sentence {
+  margin-right: auto;
+}
+
+.relation .link-button {
+  font-size: 0.85rem;
+}
+
+.relation-sentence .link-button {
+  font-size: inherit;
+}
+
+.relation > .link-button {
+  color: var(--muted);
+  opacity: 0;
+}
+
+.relation:is(:hover, :focus-within) > .link-button {
+  opacity: 1;
+}
+
+.relation-label {
+  font: inherit;
+  font-style: italic;
+  width: 12ch;
+}
+
+.relation-add {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.relation-add-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+}
+
 .custom-field-label-row {
   display: flex;
   gap: 0.5rem;

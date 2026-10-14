@@ -18,6 +18,7 @@ import {
   type EntrySummary,
   type EntryType,
 } from '../shared/project-types';
+import type { RelationsView } from '../shared/relation';
 import { SHORTCUTS, withShortcut } from '../shared/shortcuts';
 import { addTodoItem, ConflictMarker, Menu } from './Binder';
 import {
@@ -48,10 +49,12 @@ import { ReadOnlyContext } from './read-only';
  * has a subgroup per Tag, and dragging an Entry onto one adds that Tag, or
  * with the move key moves it there from the Tag it was dragged from. In a
  * Series a Book picker shows the Entries as of one Book, and the Filter
- * narrows them by the Book they first appear in.
+ * narrows them by the Book they first appear in. Places and Items nest
+ * under the one they are Part of.
  */
 export function StoryBible({
   entries,
+  relations,
   books = [],
   asOf,
   onAsOf,
@@ -68,6 +71,8 @@ export function StoryBible({
 }: {
   /** In a Series, as of the Book `asOf`. */
   entries: EntrySummary[];
+  /** The Relations among the Entries, which Places and Items nest by. */
+  relations?: RelationsView;
   /** In a Series, the Books in reading order; none otherwise. */
   books?: readonly TitledBook[];
   /** The id of the Book the Entries are shown as of, in a Series. */
@@ -109,7 +114,7 @@ export function StoryBible({
           : undefined,
     }),
   );
-  const groups = bibleGroups(shown, view);
+  const groups = bibleGroups(shown, view, relations);
   // The rows that show, in order; an Entry may show under each of its Tags.
   const rows = bibleRows(groups);
   /** The row whose ⋯ menu is open, as by Shift+F10. */
@@ -136,12 +141,14 @@ export function StoryBible({
     return tagDrop(drag.entry, drag.from, to, movesTags(event, MAC));
   }
 
-  function entryRow(entry: EntrySummary, sub?: TagGroup) {
+  function entryRow(entry: EntrySummary, depth = 0, sub?: TagGroup) {
     const id = rowId(entry.id, sub);
     return (
       <li
         key={id}
         className="binder-scene"
+        // Under the one it is Part of.
+        style={depth > 0 ? { marginLeft: `${depth}rem` } : undefined}
         draggable={sub !== undefined && !readOnly}
         onDragStart={(event) => {
           if (!sub) return;
@@ -256,7 +263,11 @@ export function StoryBible({
           {hint && <span className="drop-hint">{hint}</span>}
         </h3>
         {!sub.collapsed && (
-          <ol>{sub.entries.map((entry) => entryRow(entry, sub))}</ol>
+          <ol>
+            {sub.entries.map((entry) =>
+              entryRow(entry, sub.depth.get(entry.id), sub),
+            )}
+          </ol>
         )}
       </section>
     );
@@ -348,7 +359,11 @@ export function StoryBible({
           {group.collapsed ? null : group.tags ? (
             group.tags.map((sub) => tagGroup(group.type, sub))
           ) : (
-            <ol>{group.entries.map((entry) => entryRow(entry))}</ol>
+            <ol>
+              {group.entries.map((entry) =>
+                entryRow(entry, group.depth.get(entry.id)),
+              )}
+            </ol>
           )}
         </section>
       ))}

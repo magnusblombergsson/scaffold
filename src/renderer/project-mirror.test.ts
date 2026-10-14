@@ -106,6 +106,7 @@ function setUp(held: Partial<Held> = {}) {
       listTodos: async () => main.todos,
       listCustomFields: async () => main.customFields,
       listKeyFields: async () => main.keyFields,
+      listRelations: async () => [],
       listConflicts: async () => main.conflicts,
       setStatus: async (_ctx: unknown, unitId: string) => {
         main.calls.push(`setStatus ${unitId}`);
