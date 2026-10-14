@@ -99,7 +99,7 @@ import {
   withoutTrashed,
 } from './pinned-notes';
 import { revealedEdge, type ChromeEdge } from './zen';
-import { cycleWritingWidth } from './view-settings';
+import { cycleWritingWidth, toggleTypewriter } from './view-settings';
 import {
   onMentionClick,
   setMentionEntries,
@@ -1195,6 +1195,11 @@ function ProjectView({
     if (command.type === 'cycleWritingWidth') {
       if (!keyApplies(command, room)) return false;
       cycleWritingWidth();
+      return true;
+    }
+    if (command.type === 'toggleTypewriter') {
+      if (!keyApplies(command, room)) return false;
+      toggleTypewriter();
       return true;
     }
     if (command.type === 'togglePane') {

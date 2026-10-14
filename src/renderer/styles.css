@@ -372,6 +372,17 @@ button.recent-open:hover {
   max-width: 72rem;
 }
 
+/* Typewriter scrolling, a Setting: blank space above the first line and below
+   the last, so either can sit at the middle of the editor as it scrolls. */
+:root[data-typewriter='true'] .editor:has(> .prose) {
+  container-type: size;
+}
+
+:root[data-typewriter='true'] .editor .prose {
+  padding-block: calc(50cqh - 0.5lh);
+  min-height: 0;
+}
+
 .editor .prose p {
   margin: 0 0 1em;
 }

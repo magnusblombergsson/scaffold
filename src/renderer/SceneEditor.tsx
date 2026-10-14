@@ -4,6 +4,7 @@ import type { ProseLanguage } from '../shared/project-types';
 import { findQuote } from './find-quote';
 import { MentionHighlight } from './mention-highlight';
 import { proseExtensions } from './prose-editor';
+import { TypewriterScrolling } from './typewriter-scrolling';
 import { docToMarkdown, markdownToDoc } from '../shared/prose-markdown';
 import { UnitEditor } from './UnitEditor';
 
@@ -72,7 +73,11 @@ export function SceneEditor({
     <UnitEditor
       unitKey={`scene:${sceneId}`}
       text={markdown}
-      extensions={[...proseExtensions(language), MentionHighlight]}
+      extensions={[
+        ...proseExtensions(language),
+        MentionHighlight,
+        TypewriterScrolling,
+      ]}
       madeWith={language}
       toDoc={markdownToDoc}
       toText={docToMarkdown}

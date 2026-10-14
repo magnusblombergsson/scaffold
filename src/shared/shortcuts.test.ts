@@ -62,9 +62,6 @@ describe('commandForKey', () => {
     expect(commandForKey(key('T', { ctrlKey: true }), false)).toEqual({
       type: 'newTodo',
     });
-    expect(
-      commandForKey(key('t', { ctrlKey: true, shiftKey: true }), false),
-    ).toBeNull();
   });
 
   it('splits the Scene with Ctrl+K, and to the next Chapter with Shift, either case', () => {
@@ -146,6 +143,19 @@ describe('commandForKey', () => {
     expect(commandForKey(key('w', { ctrlKey: true }), false)).toBeNull();
   });
 
+  it('turns typewriter scrolling on or off with Ctrl+Shift+T, but Ctrl+T is a new Todo', () => {
+    expect(
+      commandForKey(key('T', { ctrlKey: true, shiftKey: true }), false),
+    ).toEqual({ type: 'toggleTypewriter' });
+    expect(
+      commandForKey(key('T', { metaKey: true, shiftKey: true }), true),
+    ).toEqual({ type: 'toggleTypewriter' });
+    expect(SHORTCUTS.typewriter).toBe('CmdOrCtrl+Shift+T');
+    expect(commandForKey(key('t', { ctrlKey: true }), false)).toEqual({
+      type: 'newTodo',
+    });
+  });
+
   it('never takes Ctrl+Alt with a letter or digit, which is AltGr on Windows', () => {
     expect(
       commandForKey(key('e', { ctrlKey: true, altKey: true }), false),
@@ -202,7 +212,7 @@ describe('CHEAT_SHEET', () => {
     }
   });
 
-  it('lists zen mode, Escape leaving it, the pane keys and the width key in a View group', () => {
+  it('lists zen mode, Escape leaving it, the pane keys, the width key and typewriter scrolling in a View group', () => {
     const view = CHEAT_SHEET.find((group) => group.title === 'View');
     expect(view?.shortcuts.flatMap((s) => s.keys)).toEqual([
       'CmdOrCtrl+Shift+F',
@@ -210,6 +220,7 @@ describe('CHEAT_SHEET', () => {
       'CmdOrCtrl+Shift+M',
       'CmdOrCtrl+Shift+A',
       'CmdOrCtrl+Shift+W',
+      'CmdOrCtrl+Shift+T',
     ]);
   });
 

@@ -203,6 +203,7 @@ function parseSettings(text: string): SettingsFile | null {
   delete global.writingWidth;
   delete global.theme;
   delete global.spellCheck;
+  delete global.typewriter;
   Object.assign(global, view);
   if (isJsonObject(global.providers)) {
     global.providers = parseProvidersSettings(global.providers);

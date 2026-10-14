@@ -171,22 +171,24 @@ describe('saving', () => {
     expect(settings.composerHeight()).toBe(180);
   });
 
-  it('looks as today until the Author changes the writing width, theme or spell check, and remembers them', async () => {
+  it('looks as today until the Author changes the writing width, theme, spell check or typewriter scrolling, and remembers them', async () => {
     const settings = await load();
     expect(settings.viewSettings()).toEqual({
       writingWidth: 'narrow',
       theme: 'system',
       spellCheck: true,
+      typewriter: false,
     });
 
     settings.setViewSettings({ writingWidth: 'full', spellCheck: false });
-    settings.setViewSettings({ theme: 'dark' });
+    settings.setViewSettings({ theme: 'dark', typewriter: true });
     await settings.flush();
 
     expect((await load()).viewSettings()).toEqual({
       writingWidth: 'full',
       theme: 'dark',
       spellCheck: false,
+      typewriter: true,
     });
   });
 
@@ -621,6 +623,7 @@ describe('a bad or newer settings file', () => {
           writingWidth: 'huge',
           theme: 'sepia',
           spellCheck: 'off',
+          typewriter: 'on',
         },
         projects: {
           a: {
@@ -664,6 +667,7 @@ describe('a bad or newer settings file', () => {
       writingWidth: 'narrow',
       theme: 'system',
       spellCheck: true,
+      typewriter: false,
     });
     expect(settings.project('a')).toEqual({ panelWidths: { binder: 300 } });
     expect(settings.project('b')).toEqual({});

@@ -50,6 +50,7 @@ describe('keyApplies', () => {
       { type: 'togglePane', pane: 'left' },
       { type: 'zen' },
       { type: 'cycleWritingWidth' },
+      { type: 'toggleTypewriter' },
       { type: 'newScene', above: false },
       { type: 'newChapter', above: false },
       { type: 'splitScene', toNextChapter: false },
