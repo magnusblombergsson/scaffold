@@ -330,6 +330,41 @@ ${JSON.stringify({ type: 'message', role: 'assistant', text: 'Odd.', focus: [], 
     ]);
   });
 
+  it('logs the Book a Brainstorm or Interview is put on, and each change, as bookChosen; the latest is its Book', async () => {
+    const { projectPath, store, clock } = await newProject();
+    const { id: two } = await store.createBook();
+    const one = store.manuscript().books![0].id;
+    const { id } = await store.startConversation('brainstorm', 'Anna');
+
+    await store.chooseBook(id, two);
+    await clock.sleep(1_000);
+    await store.chooseBook(id, one);
+
+    expect((await logLines(projectPath, id)).slice(1)).toEqual([
+      { type: 'bookChosen', book: two, at: 1_000 },
+      { type: 'bookChosen', book: one, at: 2_000 },
+    ]);
+    expect((await store.readConversation(id)).book).toBe(one);
+    expect(await store.listConversations()).toEqual([
+      expect.objectContaining({ id, book: one }),
+    ]);
+  });
+
+  it('puts only a Brainstorm or Interview on a Book, and only on a Book of the Series', async () => {
+    const { store } = await newProject();
+    const { id: book } = await store.createBook();
+    const writing = await store.startConversation('writing', 'Anna');
+    const interview = await store.startConversation('interview', 'Mara');
+
+    await expect(store.chooseBook(writing.id, book)).rejects.toThrow(
+      'Only a Brainstorm or Interview Conversation is on a Book',
+    );
+    await expect(store.chooseBook(interview.id, 'gone')).rejects.toThrow(
+      'No such Book',
+    );
+    expect((await store.readConversation(interview.id)).book).toBeUndefined();
+  });
+
   it('keeps a Tag focus as the Tag was spelled', async () => {
     const { store } = await newProject();
     const { id } = await store.conversations.startConversation(

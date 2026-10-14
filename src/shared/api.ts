@@ -947,6 +947,12 @@ export interface AssistantApi {
    * the Model chosen last.
    */
   chooseModel(conversationId: string, model: Model): Promise<void>;
+  /**
+   * In a Series, puts a Brainstorm or Interview on the Book `bookId` from
+   * its next message on, logged as an event. Refused for a Writing
+   * Conversation, and for what is no Book.
+   */
+  chooseBook(conversationId: string, bookId: string): Promise<void>;
   /** Gives a Conversation a new title; refused for an empty one. */
   renameConversation(conversationId: string, title: string): Promise<void>;
   /**
@@ -1132,6 +1138,7 @@ export const assistantMethods = {
   readConversation: 'invoke',
   startConversation: 'invoke',
   chooseModel: 'invoke',
+  chooseBook: 'invoke',
   renameConversation: 'invoke',
   starConversation: 'invoke',
   trashConversation: 'invoke',

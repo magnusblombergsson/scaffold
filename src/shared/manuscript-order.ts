@@ -122,6 +122,21 @@ export function bookOf(
 }
 
 /**
+ * In a Series, the Book a Brainstorm or Interview Conversation is about: the
+ * one it was last put on, while that is a Book, or else the first, as one
+ * started before the Project was a Series was about what became Book 1.
+ * None in a Project that is no Series.
+ */
+export function conversationBook(
+  manuscript: Manuscript,
+  book: string | undefined,
+): string | undefined {
+  const { books } = manuscript;
+  if (!books) return undefined;
+  return books.find((b) => b.id === book)?.id ?? books[0]?.id;
+}
+
+/**
  * Whether Split to Next Chapter is offered in a Chapter: in a Series only
  * where its Book has a Chapter after it, since a Split never puts the new
  * Scene in another Book, nor makes a Chapter for it there.

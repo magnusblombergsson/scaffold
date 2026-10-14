@@ -28,6 +28,7 @@ import {
 } from './Conversation';
 import { EntryCard } from './EntryCard';
 import { FilterControl, useFilter } from './Filter';
+import { BookPicker } from './BookPicker';
 import { ModelPicker } from './ModelPicker';
 import { PanelResizer, type PaneSize } from './PanelResizer';
 import { RoomList } from './RoomList';
@@ -43,6 +44,7 @@ import { UnitStatusDot, useStatuses } from './StatusAndTags';
 export function BrainstormRoom({
   active,
   names,
+  book,
   pane,
   onAddProvider,
   onOpenEntry,
@@ -52,6 +54,8 @@ export function BrainstormRoom({
   /** Whether the room is shown, its Mode the window's. */
   active: boolean;
   names: Names;
+  /** In a Series, the Book a new Conversation is about: the Book being written. */
+  book?: string;
   /** The width of a side pane, and how to resize it. */
   pane(key: keyof PanelWidths): PaneSize;
   onAddProvider(): void;
@@ -66,6 +70,7 @@ export function BrainstormRoom({
     mode: 'brainstorm',
     sceneId: null,
     names,
+    book,
     active,
     onChange,
   });
@@ -93,6 +98,7 @@ export function BrainstormRoom({
         {providers &&
           (anyAdded(providers) ? (
             <div className="conversations">
+              <BookPicker conversation={conversation} names={names} />
               <ModelPicker conversation={conversation} />
               <ConversationUsage total={total} />
               <MessageLog

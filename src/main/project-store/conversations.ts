@@ -183,17 +183,39 @@ export class Conversations {
   }
 
   /**
+   * In a Series, puts a Brainstorm or Interview on the Book `book` from its
+   * next message on, logged as chosen; never a Writing Conversation, whose
+   * Book is that of the Scene in focus.
+   */
+  chooseBook(id: string, book: string): Promise<void> {
+    return this.inLog(id, async () => {
+      const { mode } = await this.readLogged(id);
+      if (mode === 'writing') {
+        throw new Error(
+          'Only a Brainstorm or Interview Conversation is on a Book',
+        );
+      }
+      await this.appendEvent(id, {
+        type: 'bookChosen',
+        book,
+        at: this.deps.clock.now(),
+      });
+    });
+  }
+
+  /**
    * The Conversations in `conversations/`, latest first; `project.json`
    * doesn't list them. A log whose header can't be read is logged and left out.
    */
   async listConversations(): Promise<ConversationSummary[]> {
     return (await this.readLogs())
-      .map(({ id, mode, title, created, focus }) => ({
+      .map(({ id, mode, title, created, focus, book }) => ({
         id,
         mode,
         title,
         created,
         ...(focus && { focus }),
+        ...(book !== undefined && { book }),
       }))
       .sort((a, b) => b.created - a.created);
   }
