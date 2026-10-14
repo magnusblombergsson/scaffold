@@ -1594,6 +1594,144 @@ describe('Series', () => {
     expect(sent(context)).toContain('a Book which is no longer in the Project');
   });
 
+  it('sends each Entry as of the Conversation’s Book: its own values with the Evolutions up to it', async () => {
+    const { store, view, books, entries } = await series();
+    const ref = { kind: 'entry', id: entries.mira } as const;
+    const mira = await store.read(ref);
+    await store.write(ref, {
+      ...mira,
+      evolutions: {
+        [books.two]: { name: 'Queen Mira', description: 'She rules now.' },
+      },
+    });
+    const asked = async (book: string) =>
+      sent(
+        await buildContext(view, {
+          mode: 'brainstorm',
+          book,
+          messages: [message('author', 'Hm.')],
+        }),
+      );
+
+    const one = await asked(books.one);
+    expect(one).toContain('## Mira (Character)');
+    expect(one).toContain('Her sister.');
+    expect(one).not.toContain('She rules now.');
+    const two = await asked(books.two);
+    expect(two).toContain('## Queen Mira (Character)');
+    expect(two).toContain('She rules now.');
+    expect(two).not.toContain('Her sister.');
+  });
+
+  it('never sends an Entry that first appears in a later Book, however it is seen', async () => {
+    const { store, view, books, entries } = await series();
+    await store.setFirstAppears(entries.mira, books.two);
+    await store.setFirstAppears(entries.anna, books.two);
+    const asked = (book: string) =>
+      buildContext(view, {
+        mode: 'interview',
+        focus: { kind: 'entry-type', type: 'character' },
+        book,
+        messages: [message('author', 'Annie?')],
+      });
+
+    const one = await asked(books.one);
+    expect(one.saw.entries).not.toContain(entries.mira);
+    expect(one.saw.entries).not.toContain(entries.anna);
+    expect(sent(one)).not.toContain('Her sister.');
+    const two = await asked(books.two);
+    expect(two.saw.entries).toContain(entries.mira);
+    expect(two.saw.entries).toContain(entries.anna);
+  });
+
+  it('Interview: names an Entry in focus as of the Book, and not at all before it first appears', async () => {
+    const { store, view, books, entries } = await series();
+    const ref = { kind: 'entry', id: entries.mira } as const;
+    await store.write(ref, {
+      ...(await store.read(ref)),
+      evolutions: { [books.two]: { name: 'Queen Mira' } },
+    });
+    await store.setFirstAppears(entries.mira, books.two);
+    const focusOf = async (book: string) =>
+      (
+        await buildContext(view, {
+          mode: 'interview',
+          focus: { kind: 'entry', id: entries.mira },
+          book,
+          messages: [message('author', 'Ask me.')],
+        })
+      ).system.find((b) => b.text.startsWith('The Interview’s focus'))?.text;
+
+    expect(await focusOf(books.two)).toContain('the Entry “Queen Mira”');
+    const one = await focusOf(books.one);
+    expect(one).not.toContain('Mira');
+    expect(one).toContain("Say you can't see it");
+  });
+
+  it('matches mentions by every name and alias an Entry has had up to the Book, never one it takes later', async () => {
+    const { store, view, books, entries, scenes } = await series();
+    const ref = { kind: 'entry', id: entries.master } as const;
+    const master = await store.read(ref);
+    await store.write(ref, {
+      ...master,
+      evolutions: {
+        [books.two]: { name: 'Old Tom', aliases: ['Tom'] },
+      },
+    });
+    const asked = (book: string, text: string) =>
+      buildContext(view, {
+        mode: 'brainstorm',
+        book,
+        messages: [message('author', text)],
+      });
+
+    expect(
+      (await asked(books.one, 'What of Old Tom?')).saw.entries,
+    ).not.toContain(entries.master);
+    expect((await asked(books.two, 'What of Tom?')).saw.entries).toContain(
+      entries.master,
+    );
+    expect(
+      (await asked(books.two, 'And the Harbour master?')).saw.entries,
+    ).toContain(entries.master);
+    // Writing sees it as of the Book of the Scene in focus.
+    const writing = await buildContext(view, {
+      mode: 'writing',
+      command: 'question',
+      sceneId: scenes.wreck,
+      messages: [message('author', 'Is Tom here?')],
+    });
+    expect(writing.saw.entries).toContain(entries.master);
+    expect(sent(writing)).toContain('## Old Tom (Character)');
+  });
+
+  it('Writing · Review: judges against the Entries as of the Book of the Scene reviewed', async () => {
+    const { store, view, books, entries, scenes } = await series();
+    const ref = { kind: 'entry', id: entries.mira } as const;
+    await store.write(ref, {
+      ...(await store.read(ref)),
+      evolutions: { [books.two]: { description: 'She rules now.' } },
+    });
+    await store.setFirstAppears(entries.anna, books.two);
+    const review = (sceneId: string, command: Command) =>
+      buildContext(view, {
+        mode: 'writing',
+        command,
+        sceneId,
+        messages: [message('author', 'Review Annie.')],
+      });
+
+    for (const command of ['review-scene', 'review-chapter'] as const) {
+      const inOne = await review(scenes.harbour, command);
+      expect(sent(inOne)).toContain('Her sister.');
+      expect(sent(inOne)).not.toContain('She rules now.');
+      expect(inOne.saw.entries).not.toContain(entries.anna);
+      const inTwo = await review(scenes.wreck, command);
+      expect(sent(inTwo)).toContain('She rules now.');
+      expect(sent(inTwo)).not.toContain('Her sister.');
+    }
+  });
+
   it('a Project of one Book ignores a Book it is given', async () => {
     const { view } = await fixture();
     const messages = [message('author', 'Hm.')];

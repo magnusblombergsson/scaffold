@@ -102,12 +102,14 @@ export type Operation<V, Appends extends 'append' | 'add'> =
 /**
  * A change to one field of an Entry, as the Assistant proposed it: a value
  * in place of its `base`, text appended to it, or an item, as a list of one,
- * added to a list.
+ * added to a list. In a Series, `book` is the Book whose Conversation made
+ * it, by id: its `base` and where it lands are the value as of that Book.
  */
 export type EntryFieldChange = {
   kind: 'field';
   entryId: string;
   field: ProposalField;
+  book?: string;
 } & Operation<FieldValue, 'append' | 'add'>;
 
 /** A new Entry as proposed: its type, name and a one-line description. */
@@ -173,12 +175,15 @@ export type ProposalState =
 
 /**
  * A Proposal as a card shows it: with the `name` of its target now, as in
- * `Anna` or `Scene “Harbour”`, and where it stands.
+ * `Anna` or `Scene “Harbour”`, and where it stands. A change to a field made
+ * in a Series on a Book after the first `evolvesFrom` that Book, by title:
+ * the Author may accept it from that Book on.
  */
 export type ProposalView = Proposal &
   WithFieldLabel & {
     name: string;
     state: ProposalState;
+    evolvesFrom?: string;
   };
 
 /**
@@ -647,10 +652,19 @@ function fencedProposal(json: object): string {
  * What the log says of a Proposal: undecided, accepted with the value it
  * replaced, if any, and the one it wrote, or rejected. An accept that was
  * undone leaves it undecided again, with what that accept wrote as `undid`.
+ * In a Series, an accept of a field that landed on an Evolution says from
+ * which Book `on`, and whether it `evolved` it, making that Evolution;
+ * one that landed on the Entry's own value says neither.
  */
 export type Decision =
   | { kind: 'pending'; undid?: ProposedValue }
-  | { kind: 'accepted'; replaced?: FieldValue; wrote: ProposedValue }
+  | {
+      kind: 'accepted';
+      replaced?: FieldValue;
+      wrote: ProposedValue;
+      on?: string;
+      evolved?: true;
+    }
   | { kind: 'rejected' };
 
 /** What an event logs of a Proposal once made: an accept, a reject, or an undo. */
@@ -704,6 +718,7 @@ export type Refusal = {
     | 'stale'
     | 'cannot-hold'
     | 'cannot-append'
+    | 'cannot-evolve'
     | 'orphaned'
     | 'not-accepted'
     | 'changed';

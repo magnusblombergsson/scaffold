@@ -199,7 +199,11 @@ export function createConversationEngine({
     // A Review asks before it proposes.
     const made = reviewing
       ? null
-      : await readProposals(store.assistantView(), finished.proposals);
+      : await readProposals(
+          store.assistantView(),
+          finished.proposals,
+          context.book,
+        );
     const proposals = made?.proposals ?? [];
     const unreadable = made ? finished.unreadable + made.unreadable : 0;
     const reply: ConversationMessage = {

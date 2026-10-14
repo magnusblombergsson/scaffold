@@ -71,6 +71,20 @@ export function booksUpTo(
   return books.slice(0, index + 1);
 }
 
+/**
+ * Whether an Entry first appears in a Book after `book` among `books`; a
+ * first Book in Trash or the Drawer is as good as not said.
+ */
+export function appearsAfter(
+  { firstAppears }: Pick<EntrySummary, 'firstAppears'>,
+  books: readonly string[],
+  book: string | undefined,
+): boolean {
+  if (firstAppears === undefined || book === undefined) return false;
+  const first = books.indexOf(firstAppears);
+  return first !== -1 && first > books.indexOf(book);
+}
+
 /** Whether an Entry of `entry`'s type has `field`: every one has a name and its Custom fields. */
 export function hasEvolvingField(
   entry: Pick<EntryValue, 'type'>,

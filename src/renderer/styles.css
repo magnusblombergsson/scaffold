@@ -4421,6 +4421,15 @@ button.finding-quote:hover {
   font-size: 0.85em;
 }
 
+.proposal-from-book {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin-top: 0.4rem;
+  font-size: 0.85em;
+  color: var(--muted);
+}
+
 .proposal-actions {
   display: flex;
   flex-wrap: wrap;

@@ -19,6 +19,12 @@ import { type AcceptOptions, type ProjectEvent } from '../../shared/api';
 import type { CustomField } from '../../shared/custom-field';
 import { newEntryValue } from '../../shared/entry';
 import {
+  entryAsOf,
+  removeEvolution,
+  withEvolved,
+} from '../../shared/evolution';
+import { bookIds } from '../../shared/manuscript-order';
+import {
   accept,
   customFieldId,
   fieldOf,
@@ -27,6 +33,7 @@ import {
   undo,
   withField,
   type DecidedProposal,
+  type Decision,
   type EntryCreation,
   type EntryFieldChange,
   type FieldValue,
@@ -63,6 +70,7 @@ import {
   forkedLog,
   headerLine,
   modelChosenEvent,
+  type Landing,
   parseLog,
   proposedEvent,
   type ConversationEvent,
@@ -494,25 +502,46 @@ ${text}`);
    * target held and the one written. Whether it may be accepted, and what
    * that writes, `accept` decides against the target as read just before it
    * is written: a stale one only `anyway`, and one the Author chose to
-   * `append` landing on what the target holds. Refuses any once a newer app
-   * has upgraded the Project.
+   * `append` landing on what the target holds. In a Series, a change to a
+   * field lands where the value its Book sees comes from, the Entry's own
+   * or the Evolution in effect, or `fromBook` on, as an Evolution of that
+   * Book; never for the first. Refuses any once a newer app has upgraded
+   * the Project.
    */
   acceptProposal(
     conversationId: string,
     proposalId: string,
-    { edited, anyway = false, append = false }: AcceptOptions = {},
+    {
+      edited,
+      anyway = false,
+      append = false,
+      fromBook = false,
+    }: AcceptOptions = {},
   ): Promise<void> {
     return this.inLog(conversationId, async () => {
       const proposal = await this.decidedProposal(conversationId, proposalId);
       const value = edited === undefined ? proposal.proposed : edited;
       const how = { anyway, append };
-      const { replaced, wrote, reloaded } =
+      if (fromBook && this.evolvesFrom(proposal) === undefined) {
+        throw new ProjectError(
+          'cannot-evolve',
+          'A Proposal can be accepted as an Evolution only from a Book after the first',
+        );
+      }
+      // Seen as of no Book, it would land on what every Book sees.
+      if (this.bookGone(proposal)) {
+        throw new ProjectError(
+          'orphaned',
+          'The Book it was proposed on is in Trash or the Drawer',
+        );
+      }
+      const { replaced, wrote, reloaded, landed } =
         proposal.kind === 'new-entry'
           ? await this.acceptNewEntry(proposal, value, how)
-          : await this.acceptChange(proposal, value, how);
+          : await this.acceptChange(proposal, value, how, fromBook);
       await this.appendEvent(
         conversationId,
-        acceptedEvent(proposal, replaced, wrote, this.deps.clock.now()),
+        acceptedEvent(proposal, replaced, wrote, this.deps.clock.now(), landed),
       );
       if (reloaded) {
         this.deps.emit({ type: 'unitReloaded', ...reloaded, byProposal: true });
@@ -521,25 +550,81 @@ ${text}`);
     });
   }
 
-  /** Writes the field of an Entry or the Outline a Proposal changes, as `acceptProposal`. */
+  /**
+   * Writes the field of an Entry or the Outline a Proposal changes, as
+   * `acceptProposal`: a field where the value its Book sees comes from, or
+   * `fromBook` on.
+   */
   private async acceptChange(
     proposal: DecidedProposal & (EntryFieldChange | OutlineChange),
     value: ProposedValue,
     how: AcceptHow,
+    fromBook: boolean,
   ): Promise<Accepted> {
     // Its target may be out of reach, with nothing to read.
     granted(accept(proposal, await this.target(proposal), value, how));
     let replaced: FieldValue | undefined;
     let wrote = value;
+    let landed: Landing = {};
     const ref = targetRef(proposal);
     const { after } = await this.deps.changeUnit(ref, (unit) => {
-      const target = targetIn(proposal, unit, this.deps.customFields());
+      const target = this.targetAsSeen(proposal, unit);
       ({ wrote } = granted(accept(proposal, target, value, how)));
       replaced = (target as { current: FieldValue }).current;
-      return withTarget(proposal, unit, wrote as FieldValue);
+      landed = this.landingOf(proposal, unit, fromBook);
+      return withTarget(proposal, unit, wrote as FieldValue, landed);
     });
     this.refuseUnsaved(ref, after);
-    return { replaced, wrote, reloaded: { ref, value: after } };
+    return { replaced, wrote, landed, reloaded: { ref, value: after } };
+  }
+
+  /**
+   * Where accepting a change to a field lands in `unit`: on the Evolution
+   * the value its Book sees comes from, or the Entry's own value; `fromBook`,
+   * on an Evolution of that Book, which it makes unless there is one.
+   */
+  private landingOf(
+    proposal: EntryFieldChange | OutlineChange,
+    unit: EntryValue | OutlineValue,
+    fromBook: boolean,
+  ): Landing {
+    if (proposal.kind !== 'field' || proposal.book === undefined) return {};
+    const source = entryAsOf(unit as EntryValue, this.bookIds(), proposal.book)
+      .from[proposal.field];
+    if (!fromBook) return source === undefined ? {} : { on: source };
+    return source === proposal.book
+      ? { on: source }
+      : { on: proposal.book, evolved: true };
+  }
+
+  /** The Books' ids in reading order; none in a Project that is no Series. */
+  private bookIds(): string[] {
+    return bookIds(this.deps.manuscript());
+  }
+
+  /**
+   * Whether a change to a field was made on a Book the Series no longer
+   * holds in its order, being in Trash or the Drawer.
+   */
+  private bookGone(proposal: Proposal): boolean {
+    const books = this.bookIds();
+    return (
+      proposal.kind === 'field' &&
+      proposal.book !== undefined &&
+      books.length > 0 &&
+      !books.includes(proposal.book)
+    );
+  }
+
+  /**
+   * The title of the Book a change to a field was made on, in a Series,
+   * when it may be accepted from that Book on: a Book after the first.
+   */
+  private evolvesFrom(proposal: Proposal): string | undefined {
+    if (proposal.kind !== 'field' || proposal.book === undefined) return;
+    const books = this.deps.manuscript().books ?? [];
+    const index = books.findIndex((b) => b.id === proposal.book);
+    return index > 0 ? books[index].title : undefined;
   }
 
   /**
@@ -627,11 +712,14 @@ ${text}`);
     granted(undo(proposal, await this.target(proposal)));
     const ref = targetRef(proposal);
     const { after } = await this.deps.changeUnit(ref, (unit) => {
-      const undone = granted(
-        undo(proposal, targetIn(proposal, unit, this.deps.customFields())),
-      );
+      const undone = granted(undo(proposal, this.targetAsSeen(proposal, unit)));
       const { restore } = undone as { restore: FieldValue };
-      return withTarget(proposal, unit, restore);
+      const landed = landingIn(proposal.decision);
+      // An Evolution the accept made goes with it.
+      if (landed.evolved && proposal.kind === 'field') {
+        return removeEvolution(unit as EntryValue, landed.on!, proposal.field);
+      }
+      return withTarget(proposal, unit, restore, landed);
     });
     this.refuseUnsaved(ref, after);
     return { ref, value: after };
@@ -699,16 +787,20 @@ ${text}`);
     const { message: _, decision, ...proposal } = logged;
     const name = this.proposalName(proposal);
     const labelled = this.labelled(proposal);
-    const snapshot = await this.snapshot(proposal);
-    const state = stateOf(
-      { ...proposal, ...labelled, decision, name },
-      snapshot,
-    );
-    return { ...proposal, ...labelled, name, state };
+    const decided = { ...proposal, ...labelled, decision, name };
+    const state = stateOf(decided, await this.snapshot(decided));
+    const evolvesFrom = this.evolvesFrom(proposal);
+    return {
+      ...proposal,
+      ...labelled,
+      name,
+      state,
+      ...(evolvesFrom !== undefined && { evolvesFrom }),
+    };
   }
 
   /** A Proposal's target as it is now, for `stateOf`. */
-  private snapshot(proposal: Proposal): Promise<Snapshot> {
+  private snapshot(proposal: DecidedProposal): Promise<Snapshot> {
     return proposal.kind === 'new-entry'
       ? this.newEntryPlace(proposal.entryId)
       : this.target(proposal);
@@ -754,18 +846,38 @@ ${text}`);
    * Entry without the field.
    */
   private async target(
-    proposal: EntryFieldChange | OutlineChange,
+    proposal: DecidedProposal & (EntryFieldChange | OutlineChange),
   ): Promise<Target> {
     const orphaned =
       proposal.kind === 'outline'
         ? this.deps.outlineOrphaned(proposal.outlineId)
         : this.entryOrphaned(proposal.entryId);
     if (orphaned) return { orphaned };
-    return targetIn(
+    return this.targetAsSeen(
       proposal,
       await this.deps.read(targetRef(proposal)),
-      this.deps.customFields(),
     );
+  }
+
+  /**
+   * What the field or the Outline a Proposal changes holds in `unit`. In a
+   * Series, a field holds the value as its Book sees it while undecided,
+   * and once accepted, as the Book of the Evolution it landed on sees it,
+   * or its own value: there, an Evolution the accept made and that is gone
+   * holds again what the Books before give it.
+   */
+  private targetAsSeen(
+    proposal: DecidedProposal & (EntryFieldChange | OutlineChange),
+    unit: EntryValue | OutlineValue,
+  ): Target {
+    if (proposal.kind === 'outline') return targetIn(proposal, unit, []);
+    const { decision } = proposal;
+    const book = decision.kind === 'accepted' ? decision.on : proposal.book;
+    const seen =
+      book === undefined
+        ? (unit as EntryValue)
+        : entryAsOf(unit as EntryValue, this.bookIds(), book).entry;
+    return targetIn(proposal, seen, this.deps.customFields());
   }
 
   /**
@@ -868,7 +980,15 @@ type Accepted = {
   replaced?: FieldValue;
   wrote: ProposedValue;
   reloaded?: { ref: UnitRef; value: UnitValue };
+  landed?: Landing;
 };
+
+/** Where an accepted change to a field landed, as its decision says; nowhere undecided. */
+function landingIn(decision: Decision): Landing {
+  if (decision.kind !== 'accepted') return {};
+  const { on, evolved } = decision;
+  return { ...(on !== undefined && { on }), ...(evolved && { evolved }) };
+}
 
 /** How the Author accepts a change to a target: `anyway` when stale, or to `append`. */
 type AcceptHow = Required<Pick<AcceptOptions, 'anyway' | 'append'>>;
@@ -924,13 +1044,20 @@ function targetIn(
   return current === undefined ? { orphaned: 'field' } : { current };
 }
 
-/** `unit` with the field or the Outline a Proposal changes set to `value`. */
+/**
+ * `unit` with the field or the Outline a Proposal changes set to `value`: a
+ * field on the Evolution it `landed` on, or the Entry's own value.
+ */
 function withTarget(
   proposal: EntryFieldChange | OutlineChange,
   unit: EntryValue | OutlineValue,
   value: FieldValue,
+  landed: Landing = {},
 ): EntryValue | OutlineValue {
-  return proposal.kind === 'outline'
-    ? { ...(unit as OutlineValue), body: value as string }
-    : withField(unit as EntryValue, proposal.field, value);
+  if (proposal.kind === 'outline') {
+    return { ...(unit as OutlineValue), body: value as string };
+  }
+  return landed.on === undefined
+    ? withField(unit as EntryValue, proposal.field, value)
+    : withEvolved(unit as EntryValue, landed.on, proposal.field, value);
 }

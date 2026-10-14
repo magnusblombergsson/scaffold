@@ -99,7 +99,10 @@ type Draft = string | NewEntry;
  * rejected. Decided, it collapses to a line; an accepted one offers Undo,
  * disabled with the reason while its target no longer holds what the accept
  * wrote. Nothing is decided or undone in a read-only Project. Its title
- * goes to its target, as `ProposalTargetContext` has it.
+ * goes to its target, as `ProposalTargetContext` has it. In a Series, a
+ * change to a field made on a Book after the first may be accepted from
+ * that Book on, as an Evolution; by default it lands where the value that
+ * Book sees comes from.
  */
 export function ProposalCard({
   conversationId,
@@ -114,6 +117,7 @@ export function ProposalCard({
   const readOnly = useContext(ReadOnlyContext);
   const { id, state } = proposal;
   const [draft, setDraft] = useState<Draft | null>(null);
+  const [fromBook, setFromBook] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const title = proposalTitle(proposal);
@@ -193,6 +197,7 @@ export function ProposalCard({
         // The Author sees a stale one as such, and may accept it anyway.
         anyway: stale,
         append,
+        ...(fromBook && { fromBook }),
       }),
     );
   const appendable = canAppend(proposal);
@@ -242,6 +247,17 @@ export function ProposalCard({
         <p className="proposal-error" role="alert">
           {error}
         </p>
+      )}
+      {!orphaned && proposal.evolvesFrom !== undefined && (
+        <label className="proposal-from-book">
+          <input
+            type="checkbox"
+            checked={fromBook}
+            onChange={(event) => setFromBook(event.target.checked)}
+            disabled={readOnly || busy}
+          />
+          From {proposal.evolvesFrom} on
+        </label>
       )}
       <div className="proposal-actions">
         {draft !== null ? (

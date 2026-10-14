@@ -180,8 +180,8 @@ export const DETAILS: readonly Row[] = [
       return value;
     },
     split: 'stays',
-    // What the Assistant makes of it is for the Book it works in (#244).
-    assistant: 'hidden',
+    // The Assistant is never sent an Entry that first appears after its Book.
+    assistant: 'sees',
     trash: 'stays',
   },
   {
