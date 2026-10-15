@@ -25,7 +25,6 @@ import {
   MessageLog,
   useConversation,
   type Names,
-  type OnChange,
   type ShowProposal,
 } from './Conversation';
 import { EntryCard } from './EntryCard';
@@ -66,7 +65,6 @@ export function InterviewRoom({
   pane,
   onAddProvider,
   onOpenEntry,
-  onChange,
 }: {
   /** Whether the room is shown, its Mode the window's. */
   active: boolean;
@@ -78,7 +76,6 @@ export function InterviewRoom({
   onAddProvider(): void;
   /** Opens an Entry in the Story Bible Room. */
   onOpenEntry(entryId: string): void;
-  onChange: OnChange;
 }) {
   const providers = useProviders();
   const readOnly = useContext(ReadOnlyContext);
@@ -95,7 +92,6 @@ export function InterviewRoom({
     book,
     active,
     show,
-    onChange,
   });
   const { list, current, error, streaming, total, send, changeFocus } =
     conversation;

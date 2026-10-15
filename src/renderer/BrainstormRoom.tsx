@@ -23,7 +23,6 @@ import {
   MessageLog,
   useConversation,
   type Names,
-  type OnChange,
 } from './Conversation';
 import { EntryCard } from './EntryCard';
 import { FilterControl, useFilter } from './Filter';
@@ -49,7 +48,6 @@ export function BrainstormRoom({
   pane,
   onAddProvider,
   onOpenEntry,
-  onChange,
   todos,
 }: {
   /** Whether the room is shown, its Mode the window's. */
@@ -62,7 +60,6 @@ export function BrainstormRoom({
   onAddProvider(): void;
   /** Opens an Entry in the Story Bible Room. */
   onOpenEntry(entryId: string): void;
-  onChange: OnChange;
   /** The Todos tab of the Reference pane. */
   todos: ReactNode;
 }) {
@@ -73,7 +70,6 @@ export function BrainstormRoom({
     names,
     book,
     active,
-    onChange,
   });
   const { list, current, error, total } = conversation;
   const listed = list.filter((c) => c.mode === 'brainstorm');

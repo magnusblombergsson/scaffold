@@ -22,6 +22,7 @@ import type { PendingProposal } from '../shared/proposal';
 import type { CustomField } from '../shared/custom-field';
 import type { KeyFieldChoices } from '../shared/key-fields';
 import type { Todo } from '../shared/todo';
+import { registerPendingEdits } from './pending-edits';
 import { ProjectMirror, type MirrorEvent } from './project-mirror';
 
 // The renderer's Project mirror over the bridge, in memory: no DOM, no React.
@@ -146,6 +147,7 @@ function setUp(held: Partial<Held> = {}) {
         return value;
       },
       write: async (_ctx: unknown, ref: UnitRef, value: UnitValue) => {
+        main.calls.push(`write ${unitKey(ref)}`);
         guard();
         main.units[unitKey(ref)] = value;
       },
@@ -454,13 +456,18 @@ describe('ProjectMirror', () => {
     });
   });
 
-  describe('commands', () => {
+  describe('run', () => {
     it('reports a failing command once, as what could not be done', async () => {
       const { mirror, main, events } = setUp({ failWith: 'Disk full' });
 
-      const done = await mirror.setStatus('s1', 'idea');
+      const done = await mirror.run(
+        (project) => project.setStatus('s1', 'idea'),
+        {
+          what: 'set the Status',
+        },
+      );
 
-      expect(done).toBe(false);
+      expect(done).toBeUndefined();
       expect(main.calls).toEqual(['setStatus s1']);
       expect(events).toEqual([
         {
@@ -470,11 +477,55 @@ describe('ProjectMirror', () => {
       ]);
     });
 
-    it('clears the error once a command succeeds', async () => {
+    it('records an undo step with its label, and shows the Manuscript', async () => {
       const { mirror, events } = setUp();
 
-      expect(await mirror.setTags('s1', ['a'])).toBe(true);
-      expect(await mirror.setWordTarget('s1', 5)).toBe(true);
+      const result = await mirror.run(
+        async () => ({ manuscript: one, step: 4 }),
+        {
+          undo: 'Scene created',
+        },
+      );
+
+      expect(result).toEqual({ manuscript: one, step: 4 });
+      expect(mirror.getSnapshot().manuscript).toEqual(one);
+      expect(events).toEqual([
+        { type: 'error', message: null },
+        { type: 'undoable', message: 'Scene created', step: 4 },
+      ]);
+    });
+
+    it('records no undo step without a label', async () => {
+      const { mirror, events } = setUp();
+
+      await mirror.run(async () => ({ manuscript: one, step: 4 }));
+
+      expect(mirror.getSnapshot().manuscript).toEqual(one);
+      expect(events).toEqual([{ type: 'error', message: null }]);
+    });
+
+    it('flushes pending edits before the command reaches main', async () => {
+      const { mirror, main } = setUp();
+      const stop = registerPendingEdits(() => {
+        void mirror.write({ kind: 'outline', id: 's' }, {
+          id: 's',
+          body: 'typed',
+        } as never);
+      });
+
+      await mirror.run((project) => project.setStatus('s', 'idea'));
+      stop();
+
+      expect(main.calls).toEqual(['write outline:s', 'setStatus s']);
+    });
+  });
+
+  describe('commands', () => {
+    it('clears the error once a command succeeds, true for one that gives nothing', async () => {
+      const { mirror, events } = setUp();
+
+      expect(await mirror.run((p) => p.setTags('s1', ['a']))).toBe(true);
+      expect(await mirror.run((p) => p.setWordTarget('s1', 5))).toBe(true);
 
       expect(events).toEqual([
         { type: 'error', message: null },
@@ -482,56 +533,54 @@ describe('ProjectMirror', () => {
       ]);
     });
 
-    it('names the command that failed: Word target, Tags, undo and Conflict', async () => {
+    it('names what failed, by default a change; undo and Conflict too', async () => {
       const { mirror, events } = setUp({ failWith: 'No' });
 
-      await mirror.setWordTarget('s', 1);
-      await mirror.setTags('s', []);
+      await mirror.run((p) => p.setTags('s', []));
       await mirror.undo(3);
       await mirror.resolveConflict({ kind: 'scene', id: 's' }, {} as never);
 
       expect(events.map((e) => (e.type === 'error' ? e.message : ''))).toEqual([
-        expect.stringContaining("Can't set the Word target"),
-        expect.stringContaining("Can't save the Tags"),
+        expect.stringContaining("Can't make that change"),
         expect.stringContaining("Can't undo"),
         expect.stringContaining("Can't resolve the Conflict"),
       ]);
     });
 
-    it('change shows the Manuscript the operation made, and refreshes Trash', async () => {
+    it('a structure change refreshes Trash', async () => {
       const { mirror, main } = setUp();
       main.trash = [trashed('gone')];
 
-      const result = await mirror.change(async () => ({
-        manuscript: one,
-        step: 4,
-      }));
+      await mirror.run(async () => ({ manuscript: one, step: 4 }));
 
-      expect(result).toEqual({ manuscript: one, step: 4 });
-      expect(mirror.getSnapshot()).toMatchObject({
-        manuscript: one,
-        trash: [trashed('gone')],
-      });
+      expect(mirror.getSnapshot().trash).toEqual([trashed('gone')]);
     });
 
-    it('change does nothing when the Author cancelled', async () => {
+    it('does nothing when the Author cancelled', async () => {
       const { mirror, events } = setUp();
       const before = mirror.getSnapshot().manuscript;
 
-      expect(await mirror.change(async () => null)).toBeUndefined();
+      expect(
+        await mirror.run(async () => null, { undo: 'Scene created' }),
+      ).toBeUndefined();
 
       expect(mirror.getSnapshot().manuscript).toBe(before);
       expect(events).toEqual([]);
     });
 
-    it('change reports a failure once, and keeps the Manuscript', async () => {
+    it('keeps the Manuscript when a structure change fails', async () => {
       const { mirror, events } = setUp();
+      const before = mirror.getSnapshot().manuscript;
 
-      const result = await mirror.change(async () => {
-        throw { message: 'Read-only' };
-      });
+      const result = await mirror.run(
+        async () => {
+          throw { message: 'Read-only' };
+        },
+        { undo: 'Scene created' },
+      );
 
       expect(result).toBeUndefined();
+      expect(mirror.getSnapshot().manuscript).toBe(before);
       expect(events).toEqual([
         { type: 'error', message: "Can't make that change: Read-only" },
       ]);

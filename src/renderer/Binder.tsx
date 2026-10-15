@@ -9,7 +9,7 @@ import {
   type MouseEvent as ReactMouseEvent,
   type ReactNode,
 } from 'react';
-import type { Changed, Created } from '../shared/api';
+import type { Changed, Created, ProjectApi } from '../shared/api';
 import {
   bookMove,
   chapterMove,
@@ -32,6 +32,7 @@ import {
 import { SHORTCUTS, shortcutText, withShortcut } from '../shared/shortcuts';
 import { MAC } from './platform';
 import { ReadOnlyContext } from './read-only';
+import { useRun } from './use-project';
 import { statusOf, type Status } from '../shared/status';
 import type { TodoLink } from '../shared/todo';
 import { unitImageItems } from './UnitImage';
@@ -65,11 +66,6 @@ type Props = {
   onSelect(selection: Selection): void;
   /** The Parts, Chapters and Scenes, or `PROJECT_OUTLINE`, with a unit in Conflict. */
   conflicted: ReadonlySet<string>;
-  /**
-   * Runs a structure operation and shows the Manuscript it resolves with;
-   * `message` says what it did, beside Undo.
-   */
-  onChange(operation: () => Promise<Changed>, message: string): Promise<void>;
   /** The Book, Part, Chapter or Scene whose title is being edited, if any. */
   renaming: string | null;
   onRename(id: string | null): void;
@@ -104,7 +100,6 @@ export function Binder({
   selected,
   onSelect,
   conflicted,
-  onChange,
   renaming,
   onRename: setRenaming,
   onUndo,
@@ -114,7 +109,7 @@ export function Binder({
   onSetWordTarget,
   onAddTodo,
 }: Props) {
-  const project = window.project;
+  const run = useRun();
   const readOnly = useContext(ReadOnlyContext);
   const imagePicker = useImagePicker();
   const { chapters, parts = [], books } = manuscript;
@@ -165,18 +160,21 @@ export function Binder({
       : undefined;
   const onOpenScene = (id: string) => onSelect({ kind: 'scene', id });
 
+  /** Runs a structure operation, offering to undo it as `message`. */
+  async function change(
+    operation: (project: ProjectApi) => Promise<Changed>,
+    message: string,
+  ) {
+    await run(operation, { undo: message });
+  }
+
   async function create(
-    operation: () => Promise<Created>,
+    operation: (project: ProjectApi) => Promise<Created>,
     message: string,
     then: (id: string) => void,
   ) {
-    let id: string | undefined;
-    await onChange(async () => {
-      const created = await operation();
-      id = created.id;
-      return created;
-    }, message);
-    if (id) then(id);
+    const created = await run(operation, { undo: message });
+    if (created) then(created.id);
   }
 
   function rename(
@@ -186,17 +184,23 @@ export function Binder({
   ) {
     setRenaming(null);
     void (kind === 'book'
-      ? onChange(() => project.renameBook(id, title), 'Book renamed')
+      ? change((project) => project.renameBook(id, title), 'Book renamed')
       : kind === 'part'
-        ? onChange(() => project.renamePart(id, title), `${name} renamed`)
+        ? change((project) => project.renamePart(id, title), `${name} renamed`)
         : kind === 'chapter'
-          ? onChange(() => project.renameChapter(id, title), 'Chapter renamed')
-          : onChange(() => project.renameScene(id, title), 'Scene renamed'));
+          ? change(
+              (project) => project.renameChapter(id, title),
+              'Chapter renamed',
+            )
+          : change(
+              (project) => project.renameScene(id, title),
+              'Scene renamed',
+            ));
   }
 
   function moveScene(sceneId: string, chapterId: string, index: number) {
-    return onChange(
-      () => project.moveScene(sceneId, chapterId, index),
+    return change(
+      (project) => project.moveScene(sceneId, chapterId, index),
       'Scene moved',
     );
   }
@@ -213,8 +217,8 @@ export function Binder({
   ) {
     if (partId) expand(partId);
     if (bookId) expand(bookId);
-    return onChange(
-      () => project.moveChapter(chapterId, index, partId, bookId),
+    return change(
+      (project) => project.moveChapter(chapterId, index, partId, bookId),
       'Chapter moved',
     );
   }
@@ -222,8 +226,8 @@ export function Binder({
   /** Moves a Part to `index` at the top of Book `bookId`, which then shows its own, or of its own. */
   function movePart(partId: string, index: number, bookId?: string) {
     if (bookId) expand(bookId);
-    return onChange(
-      () => project.movePart(partId, index, bookId),
+    return change(
+      (project) => project.movePart(partId, index, bookId),
       `${name} moved`,
     );
   }
@@ -231,8 +235,8 @@ export function Binder({
   function moveBook(bookId: string, index: number) {
     const order = (manuscript.books ?? []).map((book) => book.id);
     const notice = bookMoveNotice(entries, order, bookId, index);
-    return onChange(
-      () => project.moveBook(bookId, index),
+    return change(
+      (project) => project.moveBook(bookId, index),
       notice ? `Book moved: ${notice}` : 'Book moved',
     );
   }
@@ -326,8 +330,8 @@ export function Binder({
     node: { id: string; title: string },
     kind: 'scene' | 'chapter' | 'part' | 'book',
   ) {
-    return onChange(
-      () =>
+    return change(
+      (project) =>
         kind === 'scene'
           ? project.trashScene(node.id)
           : kind === 'chapter'
@@ -351,8 +355,8 @@ export function Binder({
         label: 'Move to Drawer',
         disabled,
         run: () =>
-          onChange(
-            () => project.moveToDrawer(kind, node.id),
+          change(
+            (project) => project.moveToDrawer(kind, node.id),
             `“${node.title}” moved to the Drawer`,
           ),
       },
@@ -493,7 +497,7 @@ export function Binder({
         shortcut: SHORTCUTS.newSceneAbove,
         run: () =>
           create(
-            () => project.createScene(chapter.id, index),
+            (project) => project.createScene(chapter.id, index),
             'Scene created',
             onOpenScene,
           ),
@@ -503,7 +507,7 @@ export function Binder({
         shortcut: SHORTCUTS.newScene,
         run: () =>
           create(
-            () => project.createScene(chapter.id, index + 1),
+            (project) => project.createScene(chapter.id, index + 1),
             'Scene created',
             onOpenScene,
           ),
@@ -580,7 +584,8 @@ export function Binder({
     );
     const createChapter = (at: number) =>
       create(
-        () => project.createChapter(at, undefined, part?.id, chapter.book),
+        (project) =>
+          project.createChapter(at, undefined, part?.id, chapter.book),
         'Chapter created',
         setRenaming,
       );
@@ -595,7 +600,7 @@ export function Binder({
         shortcut: SHORTCUTS.newScene,
         run: () =>
           create(
-            () => project.createScene(chapter.id, chapter.scenes.length),
+            (project) => project.createScene(chapter.id, chapter.scenes.length),
             'Scene created',
             onOpenScene,
           ),
@@ -644,7 +649,7 @@ export function Binder({
     const inPart = chapters.filter((c) => part.chapters.includes(c.id));
     const createPart = (at: number) =>
       create(
-        () => project.createPart(at, undefined, part.book),
+        (project) => project.createPart(at, undefined, part.book),
         `${name} created`,
         setRenaming,
       );
@@ -659,7 +664,7 @@ export function Binder({
         run: () => {
           expand(part.id);
           return create(
-            () =>
+            (project) =>
               project.createChapter(part.chapters.length, undefined, part.id),
             'Chapter created',
             setRenaming,
@@ -690,7 +695,7 @@ export function Binder({
     const index = books?.indexOf(book) ?? 0;
     const inBook = chapters.filter((c) => c.book === book.id);
     const createBook = (at: number) =>
-      create(() => project.createBook(at), 'Book created', setRenaming);
+      create((project) => project.createBook(at), 'Book created', setRenaming);
     return [
       {
         label: 'Rename…',
@@ -702,7 +707,7 @@ export function Binder({
         run: () => {
           expand(book.id);
           return create(
-            () =>
+            (project) =>
               project.createChapter(
                 book.top.length,
                 undefined,
@@ -719,7 +724,8 @@ export function Binder({
         run: () => {
           expand(book.id);
           return create(
-            () => project.createPart(book.top.length, undefined, book.id),
+            (project) =>
+              project.createPart(book.top.length, undefined, book.id),
             `${name} created`,
             setRenaming,
           );
@@ -1104,7 +1110,7 @@ export function Binder({
           title={withShortcut('New Chapter', SHORTCUTS.newChapter, MAC)}
           onClick={() =>
             create(
-              () =>
+              (project) =>
                 project.createChapter(
                   topLength(ofBook(lastBook?.id)),
                   undefined,
@@ -1122,7 +1128,7 @@ export function Binder({
           className="binder-add"
           onClick={() =>
             create(
-              () =>
+              (project) =>
                 project.createPart(
                   topLength(ofBook(lastBook?.id)),
                   undefined,
@@ -1140,7 +1146,11 @@ export function Binder({
           <button
             className="binder-add"
             onClick={() =>
-              create(() => project.createBook(), 'Book created', setRenaming)
+              create(
+                (project) => project.createBook(),
+                'Book created',
+                setRenaming,
+              )
             }
           >
             New Book

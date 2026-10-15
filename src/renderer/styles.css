@@ -4669,12 +4669,6 @@ button.finding-quote:hover {
   font: inherit;
 }
 
-.proposal-error {
-  margin: 0.3rem 0 0;
-  color: var(--danger);
-  font-size: 0.85em;
-}
-
 .proposal-from-book {
   display: flex;
   align-items: center;

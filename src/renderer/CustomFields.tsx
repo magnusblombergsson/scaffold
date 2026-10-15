@@ -1,5 +1,4 @@
 import { useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import type { CallFailure } from '../shared/api';
 import { labelRefusal, type CustomField } from '../shared/custom-field';
 import {
   ENTRY_GROUP_TITLES,
@@ -10,6 +9,7 @@ import { customFieldKey } from '../shared/proposal';
 import { Menu } from './Binder';
 import { ShowInPeek } from './ShowInPeek';
 import { ReadOnlyContext } from './read-only';
+import { useRun } from './use-project';
 
 /**
  * A Custom field's heading in the Entry view: its label, and a menu to
@@ -28,6 +28,7 @@ export function CustomFieldHeading({
   fields: CustomField[];
 }) {
   const readOnly = useContext(ReadOnlyContext);
+  const run = useRun();
   const [renaming, setRenaming] = useState(false);
   const count = fields.filter((f) => f.type === field.type).length;
   const plural = ENTRY_GROUP_TITLES[field.type];
@@ -37,10 +38,12 @@ export function CustomFieldHeading({
         initial={field.label}
         label={`Rename ${field.label}`}
         refusal={(label) => labelRefusal(label, field.type, fields, field.id)}
-        submit={(label) =>
-          label === field.label
-            ? Promise.resolve()
-            : window.project.renameCustomField(field.id, label)
+        submit={async (label) =>
+          label === field.label ||
+          !!(await run(
+            (project) => project.renameCustomField(field.id, label),
+            { what: 'rename the field' },
+          ))
         }
         onDone={() => setRenaming(false)}
       >
@@ -65,27 +68,29 @@ export function CustomFieldHeading({
             label: 'Move up',
             disabled: index === 0,
             run: () =>
-              logFailure(window.project.moveCustomField(field.id, index - 1)),
+              run((project) => project.moveCustomField(field.id, index - 1), {
+                what: 'move the field',
+              }),
           },
           {
             label: 'Move down',
             disabled: index === count - 1,
             run: () =>
-              logFailure(window.project.moveCustomField(field.id, index + 1)),
+              run((project) => project.moveCustomField(field.id, index + 1), {
+                what: 'move the field',
+              }),
           },
           {
             label: `Delete from all ${plural}…`,
-            run: () => logFailure(window.project.trashCustomField(field.id)),
+            run: () =>
+              run((project) => project.trashCustomField(field.id), {
+                what: 'delete the field',
+              }),
           },
         ]}
       />
     </div>
   );
-}
-
-/** A change that failed shows nowhere else: it is logged. */
-function logFailure(change: Promise<unknown>): void {
-  change.catch((error: unknown) => console.error(error));
 }
 
 /**
@@ -100,6 +105,7 @@ export function AddCustomField({
   fields: CustomField[];
 }) {
   const readOnly = useContext(ReadOnlyContext);
+  const run = useRun();
   const [adding, setAdding] = useState(false);
   const plural = ENTRY_GROUP_TITLES[type];
   if (adding) {
@@ -109,7 +115,11 @@ export function AddCustomField({
         label={`New field for every ${ENTRY_TYPE_LABELS[type]}`}
         placeholder="Field name, such as Allegiance"
         refusal={(label) => labelRefusal(label, type, fields)}
-        submit={(label) => window.project.addCustomField(type, label)}
+        submit={async (label) =>
+          !!(await run((project) => project.addCustomField(type, label), {
+            what: 'add the field',
+          }))
+        }
         onDone={() => setAdding(false)}
       >
         Add
@@ -129,8 +139,8 @@ export function AddCustomField({
 
 /**
  * A field's label being typed: Enter or the button saves it, unless
- * `refusal` says why not, and Escape cancels. What main refuses is shown
- * too, and the Author may try again.
+ * `refusal` says why not, and Escape cancels. What main refuses is
+ * reported as any failed command is, and the Author may try again.
  */
 function LabelInput({
   initial,
@@ -145,7 +155,8 @@ function LabelInput({
   label: string;
   placeholder?: string;
   refusal(label: string): string | null;
-  submit(label: string): Promise<unknown>;
+  /** Saves the label; whether it did. */
+  submit(label: string): Promise<boolean>;
   onDone(): void;
   /** The save button's text. */
   children: ReactNode;
@@ -163,13 +174,8 @@ function LabelInput({
       return;
     }
     setBusy(true);
-    try {
-      await submit(text.trim());
-      onDone();
-    } catch (failure) {
-      setError((failure as CallFailure).message);
-      setBusy(false);
-    }
+    if (await submit(text.trim())) onDone();
+    else setBusy(false);
   }
 
   return (

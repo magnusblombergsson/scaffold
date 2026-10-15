@@ -28,6 +28,15 @@ export function useMirror(): ProjectMirror {
 }
 
 /**
+ * The window's `run`: the one way a view writes the Project. It flushes
+ * pending edits first, reports a failure, and offers an Undo when asked.
+ */
+export function useRun(): ProjectMirror['run'] {
+  const mirror = useMirror();
+  return useMemo(() => mirror.run.bind(mirror), [mirror]);
+}
+
+/**
  * A unit's value as it is now: undefined until it is read, null when it
  * can't be, as once it is in Trash, or with no unit.
  */

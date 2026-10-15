@@ -9,6 +9,7 @@ import {
 import type { Status } from '../shared/status';
 import { StatusSettings } from './StatusSettings';
 import { TagSettings } from './TagSettings';
+import { useRun } from './use-project';
 
 /**
  * Tools ▸ Project Settings…: the Project settings, saved with the Project.
@@ -36,6 +37,7 @@ export function ProjectSettingsDialog({
   readOnly: boolean;
   onClose(): void;
 }) {
+  const run = useRun();
   const dialogRef = useRef<HTMLDialogElement>(null);
   /** Where focus was, to go back to. */
   const opener = useRef(document.activeElement);
@@ -50,7 +52,9 @@ export function ProjectSettingsDialog({
   async function chooseLanguage(chosen: ProseLanguage) {
     setSaving(chosen);
     // Saved, `language` follows from main before this resolves.
-    await window.project.setLanguage(chosen);
+    await run((project) => project.setLanguage(chosen), {
+      what: 'set the Prose language',
+    });
     // A later choice is still being saved.
     setSaving((latest) => (latest === chosen ? null : latest));
   }
@@ -58,14 +62,18 @@ export function ProjectSettingsDialog({
   async function choosePartLabel(chosen: PartLabel) {
     setSavingLabel(chosen);
     // Saved, the Manuscript carrying it follows from main before this resolves.
-    await window.project.setPartLabel(chosen);
+    await run((project) => project.setPartLabel(chosen), {
+      what: 'set what Parts are called',
+    });
     setSavingLabel((latest) => (latest === chosen ? null : latest));
   }
 
   async function chooseFoldedImage(on: boolean) {
     setSavingImage(on);
     // Saved, `foldedNoteImage` follows from main before this resolves.
-    await window.project.setFoldedNoteImage(on);
+    await run((project) => project.setFoldedNoteImage(on), {
+      what: 'save whether folded notes show images',
+    });
     setSavingImage((latest) => (latest === on ? null : latest));
   }
 

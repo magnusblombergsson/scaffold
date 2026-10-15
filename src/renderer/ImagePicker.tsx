@@ -22,6 +22,7 @@ import {
   skipMessage,
 } from './image-picker';
 import { useImageUrl } from './ImageView';
+import { useRun } from './use-project';
 
 /**
  * Choose from Project…: whether a unit has an image to pick, and picking
@@ -33,6 +34,10 @@ export type ImagePicker = {
   choose(ref: ImageRef): void;
   shares(ref: ImageRef): boolean;
   replaceEverywhere(ref: ImageRef): Promise<void>;
+  /** Add image… or Replace image…: one the Author chooses from their files. */
+  chooseFile(ref: ImageRef): Promise<void>;
+  /** Remove image. */
+  remove(ref: ImageRef): Promise<void>;
 };
 
 /** Without a Project, nothing to pick. */
@@ -41,6 +46,8 @@ const ImagePickerContext = createContext<ImagePicker>({
   choose: () => {},
   shares: () => false,
   replaceEverywhere: async () => {},
+  chooseFile: async () => {},
+  remove: async () => {},
 });
 
 export function useImagePicker(): ImagePicker {
@@ -68,8 +75,12 @@ export function ImagePickerProvider({
     url: string;
   } | null>(null);
 
+  const run = useRun();
+
   async function replaceEverywhere(ref: ImageRef) {
-    const url = await window.project.pickImage();
+    const url = await run((project) => project.pickImage(), {
+      what: 'pick the image',
+    });
     if (!url) return;
     const held = images
       .flatMap((image) => image.holders)
@@ -107,6 +118,16 @@ export function ImagePickerProvider({
         choose: setTarget,
         shares: (ref) => sharesImage(images, ref),
         replaceEverywhere,
+        chooseFile: async (ref) => {
+          await run((project) => project.chooseImage(ref), {
+            what: 'add the image',
+          });
+        },
+        remove: async (ref) => {
+          await run((project) => project.removeImage(ref), {
+            what: 'remove the image',
+          });
+        },
       }}
     >
       {children}
@@ -137,6 +158,7 @@ function ImagePickerDialog({
   target: ImageRef;
   onClose(): void;
 }) {
+  const run = useRun();
   const dialogRef = useRef<HTMLDialogElement>(null);
   /** Where focus was, to go back to. */
   const opener = useRef(document.activeElement);
@@ -157,7 +179,9 @@ function ImagePickerDialog({
 
   function pick(image: ProjectImage) {
     dialogRef.current?.close();
-    void window.project.copyImage(target, image.holders[0]);
+    void run((project) => project.copyImage(target, image.holders[0]), {
+      what: 'copy the image',
+    });
   }
 
   const shown = images && imagesMatching(images, filter);
@@ -239,6 +263,7 @@ function ReplaceEverywhereDialog({
   partLabel?: PartLabel;
   onClose(): void;
 }) {
+  const run = useRun();
   const dialogRef = useRef<HTMLDialogElement>(null);
   /** Where focus was, to go back to. */
   const opener = useRef(document.activeElement);
@@ -278,24 +303,29 @@ function ReplaceEverywhereDialog({
       ...(matches?.live.filter((h) => !unticked.has(h.id)) ?? []),
     ];
     setReplacing(true);
-    try {
-      const { skipped } = await window.project.replaceImages(
-        // Never an Evolution's image, which shares none.
-        holders.map(({ kind, id }) => ({ kind, id }) as ImageRef),
-      );
-      if (skipped.length === 0) return dialogRef.current?.close();
-      setSkipped(
-        skipped.map(({ ref, reason }) =>
-          skipMessage(
-            holders.find((h) => h.id === ref.id) ?? { ...ref, title: ref.id },
-            reason,
-          ),
+    const replaced = await run(
+      (project) =>
+        project.replaceImages(
+          // Never an Evolution's image, which shares none.
+          holders.map(({ kind, id }) => ({ kind, id }) as ImageRef),
         ),
-      );
-    } catch (error) {
-      console.error("Can't replace the images:", error);
-      setSkipped(["The image couldn't be replaced."]);
+      { what: 'replace the images' },
+    );
+    // Failed, as the Author has been told; they may try again.
+    if (!replaced) {
+      setReplacing(false);
+      return;
     }
+    const { skipped } = replaced;
+    if (skipped.length === 0) return dialogRef.current?.close();
+    setSkipped(
+      skipped.map(({ ref, reason }) =>
+        skipMessage(
+          holders.find((h) => h.id === ref.id) ?? { ...ref, title: ref.id },
+          reason,
+        ),
+      ),
+    );
   }
 
   return (

@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { tagKey, type TagUse } from '../shared/tags';
 import { NameField } from './NameField';
+import { useRun } from './use-project';
 
 /**
  * Project Settings' Tags: the Tags in use, each with how many Scenes,
@@ -10,15 +11,20 @@ import { NameField } from './NameField';
  * the Author confirms. Neither has an undo.
  */
 export function TagSettings({ readOnly }: { readOnly: boolean }) {
+  const run = useRun();
   /** The Tags in use as main last said; null until it has. */
   const [inUse, setInUse] = useState<TagUse[] | null>(null);
   /** The Tag being deleted, and how many units have it. */
   const [deleting, setDeleting] = useState<TagUse | null>(null);
   const heading = useRef<HTMLHeadingElement>(null);
 
+  /** Counts the asks, so that an answer overtaken by a later one is left out. */
+  const asked = useRef(0);
   const refresh = useCallback(async () => {
+    const ask = ++asked.current;
     try {
-      setInUse(await window.project.tagUses());
+      const uses = await window.project.tagUses();
+      if (ask === asked.current) setInUse(uses);
     } catch (error) {
       console.error("Can't list the Tags in use:", error);
     }
@@ -38,9 +44,11 @@ export function TagSettings({ readOnly }: { readOnly: boolean }) {
 
   /** Units in Trash change unseen: the list is asked for again. */
   async function rename(tag: string, to: string): Promise<boolean> {
-    const saved = await window.project.renameTag(tag, to).catch(() => false);
+    const saved = await run((project) => project.renameTag(tag, to), {
+      what: 'rename the Tag',
+    });
     await refresh();
-    return saved;
+    return !!saved;
   }
 
   return (
@@ -114,12 +122,15 @@ function DeleteTag({
   onDone(deleted: boolean): void;
 }) {
   const [busy, setBusy] = useState(false);
+  const run = useRun();
   const cancel = useRef<HTMLButtonElement>(null);
   useEffect(() => cancel.current?.focus(), []);
 
   async function confirm() {
     setBusy(true);
-    const deleted = await window.project.deleteTag(tag).catch(() => false);
+    const deleted = await run((project) => project.deleteTag(tag), {
+      what: 'delete the Tag',
+    });
     // Not deleted, main has told the Author; they may try again or cancel.
     if (deleted) onDone(true);
     else setBusy(false);

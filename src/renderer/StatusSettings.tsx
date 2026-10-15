@@ -8,6 +8,7 @@ import type { StatusEdit } from '../shared/api';
 import { capitalized } from '../shared/unit-name';
 import { StatusDot } from './Binder';
 import { NameField } from './NameField';
+import { useRun } from './use-project';
 
 /**
  * Project Settings' Statuses: the ordered Status list, edited in place
@@ -25,6 +26,7 @@ export function StatusSettings({
   statuses: Status[];
   readOnly: boolean;
 }) {
+  const run = useRun();
   /** The Status being deleted, and how many units have it. */
   const [deleting, setDeleting] = useState<Deleting | null>(null);
   /** A Status just added, whose name takes focus. */
@@ -32,8 +34,10 @@ export function StatusSettings({
   const addButton = useRef<HTMLButtonElement>(null);
 
   /** Saved, `statuses` follows from main before this resolves. */
-  function edit(change: StatusEdit): Promise<boolean> {
-    return window.project.editStatus(change);
+  async function edit(change: StatusEdit): Promise<boolean> {
+    return !!(await run((project) => project.editStatus(change), {
+      what: 'save the Statuses',
+    }));
   }
 
   function add() {
@@ -49,16 +53,17 @@ export function StatusSettings({
 
   /** Deletes a Status no unit has; asks where they go first if any do. */
   async function startDeleting(status: Status) {
-    try {
-      const uses = await window.project.statusUses(status.id);
-      if (uses > 0) {
-        setDeleting({ status, uses });
-      } else if (await window.project.deleteStatus(status.id, null)) {
-        addButton.current?.focus();
-      }
-    } catch (error) {
-      console.error(`Can't delete the Status ${status.name}:`, error);
-    }
+    await run(
+      async (project) => {
+        const uses = await project.statusUses(status.id);
+        if (uses > 0) {
+          setDeleting({ status, uses });
+        } else if (await project.deleteStatus(status.id, null)) {
+          addButton.current?.focus();
+        }
+      },
+      { what: `delete the Status ${status.name}` },
+    );
   }
 
   return (
@@ -172,14 +177,17 @@ function DeleteStatus({
   /** The id of the Status they move to; '' for none. */
   const [moveTo, setMoveTo] = useState('');
   const [busy, setBusy] = useState(false);
+  const run = useRun();
   const select = useRef<HTMLSelectElement>(null);
   useEffect(() => select.current?.focus(), []);
 
   async function confirm() {
     setBusy(true);
-    const deleted = await window.project
-      .deleteStatus(status.id, moveTo === '' ? null : moveTo)
-      .catch(() => false);
+    const deleted = await run(
+      (project) =>
+        project.deleteStatus(status.id, moveTo === '' ? null : moveTo),
+      { what: `delete the Status ${status.name}` },
+    );
     // Not deleted, main has told the Author; they may try again or cancel.
     if (deleted) onDone();
     else setBusy(false);
