@@ -172,20 +172,27 @@ test('emptying Trash makes an automatic Backup holding Trash first, unless one w
   await app.close();
 });
 
-test('with automatic Backups off, none is made on open or before emptying Trash', async () => {
+test('with automatic Backups off, none is made on open or before emptying Trash, which the Author is told after', async () => {
   seedSettings(tempDir(), { autoBackup: false });
   const projectPath = path.join(tempDir(), 'My Novel');
   const { app, page } = await newProject(projectPath);
   await trashFirstScene(page);
-  await answerQuestions(app, 0);
+  const asked = await answerQuestions(app, 0);
   await page.getByRole('button', { name: 'Empty Trash…' }).click();
   await expect(page.getByText('Trash is empty')).toBeVisible();
+  expect(await asked()).toEqual(['Empty Trash?']);
+  const emptied = page.locator('.toast', {
+    hasText:
+      'Trash was emptied without a Backup. Automatic Backups are turned off.',
+  });
+  await emptied.getByRole('button', { name: 'Open Settings' }).click();
+  await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
   await page.waitForTimeout(7000);
   expect(existsSync(backupsIn(tempDir()))).toBe(false);
   await app.close();
 });
 
-test('a Backup folder that is gone skips the Backups with a Toast, and Trash is still emptied', async () => {
+test('a Backup folder that is gone skips the Backups with a Toast, and Trash is emptied once the Author goes on', async () => {
   const gone = path.join(tempDir(), 'gone', 'Backups');
   seedSettings(tempDir(), { backupFolder: gone });
   const projectPath = path.join(tempDir(), 'My Novel');
@@ -200,14 +207,13 @@ test('a Backup folder that is gone skips the Backups with a Toast, and Trash is 
   ).toBeVisible();
 
   await trashFirstScene(page);
-  await answerQuestions(app, 0);
+  const asked = await answerQuestions(app, 0);
   await page.getByRole('button', { name: 'Empty Trash…' }).click();
   await expect(page.getByText('Trash is empty')).toBeVisible();
-  const emptied = page.locator('.toast', {
-    hasText: 'Trash was emptied without a Backup.',
-  });
-  await emptied.getByRole('button', { name: 'Open Settings' }).click();
-  await expect(page.getByRole('dialog', { name: 'Settings' })).toBeVisible();
+  expect(await asked()).toEqual([
+    'Empty Trash?',
+    'No Backup of My Novel was made first.',
+  ]);
   expect(existsSync(path.join(tempDir(), 'gone'))).toBe(false);
   await app.close();
 });
