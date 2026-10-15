@@ -381,10 +381,10 @@ export interface ProjectApi {
   importBook(file: ImportFile, convention: ImportConvention): Promise<Created>;
   /**
    * Asks for a Backup of another Project and adds it after the last Book,
-   * once a Backup of this one is made or the Author chose to go on
-   * without, as one step: `undo` moves the added Books and Entries to
-   * Trash. Null when the Author cancels or it is refused, which they are
-   * told.
+   * once a Backup of this one is made, the Author chose to go on when it
+   * failed, or automatic Backups are off, as `onBackupNotice` then tells:
+   * as one step, and `undo` moves the added Books and Entries to Trash.
+   * Null when the Author cancels or it is refused, which they are told.
    */
   addBookFromBackup(): Promise<AddedFromBackup | null>;
   renameBook(bookId: string, title: string): Promise<Changed>;
@@ -527,7 +527,10 @@ export interface ProjectApi {
    * other versions go to Trash.
    */
   resolveConflict<R extends UnitRef>(ref: R, kept: ValueOf<R>): Promise<void>;
-  /** Asks the Author to confirm, then deletes Trash for good; false if not. */
+  /**
+   * Asks the Author to confirm, then deletes Trash for good once a Backup
+   * is made, as `addBookFromBackup` says; false if not.
+   */
   emptyTrash(): Promise<boolean>;
   /**
    * Spellchecks and typesets the Prose in `language` from now on, a Project
@@ -886,8 +889,9 @@ export type BackupSkip = {
 };
 
 /**
- * An automatic Backup that wasn't made, told to the Author: each time
- * before emptying Trash, otherwise once per Project per session.
+ * An automatic Backup that wasn't made, told to the Author: after emptying
+ * Trash or adding a Book with automatic Backups off, and once per Project
+ * per session for a daily one that failed.
  */
 export type BackupNotice = {
   message: string;
@@ -1049,13 +1053,13 @@ export interface ShellApi {
   restoreBackup(): Promise<OpenResult>;
   /**
    * Calls `listener` with true as an automatic Backup before emptying Trash
-   * starts in this window, and false once it is done. Returns an
-   * unsubscribe function.
+   * or adding a Book from a Backup starts in this window, and false once it
+   * is done. Returns an unsubscribe function.
    */
   onBackingUp(listener: (on: boolean) => void): () => void;
   /**
    * Calls `listener` when an automatic Backup of this window's Project
-   * wasn't made. Returns an unsubscribe function.
+   * wasn't made, as BackupNotice says. Returns an unsubscribe function.
    */
   onBackupNotice(listener: (notice: BackupNotice) => void): () => void;
   /** Opens a Project from the recent list. */
