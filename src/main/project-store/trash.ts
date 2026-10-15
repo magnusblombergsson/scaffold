@@ -54,6 +54,7 @@ import {
 } from './layout';
 import { ProjectError } from './project-error';
 import type { HeldRecords, RecordKindName } from './record-kinds';
+import type { References } from './references';
 import { freeName, renameWithRetry, safeWrite } from './safe-write';
 import {
   asSeries,
@@ -518,8 +519,8 @@ export type TrashDeps = {
   sceneOrChapterRef: (id: string) => ImageRef;
   deleteOutlineAndNotes: (id: string) => Promise<void>;
   deleteUnitFile: (ref: UnitRef) => Promise<void>;
-  /** Todos linked to what is gone keep their text; the store says so. */
-  dropTodoLinks: (gone: (id: string) => boolean) => Promise<void>;
+  /** Drops what names the units gone once Trash is emptied. */
+  references: Pick<References, 'dropGone'>;
   findConflicts: () => Promise<void>;
   /** The records that keep their own Trash: Custom fields and Snapshots. */
   records: Pick<HeldRecords, 'customFields' | 'snapshots'>;
@@ -559,7 +560,7 @@ type TrashedSnapshot = Snapshot & { trashedAt: number };
  * How a kind whose records say themselves whether they are in Trash, in
  * their own folder, is listed, restored and emptied.
  */
-type RecordRow<T extends { id: string; trashedAt: number }> = {
+type RecordRow<T extends RecordItem> = {
   /** Those listed in Trash. */
   listed: () => T[];
   describe: (item: T) => TrashItem;
@@ -574,10 +575,21 @@ type RecordRows = {
   snapshots: RecordRow<TrashedSnapshot>;
 };
 
+/** What a kind kept in its own records holds in Trash. */
+type RecordItem = { id: string; trashedAt: number };
+
+/** The kinds kept in records of their own. */
+function recordKinds(rows: RecordRows): (keyof RecordRows)[] {
+  return Object.keys(rows) as (keyof RecordRows)[];
+}
+
 /**
- * Trash: the Scenes, Chapters, Entries, Conversations and Conflict versions
- * that were deleted, and are kept until it is emptied. Each kind is a row of
- * one table; listing, restoring and emptying work from it. The Drawer is its
+ * Trash: the Scenes, Chapters, Parts, Books, Entries, Conversations and
+ * Conflict versions that were deleted, and are kept until it is emptied,
+ * and the Custom fields and Snapshots whose own records say they are in it.
+ * Each kind is a row of one table; listing, restoring and emptying work
+ * from it, and once it is emptied, References drop what named what is
+ * gone. The Drawer is its
  * second place, in `drawer/`, which emptying never touches.
  */
 export class Trash {
@@ -1775,7 +1787,6 @@ export class Trash {
         await fs.unlink(file);
       }
     }
-    // A Todo linked to what was in Trash stays, as plain text.
     const inTrash = [...this.items.values()].filter(
       (item) => placeOf(item) === 'trash',
     );
@@ -1786,20 +1797,13 @@ export class Trash {
     for (const kind of recordKinds(this.recordRows)) {
       if (await this.recordRows[kind].empty()) this.deps.emitRecords(kind);
     }
-    await this.deps.dropTodoLinks(
-      (id) =>
-        emptied.has(id) &&
-        !this.deps.isLive(id) &&
-        !entries.has(id) &&
-        !drawered(id),
+    // What named them goes, unless another copy is back or in the Drawer.
+    await this.deps.references.dropGone(
+      new Set(
+        [...emptied].filter(
+          (id) => !this.deps.isLive(id) && !entries.has(id) && !drawered(id),
+        ),
+      ),
     );
   }
-}
-
-/** What a kind kept in its own records holds in Trash. */
-type RecordItem = { id: string; trashedAt: number };
-
-/** The kinds kept in records of their own. */
-function recordKinds(rows: RecordRows): (keyof RecordRows)[] {
-  return Object.keys(rows) as (keyof RecordRows)[];
 }

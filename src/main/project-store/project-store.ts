@@ -67,13 +67,11 @@ import {
   combinedEntry,
   combinedFirstAppears,
   combinedPrivateNotes,
-  combinedRelations,
   combinedTags,
   combineRefusal,
   evolutionKey,
   type CombineChoices,
 } from '../../shared/combine';
-import { withoutBook } from '../../shared/evolution';
 import { bookIds } from '../../shared/manuscript-order';
 import {
   type Orphaned,
@@ -166,6 +164,7 @@ import {
   type Records,
   type RecordsOf,
 } from './record-kinds';
+import { References, type PinnedNotesPort } from './references';
 import { beforeRestoringName, type Snapshot } from '../../shared/snapshot';
 import {
   customSuggestions,
@@ -296,7 +295,18 @@ const MANIFEST = 'project.json';
 const HANDOVER_MS = 2000;
 
 /** `host` names this computer in its session marker; the OS's name by default. */
-export type StoreDeps = { fs: FileSystem; clock: Clock; host?: string };
+export type StoreDeps = {
+  fs: FileSystem;
+  clock: Clock;
+  host?: string;
+  /** This computer's Pinned notes of the Project of `projectId`; none without. */
+  pinnedNotes?: (projectId: string) => PinnedNotesPort;
+};
+
+export type { PinnedNotesPort };
+
+/** Pinned notes nowhere: a store opened without app settings. */
+const NO_PINNED_NOTES: PinnedNotesPort = { read: () => [], write: () => {} };
 
 type Manifest = {
   format: number;
@@ -1032,6 +1042,8 @@ export class ProjectStore {
   private readonly entries: Map<string, EntrySummary>;
   /** What was deleted and is kept until Trash is emptied; the methods below delegate to it. */
   private readonly trash: Trash;
+  /** Everything that names an Entry, Book, Part, Chapter or Scene. */
+  private readonly references: References;
   /** Scenes and Entries on their way to Trash, which take no more writes. */
   private readonly closing = new Set<string>();
   /** The structure operation running last; the next one waits for it. */
@@ -1124,6 +1136,16 @@ export class ProjectStore {
     this.entries = units.entries;
     this.records = recordsIn(path, this.deps.fs, deps.clock);
     this.host = hostOf(this.deps);
+    this.references = new References({
+      records: this.records,
+      emitRecords: (kind) => this.emitRecords(kind),
+      emit: (event) => this.emit(event),
+      conversations: () => this.conversations,
+      listEntries: () => this.listEntries(),
+      changeEntry: (id, change) => this.changeEntry(id, change),
+      dropImage: (ref) => this.changeImage(ref, undefined),
+      pinnedNotes: () => deps.pinnedNotes?.(this.id) ?? NO_PINNED_NOTES,
+    });
     this.trash = new Trash(
       {
         path,
@@ -1148,11 +1170,7 @@ export class ProjectStore {
         sceneOrChapterRef: (id) => this.sceneOrChapterRef(id),
         deleteOutlineAndNotes: (id) => this.deleteOutlineAndNotes(id),
         deleteUnitFile: (ref) => this.deleteUnitFile(ref),
-        dropTodoLinks: async (gone) => {
-          if (await this.records.todos.dropLinks(({ id }) => gone(id))) {
-            this.emitRecords('todos');
-          }
-        },
+        references: this.references,
         findConflicts: () => this.findConflicts(),
         records: this.records,
         emitRecords: (kind) => this.emitRecords(kind),
@@ -2992,7 +3010,7 @@ export class ProjectStore {
           ),
         );
         undo.push(async () => {
-          await this.setDetail(detail, 'tags', before.tags);
+          await this.setDetail(detail, 'tags', before.tags ?? []);
           await this.setDetail(detail, 'firstAppears', before.firstAppears);
         });
         undo.push(
@@ -3008,24 +3026,9 @@ export class ProjectStore {
         });
 
         // What named the other names the kept one.
-        const plan = combinedRelations(
-          this.records.relations.list(),
-          this.listEntries(),
-          otherId,
-          keptId,
-        );
-        dropped = plan.dropped;
-        undo.push(await this.records.relations.combine(plan.steps));
-        this.emitRecords('relations');
-        const relinked = await this.records.todos.relinkEntry(otherId, keptId);
-        if (relinked) {
-          this.emitRecords('todos');
-          undo.push(async () => {
-            await relinked();
-            this.emitRecords('todos');
-          });
-        }
-        undo.push(await this.conversations.combine(otherId, keptId));
+        const relinked = await this.references.relink(otherId, keptId);
+        dropped = relinked.dropped;
+        undo.push(relinked.undo);
 
         // Last: the other, as it was.
         undo.push(await this.trash.move('entry', otherId));
@@ -3039,7 +3042,6 @@ export class ProjectStore {
       await this.reloadEntry(keptId);
       return async () => {
         await undoAll();
-        this.emitRecords('relations');
         await this.reloadEntry(keptId);
       };
     }).then((changed) => ({ ...changed, dropped }));
@@ -3884,9 +3886,7 @@ export class ProjectStore {
       const file = imagePath(this.path, image);
       if (await this.deps.fs.exists(file)) await this.deps.fs.unlink(file);
     }
-    if (await this.records.todos.dropLinks((link) => link.id === newId)) {
-      this.emitRecords('todos');
-    }
+    await this.references.dropGone(new Set([newId]));
     this.emit({
       type: 'unitReloaded',
       ref,
@@ -4137,79 +4137,15 @@ export class ProjectStore {
     });
   }
 
-  /** Deletes everything in Trash for good. Nothing done before can be undone. */
+  /**
+   * Deletes everything in Trash for good, and every reference to what is
+   * gone with it. Nothing done before can be undone.
+   */
   emptyTrash(): Promise<void> {
     return this.enqueueWrite(async () => {
       this.latest = null;
-      const books = this.trash
-        .list()
-        .filter(
-          (item) =>
-            item.kind === 'book' && !isBook(this.manifest.tree, item.id),
-        )
-        .map((item) => item.id);
-      const entries = new Set(
-        this.trash
-          .list()
-          .filter((item) => item.kind === 'entry')
-          .map((item) => item.id),
-      );
-      const withSnapshots = [...this.records.snapshots.scenes()].filter(
-        (id) => this.trash.where(id) === 'trash',
-      );
       await this.trash.empty();
-      // A Scene's Snapshots go with it, unless it is in the Drawer too.
-      const scenesGone = new Set(
-        withSnapshots.filter(
-          (id) => !this.trash.where(id) && !this.files.has(id),
-        ),
-      );
-      if (await this.records.snapshots.drop(scenesGone)) {
-        this.emitRecords('snapshots');
-      }
-      // Their Relations go with them, unless they are in the Drawer too.
-      const gone = new Set(
-        [...entries].filter(
-          (id) => !this.trash.where(id) && !this.entries.has(id),
-        ),
-      );
-      if (gone.size > 0) {
-        await this.records.relations.drop(gone);
-        this.emitRecords('relations');
-      }
-      // Their Evolutions and Relations go with them, unless the Book is in
-      // the Drawer too.
-      const goneBooks = books.filter((id) => !this.trash.where(id));
-      await this.dropEvolutions(goneBooks);
-      if (goneBooks.length > 0) {
-        await this.records.relations.dropBooks(new Set(goneBooks));
-        this.emitRecords('relations');
-      }
     });
-  }
-
-  /**
-   * Takes the Evolutions of `books`, emptied from Trash, off every Entry:
-   * their values from the Entry's text, and their images with their files.
-   */
-  private async dropEvolutions(books: readonly string[]): Promise<void> {
-    if (books.length === 0) return;
-    for (const entry of this.listEntries()) {
-      const evolved = Object.keys(entry.evolved ?? {});
-      if (books.some((book) => evolved.includes(book))) {
-        await this.changeEntry(entry.id, (value) =>
-          books.reduce(withoutBook, value),
-        );
-      }
-      for (const book of books) {
-        if (entry.evolvedImages?.[book]) {
-          await this.changeImage(
-            { kind: 'entry', id: entry.id, book },
-            undefined,
-          );
-        }
-      }
-    }
   }
 
   /** Whether a Book, Part, Chapter or Scene of this id is in the Manuscript or Unplaced. */

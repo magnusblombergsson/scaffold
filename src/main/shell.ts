@@ -87,6 +87,7 @@ import {
   ProjectError,
   projectLookup,
   type ProjectStore,
+  type StoreDeps,
 } from './project-store/project-store';
 import {
   backupName,
@@ -114,7 +115,15 @@ import {
 // The app shell: its windows, the Project each one shows, and the settings
 // that remember them on this computer.
 
-const deps = { fs: nodeFileSystem, clock: systemClock };
+const deps: StoreDeps = {
+  fs: nodeFileSystem,
+  clock: systemClock,
+  // A Combine and its undo repoint them; emptying Trash drops them.
+  pinnedNotes: (projectId) => ({
+    read: () => settings.project(projectId).pinnedNotes ?? [],
+    write: (pinnedNotes) => settings.updateProject(projectId, { pinnedNotes }),
+  }),
+};
 
 let settings: AppSettings;
 let providers: ProviderSettings;

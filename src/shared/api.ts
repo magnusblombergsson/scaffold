@@ -285,6 +285,15 @@ export type FoldedNoteImageChanged = {
   on: boolean;
 };
 
+/**
+ * This computer's Pinned notes of the Project, as a Combine, its undo or
+ * emptying Trash left them; already saved.
+ */
+export type PinnedNotesChanged = {
+  type: 'pinnedNotesChanged';
+  notes: PinnedNote[];
+};
+
 /** What main tells a window about its Project as it happens. */
 export type ProjectEvent =
   | UnitSaveStatus
@@ -304,7 +313,8 @@ export type ProjectEvent =
   | ConversationsChanged
   | ReadOnly
   | LanguageChanged
-  | FoldedNoteImageChanged;
+  | FoldedNoteImageChanged
+  | PinnedNotesChanged;
 
 /** Mirrors the main-process ProjectStore of this window's Project. */
 export interface ProjectApi {

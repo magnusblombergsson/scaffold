@@ -338,6 +338,18 @@ describe('ProjectMirror', () => {
       expect(mirror.getSnapshot().language).toBe('sv-SE');
     });
 
+    it('pinnedNotesChanged tells the UI this computer’s Pinned notes as main left them', async () => {
+      const { mirror, tell, settle } = await started();
+      const seen: unknown[] = [];
+      mirror.onEvent((event) => seen.push(event));
+      const notes = [{ entryId: 'e1', x: 4, y: 8, folded: false }];
+
+      tell({ type: 'pinnedNotesChanged', notes });
+      await settle();
+
+      expect(seen).toEqual([{ type: 'pinnedNotesChanged', notes }]);
+    });
+
     it('readOnly tells the UI before the Project is read-only, then shows who upgraded it', async () => {
       const { mirror, tell, settle } = await started();
       const seen: unknown[] = [];
