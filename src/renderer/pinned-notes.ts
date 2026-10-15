@@ -85,24 +85,6 @@ export function withoutTrashed(
 }
 
 /**
- * The notes with `from`'s now `to`'s, as when `from` is combined into `to`;
- * where `to` has a note already, `from`'s goes. The same notes if `from`
- * has none.
- */
-export function repointed(
-  notes: PinnedNote[],
-  from: string,
-  to: string,
-): PinnedNote[] {
-  if (!notes.some((note) => note.entryId === from)) return notes;
-  return notes.some((note) => note.entryId === to)
-    ? notes.filter((note) => note.entryId !== from)
-    : notes.map((note) =>
-        note.entryId === from ? { ...note, entryId: to } : note,
-      );
-}
-
-/**
  * The notes with those showing an image their Entry no longer has back to
  * text, given the ids of the Entries with an image. The same notes if none
  * changes.

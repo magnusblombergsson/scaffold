@@ -220,13 +220,16 @@ export class Relations {
     await this.records.change(kept, { book });
   }
 
-  /** Deletes the Relations holding from `books`, emptied from Trash. */
-  async dropBooks(books: ReadonlySet<string>): Promise<void> {
+  /** Deletes the Relations holding from `books`, emptied from Trash; whether any did. */
+  async dropBooks(books: ReadonlySet<string>): Promise<boolean> {
+    let changed = false;
     for (const record of this.records.live()) {
       if (record.book !== null && books.has(record.book)) {
         await this.records.delete(record.id);
+        changed = true;
       }
     }
+    return changed;
   }
 
   /** Deletes a pair, leaving a marker. */
@@ -247,17 +250,24 @@ export class Relations {
 
   /**
    * Takes the Entries `gone`, emptied from Trash, out of every Relation:
-   * a pair naming one is deleted, and a group loses that face.
+   * a pair naming one is deleted, and a group loses that face. Whether
+   * any named one.
    */
-  async drop(gone: ReadonlySet<string>): Promise<void> {
+  async drop(gone: ReadonlySet<string>): Promise<boolean> {
+    let changed = false;
     for (const record of this.records.live()) {
       if (record.kind === 'same-as') {
         const faces = onFaces(record).filter((face) => gone.has(face));
-        if (faces.length > 0) await this.switchOff(record.id, faces);
+        if (faces.length > 0) {
+          await this.switchOff(record.id, faces);
+          changed = true;
+        }
       } else if (gone.has(record.from!) || gone.has(record.to!)) {
         await this.records.delete(record.id);
+        changed = true;
       }
     }
+    return changed;
   }
 
   /**

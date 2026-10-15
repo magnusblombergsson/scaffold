@@ -4,6 +4,7 @@ import type {
   Conflict,
   Dropped,
   OpenedProject,
+  PinnedNote,
   ProjectApi,
   ProjectEvent,
   Upgrade,
@@ -66,7 +67,9 @@ export type MirrorEvent =
   /** Another computer changed a unit. */
   | { type: 'unitReloaded'; ref: UnitRef }
   /** A command failed, with `message`; null once one has succeeded. */
-  | { type: 'error'; message: string | null };
+  | { type: 'error'; message: string | null }
+  /** Main changed this computer's Pinned notes, as a Combine does, and saved them. */
+  | { type: 'pinnedNotesChanged'; notes: PinnedNote[] };
 
 type Listener = () => void;
 
@@ -214,6 +217,9 @@ export class ProjectMirror {
       case 'languageChanged':
         this.emit({ type: 'languageChanged' });
         this.set({ language: event.language });
+        break;
+      case 'pinnedNotesChanged':
+        this.emit({ type: 'pinnedNotesChanged', notes: event.notes });
         break;
       case 'foldedNoteImageChanged':
         this.set({ foldedNoteImage: event.on });

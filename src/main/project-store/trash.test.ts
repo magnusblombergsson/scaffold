@@ -53,10 +53,16 @@ type Fixture = Awaited<ReturnType<typeof newProject>>;
 
 /** What each kind has that the table has to say. */
 type KindCase = {
-  kind: 'scene' | 'chapter' | 'entry' | 'conversation';
+  kind:
+    | 'scene'
+    | 'chapter'
+    | 'entry'
+    | 'conversation'
+    | 'custom-field'
+    | 'snapshot';
   /** Makes one to delete; its image is set where the kind has one. */
   make: (f: Fixture) => Promise<{ id: string; image?: ImageRef }>;
-  trash: (f: Fixture, id: string) => Promise<Changed>;
+  trash: (f: Fixture, id: string) => Promise<Changed | void>;
   /** Where it is now, as the Author sees it; the same once restored. */
   place: (f: Fixture) => Promise<unknown>;
   /** What listing it in Trash says. */
@@ -111,6 +117,36 @@ const cases: KindCase[] = [
     listed: (id) => ({ kind: 'conversation', id, title: 'Why Anna?' }),
     gone: async ({ store }, id) =>
       !ids(await store.listConversations()).includes(id),
+  },
+  {
+    kind: 'custom-field',
+    make: async ({ store }) => ({
+      id: await store.addCustomField('character', 'Nickname'),
+    }),
+    trash: ({ store }, id) => store.trashCustomField(id),
+    place: async ({ store }) => ids(store.listCustomFields()),
+    listed: (id) => ({
+      kind: 'custom-field',
+      id,
+      title: 'Nickname',
+      type: 'character',
+    }),
+    gone: async ({ store }, id) => !ids(store.listCustomFields()).includes(id),
+  },
+  {
+    kind: 'snapshot',
+    make: async ({ store, b }) => ({
+      id: await store.takeSnapshot(b, 'Draft one'),
+    }),
+    trash: ({ store }, id) => store.trashSnapshot(id),
+    place: async ({ store, b }) => ids(store.listSnapshots(b)),
+    listed: (id) => ({
+      kind: 'snapshot',
+      id,
+      title: 'Draft one',
+      sceneTitle: 'B',
+    }),
+    gone: async ({ store, b }) => store.listSnapshots(b).length === 0,
   },
 ];
 

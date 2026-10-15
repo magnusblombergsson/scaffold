@@ -150,18 +150,25 @@ export class Snapshots {
 
   /**
    * Deletes for good, each leaving a marker, the Snapshots in Trash whose
-   * Scene `listed` says is, and every Snapshot of the Scenes `gone`.
+   * Scene `listed` says is; whether any was.
    */
-  async empty(
-    listed: (sceneId: string) => boolean,
-    gone: ReadonlySet<string>,
+  async empty(listed: (sceneId: string) => boolean): Promise<boolean> {
+    return this.deleteWhere((s) => inTrash(s) && listed(s.sceneId));
+  }
+
+  /** Deletes for good every Snapshot of the Scenes `gone`; whether any was. */
+  drop(gone: ReadonlySet<string>): Promise<boolean> {
+    return this.deleteWhere((s) => gone.has(s.sceneId));
+  }
+
+  private async deleteWhere(
+    test: (s: SnapshotFile) => boolean,
   ): Promise<boolean> {
     let changed = false;
     for (const s of this.held()) {
-      if (gone.has(s.sceneId) || (inTrash(s) && listed(s.sceneId))) {
-        await this.records.delete(s.id);
-        changed = true;
-      }
+      if (!test(s)) continue;
+      await this.records.delete(s.id);
+      changed = true;
     }
     return changed;
   }
