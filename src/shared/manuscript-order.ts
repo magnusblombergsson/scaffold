@@ -122,7 +122,9 @@ export function bookOf(
 }
 
 /** The Books' ids in reading order; none in a Project that is no Series. */
-export function bookIds(manuscript: Manuscript): string[] {
+export function bookIds(manuscript: {
+  books?: readonly { id: string }[];
+}): string[] {
   return (manuscript.books ?? []).map((b) => b.id);
 }
 

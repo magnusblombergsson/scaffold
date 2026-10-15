@@ -1,4 +1,4 @@
-import { createContext, useContext, useRef, useState } from 'react';
+import { useRef, useState } from 'react';
 import { entryTitle, roleText } from '../shared/entry';
 import {
   ENTRY_TYPE_LABELS,
@@ -8,15 +8,10 @@ import {
 import { entryImageRef, useUnitImage } from './UnitImage';
 import { ViewableImage } from './ImageView';
 import { isKeyField, type KeyFieldItem } from '../shared/key-fields';
-import { relationSentences, type RelationsView } from '../shared/relation';
+import { relationSentences } from '../shared/relation';
+import type { StoryBibleLens } from '../shared/story-bible-as-of';
 import { entryFields, keyFields } from './card-fields';
 import { useCustomFields, useKeyFields } from './StatusAndTags';
-
-/**
- * The Relations a Peek and a Pinned note show, among the Entries as of the
- * Book being written; none where there are none to show.
- */
-export const PeekRelationsContext = createContext<RelationsView | null>(null);
 
 /**
  * An Entry in the Peek, shortened: its image small, type and name, then
@@ -29,18 +24,22 @@ export const PeekRelationsContext = createContext<RelationsView | null>(null);
  * type's defaults show as the Peek always did: the Role under the name, then
  * the aliases and description, then the other Key fields in the order the
  * Entry view shows them, then its Relations, each a sentence as on its page,
- * none cut short.
+ * none cut short. In a Series, it is as `lens` sees it, as of its Book.
  *
  * In a Peek, its header has ↗ and, in Writing, 📌; in a Pinned note, whose
  * header has the name and those, it has neither.
  */
 export function PeekCard({
-  entry,
+  entry: stored,
+  lens,
   onOpen,
   pin,
   inNote = false,
 }: {
+  /** The Entry as stored, with its own values. */
   entry: EntryValue;
+  /** The Story Bible it is seen through. */
+  lens: StoryBibleLens;
   onOpen?(entryId: string): void;
   /** Whether the Entry is pinned, and pinning or unpinning it from where the card is. */
   pin?: { pinned: boolean; toggle(entryId: string, card: DOMRect): void };
@@ -48,6 +47,7 @@ export function PeekCard({
 }) {
   const card = useRef<HTMLElement>(null);
   const [expanded, setExpanded] = useState(false);
+  const entry = lens.read(stored).entry;
   const image = useUnitImage(entryImageRef(entry.id, entry.image), entry.image);
   const title = entryTitle(entry);
   const customFields = useCustomFields();
@@ -60,11 +60,9 @@ export function PeekCard({
   const fields = expanded
     ? entryFields(entry, customFields)
     : keyFields(entry, customFields, choices);
-  const relationsView = useContext(PeekRelationsContext);
-  const relations =
-    relationsView && shows('relations')
-      ? relationSentences(relationsView, entry.id)
-      : [];
+  const relations = shows('relations')
+    ? relationSentences(lens.relations, entry.id)
+    : [];
   return (
     <article
       ref={card}

@@ -23,7 +23,11 @@ import {
   type AssistantView,
 } from '../project-store/project-store';
 import type { Credential } from './connect-provider';
-import { buildContext, type ContextRequest } from './context-builder';
+import {
+  buildContext,
+  storyBibleOf,
+  type ContextRequest,
+} from './context-builder';
 import { imagePromptRequest } from './image-prompt';
 import { readProposals } from './proposal-blocks';
 import type { Provider, ProviderRequest } from './provider';
@@ -305,7 +309,11 @@ export async function runNeverProseEval({
     for (const block of proposes ? finished.proposals : []) {
       // A block the app makes a Proposal of, as the Author would see it; one
       // to a forbidden target, which the app can't read, shown flagged.
-      const read = await readProposals(view, [block]);
+      const read = await readProposals(
+        view,
+        [block],
+        storyBibleOf(view, undefined),
+      );
       unreadable += read.unreadable;
       const line = proposalLine(block, names);
       if (read.proposals.length > 0 || line.forbidden) proposals.push(line);

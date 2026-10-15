@@ -18,17 +18,12 @@ import {
 import { type AcceptOptions, type ProjectEvent } from '../../shared/api';
 import type { CustomField } from '../../shared/custom-field';
 import { newEntryValue } from '../../shared/entry';
+import { removeEvolution, withEvolved } from '../../shared/evolution';
+import { type Relation, type RelationChoice } from '../../shared/relation';
 import {
-  entryAsOf,
-  removeEvolution,
-  summaryAsOf,
-  withEvolved,
-} from '../../shared/evolution';
-import {
-  relationsView,
-  type Relation,
-  type RelationChoice,
-} from '../../shared/relation';
+  storyBibleAsOf,
+  type StoryBibleLens,
+} from '../../shared/story-bible-as-of';
 import {
   relationProposalSentence,
   type RelationAddition,
@@ -646,8 +641,9 @@ ${text}`);
     fromBook: boolean,
   ): Landing {
     if (proposal.kind !== 'field' || proposal.book === undefined) return {};
-    const source = entryAsOf(unit as EntryValue, this.bookIds(), proposal.book)
-      .from[proposal.field];
+    const source = this.storyBible(proposal.book).read(unit as EntryValue).from[
+      proposal.field
+    ];
     if (!fromBook) return source === undefined ? {} : { on: source };
     return source === proposal.book
       ? { on: source }
@@ -657,6 +653,18 @@ ${text}`);
   /** The Books' ids in reading order; none in a Project that is no Series. */
   private bookIds(): string[] {
     return bookIds(this.deps.manuscript());
+  }
+
+  /** The Story Bible as of `book`, or of the whole Project without one it holds. */
+  private storyBible(book: string | undefined): StoryBibleLens {
+    return storyBibleAsOf(
+      {
+        manuscript: this.deps.manuscript(),
+        entries: [...this.deps.entries.values()],
+        relations: this.deps.relations(),
+      },
+      book,
+    );
   }
 
   /**
@@ -907,17 +915,7 @@ ${text}`);
       }
     }
     const relations = this.deps.relations();
-    const books = this.bookIds();
-    const entries = [...this.deps.entries.values()];
-    const views = ways.map((book) =>
-      book !== undefined && books.includes(book)
-        ? relationsView(
-            relations,
-            entries.map((e) => summaryAsOf(e, books, book)),
-            { books, book },
-          )
-        : relationsView(relations, entries),
-    );
+    const views = ways.map((book) => this.storyBible(book).relations);
     return { relations, views };
   }
 
@@ -996,10 +994,7 @@ ${text}`);
     if (proposal.kind === 'outline') return targetIn(proposal, unit, []);
     const { decision } = proposal;
     const book = decision.kind === 'accepted' ? decision.on : proposal.book;
-    const seen =
-      book === undefined
-        ? (unit as EntryValue)
-        : entryAsOf(unit as EntryValue, this.bookIds(), book).entry;
+    const seen = this.storyBible(book).read(unit as EntryValue).entry;
     return targetIn(proposal, seen, this.deps.customFields());
   }
 

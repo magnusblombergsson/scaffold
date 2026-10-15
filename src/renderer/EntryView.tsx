@@ -1,22 +1,15 @@
 import type { Node } from '@tiptap/pm/model';
-import {
-  Fragment,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-} from 'react';
+import { Fragment, useEffect, useMemo, useRef, useState } from 'react';
 import { customValue, fieldsOfType } from '../shared/custom-field';
 import {
   editAsOf,
-  entryAsOf,
   evolveFrom,
   removeEvolution,
   type Sources,
   type TitledBook,
 } from '../shared/evolution';
 import { entryCollisions, entryTitle } from '../shared/entry';
+import type { StoryBibleLens } from '../shared/story-bible-as-of';
 import {
   customFieldKey,
   fieldLabel,
@@ -48,7 +41,6 @@ import {
   type Visibility,
   type Voice,
 } from '../shared/project-types';
-import type { RelationsView } from '../shared/relation';
 import { AddCustomField, CustomFieldHeading } from './CustomFields';
 import { CustomFieldSuggestions } from './CustomFieldSuggestions';
 import { useCustomFields } from './StatusAndTags';
@@ -186,12 +178,10 @@ type Loaded = { entry: EntryValue; privateNotes: PrivateValue };
  */
 export function EntryView({
   entry: summary,
-  entries,
-  relations,
+  lens,
   onOpenEntry,
   language,
   books = [],
-  asOf,
   focusName,
   reveal,
   onType,
@@ -202,17 +192,16 @@ export function EntryView({
 }: {
   /** As of the Book it is seen as of, if any. */
   entry: EntrySummary;
-  /** Every Entry in the Story Bible, to warn of names they share. */
-  entries: EntrySummary[];
-  /** The Relations among the Entries in the Story Bible. */
-  relations: RelationsView;
+  /**
+   * The Story Bible it is seen through, as of the Book it is seen as of, if
+   * any: every Entry, to warn of names they share, and their Relations.
+   */
+  lens: StoryBibleLens;
   /** Opens another Entry, as from its name in a Relation. */
   onOpenEntry(id: string): void;
   language: ProseLanguage;
-  /** In a Series, the Books in reading order; none otherwise. */
+  /** In a Series, the Books in reading order, by title; none otherwise. */
   books?: readonly TitledBook[];
-  /** The id of the Book it is seen as of, in a Series. */
-  asOf?: string;
   /**
    * Puts focus in the Name with it selected, as for an Entry just made; each
    * new number asks again.
@@ -239,14 +228,9 @@ export function EntryView({
   /** Which values come from an Evolution, as last written or reloaded. */
   const [sources, setSources] = useState<Sources>({});
   const customFields = useCustomFields();
-  const order = books.map((book) => book.id);
-  const orderKey = order.join();
+  const { books: order, book: asOf, all: entries, relations } = lens;
   /** The Entry as of the Book it is seen as of. */
-  const shownOf = useCallback(
-    (stored: UnitValue) =>
-      entryAsOf(stored as EntryValue, orderKey.split(','), asOf),
-    [orderKey, asOf],
-  );
+  const shownOf = (stored: UnitValue) => lens.read(stored as EntryValue);
   const asOfBook = books.find((book) => book.id === asOf);
   /** Whether a value may change from the Book it is seen as of: one after the first. */
   const evolves = asOfBook !== undefined && order.indexOf(asOfBook.id) > 0;
