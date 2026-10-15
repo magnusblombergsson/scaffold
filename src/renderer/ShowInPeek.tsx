@@ -3,6 +3,7 @@ import { isKeyField, type KeyFieldItem } from '../shared/key-fields';
 import { ENTRY_GROUP_TITLES, type EntryType } from '../shared/project-types';
 import { useKeyFields } from './StatusAndTags';
 import { ReadOnlyContext } from './read-only';
+import { useRun } from './use-project';
 
 /**
  * Beside a field's label in the Entry view: whether the field is one of its
@@ -20,6 +21,7 @@ export function ShowInPeek({
   label: string;
 }) {
   const readOnly = useContext(ReadOnlyContext);
+  const run = useRun();
   // As the Author set it, until main has it too.
   const [setting, setSetting] = useState<boolean | null>(null);
   const on = setting ?? isKeyField(type, item, useKeyFields());
@@ -35,11 +37,11 @@ export function ShowInPeek({
         checked={on}
         disabled={readOnly}
         onChange={(event) => {
-          setSetting(event.target.checked);
-          window.project
-            .setKeyField(type, item, event.target.checked)
-            .catch((error: unknown) => console.error(error))
-            .finally(() => setSetting(null));
+          const checked = event.target.checked;
+          setSetting(checked);
+          void run((project) => project.setKeyField(type, item, checked), {
+            what: 'save the Key fields',
+          }).then(() => setSetting(null));
         }}
       />
       {/* Named in full on the box, so that it adds nothing to the name of

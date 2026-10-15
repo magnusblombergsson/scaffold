@@ -5,9 +5,9 @@ import { PROVIDER_NAMES } from '../shared/models';
 import type { EntrySummary } from '../shared/project-types';
 import { describeUsage } from '../shared/usage';
 import { modelName } from './model-listing';
-import { flushPendingEdits } from './pending-edits';
 import { failureMessage } from './provider-messages';
 import { NO_SHORTLISTS, useProviders, useShortlists } from './Providers';
+import { useRun } from './use-project';
 
 /**
  * Image prompt… on an Entry: the Model chosen last writes one, for the
@@ -32,24 +32,20 @@ export function ImagePromptDialog({
   const [copied, setCopied] = useState<'copied' | 'failed' | null>(null);
   /** Counts the asks, so that only the latest one's result shows. */
   const asked = useRef(0);
+  const run = useRun();
   const providers = useProviders();
   const shortlists = useShortlists() ?? NO_SHORTLISTS;
 
   function write() {
     const ask = ++asked.current;
-    // What the Author typed last reaches main before the request is built.
-    flushPendingEdits();
     setResult(null);
     setCopied(null);
-    void window.assistant.imagePrompt(entry.id).then(
-      (written) => {
-        if (ask === asked.current) setResult(written);
-      },
-      (error: unknown) => {
-        console.error("Can't write an Image prompt:", error);
-        if (ask === asked.current) setResult('broken');
-      },
-    );
+    // What the Author typed last reaches main before the request is built.
+    void run(() => window.assistant.imagePrompt(entry.id), {
+      what: 'write an Image prompt',
+    }).then((written) => {
+      if (ask === asked.current) setResult(written ?? 'broken');
+    });
   }
 
   useEffect(() => {

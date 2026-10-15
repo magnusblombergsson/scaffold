@@ -27,6 +27,7 @@ import {
   type UnitValue,
   type ValueOf,
 } from '../shared/project-types';
+import { flushPendingEdits } from './pending-edits';
 
 /** What the renderer knows of its Project, as of the last thing main said. */
 export type ProjectState = {
@@ -60,7 +61,7 @@ export type ProjectState = {
 /**
  * What the mirror tells the UI, for what it can't show by the state alone.
  * `readOnlyStarted` and `languageChanged` come before the state changes,
- * so that pending edits reach main first; the others come after.
+ * once pending edits are on their way to main; the others come after.
  */
 export type MirrorEvent =
   /** Another computer changed the structure: main can no longer undo what was last done here. */
@@ -77,9 +78,34 @@ export type MirrorEvent =
    */
   | { type: 'proposalsChanged' }
   /** A command failed, with `message`; null once one has succeeded. */
-  | { type: 'error'; message: string | null };
+  | { type: 'error'; message: string | null }
+  /** A structure change main can undo by `step`, offered as `message`. */
+  | { type: 'undoable'; message: string; step: number };
 
 type Listener = () => void;
+
+/** How `run` runs a command. */
+export type RunOptions<R> = {
+  /** What it does, for a failure: `Can't {what}: why`. */
+  what?: string;
+  /**
+   * For a structure change, the label its Undo is offered with, or how to
+   * label it by what it made; none, and none is offered.
+   */
+  undo?: string | ((result: NonNullable<R>) => string);
+};
+
+function isChanged(result: unknown): result is Changed {
+  return (
+    typeof result === 'object' &&
+    result !== null &&
+    'manuscript' in result &&
+    'step' in result
+  );
+}
+
+/** What `run` gives back of a command: true for one that gives nothing. */
+export type Ran<R> = [R] extends [void] ? true : NonNullable<R>;
 
 /**
  * The units the mirror holds values of: every kind but a Scene, whose Prose
@@ -280,6 +306,8 @@ export class ProjectMirror {
         void this.refreshTrash();
         break;
       case 'languageChanged':
+        // Prose editors are made anew in it; their edits reach main first.
+        flushPendingEdits();
         this.emit({ type: 'languageChanged' });
         this.set({ language: event.language });
         break;
@@ -315,6 +343,8 @@ export class ProjectMirror {
         this.set({ relations: event.relations });
         break;
       case 'readOnly':
+        // Main still takes these last edits.
+        flushPendingEdits();
         this.emit({ type: 'readOnlyStarted' });
         this.set({ readOnly: { ...(event.host && { host: event.host }) } });
         break;
@@ -324,19 +354,44 @@ export class ProjectMirror {
     }
   }
 
-  /** Runs `command`; its failure is reported as `Can't …: why`. Whether it ran. */
-  private async attempt(
-    what: string,
-    command: () => Promise<unknown>,
-  ): Promise<boolean> {
+  /**
+   * Runs a command on the Project, the one way the renderer writes it. Its
+   * failure is reported as `Can't {what}: why`, once. What it gave back,
+   * true for nothing; undefined when it failed.
+   */
+  async run<R>(
+    op: (project: ProjectApi) => Promise<R>,
+    options: RunOptions<R> = {},
+  ): Promise<Ran<R> | undefined> {
+    // Edits reach main before the command, which may read or change what they're in.
+    flushPendingEdits();
+    let result: R;
     try {
-      await command();
-      this.emit({ type: 'error', message: null });
-      return true;
+      result = await op(this.api);
     } catch (error) {
-      this.fail(what, error);
-      return false;
+      this.fail(options.what ?? 'make that change', error);
+      // What it did before failing may have moved things to Trash.
+      await this.refreshTrash();
+      return undefined;
     }
+    // The Author cancelled: nothing changed, so nothing is reported.
+    if (result === null) return undefined;
+    this.emit({ type: 'error', message: null });
+    if (isChanged(result)) {
+      this.set({ manuscript: result.manuscript });
+      await this.refreshTrash();
+      // Offered last, so that what the caller does with the result is done
+      // before the Author can undo it.
+      const { undo } = options;
+      if (undo !== undefined) {
+        this.emit({
+          type: 'undoable',
+          message: typeof undo === 'string' ? undo : undo(result),
+          step: result.step,
+        });
+      }
+    }
+    return (result ?? true) as Ran<R>;
   }
 
   private fail(what: string, error: unknown): void {
@@ -346,67 +401,21 @@ export class ProjectMirror {
     });
   }
 
-  /** Gives a Part, Chapter or Scene a Status; the Manuscript showing it follows from main. */
-  setStatus(unitId: string, statusId: string | null): Promise<boolean> {
-    return this.attempt('set the Status', () =>
-      this.api.setStatus(unitId, statusId),
-    );
-  }
-
-  /** Gives a Part, Chapter, Scene or the Manuscript a Word target, or none. */
-  setWordTarget(unitId: string, words: number | null): Promise<boolean> {
-    return this.attempt('set the Word target', () =>
-      this.api.setWordTarget(unitId, words),
-    );
-  }
-
-  /** Gives a Part, Chapter, Scene or Entry Tags. */
-  setTags(unitId: string, tags: string[]): Promise<boolean> {
-    return this.attempt('save the Tags', () => this.api.setTags(unitId, tags));
-  }
-
-  /** Says which Book an Entry first appears in, or that it isn't said. */
-  setFirstAppears(entryId: string, bookId: string | null): Promise<boolean> {
-    return this.attempt('save the Book it first appears in', () =>
-      this.api.setFirstAppears(entryId, bookId),
-    );
-  }
-
-  /**
-   * Runs a structure operation and shows its Manuscript; the result, or
-   * undefined when the Author cancelled it or it failed.
-   */
-  async change<R extends Changed>(
-    operation: () => Promise<R | null>,
-  ): Promise<R | undefined> {
-    try {
-      const result = await operation();
-      // The Author cancelled: nothing changed, so nothing is reported.
-      if (!result) return undefined;
-      this.set({ manuscript: result.manuscript });
-      this.emit({ type: 'error', message: null });
-      await this.refreshTrash();
-      return result;
-    } catch (error) {
-      this.fail('make that change', error);
-      await this.refreshTrash();
-      return undefined;
-    }
-  }
-
   /** Undoes a structure change by its step. */
   async undo(step: number): Promise<void> {
-    await this.attempt('undo', async () => {
-      this.set({ manuscript: await this.api.undo(step) });
-    });
+    await this.run(
+      async (project) => this.set({ manuscript: await project.undo(step) }),
+      { what: 'undo' },
+    );
     await this.refreshTrash();
   }
 
   /** Keeps one version of a unit in Conflict; whether it did. */
   async resolveConflict(ref: UnitRef, kept: UnitValue): Promise<boolean> {
-    const resolved = await this.attempt('resolve the Conflict', () =>
-      this.api.resolveConflict(ref, kept),
-    );
+    const resolved = !!(await this.run(
+      (project) => project.resolveConflict(ref, kept),
+      { what: 'resolve the Conflict' },
+    ));
     // What main kept has the details of every version merged in.
     if (resolved && ref.kind !== 'scene') this.read(ref, true);
     await this.refreshTrash();
@@ -415,10 +424,9 @@ export class ProjectMirror {
 
   /** Empties the Trash if the Author agrees; whether it did. */
   async emptyTrash(): Promise<boolean> {
-    let emptied = false;
-    await this.attempt('empty the Trash', async () => {
-      emptied = await this.api.emptyTrash();
-    });
+    const emptied = !!(await this.run((project) => project.emptyTrash(), {
+      what: 'empty the Trash',
+    }));
     if (emptied) await this.refreshTrash();
     return emptied;
   }
@@ -460,10 +468,11 @@ export class ProjectMirror {
   }
 
   /**
-   * Writes a unit; resolves once main has it, and then shows it to whatever
-   * watches it. Nothing shows it before then.
+   * Writes a unit, as its editor saves its edits; resolves once main has
+   * it, and then shows it to whatever watches it. Nothing shows it before
+   * then. Not a command: these are the edits a command flushes first.
    */
-  async write<R extends HeldRef>(ref: R, value: ValueOf<R>): Promise<void> {
+  async write<R extends UnitRef>(ref: R, value: ValueOf<R>): Promise<void> {
     const key = unitKey(ref);
     this.writes.set(key, (this.writes.get(key) ?? 0) + 1);
     let written = false;
@@ -488,6 +497,22 @@ export class ProjectMirror {
    */
   writing(ref: HeldRef): boolean {
     return this.writes.has(unitKey(ref));
+  }
+
+  /**
+   * Tells main an editor shows the unit's latest reload, so what it writes
+   * from now on is made on that version.
+   */
+  reloadTaken(ref: UnitRef): Promise<void> {
+    return this.api.reloadTaken(ref);
+  }
+
+  /**
+   * Tells main an editor kept its own edits over the unit's latest reload,
+   * before they are written: not a command, which would flush them first.
+   */
+  keepEditsOverReload(ref: UnitRef): Promise<void> {
+    return this.api.keepEditsOverReload(ref);
   }
 
   /** Calls `listener` with each UnitChanged; returns an unsubscribe function. */

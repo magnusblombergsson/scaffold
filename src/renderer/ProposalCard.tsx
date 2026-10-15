@@ -1,5 +1,4 @@
 import { createContext, useContext, useState } from 'react';
-import type { CallFailure } from '../shared/api';
 import {
   ENTRY_TYPE_LABELS,
   ENTRY_TYPES,
@@ -28,8 +27,8 @@ import {
 } from '../shared/proposal';
 import { relationVerb } from '../shared/relation-proposal';
 import { fieldDiff, textDiff, type DiffPart } from '../shared/diff';
-import { flushPendingEdits } from './pending-edits';
 import { ReadOnlyContext } from './read-only';
+import { useRun } from './use-project';
 
 /** The id of a Proposal's card in the page, for *Show in Conversation*. */
 export function proposalCardId(proposalId: string): string {
@@ -158,7 +157,7 @@ export function ProposalCard({
   const [draft, setDraft] = useState<Draft | null>(null);
   const [fromBook, setFromBook] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const run = useRun();
   const title = proposalTitle(proposal);
   const appending = isAppending(proposal);
   // An Append or an Add has one button, named for what it does.
@@ -168,19 +167,11 @@ export function ProposalCard({
       ? ['Add', 'Added']
       : ['Append', 'Appended'];
 
-  async function decide(run: () => Promise<void>) {
-    // Edits typed into the target reach main before it is changed.
-    flushPendingEdits();
+  /** Decides the Proposal, edits typed into its target reaching main first. */
+  async function decide(decision: () => Promise<void>, what: string) {
     setBusy(true);
-    setError(null);
-    try {
-      await run();
-      setDraft(null);
-    } catch (error) {
-      setError((error as CallFailure).message);
-    } finally {
-      setBusy(false);
-    }
+    if (await run(decision, { what })) setDraft(null);
+    setBusy(false);
   }
 
   if (state.kind !== 'pending') {
@@ -202,8 +193,9 @@ export function ProposalCard({
             <button
               className="proposal-undo"
               onClick={() =>
-                void decide(() =>
-                  window.assistant.undoProposal(conversationId, id),
+                void decide(
+                  () => window.assistant.undoProposal(conversationId, id),
+                  'undo the Proposal',
                 )
               }
               disabled={readOnly || busy || !!undoBlocked}
@@ -215,11 +207,6 @@ export function ProposalCard({
         </p>
         {undoBlocked && (
           <p className="proposal-undo-blocked">Can’t undo: {undoBlocked}</p>
-        )}
-        {error && (
-          <p className="proposal-error" role="alert">
-            {error}
-          </p>
         )}
       </section>
     );
@@ -233,18 +220,23 @@ export function ProposalCard({
   const stale = 'stale' in state && state.stale;
 
   const accept = (edited?: ProposedValue, append = false) =>
-    decide(() =>
-      window.assistant.acceptProposal(conversationId, id, {
-        edited,
-        // The Author sees a stale one as such, and may accept it anyway.
-        anyway: stale,
-        append,
-        ...(fromBook && { fromBook }),
-      }),
+    decide(
+      () =>
+        window.assistant.acceptProposal(conversationId, id, {
+          edited,
+          // The Author sees a stale one as such, and may accept it anyway.
+          anyway: stale,
+          append,
+          ...(fromBook && { fromBook }),
+        }),
+      'accept the Proposal',
     );
   const appendable = canAppend(proposal);
   const reject = () =>
-    decide(() => window.assistant.rejectProposal(conversationId, id));
+    decide(
+      () => window.assistant.rejectProposal(conversationId, id),
+      'reject the Proposal',
+    );
 
   /** The value the Author edited, as the Proposal's target holds it. */
   function editedValue(draft: Draft): ProposedValue {
@@ -293,11 +285,6 @@ export function ProposalCard({
       )}
       {draft !== null && (
         <EditValue proposal={proposal} draft={draft} onChange={setDraft} />
-      )}
-      {error && (
-        <p className="proposal-error" role="alert">
-          {error}
-        </p>
       )}
       {!orphaned && !refused && proposal.evolvesFrom !== undefined && (
         <label className="proposal-from-book">

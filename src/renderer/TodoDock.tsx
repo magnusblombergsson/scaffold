@@ -41,7 +41,6 @@ export function TodoDockPane({
   draft,
   onOpen,
   onOpenTrash,
-  onError,
 }: {
   dock: TodoDock;
   onDock(change: Partial<TodoDock>, save?: boolean): void;
@@ -51,7 +50,6 @@ export function TodoDockPane({
   draft?: TodoDraft;
   onOpen(link: TodoLink): void;
   onOpenTrash(trashId: string): void;
-  onError(message: string | null): void;
 }) {
   const shown = shownTodos(todos, dock.scope, prelink, names);
   const count = shown.filter((todo) => !todo.done).length;
@@ -98,7 +96,6 @@ export function TodoDockPane({
             onScope={(scope) => onDock({ scope })}
             onOpen={onOpen}
             onOpenTrash={onOpenTrash}
-            onError={onError}
           />
         </div>
       )}

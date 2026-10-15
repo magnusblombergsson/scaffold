@@ -7,11 +7,10 @@ import {
   type FormEvent,
   type ReactNode,
 } from 'react';
-import type { CallFailure } from '../shared/api';
 import { wordDiff } from '../shared/diff';
 import { suggestedSnapshotName, type Snapshot } from '../shared/snapshot';
-import { flushPendingEdits } from './pending-edits';
 import { ReadOnlyContext } from './read-only';
+import { useRun } from './use-project';
 
 /** Hears a Scene's Prose as the editor changes it; returns how to stop. */
 export type ListenToProse = (
@@ -109,32 +108,26 @@ function SnapshotList({
   const readOnly = useContext(ReadOnlyContext);
   const [name, setName] = useState(() => suggestedSnapshotName(new Date()));
   const [renaming, setRenaming] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  /** Runs a change to the Snapshots, saying why main refused it. */
-  async function run(command: () => Promise<unknown>): Promise<boolean> {
-    try {
-      await command();
-      setError(null);
-      return true;
-    } catch (failure) {
-      setError((failure as CallFailure).message);
-      return false;
-    }
-  }
+  const run = useRun();
 
   async function take(event: FormEvent) {
     event.preventDefault();
-    // What is taken is the Prose as main has it.
-    flushPendingEdits();
-    if (await run(() => window.project.takeSnapshot(sceneId, name))) {
+    // What is taken is the Prose as main has it, its edits flushed first.
+    if (
+      await run((project) => project.takeSnapshot(sceneId, name), {
+        what: 'take a Snapshot',
+      })
+    ) {
       setName(suggestedSnapshotName(new Date()));
     }
   }
 
   async function restore(id: string) {
-    flushPendingEdits();
-    if (await run(() => window.project.restoreSnapshot(id))) {
+    if (
+      await run((project) => project.restoreSnapshot(id), {
+        what: 'restore the Snapshot',
+      })
+    ) {
       onCompare(undefined);
     }
   }
@@ -176,8 +169,9 @@ function SnapshotList({
                   onDone={async (name) => {
                     if (
                       name === null ||
-                      (await run(() =>
-                        window.project.renameSnapshot(snapshot.id, name),
+                      (await run(
+                        (project) => project.renameSnapshot(snapshot.id, name),
+                        { what: 'rename the Snapshot' },
                       ))
                     ) {
                       setRenaming(null);
@@ -225,7 +219,9 @@ function SnapshotList({
                   disabled={readOnly}
                   onClick={() => {
                     if (snapshot.id === comparing) onCompare(undefined);
-                    void run(() => window.project.trashSnapshot(snapshot.id));
+                    void run((project) => project.trashSnapshot(snapshot.id), {
+                      what: 'move the Snapshot to Trash',
+                    });
                   }}
                 >
                   Move to Trash
@@ -234,11 +230,6 @@ function SnapshotList({
             </li>
           ))}
         </ul>
-      )}
-      {error && (
-        <p className="field-error" role="alert">
-          {error}
-        </p>
       )}
     </section>
   );
@@ -331,6 +322,7 @@ function SnapshotCompare({
 /** The Scene's Prose as the editor has it, from main's first; null until read. */
 function useProse(sceneId: string, listen: ListenToProse): string | null {
   const [prose, setProse] = useState<string | null>(null);
+  const run = useRun();
   useEffect(() => {
     let heard = false;
     const stop = listen((id, markdown) => {
@@ -338,12 +330,13 @@ function useProse(sceneId: string, listen: ListenToProse): string | null {
       heard = true;
       setProse(markdown);
     });
-    flushPendingEdits();
-    void window.project.read({ kind: 'scene', id: sceneId }).then((value) => {
-      if (!heard) setProse(value.markdown);
+    void run((project) => project.read({ kind: 'scene', id: sceneId }), {
+      what: 'read the Prose',
+    }).then((value) => {
+      if (value && !heard) setProse(value.markdown);
     });
     return stop;
-  }, [sceneId, listen]);
+  }, [sceneId, listen, run]);
   return prose;
 }
 

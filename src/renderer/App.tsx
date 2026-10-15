@@ -18,6 +18,7 @@ import type {
   OpenedProject,
   OpenResult,
   PanelWidths,
+  ProjectApi,
   PinnedNote,
   Tip,
   WelcomeReason,
@@ -510,7 +511,7 @@ function ProjectView({
   const [overviewOpen, setOverviewOpen] = useState(
     project.view.overviewOpen ?? false,
   );
-  const saveStatus = useSaveStatus();
+  const saveStatus = useSaveStatus(mirror);
   const { scenes: sceneCounts, setProse } = useSceneCounts(mirror, manuscript);
   /** Whether the open Scene's Snapshots are listed above its Prose. */
   const [snapshotsOpen, setSnapshotsOpen] = useState(false);
@@ -1079,15 +1080,16 @@ function ProjectView({
       mirror.onEvent((event) => {
         if (event.type === 'error') {
           onError(event.message);
+        } else if (event.type === 'undoable') {
+          changeLatest({ message: event.message, step: event.step });
         } else if (event.type === 'unitReloaded') {
           setReloaded({ ref: event.ref, count: ++reloads.current });
-        } else if (event.type === 'proposalsChanged') {
-          // For the views that show Proposals.
-        } else if (event.type === 'languageChanged') {
-          // Prose editors are made anew in it; their edits reach main first.
-          flushPendingEdits();
+        } else if (
+          event.type === 'proposalsChanged' ||
+          event.type === 'languageChanged'
+        ) {
+          // For the views that show Proposals, and the Prose editors.
         } else {
-          if (event.type === 'readOnlyStarted') flushPendingEdits();
           // Main can no longer undo it.
           changeLatest(undefined);
         }
@@ -1096,36 +1098,36 @@ function ProjectView({
   );
 
   // The Manuscript or Entries showing a change follow from main.
-  const setStatus = (unitId: string, statusId: string | null) =>
-    mirror.setStatus(unitId, statusId).then(() => {});
-  const setWordTarget = (unitId: string, words: number | null) =>
-    mirror.setWordTarget(unitId, words).then(() => {});
-  const setTags = (unitId: string, tags: string[]) =>
-    mirror.setTags(unitId, tags).then(() => {});
+  const setStatus = async (unitId: string, statusId: string | null) => {
+    await mirror.run((project) => project.setStatus(unitId, statusId), {
+      what: 'set the Status',
+    });
+  };
+  const setWordTarget = async (unitId: string, words: number | null) => {
+    await mirror.run((project) => project.setWordTarget(unitId, words), {
+      what: 'set the Word target',
+    });
+  };
+  const setTags = async (unitId: string, tags: string[]) => {
+    await mirror.run((project) => project.setTags(unitId, tags), {
+      what: 'save the Tags',
+    });
+  };
 
-  /** Runs a structure operation, and offers to undo it; null when the Author cancelled it. */
+  /** Runs a structure operation, and offers to undo it; nothing when the Author cancelled it. */
   async function change(
-    operation: () => Promise<Changed | null>,
+    operation: (project: ProjectApi) => Promise<Changed | null>,
     message: string,
   ) {
-    // Edits reach main before the structure changes under them.
-    flushPendingEdits();
-    const result = await mirror.change(operation);
-    if (result) changeLatest({ message, step: result.step });
+    await mirror.run(operation, { undo: message });
   }
 
   /** Runs a structure operation that makes a unit, as `change` does; its id, if made. */
   async function create(
-    operation: () => Promise<Created>,
+    operation: (project: ProjectApi) => Promise<Created>,
     message: string,
   ): Promise<string | undefined> {
-    let id: string | undefined;
-    await change(async () => {
-      const created = await operation();
-      id = created.id;
-      return created;
-    }, message);
-    return id;
+    return (await mirror.run(operation, { undo: message }))?.id;
   }
 
   /**
@@ -1164,10 +1166,10 @@ function ProjectView({
       showNotice('Nothing to split at the start or end of the Prose');
       return;
     }
-    // The Prose as cut is what main has, before the split writes over it.
-    flushPendingEdits();
+    // The Prose as cut is what main has, before the split writes over it:
+    // `create` flushes it first.
     const id = await create(
-      () => window.project.splitScene(sceneId, cut, toNextChapter),
+      (project) => project.splitScene(sceneId, cut, toNextChapter),
       'Scene split',
     );
     // The start of its first paragraph.
@@ -1261,7 +1263,7 @@ function ProjectView({
   async function importBook(file: ImportFile, convention: ImportConvention) {
     onCloseImport();
     const id = await create(
-      () => window.project.importBook(file, convention),
+      (project) => project.importBook(file, convention),
       `Imported ${file.name} as a new Book`,
     );
     if (!id) return;
@@ -1273,7 +1275,7 @@ function ProjectView({
   async function importEntries(added: NewEntry[], leftOut: number) {
     switchRoom('storyBible');
     await change(
-      () => window.project.importEntries(added),
+      (project) => project.importEntries(added),
       `Imported ${entryCount(added.length)}` +
         (leftOut > 0 ? `, ${leftOut} left out` : ''),
     );
@@ -1282,7 +1284,7 @@ function ProjectView({
   async function createEntry(type: EntryType) {
     const label = ENTRY_TYPE_LABELS[type];
     const id = await create(
-      () => window.project.createEntry(type, `New ${label}`),
+      (project) => project.createEntry(type, `New ${label}`),
       `${label} created`,
     );
     if (!id) return;
@@ -1401,7 +1403,7 @@ function ProjectView({
       const at = sceneInsertion(manuscript, current(), command.above);
       if (!at) return false;
       void create(
-        () => window.project.createScene(at.chapterId, at.index),
+        (project) => project.createScene(at.chapterId, at.index),
         'Scene created',
       ).then((id) => {
         if (!id) return;
@@ -1411,13 +1413,8 @@ function ProjectView({
     } else if (command.type === 'newChapter') {
       const at = chapterInsertion(manuscript, current(), command.above);
       void create(
-        () =>
-          window.project.createChapter(
-            at.index,
-            undefined,
-            at.partId,
-            at.bookId,
-          ),
+        (project) =>
+          project.createChapter(at.index, undefined, at.partId, at.bookId),
         'Chapter created',
       ).then((id) => {
         if (!id) return;
@@ -1425,7 +1422,7 @@ function ProjectView({
         setRenaming(id);
       });
     } else if (command.type === 'newBook') {
-      void create(() => window.project.createBook(), 'Book created').then(
+      void create((project) => project.createBook(), 'Book created').then(
         (id) => {
           if (!id) return;
           setTab('manuscript');
@@ -1486,7 +1483,6 @@ function ProjectView({
   }, [zen]);
 
   async function undo(step: number) {
-    flushPendingEdits();
     changeLatest(undefined);
     await mirror.undo(step);
     // Undoing a Combine puts the Pinned notes back, its other Entry back too.
@@ -1502,14 +1498,11 @@ function ProjectView({
 
   /** Adds the Backup the Author chooses, as one step they can undo from the dialog. */
   async function addBookFromBackup() {
-    flushPendingEdits();
-    const added = await mirror.change(() => window.project.addBookFromBackup());
-    if (!added) return;
-    changeLatest({
-      message: `Added “${added.name}” as ${added.books.length === 1 ? 'a new Book' : `${added.books.length} new Books`}`,
-      step: added.step,
+    const added = await mirror.run((project) => project.addBookFromBackup(), {
+      undo: (added) =>
+        `Added “${added.name}” as ${added.books.length === 1 ? 'a new Book' : `${added.books.length} new Books`}`,
     });
-    setAddingFromBackup(added);
+    if (added) setAddingFromBackup(added);
   }
 
   /**
@@ -1521,22 +1514,21 @@ function ProjectView({
     pairs: { added: string; here: string }[],
     firstBook: string,
   ) {
-    flushPendingEdits();
     let combined = 0;
     const dropped: string[] = [];
     for (const pair of pairs) {
-      const [here, added] = await Promise.all([
-        window.project.read({ kind: 'entry', id: pair.here }),
-        window.project.read({ kind: 'entry', id: pair.added }),
-      ]);
-      changePinnedNotes(repointed(notesNow.current, pair.added, pair.here));
-      const result = await mirror.change(() =>
-        window.project.combineEntries(
+      const result = await mirror.run(async (project) => {
+        const [here, added] = await Promise.all([
+          project.read({ kind: 'entry', id: pair.here }),
+          project.read({ kind: 'entry', id: pair.added }),
+        ]);
+        changePinnedNotes(repointed(notesNow.current, pair.added, pair.here));
+        return project.combineEntries(
           pair.here,
           pair.added,
           pairChoices(here, added, customFields, firstBook),
-        ),
-      );
+        );
+      });
       if (!result) break;
       combined++;
       dropped.push(...result.dropped);
@@ -1571,11 +1563,17 @@ function ProjectView({
     choices: CombineChoices,
     names: { kept: string; other: string },
   ) {
-    flushPendingEdits();
     const notes = notesNow.current;
     changePinnedNotes(repointed(notes, otherId, keptId));
-    const result = await mirror.change(() =>
-      window.project.combineEntries(keptId, otherId, choices),
+    const result = await mirror.run(
+      (project) => project.combineEntries(keptId, otherId, choices),
+      {
+        undo: ({ dropped }) =>
+          `Combined “${names.other}” into “${names.kept}”` +
+          (dropped.length > 0
+            ? `; dropped ${dropped.length === 1 ? 'a Relation' : `${dropped.length} Relations`} that broke a rule: ${dropped.join('; ')}`
+            : ''),
+      },
     );
     if (!result) {
       changePinnedNotes(notes);
@@ -1583,15 +1581,6 @@ function ProjectView({
     }
     notesBeforeCombine.current = { step: result.step, notes };
     undoOnlyInToast.current = result.step;
-    const { dropped } = result;
-    changeLatest({
-      message:
-        `Combined “${names.other}” into “${names.kept}”` +
-        (dropped.length > 0
-          ? `; dropped ${dropped.length === 1 ? 'a Relation' : `${dropped.length} Relations`} that broke a rule: ${dropped.join('; ')}`
-          : ''),
-      step: result.step,
-    });
     showEntry(keptId);
   }
 
@@ -1600,7 +1589,6 @@ function ProjectView({
    * in the Story Bible Room, the rest in Writing.
    */
   async function resolve(ref: UnitRef, kept: UnitValue) {
-    flushPendingEdits();
     if (!(await mirror.resolveConflict(ref, kept))) return;
     setResolving(null);
     if (roomOf(ref) === 'storyBible') {
@@ -1754,7 +1742,6 @@ function ProjectView({
                   pane={pane}
                   onAddProvider={onAddProvider}
                   onOpenEntry={showEntry}
-                  onChange={change}
                   todos={
                     <TodoList
                       todos={todos}
@@ -1762,7 +1749,6 @@ function ProjectView({
                       prelink={null}
                       onOpen={openLink}
                       onOpenTrash={openTrashItem}
-                      onError={onError}
                     />
                   }
                 />
@@ -1777,7 +1763,6 @@ function ProjectView({
                   pane={pane}
                   onAddProvider={onAddProvider}
                   onOpenEntry={showEntry}
-                  onChange={change}
                 />
               </div>
             )}
@@ -1876,7 +1861,6 @@ function ProjectView({
                       selected={selected}
                       onSelect={select}
                       conflicted={conflicted}
-                      onChange={change}
                       renaming={renaming}
                       onRename={setRenaming}
                       onUndo={undoLatest}
@@ -1908,7 +1892,7 @@ function ProjectView({
                       reveal={trashReveal}
                       onRestore={(item) =>
                         change(
-                          () => window.project.restore(item.id),
+                          (project) => project.restore(item.id),
                           item.kind === 'version'
                             ? `Restored ${trashTitle(item)}`
                             : `Restored “${item.title}”`,
@@ -1917,11 +1901,8 @@ function ProjectView({
                       onMove={(item) => {
                         const to = tab === 'drawer' ? 'trash' : 'drawer';
                         return change(
-                          () =>
-                            window.project.moveBetweenTrashAndDrawer(
-                              item.id,
-                              to,
-                            ),
+                          (project) =>
+                            project.moveBetweenTrashAndDrawer(item.id, to),
                           movedText(item, to),
                         );
                       }}
@@ -1941,7 +1922,6 @@ function ProjectView({
                   draft={draftIn('writing')}
                   onOpen={openLink}
                   onOpenTrash={openTrashItem}
-                  onError={onError}
                 />
               </aside>
               {docked.left && (
@@ -2164,7 +2144,6 @@ function ProjectView({
                       focusNameOf(id);
                     }}
                     onCreate={(type) => void createEntry(type)}
-                    onChange={change}
                     onUndo={undoLatest}
                     highlight={highlight}
                     onHighlight={(on) => {
@@ -2186,7 +2165,6 @@ function ProjectView({
                   draft={draftIn('storyBible')}
                   onOpen={openLink}
                   onOpenTrash={openTrashItem}
-                  onError={onError}
                 />
               </aside>
               <PanelResizer
@@ -2209,7 +2187,11 @@ function ProjectView({
                   language={language}
                   books={seriesBooks}
                   onFirstAppears={(bookId) =>
-                    void mirror.setFirstAppears(openEntry.id, bookId)
+                    void mirror.run(
+                      (project) =>
+                        project.setFirstAppears(openEntry.id, bookId),
+                      { what: 'save the Book it first appears in' },
+                    )
                   }
                   focusName={
                     focusName?.id === openEntry.id ? focusName.count : undefined
@@ -2217,17 +2199,14 @@ function ProjectView({
                   reveal={revealIn(openEntry.id)}
                   onType={(type) =>
                     change(
-                      () => window.project.setEntryType(openEntry.id, type),
+                      (project) => project.setEntryType(openEntry.id, type),
                       `Type changed to ${ENTRY_TYPE_LABELS[type]}`,
                     )
                   }
                   onVisibility={(visibility) =>
                     change(
-                      () =>
-                        window.project.setEntryVisibility(
-                          openEntry.id,
-                          visibility,
-                        ),
+                      (project) =>
+                        project.setEntryVisibility(openEntry.id, visibility),
                       `Visibility set to ${VISIBILITY_LABELS[visibility]}`,
                     )
                   }
@@ -2268,7 +2247,6 @@ function ProjectView({
                 onAddTodo={(text, link) =>
                   startTodo(dockRoomOf(room) ?? 'writing', link, text)
                 }
-                onChange={change}
               />
             </ProposalTargetContext.Provider>,
             assistantHome,

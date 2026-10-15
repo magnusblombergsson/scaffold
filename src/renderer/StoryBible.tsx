@@ -6,7 +6,6 @@ import {
   type DragEvent,
   type ReactNode,
 } from 'react';
-import type { Changed } from '../shared/api';
 import type { BibleView } from '../shared/bible-view';
 import { filterOn, matchesFilter } from '../shared/filter';
 import { entryTitle } from '../shared/entry';
@@ -41,6 +40,7 @@ import type { Row } from './binder-keys';
 import { useListKeys } from './list-keys';
 import { MAC } from './platform';
 import { ReadOnlyContext } from './read-only';
+import { useRun } from './use-project';
 
 /**
  * The Story Bible tab: the Entries, grouped by type, narrowed by a Filter,
@@ -63,7 +63,6 @@ export function StoryBible({
   onOpen,
   onRename,
   onCreate,
-  onChange,
   onUndo,
   highlight,
   onHighlight,
@@ -89,8 +88,6 @@ export function StoryBible({
   onRename(id: string): void;
   /** Makes an Entry of `type` and opens it, with its Name focused. */
   onCreate(type: EntryType): void;
-  /** Runs a change the Author can undo; `message` says what it did, beside Undo. */
-  onChange(operation: () => Promise<Changed>, message: string): Promise<void>;
   /** Undoes the last structure change, as Ctrl+Z in the list does. */
   onUndo(): Promise<void>;
   highlight: boolean;
@@ -101,6 +98,7 @@ export function StoryBible({
   onCombine(entryId: string): void;
 }) {
   const readOnly = useContext(ReadOnlyContext);
+  const run = useRun();
   const bookIds = books.map((book) => book.id);
   const { filter, setFilter, inUse } = useFilter(
     'writing-bible',
@@ -200,18 +198,16 @@ export function StoryBible({
             {
               label: 'Move to Trash',
               run: () =>
-                onChange(
-                  () => window.project.trashEntry(entry.id),
-                  `“${entryTitle(entry)}” moved to Trash`,
-                ),
+                run((project) => project.trashEntry(entry.id), {
+                  undo: `“${entryTitle(entry)}” moved to Trash`,
+                }),
             },
             {
               label: 'Move to Drawer',
               run: () =>
-                onChange(
-                  () => window.project.moveToDrawer('entry', entry.id),
-                  `“${entryTitle(entry)}” moved to the Drawer`,
-                ),
+                run((project) => project.moveToDrawer('entry', entry.id), {
+                  undo: `“${entryTitle(entry)}” moved to the Drawer`,
+                }),
             },
           ]}
         />
@@ -255,9 +251,9 @@ export function StoryBible({
           setTarget(null);
           if (!drag || !drop) return;
           event.preventDefault();
-          void onChange(
-            () => window.project.changeEntryTags(drag.entry.id, drop.change),
-            dropMessage(entryTitle(drag.entry), drop),
+          void run(
+            (project) => project.changeEntryTags(drag.entry.id, drop.change),
+            { undo: dropMessage(entryTitle(drag.entry), drop) },
           );
         }}
       >

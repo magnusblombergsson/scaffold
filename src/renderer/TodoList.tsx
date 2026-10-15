@@ -7,7 +7,6 @@ import {
   type FormEvent,
   type KeyboardEvent,
 } from 'react';
-import type { CallFailure } from '../shared/bridge';
 import {
   inContext,
   linkView,
@@ -18,6 +17,7 @@ import {
 import type { TodoScope } from '../shared/todo-dock';
 import { inLowerHalf } from './Binder';
 import { ReadOnlyContext } from './read-only';
+import { useRun } from './use-project';
 
 const TODO = 'application/x-scaffold-todo';
 
@@ -63,7 +63,6 @@ export function TodoList({
   onScope,
   onOpen,
   onOpenTrash,
-  onError,
 }: {
   todos: Todo[];
   names: LinkNames;
@@ -76,30 +75,13 @@ export function TodoList({
   onScope?(scope: TodoScope): void;
   onOpen(link: TodoLink): void;
   onOpenTrash(trashId: string): void;
-  onError(message: string | null): void;
 }) {
   const readOnly = useContext(ReadOnlyContext);
   const shown = shownTodos(todos, scope, prelink, names);
   const open = shown.filter((todo) => !todo.done);
   const done = shown.filter((todo) => todo.done);
 
-  /**
-   * Runs a change to the Todos, the list showing it following from main;
-   * false when it failed, which the Author is told.
-   */
-  async function run(
-    change: () => Promise<void>,
-    what: string,
-  ): Promise<boolean> {
-    try {
-      await change();
-      onError(null);
-      return true;
-    } catch (error) {
-      onError(`Can't ${what}: ${(error as CallFailure).message}`);
-      return false;
-    }
-  }
+  const run = useRun();
 
   /**
    * Moves the Todo dragged to before or after `target`, among those done as
@@ -110,10 +92,9 @@ export function TodoList({
     if (id === target.id || !group.some((todo) => todo.id === id)) return;
     const rest = group.filter((todo) => todo.id !== id);
     const at = rest.findIndex((todo) => todo.id === target.id);
-    void run(
-      () => window.project.moveTodo(id, at + (after ? 1 : 0)),
-      'move the Todo',
-    );
+    void run((project) => project.moveTodo(id, at + (after ? 1 : 0)), {
+      what: 'move the Todo',
+    });
   }
 
   /** Moves a Todo past the one shown above or below it, by Alt+↑/↓. */
@@ -129,7 +110,6 @@ export function TodoList({
       todo={todo}
       names={names}
       readOnly={readOnly}
-      run={run}
       onOpen={onOpen}
       onOpenTrash={onOpenTrash}
       onDrop={drop}
@@ -145,7 +125,9 @@ export function TodoList({
         draft={draft}
         readOnly={readOnly}
         onAdd={(text, link) =>
-          run(() => window.project.addTodo(text, link), 'add the Todo')
+          run((project) => project.addTodo(text, link), {
+            what: 'add the Todo',
+          }).then((added) => !!added)
         }
       />
       {onScope && (
@@ -184,13 +166,11 @@ export function TodoList({
             onClick={() =>
               void run(
                 // Only those shown: the Author doesn't see the others go.
-                async () => {
-                  if (scope === 'all') return window.project.clearDoneTodos();
-                  for (const todo of done) {
-                    await window.project.deleteTodo(todo.id);
-                  }
+                async (project) => {
+                  if (scope === 'all') return project.clearDoneTodos();
+                  for (const todo of done) await project.deleteTodo(todo.id);
                 },
-                'clear the done Todos',
+                { what: 'clear the done Todos' },
               )
             }
           >
@@ -287,7 +267,6 @@ function TodoRow({
   todo,
   names,
   readOnly,
-  run,
   onOpen,
   onOpenTrash,
   onDrop,
@@ -296,12 +275,12 @@ function TodoRow({
   todo: Todo;
   names: LinkNames;
   readOnly: boolean;
-  run(change: () => Promise<void>, what: string): Promise<boolean>;
   onOpen(link: TodoLink): void;
   onOpenTrash(trashId: string): void;
   onDrop(id: string, target: Todo, after: boolean): void;
   onStep(todo: Todo, by: -1 | 1): void;
 }) {
+  const run = useRun();
   const [draft, setDraft] = useState(todo.text);
   useEffect(() => setDraft(todo.text), [todo.text]);
   const view = todo.link && linkView(todo.link, names);
@@ -313,10 +292,9 @@ function TodoRow({
       setDraft(todo.text);
       return;
     }
-    void run(
-      () => window.project.changeTodo(todo.id, { text }),
-      'change the Todo',
-    );
+    void run((project) => project.changeTodo(todo.id, { text }), {
+      what: 'change the Todo',
+    });
   }
 
   function onKeyDown(event: KeyboardEvent<HTMLInputElement>) {
@@ -365,8 +343,8 @@ function TodoRow({
         aria-label={`Done: ${todo.text}`}
         onChange={() =>
           void run(
-            () => window.project.changeTodo(todo.id, { done: !todo.done }),
-            todo.done ? 'untick the Todo' : 'tick the Todo',
+            (project) => project.changeTodo(todo.id, { done: !todo.done }),
+            { what: todo.done ? 'untick the Todo' : 'tick the Todo' },
           )
         }
       />
@@ -401,10 +379,9 @@ function TodoRow({
           aria-label={`Delete “${todo.text}”`}
           title="Delete"
           onClick={() =>
-            void run(
-              () => window.project.deleteTodo(todo.id),
-              'delete the Todo',
-            )
+            void run((project) => project.deleteTodo(todo.id), {
+              what: 'delete the Todo',
+            })
           }
         >
           ×

@@ -184,12 +184,12 @@ export function UnitEditor({
             reloaded.byCombine)
         ) {
           reloadUnitEditor(editor, toDoc(textOf(value)));
-          void window.project.reloadTaken(ref);
+          void mirror.reloadTaken(ref);
           return;
         }
         // The edits here were made on the version before: saved now, they
         // put the reloaded one beside them as a Conflict.
-        void window.project.keepEditsOverReload(ref);
+        void mirror.keepEditsOverReload(ref);
         autosave.flush();
       }),
     [mirror, editor, autosave, reloadKey, textOf, toDoc],
