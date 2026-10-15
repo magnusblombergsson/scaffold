@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   appBridge,
+  type AssistantApi,
   type Conflict,
   type OpenedProject,
   type ProjectApi,
@@ -8,11 +9,16 @@ import {
 } from '../shared/api';
 import { memoryTransport } from '../shared/memory-transport';
 import { DEFAULT_TODO_DOCK } from '../shared/todo-dock';
-import type {
-  EntrySummary,
-  Manuscript,
-  TrashItem,
+import {
+  unitKey,
+  type EntrySummary,
+  type EntryValue,
+  type Manuscript,
+  type TrashItem,
+  type UnitRef,
+  type UnitValue,
 } from '../shared/project-types';
+import type { PendingProposal } from '../shared/proposal';
 import type { CustomField } from '../shared/custom-field';
 import type { KeyFieldChoices } from '../shared/key-fields';
 import type { Todo } from '../shared/todo';
@@ -76,6 +82,12 @@ type Held = {
   failWith?: string;
   undone: Manuscript;
   emptied: boolean;
+  /** Each unit's value, by key. */
+  units: Record<string, UnitValue>;
+  /** The keys of the units read, in order. */
+  reads: string[];
+  /** The Proposals pending on each Entry, by its id. */
+  pending: Record<string, PendingProposal[]>;
 };
 
 function setUp(held: Partial<Held> = {}) {
@@ -90,6 +102,9 @@ function setUp(held: Partial<Held> = {}) {
     calls: [],
     undone: emptyManuscript,
     emptied: true,
+    units: {},
+    reads: [],
+    pending: {},
     ...held,
   };
   const guard = () => {
@@ -118,14 +133,39 @@ function setUp(held: Partial<Held> = {}) {
         guard();
         return main.undone;
       },
-      resolveConflict: async () => guard(),
+      resolveConflict: async (_ctx: unknown, ref: UnitRef, kept: UnitValue) => {
+        guard();
+        main.units[unitKey(ref)] = kept;
+      },
       emptyTrash: async () => main.emptied,
+      read: async (_ctx: unknown, ref: UnitRef) => {
+        const key = unitKey(ref);
+        main.reads.push(key);
+        const value = main.units[key];
+        if (!value) throw new Error(`${key} isn't there`);
+        return value;
+      },
+      write: async (_ctx: unknown, ref: UnitRef, value: UnitValue) => {
+        guard();
+        main.units[unitKey(ref)] = value;
+      },
+    } as never,
+    () => ({}),
+  );
+  bridge.register(
+    'assistant',
+    {
+      pendingProposals: async (_ctx: unknown, entryId: string) =>
+        main.pending[entryId] ?? [],
     } as never,
     () => ({}),
   );
   const { window, renderer } = transport.open();
   const api: ProjectApi = appBridge.renderer(renderer).build('project');
-  const mirror = new ProjectMirror(api, opened);
+  const assistant: Pick<AssistantApi, 'pendingProposals'> = appBridge
+    .renderer(renderer)
+    .build('assistant');
+  const mirror = new ProjectMirror(api, opened, assistant);
   const events: MirrorEvent[] = [];
   mirror.onEvent((event) => events.push(event));
   return {
@@ -518,6 +558,245 @@ describe('ProjectMirror', () => {
       mirror.dismissDropped(mirror.getSnapshot().dropped[0]!);
 
       expect(mirror.getSnapshot().dropped).toEqual([b]);
+    });
+  });
+
+  describe('unit values', () => {
+    const ref = { kind: 'entry', id: 'e' } as const;
+    const value = (description: string): EntryValue => ({
+      ...entry('e'),
+      description,
+      fields: {},
+    });
+    const pending = (id: string): PendingProposal =>
+      ({ conversationId: 'c', proposal: { id } }) as never;
+
+    async function holding(units: Record<string, UnitValue> = {}) {
+      const world = setUp({ entries: [entry('e')], units });
+      world.mirror.start();
+      await world.settle();
+      return world;
+    }
+
+    it('reads a unit once for two subscribers', async () => {
+      const { mirror, main, settle } = await holding({ 'entry:e': value('a') });
+
+      mirror.watchUnit(ref, () => {});
+      mirror.watchUnit(ref, () => {});
+      await settle();
+
+      expect(main.reads).toEqual(['entry:e']);
+      expect(mirror.unit(ref)).toEqual(value('a'));
+    });
+
+    it('takes a reload from another computer to every subscriber', async () => {
+      const { mirror, tell, settle } = await holding({ 'entry:e': value('a') });
+      const first = vi.fn();
+      const second = vi.fn();
+      mirror.watchUnit(ref, first);
+      mirror.watchUnit(ref, second);
+      await settle();
+      first.mockClear();
+      second.mockClear();
+
+      tell({ type: 'unitReloaded', ref, value: value('b') });
+      await settle();
+
+      expect(mirror.unit(ref)).toEqual(value('b'));
+      expect(first).toHaveBeenCalled();
+      expect(second).toHaveBeenCalled();
+    });
+
+    it("shows this window's own write to a second subscriber once main has it", async () => {
+      const { mirror, settle } = await holding({ 'entry:e': value('a') });
+      const other = vi.fn();
+      mirror.watchUnit(ref, () => {});
+      mirror.watchUnit(ref, other);
+      await settle();
+      other.mockClear();
+
+      const written = mirror.write(ref, value('b'));
+      expect(mirror.unit(ref)).toEqual(value('a'));
+      await written;
+
+      expect(mirror.unit(ref)).toEqual(value('b'));
+      expect(other).toHaveBeenCalled();
+    });
+
+    it("says a unit is being written while this window's write is on its way", async () => {
+      const { mirror, main, settle } = await holding({ 'entry:e': value('a') });
+      const listener = vi.fn();
+      mirror.watchUnit(ref, listener);
+      await settle();
+      listener.mockClear();
+
+      const written = mirror.write(ref, value('b'));
+      expect(mirror.writing(ref)).toBe(true);
+      await written;
+      expect(mirror.writing(ref)).toBe(false);
+
+      main.failWith = 'Read-only';
+      await expect(mirror.write(ref, value('c'))).rejects.toThrow();
+      expect(mirror.writing(ref)).toBe(false);
+      expect(mirror.unit(ref)).toEqual(value('b'));
+      // Told each time, so that a view waiting for the write goes on.
+      expect(listener).toHaveBeenCalledTimes(2);
+    });
+
+    it('forgets a unit moved to Trash', async () => {
+      const { mirror, main, tell, settle } = await holding({
+        'entry:e': value('a'),
+      });
+      mirror.watchUnit(ref, () => {});
+      await settle();
+
+      delete main.units['entry:e'];
+      tell({ type: 'entriesChanged', entries: [] });
+      await settle();
+
+      expect(mirror.unit(ref)).toBeNull();
+    });
+
+    it("forgets the Outline of a Scene moved to Trash, and reads it once it's back", async () => {
+      const scene = { id: 's', title: 'S' } as never;
+      const { mirror, tell, settle } = await holding({
+        'outline:s': { id: 's', body: 'a', meta: {} },
+      });
+      const outline = { kind: 'outline', id: 's' } as const;
+      tell({
+        type: 'structureChanged',
+        manuscript: { chapters: [], unplaced: [scene] },
+      });
+      mirror.watchUnit(outline, () => {});
+      await settle();
+
+      tell({ type: 'structureChanged', manuscript: emptyManuscript });
+      await settle();
+      expect(mirror.unit(outline)).toBeNull();
+
+      tell({
+        type: 'structureChanged',
+        manuscript: { chapters: [], unplaced: [scene] },
+      });
+      await settle();
+      expect(mirror.unit(outline)).toEqual({ id: 's', body: 'a', meta: {} });
+    });
+
+    it('keeps a value watched anew as soon as the last watcher stops', async () => {
+      const { mirror, main, settle } = await holding({ 'entry:e': value('a') });
+      const stop = mirror.watchUnit(ref, () => {});
+      await settle();
+
+      stop();
+      mirror.watchUnit(ref, () => {});
+      await settle();
+
+      expect(main.reads).toEqual(['entry:e']);
+      expect(mirror.unit(ref)).toEqual(value('a'));
+    });
+
+    it('keeps a unit forgotten when a write to it resolves after it went to Trash', async () => {
+      const { mirror, tell, settle } = await holding({ 'entry:e': value('a') });
+      mirror.watchUnit(ref, () => {});
+      await settle();
+
+      const written = mirror.write(ref, value('b'));
+      tell({ type: 'entriesChanged', entries: [] });
+      await written;
+
+      expect(mirror.unit(ref)).toBeNull();
+    });
+
+    it('reads an Entry anew when its summary changes', async () => {
+      const { mirror, main, tell, settle } = await holding({
+        'entry:e': value('a'),
+      });
+      mirror.watchUnit(ref, () => {});
+      await settle();
+
+      main.units['entry:e'] = { ...value('a'), visibility: 'never' };
+      tell({
+        type: 'entriesChanged',
+        entries: [{ ...entry('e'), visibility: 'never' }],
+      });
+      await settle();
+
+      expect(mirror.unit(ref)).toMatchObject({ visibility: 'never' });
+    });
+
+    it('reads the Proposals pending on an Entry anew after proposalsChanged', async () => {
+      const { mirror, main, tell, settle } = await holding();
+      main.pending = { e: [pending('p')] };
+      const listener = vi.fn();
+      mirror.watchPending('e', listener);
+      await settle();
+      expect(mirror.pending('e')).toEqual([pending('p')]);
+
+      main.pending = { e: [pending('p'), pending('q')] };
+      tell({ type: 'proposalsChanged' });
+      await settle();
+
+      expect(mirror.pending('e')).toEqual([pending('p'), pending('q')]);
+      expect(listener).toHaveBeenCalled();
+    });
+
+    it('drops a value after its last subscriber, and reads it again for the next', async () => {
+      const { mirror, main, settle } = await holding({ 'entry:e': value('a') });
+      const stopFirst = mirror.watchUnit(ref, () => {});
+      const stopSecond = mirror.watchUnit(ref, () => {});
+      await settle();
+
+      stopFirst();
+      await settle();
+      expect(mirror.unit(ref)).toEqual(value('a'));
+      stopSecond();
+      await settle();
+      expect(mirror.unit(ref)).toBeUndefined();
+
+      mirror.watchUnit(ref, () => {});
+      await settle();
+      expect(main.reads).toEqual(['entry:e', 'entry:e']);
+    });
+
+    it('tells editors of a reload, and of a value read anew once a Conflict is resolved', async () => {
+      const { mirror, tell, settle } = await holding({ 'entry:e': value('a') });
+      mirror.watchUnit(ref, () => {});
+      await settle();
+      const changes = vi.fn();
+      mirror.onUnitChanged(changes);
+
+      const reload = { type: 'unitReloaded', ref, value: value('b') } as const;
+      tell(reload);
+      await settle();
+      await mirror.resolveConflict(ref, value('c'));
+      await settle();
+
+      expect(changes.mock.calls.map(([change]) => change)).toEqual([
+        { ref, value: value('b'), reloaded: reload },
+        { ref, value: value('c') },
+      ]);
+      expect(mirror.unit(ref)).toEqual(value('c'));
+    });
+
+    it("tells editors of a Scene's reload, though it holds no Prose", async () => {
+      const { mirror, tell, settle } = await holding();
+      const changes = vi.fn();
+      mirror.onUnitChanged(changes);
+      const scene = { kind: 'scene', id: 's' } as const;
+      const reload = {
+        type: 'unitReloaded',
+        ref: scene,
+        value: { id: 's', markdown: 'x' },
+      } as never;
+
+      tell(reload);
+      await settle();
+
+      expect(changes).toHaveBeenCalledWith({
+        ref: scene,
+        value: { id: 's', markdown: 'x' },
+        reloaded: reload,
+      });
     });
   });
 });

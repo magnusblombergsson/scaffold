@@ -64,6 +64,7 @@ import {
   useComposerMeasures,
 } from './composer-height';
 import { PanelResizer } from './PanelResizer';
+import { useMirror } from './use-project';
 
 // A Conversation with the Assistant, wherever it is shown: in the Assistant
 // panel beside the editor, or in a Mode's room.
@@ -236,21 +237,20 @@ export function useConversation({
     [],
   );
 
+  const mirror = useMirror();
   useEffect(
     () =>
-      window.project.subscribe((event) => {
+      mirror.onEvent((event) => {
         // A Proposal was decided, or its Entry changed: show where each stands now.
-        const changed =
-          event.type === 'proposalsChanged' ||
-          event.type === 'entriesChanged' ||
-          (event.type === 'unitReloaded' && event.ref.kind === 'entry');
         const id = currentId.current;
-        if (!changed || !id || answering.current) return;
+        if (event.type !== 'proposalsChanged' || !id || answering.current) {
+          return;
+        }
         void window.assistant.readConversation(id).then((conversation) => {
           if (currentId.current === conversation.id) setCurrent(conversation);
         });
       }),
-    [],
+    [mirror],
   );
 
   useEffect(() => {

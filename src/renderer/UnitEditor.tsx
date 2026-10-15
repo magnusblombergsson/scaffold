@@ -18,6 +18,7 @@ import { createAutosave } from './autosave';
 import { registerPendingEdits } from './pending-edits';
 import { ReadOnlyContext } from './read-only';
 import { reloadUnitEditor, unitEditor } from './unit-editors';
+import { useMirror } from './use-project';
 
 type Props = {
   /** Which unit this is, such as `outline:<id>`; its editor keeps its history under it. */
@@ -73,8 +74,9 @@ type Props = {
  * When another computer changes the unit, the editor shows the new text,
  * unless the Author has edits here that main doesn't have yet, or that are
  * on their way to it: those are kept, and the new text goes beside them as a
- * Conflict. Once the
- * Project is read-only, it takes no more edits.
+ * Conflict. A unit read anew, as once a Conflict is resolved, shows too
+ * unless there are such edits. Once the Project is read-only, it takes no
+ * more edits.
  */
 export function UnitEditor({
   unitKey,
@@ -126,6 +128,7 @@ export function UnitEditor({
     }),
   );
   const readOnly = useContext(ReadOnlyContext);
+  const mirror = useMirror();
 
   useEffect(() => {
     // Without an update event: there is nothing new to save.
@@ -162,8 +165,13 @@ export function UnitEditor({
   const textOf = field?.text ?? unitText;
   useEffect(
     () =>
-      window.project.subscribe((event) => {
-        if (event.type !== 'unitReloaded' || keyOf(event.ref) !== reloadKey) {
+      mirror.onUnitChanged(({ ref, value, reloaded }) => {
+        if (keyOf(ref) !== reloadKey) return;
+        if (!reloaded) {
+          // Read anew: edits here, if any, are newer.
+          if (!autosave.pending() && sending.current === 0) {
+            reloadUnitEditor(editor, toDoc(textOf(value)));
+          }
           return;
         }
         // A split, a restore or a Combine here wrote it after what was sent, which is
@@ -171,20 +179,20 @@ export function UnitEditor({
         if (
           !autosave.pending() &&
           (sending.current === 0 ||
-            event.bySplit ||
-            event.byRestore ||
-            event.byCombine)
+            reloaded.bySplit ||
+            reloaded.byRestore ||
+            reloaded.byCombine)
         ) {
-          reloadUnitEditor(editor, toDoc(textOf(event.value)));
-          void window.project.reloadTaken(event.ref);
+          reloadUnitEditor(editor, toDoc(textOf(value)));
+          void window.project.reloadTaken(ref);
           return;
         }
         // The edits here were made on the version before: saved now, they
         // put the reloaded one beside them as a Conflict.
-        void window.project.keepEditsOverReload(event.ref);
+        void window.project.keepEditsOverReload(ref);
         autosave.flush();
       }),
-    [editor, autosave, reloadKey, textOf, toDoc],
+    [mirror, editor, autosave, reloadKey, textOf, toDoc],
   );
 
   useEffect(() => {
