@@ -380,7 +380,9 @@ function ProjectView({
   onImportProject(file: ImportFile, convention: ImportConvention): void;
   onCloseImport(): void;
 }) {
-  const [mirror] = useState(() => new ProjectMirror(window.project, project));
+  const [mirror] = useState(
+    () => new ProjectMirror(window.project, project, window.assistant),
+  );
   useEffect(() => mirror.start(), [mirror]);
   const {
     manuscript,
@@ -483,8 +485,6 @@ function ProjectView({
   const [visited, setVisited] = useState<Set<Room>>(() => new Set([room]));
   /** The Entry open in the Story Bible Room, by id. */
   const [openEntryId, setOpenEntryId] = useState<string | null>(null);
-  /** How many Entry Conflicts were resolved: the open Entry is read anew after each. */
-  const [resolutions, setResolutions] = useState(0);
   const [widths, setWidths] = useState<PanelWidths>(
     project.view.panelWidths ?? {},
   );
@@ -510,7 +510,7 @@ function ProjectView({
     project.view.overviewOpen ?? false,
   );
   const saveStatus = useSaveStatus();
-  const { scenes: sceneCounts, setProse } = useSceneCounts(manuscript);
+  const { scenes: sceneCounts, setProse } = useSceneCounts(mirror, manuscript);
   /** Whether the open Scene's Snapshots are listed above its Prose. */
   const [snapshotsOpen, setSnapshotsOpen] = useState(false);
   /** Hear the open Scene's Prose as it changes, as a Snapshot beside it does. */
@@ -1080,6 +1080,8 @@ function ProjectView({
           onError(event.message);
         } else if (event.type === 'unitReloaded') {
           setReloaded({ ref: event.ref, count: ++reloads.current });
+        } else if (event.type === 'proposalsChanged') {
+          // For the views that show Proposals.
         } else if (event.type === 'languageChanged') {
           // Prose editors are made anew in it; their edits reach main first.
           flushPendingEdits();
@@ -1588,7 +1590,6 @@ function ProjectView({
     if (!(await mirror.resolveConflict(ref, kept))) return;
     setResolving(null);
     if (roomOf(ref) === 'storyBible') {
-      setResolutions((n) => n + 1);
       showEntry(ref.id);
       return;
     }
@@ -1642,6 +1643,7 @@ function ProjectView({
 
   return (
     <ProjectContexts
+      mirror={mirror}
       readOnly={readOnly !== null}
       partLabel={manuscript.partLabel}
       customFields={customFields}
@@ -2183,10 +2185,10 @@ function ProjectView({
             flushes their pending edits. */}
               {openEntry ? (
                 <EntryView
-                  // A type change rewrites its description and fields, and a
-                  // resolved Conflict the version kept: read them anew; so
-                  // does seeing it as of another Book, or the Books reordered.
-                  key={`${openEntry.id}:${openEntry.type}:${resolutions}:${bibleLens.book}:${bibleLens.books.join()}`}
+                  // A type change rewrites its description and fields: show
+                  // them anew; so does seeing it as of another Book, or the
+                  // Books reordered.
+                  key={`${openEntry.id}:${openEntry.type}:${bibleLens.book}:${bibleLens.books.join()}`}
                   entry={bibleLens.summary(openEntry.id) ?? openEntry}
                   lens={bibleLens}
                   onOpenEntry={showEntry}

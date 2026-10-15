@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import type { PanelWidths } from '../shared/api';
 import {
   filterManuscript,
@@ -10,7 +10,6 @@ import { topLevel } from '../shared/manuscript-order';
 import {
   partName,
   PROJECT_OUTLINE,
-  type EntryValue,
   type Manuscript,
   type ManuscriptChapter,
   type ManuscriptPart,
@@ -35,6 +34,7 @@ import { RoomList } from './RoomList';
 import { TagChips } from './TagsDialog';
 import { UnitStatusDot, useStatuses } from './StatusAndTags';
 import { useStoryBibleAsOf } from './story-bible-lens';
+import { useOutlines, useUnits } from './use-project';
 
 /**
  * The Brainstorm room: its Conversations on the left, the one open in the
@@ -160,20 +160,6 @@ function Reference({
   todos: ReactNode;
 }) {
   const [tab, setTab] = useState<'bible' | 'outlines' | 'todos'>('bible');
-  /** Counts what may have changed what the reference shows, to read it anew. */
-  const [changes, setChanges] = useState(0);
-  useEffect(
-    () =>
-      window.project.subscribe((event) => {
-        if (
-          event.type === 'proposalsChanged' ||
-          event.type === 'unitReloaded'
-        ) {
-          setChanges((n) => n + 1);
-        }
-      }),
-    [],
-  );
   return (
     <aside className="reference" aria-label="Reference" style={{ width }}>
       <div role="tablist" className="tabs">
@@ -204,13 +190,9 @@ function Reference({
       </div>
       <div role="tabpanel" aria-labelledby={`reference-${tab}-tab`}>
         {tab === 'bible' ? (
-          <BibleReference
-            book={book}
-            changes={changes}
-            onOpenEntry={onOpenEntry}
-          />
+          <BibleReference book={book} onOpenEntry={onOpenEntry} />
         ) : tab === 'outlines' ? (
-          <OutlineSkeleton manuscript={manuscript} changes={changes} />
+          <OutlineSkeleton manuscript={manuscript} />
         ) : (
           todos
         )}
@@ -226,11 +208,9 @@ function Reference({
  */
 function BibleReference({
   book,
-  changes,
   onOpenEntry,
 }: {
   book: string | undefined;
-  changes: number;
   onOpenEntry(entryId: string): void;
 }) {
   const lens = useStoryBibleAsOf(book);
@@ -240,21 +220,12 @@ function BibleReference({
     () => entries.filter((e) => matchesFilter(filter, e)),
     [entries, filter],
   );
-  const [values, setValues] = useState<EntryValue[] | null>(null);
-  useEffect(() => {
-    let current = true;
-    void Promise.all(
-      shown.map((e) =>
-        // One trashed since it was listed is left out.
-        window.project.read({ kind: 'entry', id: e.id }).catch(() => null),
-      ),
-    ).then((read) => {
-      if (current) setValues(read.filter((entry) => entry !== null));
-    });
-    return () => {
-      current = false;
-    };
-  }, [shown, changes]);
+  const read = useUnits(
+    shown.map((e) => ({ kind: 'entry', id: e.id }) as const),
+  );
+  // One trashed since it was listed is left out.
+  const values = read.filter((entry) => !!entry);
+  const allRead = read.every((entry) => entry !== undefined);
   if (entries.length === 0) {
     return <p className="reference-empty">No Entries yet.</p>;
   }
@@ -267,11 +238,11 @@ function BibleReference({
         shown={shown.length}
         total={entries.length}
       />
-      {values && values.length === 0 && filterOn(filter) && (
+      {allRead && values.length === 0 && filterOn(filter) && (
         <p className="reference-empty">No Entries match the Filter.</p>
       )}
       <div className="reference-entries">
-        {values?.map((entry) => (
+        {values.map((entry) => (
           <EntryCard
             key={entry.id}
             entry={lens.read(entry).entry}
@@ -291,45 +262,19 @@ function BibleReference({
  * others under their dimmed headings; a Part shows when it matches, and
  * dimmed over its Chapters that show.
  */
-function OutlineSkeleton({
-  manuscript,
-  changes,
-}: {
-  manuscript: Manuscript;
-  changes: number;
-}) {
+function OutlineSkeleton({ manuscript }: { manuscript: Manuscript }) {
   const { filter, setFilter, inUse } = useFilter('outline-skeleton');
   const statuses = useStatuses();
   const shown = useMemo(
     () => filterManuscript(filter, manuscript, statuses),
     [filter, manuscript, statuses],
   );
-  const [outlines, setOutlines] = useState<Map<string, string> | null>(null);
-  useEffect(() => {
-    let current = true;
-    const ids = [
-      PROJECT_OUTLINE,
-      ...(manuscript.parts ?? []).map((p) => p.id),
-      ...manuscript.chapters.flatMap((c) => [
-        c.id,
-        ...c.scenes.map((s) => s.id),
-      ]),
-    ];
-    void Promise.all(
-      ids.map((id) =>
-        window.project
-          .read({ kind: 'outline', id })
-          .then(({ body }) => [id, body] as const)
-          .catch(() => [id, ''] as const),
-      ),
-    ).then((read) => {
-      if (current) setOutlines(new Map(read));
-    });
-    return () => {
-      current = false;
-    };
-  }, [manuscript, changes]);
-  if (!outlines) return null;
+  const { outlines, allRead } = useOutlines([
+    PROJECT_OUTLINE,
+    ...(manuscript.parts ?? []).map((p) => p.id),
+    ...manuscript.chapters.flatMap((c) => [c.id, ...c.scenes.map((s) => s.id)]),
+  ]);
+  if (!allRead) return null;
   const outline = (id: string) => {
     const body = outlines.get(id)?.trim();
     return body ? (

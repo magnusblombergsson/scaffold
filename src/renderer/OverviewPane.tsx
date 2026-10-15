@@ -1,4 +1,4 @@
-import { useEffect, useState, type ReactNode } from 'react';
+import { useState, type ReactNode } from 'react';
 import {
   PROJECT_OUTLINE,
   type Manuscript,
@@ -6,10 +6,10 @@ import {
   type ManuscriptChapter,
   type ManuscriptPart,
   type ManuscriptScene,
-  type OutlineValue,
   type ProseLanguage,
 } from '../shared/project-types';
 import { OutlineNotes } from './OutlineNotes';
+import { useOutlines } from './use-project';
 import { StatusAndTagsEditor, UnitStatusDot } from './StatusAndTags';
 import { UnitImageButtons, UnitThumbnail } from './UnitImage';
 import { topItems, unplacedChapters } from '../shared/manuscript-order';
@@ -143,8 +143,6 @@ function Rows({
   const [listed, setListed] = useState(() =>
     startListed(scope, writing, manuscript),
   );
-  /** Counts rows closing: each shows its Outline's first line as it is now. */
-  const [refreshes, setRefreshes] = useState(0);
   const without = (set: ReadonlySet<string>, id: string) =>
     new Set([...set].filter((other) => other !== id));
   /**
@@ -155,7 +153,6 @@ function Rows({
   const toggle = (id: string, { lists = false, fields = true } = {}) => {
     const expanded = (fields && open.has(id)) || (lists && listed.has(id));
     if (expanded) {
-      if (open.has(id)) setRefreshes(refreshes + 1);
       setOpen(without(open, id));
       setListed(without(listed, id));
     } else {
@@ -190,8 +187,7 @@ function Rows({
           ]),
           ...manuscript.unplaced.map((s) => s.id),
         ];
-  // The Scene left last is read anew too: its Outline was edited above the Prose.
-  const outlines = useOutlines(outlineIds, `${refreshes}:${writing.sceneId}`);
+  const { outlines } = useOutlines(outlineIds);
 
   const row = ({
     id,
@@ -344,7 +340,6 @@ function Rows({
         onClick={() => {
           setOpen(new Set());
           setListed(new Set());
-          setRefreshes(refreshes + 1);
         }}
       >
         Collapse all
@@ -433,42 +428,4 @@ function Rows({
       </div>
     </>
   );
-}
-
-/**
- * The Outlines of `ids`, read again whenever `refresh` changes, and as
- * another computer or a Proposal changes one.
- */
-function useOutlines(ids: string[], refresh: string) {
-  const [outlines, setOutlines] = useState<ReadonlyMap<string, string>>(
-    () => new Map(),
-  );
-  const key = ids.join(',');
-  useEffect(() => {
-    let current = true;
-    void Promise.all(
-      key
-        .split(',')
-        .filter(Boolean)
-        .map((id) =>
-          window.project
-            .read({ kind: 'outline', id })
-            .then(({ body }) => [id, body] as const)
-            .catch(() => [id, ''] as const),
-        ),
-    ).then((read) => {
-      if (current) setOutlines(new Map(read));
-    });
-    const unsubscribe = window.project.subscribe((event) => {
-      if (event.type !== 'unitReloaded' || event.ref.kind !== 'outline') return;
-      const { id } = event.ref;
-      const { body } = event.value as OutlineValue;
-      setOutlines((outlines) => new Map(outlines).set(id, body));
-    });
-    return () => {
-      current = false;
-      unsubscribe();
-    };
-  }, [key, refresh]);
-  return outlines;
 }

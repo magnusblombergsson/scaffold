@@ -1,4 +1,5 @@
 import type {
+  AssistantApi,
   CallFailure,
   Changed,
   Conflict,
@@ -7,20 +8,25 @@ import type {
   PinnedNote,
   ProjectApi,
   ProjectEvent,
+  UnitReloaded,
   Upgrade,
 } from '../shared/api';
 import type { CustomField } from '../shared/custom-field';
+import type { PendingProposal } from '../shared/proposal';
 import type { KeyFieldChoices } from '../shared/key-fields';
 import type { Relation } from '../shared/relation';
 import type { Status } from '../shared/status';
 import type { Todo } from '../shared/todo';
-import type {
-  EntrySummary,
-  Manuscript,
-  ProseLanguage,
-  TrashItem,
-  UnitRef,
-  UnitValue,
+import {
+  PROJECT_OUTLINE,
+  unitKey,
+  type EntrySummary,
+  type Manuscript,
+  type ProseLanguage,
+  type TrashItem,
+  type UnitRef,
+  type UnitValue,
+  type ValueOf,
 } from '../shared/project-types';
 
 /** What the renderer knows of its Project, as of the last thing main said. */
@@ -66,6 +72,11 @@ export type MirrorEvent =
   | { type: 'languageChanged' }
   /** Another computer changed a unit. */
   | { type: 'unitReloaded'; ref: UnitRef }
+  /**
+   * A Proposal was made, decided or undone, or an Entry changed: where each
+   * Proposal stands may have changed.
+   */
+  | { type: 'proposalsChanged' }
   /** A command failed, with `message`; null once one has succeeded. */
   | { type: 'error'; message: string | null }
   /** Main changed this computer's Pinned notes, as a Combine does, and saved them. */
@@ -74,14 +85,56 @@ export type MirrorEvent =
 type Listener = () => void;
 
 /**
+ * The units the mirror holds values of: every kind but a Scene, whose Prose
+ * stays with its editor.
+ */
+export type HeldRef = Exclude<UnitRef, { kind: 'scene' }>;
+
+/**
+ * A unit's value changed other than by this window's write through the
+ * mirror: `reloaded` when main told of it, as another computer or a Proposal
+ * changed it; else it was read anew, as once a Conflict was resolved. Told
+ * of a Scene too, though its Prose isn't held.
+ */
+export type UnitChanged = {
+  ref: UnitRef;
+  value: UnitValue;
+  reloaded?: UnitReloaded;
+};
+
+/**
+ * A value the mirror holds while anything watches it: undefined until it is
+ * read, null when it couldn't be or has gone to Trash. `reads` counts each
+ * change, so that a read answering after one is left out.
+ */
+type Held<V> = {
+  value: V | null | undefined;
+  watchers: Set<Listener>;
+  reads: number;
+};
+
+/**
  * The renderer's copy of the Project, kept in step with main: it loads what
  * main holds, applies main's events to an immutable state, and runs the
- * Project commands the UI calls, reporting a failure one way.
+ * Project commands the UI calls, reporting a failure one way. It holds the
+ * values of the Entries, Outlines and Notes the views watch, and the
+ * Proposals pending on those Entries, each read once however many watch it:
+ * kept as main tells of changes, and as this window's writes resolve.
  */
 export class ProjectMirror {
   private state: ProjectState;
   private readonly listeners = new Set<Listener>();
   private readonly eventListeners = new Set<(event: MirrorEvent) => void>();
+  private readonly changeListeners = new Set<(change: UnitChanged) => void>();
+  /** The values of the units watched, by key. */
+  private readonly units = new Map<
+    string,
+    Held<UnitValue> & { ref: HeldRef }
+  >();
+  /** The Proposals pending on each Entry watched, by its id. */
+  private readonly pendings = new Map<string, Held<PendingProposal[]>>();
+  /** How many of this window's writes to each unit are on their way, by key. */
+  private readonly writes = new Map<string, number>();
   /** The slices main has told us of since the load began, which a load leaves be. */
   private told = new Set<
     | 'entries'
@@ -95,6 +148,7 @@ export class ProjectMirror {
   constructor(
     private readonly api: ProjectApi,
     opened: OpenedProject,
+    private readonly assistant: Pick<AssistantApi, 'pendingProposals'>,
   ) {
     this.state = {
       manuscript: opened.manuscript,
@@ -157,8 +211,15 @@ export class ProjectMirror {
   }
 
   private set(change: Partial<ProjectState>): void {
+    const before = this.state;
     this.state = { ...this.state, ...change };
     for (const listener of this.listeners) listener();
+    if (change.entries && change.entries !== before.entries) {
+      this.entriesNow(before.entriesLoaded ? before.entries : null);
+    }
+    if (change.manuscript && change.manuscript !== before.manuscript) {
+      this.manuscriptNow();
+    }
   }
 
   private emit(event: MirrorEvent): void {
@@ -190,6 +251,8 @@ export class ProjectMirror {
         break;
       }
       case 'unitReloaded':
+        this.reloaded(event);
+        if (event.ref.kind === 'entry') this.emit({ type: 'proposalsChanged' });
         // A reload by a Proposal, a Split, a restore or a Combine shows in the editor already.
         if (
           !event.byProposal &&
@@ -208,8 +271,13 @@ export class ProjectMirror {
         // A Conversation may have gone to Trash, or come out.
         void this.refreshTrash();
         break;
+      case 'proposalsChanged':
+        for (const entryId of this.pendings.keys()) this.readPending(entryId);
+        this.emit({ type: 'proposalsChanged' });
+        break;
       case 'entriesChanged':
         this.told.add('entries');
+        this.emit({ type: 'proposalsChanged' });
         this.set({ entries: event.entries, entriesLoaded: true });
         // An Entry may have gone to Trash, or come out, as by a Proposal's undo.
         void this.refreshTrash();
@@ -257,7 +325,7 @@ export class ProjectMirror {
         this.set({ readOnly: { ...(event.host && { host: event.host }) } });
         break;
       default:
-        // Save states, images and Proposals are for the views that show them.
+        // Save states and images are for the views that show them.
         break;
     }
   }
@@ -345,6 +413,8 @@ export class ProjectMirror {
     const resolved = await this.attempt('resolve the Conflict', () =>
       this.api.resolveConflict(ref, kept),
     );
+    // What main kept has the details of every version merged in.
+    if (resolved && ref.kind !== 'scene') this.read(ref, true);
     await this.refreshTrash();
     return resolved;
   }
@@ -363,4 +433,217 @@ export class ProjectMirror {
   dismissDropped(notice: Dropped): void {
     this.set({ dropped: this.state.dropped.filter((d) => d !== notice) });
   }
+
+  /**
+   * Watches a unit's value, reading it if nothing watched it yet; returns a
+   * function that stops. The value is dropped once nothing watches it: not
+   * at once, so that a view watching anew, as React does when what it
+   * watches changes, keeps it.
+   */
+  watchUnit(ref: HeldRef, listener: Listener): () => void {
+    const key = unitKey(ref);
+    let held = this.units.get(key);
+    if (!held) {
+      held = { ref, value: undefined, watchers: new Set(), reads: 0 };
+      this.units.set(key, held);
+      this.read(ref);
+    }
+    held.watchers.add(listener);
+    const watched = held;
+    return () => {
+      watched.watchers.delete(listener);
+      queueMicrotask(() => {
+        if (watched.watchers.size === 0 && this.units.get(key) === watched) {
+          this.units.delete(key);
+        }
+      });
+    };
+  }
+
+  /** A unit's value, as watched: undefined until read, null once gone. */
+  unit<R extends HeldRef>(ref: R): ValueOf<R> | null | undefined {
+    return this.units.get(unitKey(ref))?.value as ValueOf<R> | null | undefined;
+  }
+
+  /**
+   * Writes a unit; resolves once main has it, and then shows it to whatever
+   * watches it. Nothing shows it before then.
+   */
+  async write<R extends HeldRef>(ref: R, value: ValueOf<R>): Promise<void> {
+    const key = unitKey(ref);
+    this.writes.set(key, (this.writes.get(key) ?? 0) + 1);
+    let written = false;
+    try {
+      await this.api.write(ref, value);
+      written = true;
+    } finally {
+      const left = this.writes.get(key)! - 1;
+      if (left > 0) this.writes.set(key, left);
+      else this.writes.delete(key);
+      const held = this.units.get(key);
+      // Gone to Trash meanwhile, it stays forgotten.
+      if (held && written && held.value !== null) this.show(held, value);
+      // Failed, it is no longer on its way.
+      else if (held) for (const watcher of held.watchers) watcher();
+    }
+  }
+
+  /**
+   * Whether a write of this window's to the unit is on its way to main: a
+   * view making an editor of it waits, so as to start from what was written.
+   */
+  writing(ref: HeldRef): boolean {
+    return this.writes.has(unitKey(ref));
+  }
+
+  /** Calls `listener` with each UnitChanged; returns an unsubscribe function. */
+  onUnitChanged(listener: (change: UnitChanged) => void): () => void {
+    this.changeListeners.add(listener);
+    return () => void this.changeListeners.delete(listener);
+  }
+
+  /**
+   * Watches the Proposals pending on an Entry, reading them if nothing
+   * watched them yet; returns a function that stops.
+   */
+  watchPending(entryId: string, listener: Listener): () => void {
+    let held = this.pendings.get(entryId);
+    if (!held) {
+      held = { value: undefined, watchers: new Set(), reads: 0 };
+      this.pendings.set(entryId, held);
+      this.readPending(entryId);
+    }
+    held.watchers.add(listener);
+    const watched = held;
+    return () => {
+      watched.watchers.delete(listener);
+      queueMicrotask(() => {
+        if (
+          watched.watchers.size === 0 &&
+          this.pendings.get(entryId) === watched
+        ) {
+          this.pendings.delete(entryId);
+        }
+      });
+    };
+  }
+
+  /** The Proposals pending on an Entry, as watched: undefined until read. */
+  pending(entryId: string): PendingProposal[] | undefined {
+    return this.pendings.get(entryId)?.value ?? undefined;
+  }
+
+  /**
+   * Reads a watched unit anew. With `changed`, editors are told if it comes
+   * back otherwise, as it isn't this window's write.
+   */
+  private read(ref: HeldRef, changed = false): void {
+    const held = this.units.get(unitKey(ref));
+    if (!held) return;
+    const reads = ++held.reads;
+    const was = held.value;
+    void this.api.read(ref).then(
+      (value) => {
+        if (held.reads !== reads) return;
+        // The same again changes nothing.
+        if (was && JSON.stringify(was) === JSON.stringify(value)) return;
+        this.show(held, value);
+        if (changed && was) this.tellChanged({ ref, value });
+      },
+      () => {
+        // Not there, as when trashed meanwhile.
+        if (held.reads === reads) this.show(held, null);
+      },
+    );
+  }
+
+  private readPending(entryId: string): void {
+    const held = this.pendings.get(entryId);
+    if (!held) return;
+    const reads = ++held.reads;
+    void this.assistant
+      .pendingProposals(entryId)
+      .catch((): PendingProposal[] => [])
+      .then((value) => {
+        if (held.reads === reads) this.show(held, value);
+      });
+  }
+
+  /** Shows `value` to what watches `ref`, if anything does. */
+  private hold(ref: UnitRef, value: UnitValue): void {
+    const held = this.units.get(unitKey(ref));
+    if (held) this.show(held, value);
+  }
+
+  private show<V>(held: Held<V>, value: V | null): void {
+    held.reads++;
+    held.value = value;
+    for (const watcher of held.watchers) watcher();
+  }
+
+  private tellChanged(change: UnitChanged): void {
+    for (const listener of this.changeListeners) listener(change);
+  }
+
+  /** Main told of a unit's new value: it is held, and editors are told. */
+  private reloaded(event: UnitReloaded): void {
+    this.hold(event.ref, event.value);
+    this.tellChanged({ ref: event.ref, value: event.value, reloaded: event });
+  }
+
+  /**
+   * The Story Bible changed: an Entry gone to Trash is forgotten, one back
+   * from it is read, and one whose summary changed is read anew, as a type
+   * change rewrites it and a new visibility, Tags or first Book are in it.
+   * `before` is null when what came before wasn't the Story Bible yet.
+   */
+  private entriesNow(before: EntrySummary[] | null): void {
+    const now = new Map(this.state.entries.map((e) => [e.id, e]));
+    const was = new Map(before?.map((e) => [e.id, e]));
+    for (const held of this.units.values()) {
+      const { ref } = held;
+      if (ref.kind !== 'entry' && ref.kind !== 'private') continue;
+      const summary = now.get(ref.id);
+      if (!summary) {
+        this.forget(held);
+      } else if (held.value === null) {
+        this.read(ref);
+      } else if (
+        ref.kind === 'entry' &&
+        was.has(ref.id) &&
+        JSON.stringify(was.get(ref.id)) !== JSON.stringify(summary)
+      ) {
+        this.read(ref, true);
+      }
+    }
+  }
+
+  /**
+   * The Manuscript changed: the Outline or Notes of a unit gone to Trash is
+   * forgotten, and that of one back from it read.
+   */
+  private manuscriptNow(): void {
+    const ids = outlineIds(this.state.manuscript);
+    for (const held of this.units.values()) {
+      const { ref } = held;
+      if (ref.kind !== 'outline' && ref.kind !== 'notes') continue;
+      if (!ids.has(ref.id)) this.forget(held);
+      else if (held.value === null) this.read(ref);
+    }
+  }
+
+  private forget(held: Held<UnitValue>): void {
+    if (held.value !== null) this.show(held, null);
+  }
+}
+
+/** The ids of every unit with an Outline: the Project, and each Book, Part, Chapter and Scene. */
+function outlineIds(manuscript: Manuscript): Set<string> {
+  return new Set([
+    PROJECT_OUTLINE,
+    ...(manuscript.books ?? []).map((b) => b.id),
+    ...(manuscript.parts ?? []).map((p) => p.id),
+    ...manuscript.chapters.flatMap((c) => [c.id, ...c.scenes.map((s) => s.id)]),
+    ...manuscript.unplaced.map((s) => s.id),
+  ]);
 }

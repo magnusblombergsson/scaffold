@@ -19,12 +19,16 @@ import {
   type Counts,
   type ShownCounts,
 } from './word-count';
+import type { ProjectMirror } from './project-mirror';
 
 /**
  * Each Scene's counts, by id: read from main once, then kept as the Author
  * types (`setProse`) or another computer changes the Scene.
  */
-export function useSceneCounts(manuscript: Manuscript): {
+export function useSceneCounts(
+  mirror: ProjectMirror,
+  manuscript: Manuscript,
+): {
   scenes: ReadonlyMap<string, Counts>;
   setProse(sceneId: string, markdown: string): void;
 } {
@@ -66,13 +70,12 @@ export function useSceneCounts(manuscript: Manuscript): {
 
   useEffect(
     () =>
-      window.project.subscribe((event) => {
-        if (event.type === 'unitReloaded' && event.ref.kind === 'scene') {
-          const { id } = event.ref;
-          if ('markdown' in event.value) setProse(id, event.value.markdown);
+      mirror.onUnitChanged(({ ref, value }) => {
+        if (ref.kind === 'scene' && 'markdown' in value) {
+          setProse(ref.id, value.markdown);
         }
       }),
-    [setProse],
+    [mirror, setProse],
   );
 
   return { scenes, setProse };
