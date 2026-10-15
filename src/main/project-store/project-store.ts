@@ -1154,6 +1154,8 @@ export class ProjectStore {
           }
         },
         findConflicts: () => this.findConflicts(),
+        records: this.records,
+        emitRecords: (kind) => this.emitRecords(kind),
       },
       units.trash,
     );
@@ -2791,37 +2793,7 @@ export class ProjectStore {
 
   /** Latest first. */
   listTrash(): TrashItem[] {
-    const fields = this.records.customFields.trashed().map(
-      ({ id, type, label, trashedAt }): TrashItem => ({
-        kind: 'custom-field',
-        id,
-        title: label,
-        trashedAt,
-        type,
-      }),
-    );
-    // Those of a Scene in Trash or the Drawer are with it, and those of a
-    // Scene not here yet are kept till it is.
-    const snapshots = this.records.snapshots
-      .trashed()
-      .filter((s) => this.files.has(s.sceneId))
-      .map(
-        ({ id, name, trashedAt, sceneId }): TrashItem => ({
-          kind: 'snapshot',
-          id,
-          title: name,
-          trashedAt,
-          sceneTitle: this.sceneTitle(sceneId),
-        }),
-      );
-    return [...this.trash.list(), ...fields, ...snapshots].sort(
-      (a, b) => b.trashedAt - a.trashedAt,
-    );
-  }
-
-  /** A live Scene's title, as the Binder shows it. */
-  private sceneTitle(id: string): string {
-    return tryFindScene(this.manifest.tree, id)?.scene.title ?? UNPLACED_TITLE;
+    return this.trash.list();
   }
 
   /** The Entries in the Story Bible, by type in the order of `ENTRY_TYPES`, then by name. */
@@ -4030,39 +4002,7 @@ export class ProjectStore {
    * Scenes.
    */
   restore(id: string): Promise<Changed> {
-    if (this.records.customFields.trashed().some((field) => field.id === id)) {
-      return this.step(() => this.restoreCustomField(id));
-    }
-    if (this.records.snapshots.trashed().some((s) => s.id === id)) {
-      return this.step(() => this.untrashSnapshot(id));
-    }
     return this.step(() => this.trash.restore(id));
-  }
-
-  /**
-   * Brings a Custom field back from Trash, its values showing again in the
-   * Entries that kept them; refused while its type has another field of its
-   * label. Undo moves it to Trash again.
-   */
-  private async restoreCustomField(id: string): Promise<() => Promise<void>> {
-    const field = this.records.customFields.trashed().find((f) => f.id === id)!;
-    this.refuseLabel(field.label, field.type, id);
-    await this.records.customFields.restore(id);
-    this.emitRecords('customFields');
-    return async () => {
-      await this.records.customFields.trash(id, this.deps.clock.now());
-      this.emitRecords('customFields');
-    };
-  }
-
-  /** Brings a Snapshot back from Trash. Undo moves it to Trash again. */
-  private async untrashSnapshot(id: string): Promise<() => Promise<void>> {
-    await this.records.snapshots.untrash(id);
-    this.emitRecords('snapshots');
-    return async () => {
-      await this.records.snapshots.trash(id);
-      this.emitRecords('snapshots');
-    };
   }
 
   /**
@@ -4218,19 +4158,13 @@ export class ProjectStore {
         (id) => this.trash.where(id) === 'trash',
       );
       await this.trash.empty();
-      // A Scene's Snapshots go with it, unless it is in the Drawer too; those
-      // in Trash on their own go if listed there.
+      // A Scene's Snapshots go with it, unless it is in the Drawer too.
       const scenesGone = new Set(
         withSnapshots.filter(
           (id) => !this.trash.where(id) && !this.files.has(id),
         ),
       );
-      if (
-        await this.records.snapshots.empty(
-          (id) => this.files.has(id),
-          scenesGone,
-        )
-      ) {
+      if (await this.records.snapshots.drop(scenesGone)) {
         this.emitRecords('snapshots');
       }
       // Their Relations go with them, unless they are in the Drawer too.
@@ -4250,11 +4184,6 @@ export class ProjectStore {
       if (goneBooks.length > 0) {
         await this.records.relations.dropBooks(new Set(goneBooks));
         this.emitRecords('relations');
-      }
-      // Their values stay in the Entries, never shown.
-      if (this.records.customFields.trashed().length > 0) {
-        await this.records.customFields.empty();
-        this.emitRecords('customFields');
       }
     });
   }
