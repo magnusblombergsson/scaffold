@@ -17,7 +17,6 @@ import {
 } from '../../shared/status';
 import { checkBackup, restoreBackup } from './backup';
 import type { Clock } from './clock';
-import { CUSTOM_FIELDS } from './custom-fields';
 import { nodeFileSystem } from './file-system';
 import {
   CHAPTER_FILE,
@@ -27,10 +26,11 @@ import {
   PART_FILE,
   UUID as UUID_SOURCE,
 } from './layout';
-import { RELATIONS } from './relations';
-import { SNAPSHOTS } from './snapshots';
-import { Switches } from './switches';
-import { TODOS } from './todos';
+import {
+  RECORD_KINDS,
+  recordFolders,
+  STARRED_CONVERSATIONS,
+} from './record-kinds';
 import { expanded, ONLY_BOOK } from './tree';
 import { KEYS_SAVED_AT } from './unit-details';
 import { formatUnitFile, parseUnitFile } from './unit-file';
@@ -46,15 +46,13 @@ const IS_UUID = new RegExp(`^${UUID_SOURCE}$`);
 /** A file named by an id, as a record's and its copies are. */
 const NAMED_BY_ID = new RegExp(`^(${UUID_SOURCE})`);
 const MANIFEST = 'project.json';
-/** The folder of switch files, which older apps never look in (ADR 0006). */
-export const STARS = 'stars';
-/** The file in `stars/` holding the Starred Conversations. */
-export const STARRED_CONVERSATIONS = 'conversations';
+const CUSTOM_FIELDS = RECORD_KINDS.customFields.folder;
 
 /**
- * The folders of a Project that come along, every file in them. Never
- * `key-fields/`, a setting, nor `stars/`, whose one file the open
- * Project already has: its stars are set one by one.
+ * The folders of a Project that come along, every file in them, with those
+ * of each kind of record whose row says it comes along. Never the Key
+ * fields, a setting, nor the Starred Conversations' file, which the open
+ * Project has already: its stars are set one by one.
  */
 const FOLDERS = new Set([
   'scenes',
@@ -66,10 +64,7 @@ const FOLDERS = new Set([
   'trash',
   'drawer',
   CONVERSATIONS,
-  TODOS,
-  RELATIONS,
-  SNAPSHOTS,
-  CUSTOM_FIELDS,
+  ...recordFolders((kind) => kind.comesAlong),
 ]);
 
 const TEXT = /\.(md|json|jsonl)$/;
@@ -113,7 +108,8 @@ export async function readBackupProject(
     const tree: ProjectTree = Array.isArray(manifest.tree?.chapters)
       ? manifest.tree
       : { chapters: [] };
-    const stars = new Switches(path.join(root, STARS), nodeFileSystem, clock);
+    const { folder, make } = RECORD_KINDS.stars;
+    const stars = make(path.join(root, folder), nodeFileSystem, clock);
     await stars.read();
     return {
       folderName,
