@@ -1,3 +1,5 @@
+import path from 'node:path';
+import type { OpenResult } from '../../shared/api';
 import type { Refusal } from '../../shared/proposal';
 
 export class ProjectError extends Error {
@@ -34,4 +36,14 @@ export class ProjectError extends Error {
   ) {
     super(message);
   }
+}
+
+/** An open that failed, told to the Author in the window that asked. */
+export function openFailure(projectPath: string, error: unknown): OpenResult {
+  if (error instanceof ProjectError)
+    return { ok: false, message: error.message };
+  return {
+    ok: false,
+    message: `${path.basename(projectPath)} can't be opened: ${(error as Error).message}`,
+  };
 }

@@ -67,13 +67,11 @@ import {
   combinedEntry,
   combinedFirstAppears,
   combinedPrivateNotes,
-  combinedRelations,
   combinedTags,
   combineRefusal,
   evolutionKey,
   type CombineChoices,
 } from '../../shared/combine';
-import { withoutBook } from '../../shared/evolution';
 import { bookIds } from '../../shared/manuscript-order';
 import {
   type Orphaned,
@@ -131,8 +129,6 @@ import {
   planAdd,
   readBackupProject,
   seriesOutline,
-  STARRED_CONVERSATIONS,
-  STARS,
 } from './add-from-backup';
 import { freeName, safeWrite } from './safe-write';
 import {
@@ -156,11 +152,19 @@ import {
   type DetailKey,
   type HeldDetails,
 } from './unit-details-catalogue';
-import { Switches } from './switches';
-import { TODOS, Todos } from './todos';
-import { CUSTOM_FIELDS, CustomFields } from './custom-fields';
-import { RELATIONS, Relations } from './relations';
-import { SNAPSHOTS, Snapshots } from './snapshots';
+import {
+  keyFieldChoicesOf,
+  RECORD_KIND_NAMES,
+  recordFolders,
+  recordsEvent,
+  recordsIn,
+  STARRED_CONVERSATIONS,
+  type HeldRecords,
+  type RecordKindName,
+  type Records,
+  type RecordsOf,
+} from './record-kinds';
+import { References, type PinnedNotesPort } from './references';
 import { beforeRestoringName, type Snapshot } from '../../shared/snapshot';
 import {
   customSuggestions,
@@ -291,7 +295,18 @@ const MANIFEST = 'project.json';
 const HANDOVER_MS = 2000;
 
 /** `host` names this computer in its session marker; the OS's name by default. */
-export type StoreDeps = { fs: FileSystem; clock: Clock; host?: string };
+export type StoreDeps = {
+  fs: FileSystem;
+  clock: Clock;
+  host?: string;
+  /** This computer's Pinned notes of the Project of `projectId`; none without. */
+  pinnedNotes?: (projectId: string) => PinnedNotesPort;
+};
+
+export type { PinnedNotesPort };
+
+/** Pinned notes nowhere: a store opened without app settings. */
+const NO_PINNED_NOTES: PinnedNotesPort = { read: () => [], write: () => {} };
 
 type Manifest = {
   format: number;
@@ -494,12 +509,7 @@ export async function openProject(
   await store.findConflicts();
   await store.forkConversationCopies();
   await store.readUnitDetails();
-  await store.readTodos();
-  await store.readStars();
-  await store.readCustomFields();
-  await store.readKeyFields();
-  await store.readRelations();
-  await store.readSnapshots();
+  await store.readRecords();
   return store;
 }
 
@@ -712,12 +722,7 @@ async function sweepTempFiles(projectPath: string, fs: FileSystem) {
     IMAGES,
     SESSIONS,
     CONVERSATIONS,
-    TODOS,
-    STARS,
-    CUSTOM_FIELDS,
-    KEY_FIELDS,
-    RELATIONS,
-    SNAPSHOTS,
+    ...recordFolders((kind) => kind.sweepsTemp),
   ].map((d) => path.join(projectPath, d));
   for (const dir of [projectPath, ...dirs]) {
     for (const name of await fs.readdir(dir)) {
@@ -1037,6 +1042,8 @@ export class ProjectStore {
   private readonly entries: Map<string, EntrySummary>;
   /** What was deleted and is kept until Trash is emptied; the methods below delegate to it. */
   private readonly trash: Trash;
+  /** Everything that names an Entry, Book, Part, Chapter or Scene. */
+  private readonly references: References;
   /** Scenes and Entries on their way to Trash, which take no more writes. */
   private readonly closing = new Set<string>();
   /** The structure operation running last; the next one waits for it. */
@@ -1064,18 +1071,8 @@ export class ProjectStore {
   private readonly unitDetails = new Map<string, HeldDetails>();
   /** The Outline files as their details were last read or written, by unit id. */
   private readonly outlineFingerprints = new Map<string, Fingerprint>();
-  /** The Todos in `todos/`, as last read or written. */
-  private readonly todos: Todos;
-  /** The Starred Conversations, in `stars/`, as last read or written. */
-  private readonly stars: Switches;
-  /** Each Entry type's Key fields, in `key-fields/`, as last read or written. */
-  private readonly keyFields: Switches;
-  /** The Custom fields in `custom-fields/`, as last read or written. */
-  private readonly customFields: CustomFields;
-  /** The Relations between Entries in `relations/`, as last read or written. */
-  private readonly relations: Relations;
-  /** The Snapshots of Scenes in `snapshots/`, as last read or written. */
-  private readonly snapshots: Snapshots;
+  /** Each kind of record that merges itself, as last read or written. */
+  private readonly records: HeldRecords;
   /** What versions of `project.json` that met as the Project opened lost, until told. */
   private dropped: Dropped[];
   /**
@@ -1137,13 +1134,18 @@ export class ProjectStore {
     this.unrecognised = opened.unrecognised;
     this.files = units.files;
     this.entries = units.entries;
-    this.todos = todosOf(path, this.deps);
-    this.stars = starsOf(path, this.deps);
-    this.keyFields = keyFieldsOf(path, this.deps);
-    this.customFields = customFieldsOf(path, this.deps);
-    this.relations = relationsOf(path, this.deps);
-    this.snapshots = snapshotsOf(path, this.deps);
+    this.records = recordsIn(path, this.deps.fs, deps.clock);
     this.host = hostOf(this.deps);
+    this.references = new References({
+      records: this.records,
+      emitRecords: (kind) => this.emitRecords(kind),
+      emit: (event) => this.emit(event),
+      conversations: () => this.conversations,
+      listEntries: () => this.listEntries(),
+      changeEntry: (id, change) => this.changeEntry(id, change),
+      dropImage: (ref) => this.changeImage(ref, undefined),
+      pinnedNotes: () => deps.pinnedNotes?.(this.id) ?? NO_PINNED_NOTES,
+    });
     this.trash = new Trash(
       {
         path,
@@ -1168,12 +1170,10 @@ export class ProjectStore {
         sceneOrChapterRef: (id) => this.sceneOrChapterRef(id),
         deleteOutlineAndNotes: (id) => this.deleteOutlineAndNotes(id),
         deleteUnitFile: (ref) => this.deleteUnitFile(ref),
-        dropTodoLinks: async (gone) => {
-          if (await this.todos.dropLinks(({ id }) => gone(id))) {
-            this.emitTodos();
-          }
-        },
+        references: this.references,
         findConflicts: () => this.findConflicts(),
+        records: this.records,
+        emitRecords: (kind) => this.emitRecords(kind),
       },
       units.trash,
     );
@@ -1193,15 +1193,14 @@ export class ProjectStore {
       changeUnit: (ref, change) => this.changeUnit(ref, change),
       pendingUnit: (key) => this.unitWriter.pending(key),
       addEntry: (value) => this.addEntry(value),
-      customFields: () => this.customFields.list(),
+      customFields: () => this.records.customFields.list(),
       moveEntryToTrash: async (id) => {
         await this.trash.move('entry', id);
       },
       enqueueWrite: (operation) => this.enqueueWrite(operation),
       passFormatGate: () => this.passFormatGate(),
-      relations: () => this.relations.list(),
-      changeRelations: (change) =>
-        this.changeRelations(() => change(this.relations)),
+      relations: () => this.records.relations.list(),
+      changeRelations: (change) => this.changeRecords('relations', change),
     });
     this.sessions = new Sessions(
       {
@@ -1350,14 +1349,9 @@ export class ProjectStore {
         manuscript: this.manuscript(),
       });
     }
-    if (await this.todos.read()) this.emitTodos();
-    if (await this.stars.read()) {
-      this.emit({ type: 'conversationsChanged' });
+    for (const kind of RECORD_KIND_NAMES) {
+      if (await this.records[kind].read()) this.emitRecords(kind);
     }
-    if (await this.customFields.read()) this.emitCustomFields();
-    if (await this.keyFields.read()) this.emitKeyFields();
-    if (await this.relations.read()) this.emitRelations();
-    if (await this.snapshots.read()) this.emitSnapshots();
     for (const change of tagChanges(tagsBefore, this.tagsByUnit())) {
       this.emitVocabulary(change);
     }
@@ -2378,29 +2372,20 @@ export class ProjectStore {
 
   /** The Todos: those not done, then the done, each in list order. */
   listTodos(): Todo[] {
-    return this.todos.list();
-  }
-
-  /**
-   * Reads the Todos as the Project opens, merging their copies, and sweeps
-   * the markers of those deleted longer ago than a delete is kept.
-   */
-  async readTodos(): Promise<void> {
-    await this.todos.read();
-    await this.todos.sweep();
+    return this.records.todos.list();
   }
 
   /** Adds a Todo on top of the list, as one line; there must be some text. */
   addTodo(text: string, link: TodoLink | null): Promise<void> {
-    return this.changeTodos(() =>
-      this.todos.add(todoText(text), link && todoLink(link)),
+    return this.changeRecords('todos', (todos) =>
+      todos.add(todoText(text), link && todoLink(link)),
     );
   }
 
   /** Sets a Todo's text, tick or link; null drops its link. */
   changeTodo(id: string, change: TodoChange): Promise<void> {
-    return this.changeTodos(() =>
-      this.todos.change(id, {
+    return this.changeRecords('todos', (todos) =>
+      todos.change(id, {
         ...(change.text !== undefined && { text: todoText(change.text) }),
         ...(change.done !== undefined && { done: change.done === true }),
         ...(change.link !== undefined && {
@@ -2412,46 +2397,55 @@ export class ProjectStore {
 
   /** Moves a Todo to `index` among the others that are done as it is, or not. */
   moveTodo(id: string, index: number): Promise<void> {
-    return this.changeTodos(() => this.todos.move(id, index));
+    return this.changeRecords('todos', (todos) => todos.move(id, index));
   }
 
   /** Deletes a Todo; its file stays a while as a marker (ADR 0008). */
   deleteTodo(id: string): Promise<void> {
-    return this.changeTodos(() => this.todos.delete(id));
+    return this.changeRecords('todos', (todos) => todos.delete(id));
   }
 
   /** Deletes every Todo that is done. */
   clearDoneTodos(): Promise<void> {
-    return this.changeTodos(() => this.todos.clearDone());
+    return this.changeRecords('todos', (todos) => todos.clearDone());
   }
 
   /**
-   * Changes the Todos, then tells the window. Todos aren't in the tree, so
-   * another computer's tree is no reason to wait.
+   * Reads each kind of record as the Project opens, merging their copies,
+   * and sweeps the markers of those deleted longer ago than a delete is
+   * kept.
    */
-  private changeTodos(change: () => Promise<void>): Promise<void> {
+  async readRecords(): Promise<void> {
+    for (const kind of RECORD_KIND_NAMES) {
+      const records: Records = this.records[kind];
+      await records.read();
+      await records.sweep?.();
+    }
+  }
+
+  /**
+   * Changes `kind`'s records, then tells the window. They aren't in the
+   * tree, so another computer's tree is no reason to wait.
+   */
+  private changeRecords<K extends RecordKindName, T>(
+    kind: K,
+    change: (records: RecordsOf<K>) => Promise<T>,
+  ): Promise<T> {
     return this.enqueueStructure(async () => {
-      await change();
-      this.emitTodos();
+      await this.passFormatGate();
+      const changed = await change(this.records[kind]);
+      this.emitRecords(kind);
+      return changed;
     });
   }
 
-  private emitTodos(): void {
-    this.emit({ type: 'todosChanged', todos: this.todos.list() });
+  private emitRecords(kind: RecordKindName): void {
+    this.emit(recordsEvent(kind, this.records));
   }
 
   /** The Custom fields, by Entry type, each type's in their order; none in Trash. */
   listCustomFields(): CustomField[] {
-    return this.customFields.list();
-  }
-
-  /**
-   * Reads the Custom fields as the Project opens, merging their copies, and
-   * sweeps the markers of those deleted longer ago than a delete is kept.
-   */
-  async readCustomFields(): Promise<void> {
-    await this.customFields.read();
-    await this.customFields.sweep();
+    return this.records.customFields.list();
   }
 
   /**
@@ -2460,24 +2454,26 @@ export class ProjectStore {
    */
   async addCustomField(type: EntryType, label: string): Promise<string> {
     let id = '';
-    await this.changeCustomFields(async () => {
+    await this.changeRecords('customFields', async (customFields) => {
       this.refuseLabel(label, type);
-      id = await this.customFields.add(type, label.trim());
+      id = await customFields.add(type, label.trim());
     });
     return id;
   }
 
   /** Renames a Custom field; Entries hold its values by id, so none changes. */
   renameCustomField(id: string, label: string): Promise<void> {
-    return this.changeCustomFields(async () => {
+    return this.changeRecords('customFields', async (customFields) => {
       this.refuseLabel(label, this.customField(id).type, id);
-      await this.customFields.rename(id, label.trim());
+      await customFields.rename(id, label.trim());
     });
   }
 
   /** Moves a Custom field to `index` among its type's. */
   moveCustomField(id: string, index: number): Promise<void> {
-    return this.changeCustomFields(() => this.customFields.move(id, index));
+    return this.changeRecords('customFields', (customFields) =>
+      customFields.move(id, index),
+    );
   }
 
   /** How many Entries in the Story Bible hold a value in a Custom field. */
@@ -2522,15 +2518,15 @@ export class ProjectStore {
    * again if it is restored, until Trash is emptied.
    */
   trashCustomField(id: string): Promise<void> {
-    return this.changeCustomFields(async () => {
+    return this.changeRecords('customFields', async (customFields) => {
       this.customField(id);
-      await this.customFields.trash(id, this.deps.clock.now());
+      await customFields.trash(id, this.deps.clock.now());
     });
   }
 
   /** A Custom field not in Trash; refused if there is none. */
   private customField(id: string): CustomField {
-    const field = this.customFields.list().find((f) => f.id === id);
+    const field = this.records.customFields.list().find((f) => f.id === id);
     if (!field) throw new Error(`No Custom field ${id}`);
     return field;
   }
@@ -2540,29 +2536,10 @@ export class ProjectStore {
     const refusal = labelRefusal(
       label,
       type,
-      this.customFields.list(),
+      this.records.customFields.list(),
       exceptId,
     );
     if (refusal) throw new ProjectError('label-taken', refusal);
-  }
-
-  /**
-   * Changes the Custom fields, then tells the window. They aren't in the
-   * tree, so another computer's tree is no reason to wait.
-   */
-  private changeCustomFields(change: () => Promise<void>): Promise<void> {
-    return this.enqueueStructure(async () => {
-      await this.passFormatGate();
-      await change();
-      this.emitCustomFields();
-    });
-  }
-
-  private emitCustomFields(): void {
-    this.emit({
-      type: 'customFieldsChanged',
-      fields: this.customFields.list(),
-    });
   }
 
   /**
@@ -2572,17 +2549,7 @@ export class ProjectStore {
    * shows only the Custom fields that are live.
    */
   keyFieldChoices(): KeyFieldChoices {
-    return Object.fromEntries(
-      ENTRY_TYPES.flatMap((type) => {
-        const states = this.keyFields.states(type);
-        return Object.keys(states).length > 0 ? [[type, states]] : [];
-      }),
-    );
-  }
-
-  /** Reads the Key fields as the Project opens, merging their copies. */
-  async readKeyFields(): Promise<void> {
-    await this.keyFields.read();
+    return keyFieldChoicesOf(this.records.keyFields);
   }
 
   /**
@@ -2591,21 +2558,15 @@ export class ProjectStore {
    * for an item the type has no part for.
    */
   setKeyField(type: EntryType, item: KeyFieldItem, on: boolean): Promise<void> {
-    return this.enqueueStructure(async () => {
+    return this.changeRecords('keyFields', async (keyFields) => {
       if (
         !ENTRY_TYPES.includes(type) ||
-        !isChoosable(type, item, this.customFields.list())
+        !isChoosable(type, item, this.records.customFields.list())
       ) {
         throw new Error(`A ${type} has no ${item} to show in a Peek`);
       }
-      await this.passFormatGate();
-      await this.keyFields.set(type, item, on, isKeyField(type, item, {}));
-      this.emitKeyFields();
+      await keyFields.set(type, item, on, isKeyField(type, item, {}));
     });
-  }
-
-  private emitKeyFields(): void {
-    this.emit({ type: 'keyFieldsChanged', choices: this.keyFieldChoices() });
   }
 
   /**
@@ -2613,13 +2574,7 @@ export class ProjectStore {
    * not here too, which `relationsView` hides.
    */
   listRelations(): Relation[] {
-    return this.relations.list();
-  }
-
-  /** Reads the Relations as the Project opens, merging their copies, and sweeps old delete markers. */
-  async readRelations(): Promise<void> {
-    await this.relations.read();
-    await this.relations.sweep();
+    return this.records.relations.list();
   }
 
   /**
@@ -2632,7 +2587,7 @@ export class ProjectStore {
     choice: RelationChoice,
   ): Promise<string> {
     let id = '';
-    await this.changeRelations(async () => {
+    await this.changeRecords('relations', async (relations) => {
       if (
         !RELATION_KINDS.includes(choice.kind) ||
         (choice.kind === 'label' && typeof choice.label !== 'string')
@@ -2641,7 +2596,7 @@ export class ProjectStore {
       }
       const refusal = relationRefusal(this.relationsView(), from, to, choice);
       if (refusal) throw new ProjectError('relation-refused', refusal);
-      id = await this.relations.add(
+      id = await relations.add(
         from,
         to,
         choice.kind === 'label'
@@ -2654,10 +2609,10 @@ export class ProjectStore {
 
   /** Gives a free-text Relation another label, which may not be empty. */
   relabelRelation(id: string, label: string): Promise<void> {
-    return this.changeRelations(async () => {
+    return this.changeRecords('relations', async (relations) => {
       const refusal = relationLabelRefusal(label);
       if (refusal) throw new ProjectError('relation-refused', refusal);
-      await this.relations.relabel(id, label.trim());
+      await relations.relabel(id, label.trim());
     });
   }
 
@@ -2666,57 +2621,36 @@ export class ProjectStore {
    * null, in every Book; a Same as group's is set on the whole group.
    */
   setRelationBook(id: string, book: string | null): Promise<void> {
-    return this.changeRelations(async () => {
+    return this.changeRecords('relations', async (relations) => {
       if (book !== null && !isBook(this.manifest.tree, book)) {
         throw new ProjectError(
           'relation-refused',
           'A Relation can hold only from a Book of this Project',
         );
       }
-      await this.relations.setBook(id, book);
+      await relations.setBook(id, book);
     });
   }
 
   /** Removes a free-text or Part of Relation. */
   removeRelation(id: string): Promise<void> {
-    return this.changeRelations(() => this.relations.remove(id));
+    return this.changeRecords('relations', (relations) => relations.remove(id));
   }
 
   /** Takes an Entry out of its Same as group, the others staying together. */
   leaveSameAs(entryId: string): Promise<void> {
-    return this.changeRelations(() => this.relations.leave(entryId));
+    return this.changeRecords('relations', (relations) =>
+      relations.leave(entryId),
+    );
   }
 
   private relationsView(): RelationsView {
-    return relationsView(this.relations.list(), this.listEntries());
-  }
-
-  /**
-   * Changes the Relations, then tells the window. They aren't in the tree,
-   * so another computer's tree is no reason to wait.
-   */
-  private changeRelations<T>(change: () => Promise<T>): Promise<T> {
-    return this.enqueueStructure(async () => {
-      await this.passFormatGate();
-      const changed = await change();
-      this.emitRelations();
-      return changed;
-    });
-  }
-
-  private emitRelations(): void {
-    this.emit({ type: 'relationsChanged', relations: this.relations.list() });
+    return relationsView(this.records.relations.list(), this.listEntries());
   }
 
   /** The Scene's Snapshots not in Trash, newest first. */
   listSnapshots(sceneId: string): Snapshot[] {
-    return this.snapshots.of(sceneId);
-  }
-
-  /** Reads the Snapshots as the Project opens, merging their copies, and sweeps old delete markers. */
-  async readSnapshots(): Promise<void> {
-    await this.snapshots.read();
-    await this.snapshots.sweep();
+    return this.records.snapshots.of(sceneId);
   }
 
   /**
@@ -2726,26 +2660,26 @@ export class ProjectStore {
    */
   async takeSnapshot(sceneId: string, name: string): Promise<string> {
     let id = '';
-    await this.changeSnapshots(async () => {
+    await this.changeRecords('snapshots', async (snapshots) => {
       const markdown = await this.snapshotProse(
         sceneId,
         "A Scene in Conflict can't take a Snapshot",
       );
-      id = await this.snapshots.take(sceneId, snapshotName(name), markdown);
+      id = await snapshots.take(sceneId, snapshotName(name), markdown);
     });
     return id;
   }
 
   /** Gives a Snapshot another name, which may not be empty. */
   renameSnapshot(id: string, name: string): Promise<void> {
-    return this.changeSnapshots(() =>
-      this.snapshots.rename(id, snapshotName(name)),
+    return this.changeRecords('snapshots', (snapshots) =>
+      snapshots.rename(id, snapshotName(name)),
     );
   }
 
   /** Moves a Snapshot to Trash, from which it can be restored until Trash is emptied. */
   trashSnapshot(id: string): Promise<void> {
-    return this.changeSnapshots(() => this.snapshots.trash(id));
+    return this.changeRecords('snapshots', (snapshots) => snapshots.trash(id));
   }
 
   /**
@@ -2753,9 +2687,9 @@ export class ProjectStore {
    * the Prose it replaces, so nothing is lost. Refused as taking one is.
    */
   restoreSnapshot(id: string): Promise<void> {
-    return this.changeSnapshots(async () => {
-      const snapshot = this.snapshots.get(id);
-      if (!snapshot || this.snapshots.trashed().some((s) => s.id === id)) {
+    return this.changeRecords('snapshots', async (snapshots) => {
+      const snapshot = snapshots.get(id);
+      if (!snapshot || snapshots.trashed().some((s) => s.id === id)) {
         throw new Error(`No Snapshot ${id}`);
       }
       const { sceneId, markdown } = snapshot;
@@ -2763,7 +2697,7 @@ export class ProjectStore {
         sceneId,
         "A Scene in Conflict can't be restored from a Snapshot",
       );
-      await this.snapshots.take(
+      await snapshots.take(
         sceneId,
         beforeRestoringName(snapshot.name),
         current,
@@ -2785,22 +2719,6 @@ export class ProjectStore {
     this.refuseUnavailable(ref);
     this.refuseConflict(sceneId, inConflict);
     return (await this.read(ref)).markdown;
-  }
-
-  /**
-   * Changes the Snapshots, then tells the window. They aren't in the tree,
-   * so another computer's tree is no reason to wait.
-   */
-  private changeSnapshots(change: () => Promise<void>): Promise<void> {
-    return this.enqueueStructure(async () => {
-      await this.passFormatGate();
-      await change();
-      this.emitSnapshots();
-    });
-  }
-
-  private emitSnapshots(): void {
-    this.emit({ type: 'snapshotsChanged' });
   }
 
   tree(): ProjectTree {
@@ -2893,37 +2811,7 @@ export class ProjectStore {
 
   /** Latest first. */
   listTrash(): TrashItem[] {
-    const fields = this.customFields.trashed().map(
-      ({ id, type, label, trashedAt }): TrashItem => ({
-        kind: 'custom-field',
-        id,
-        title: label,
-        trashedAt,
-        type,
-      }),
-    );
-    // Those of a Scene in Trash or the Drawer are with it, and those of a
-    // Scene not here yet are kept till it is.
-    const snapshots = this.snapshots
-      .trashed()
-      .filter((s) => this.files.has(s.sceneId))
-      .map(
-        ({ id, name, trashedAt, sceneId }): TrashItem => ({
-          kind: 'snapshot',
-          id,
-          title: name,
-          trashedAt,
-          sceneTitle: this.sceneTitle(sceneId),
-        }),
-      );
-    return [...this.trash.list(), ...fields, ...snapshots].sort(
-      (a, b) => b.trashedAt - a.trashedAt,
-    );
-  }
-
-  /** A live Scene's title, as the Binder shows it. */
-  private sceneTitle(id: string): string {
-    return tryFindScene(this.manifest.tree, id)?.scene.title ?? UNPLACED_TITLE;
+    return this.trash.list();
   }
 
   /** The Entries in the Story Bible, by type in the order of `ENTRY_TYPES`, then by name. */
@@ -3099,7 +2987,7 @@ export class ProjectStore {
             keptValue,
             otherValue,
             choices,
-            this.customFields.list(),
+            this.records.customFields.list(),
             books,
           ),
         );
@@ -3122,7 +3010,7 @@ export class ProjectStore {
           ),
         );
         undo.push(async () => {
-          await this.setDetail(detail, 'tags', before.tags);
+          await this.setDetail(detail, 'tags', before.tags ?? []);
           await this.setDetail(detail, 'firstAppears', before.firstAppears);
         });
         undo.push(
@@ -3138,24 +3026,9 @@ export class ProjectStore {
         });
 
         // What named the other names the kept one.
-        const plan = combinedRelations(
-          this.relations.list(),
-          this.listEntries(),
-          otherId,
-          keptId,
-        );
-        dropped = plan.dropped;
-        undo.push(await this.relations.combine(plan.steps));
-        this.emitRelations();
-        const relinked = await this.todos.relinkEntry(otherId, keptId);
-        if (relinked) {
-          this.emitTodos();
-          undo.push(async () => {
-            await relinked();
-            this.emitTodos();
-          });
-        }
-        undo.push(await this.conversations.combine(otherId, keptId));
+        const relinked = await this.references.relink(otherId, keptId);
+        dropped = relinked.dropped;
+        undo.push(relinked.undo);
 
         // Last: the other, as it was.
         undo.push(await this.trash.move('entry', otherId));
@@ -3169,7 +3042,6 @@ export class ProjectStore {
       await this.reloadEntry(keptId);
       return async () => {
         await undoAll();
-        this.emitRelations();
         await this.reloadEntry(keptId);
       };
     }).then((changed) => ({ ...changed, dropped }));
@@ -3255,11 +3127,16 @@ export class ProjectStore {
   setEntryType(entryId: string, type: EntryType): Promise<Changed> {
     return this.step(async () => {
       const { before, after } = await this.changeEntry(entryId, (value) =>
-        changeEntryType(value, type, this.customFields.list()),
+        changeEntryType(value, type, this.records.customFields.list()),
       );
       return async () => {
         await this.changeEntry(entryId, (value) =>
-          revertEntryType(value, before, after, this.customFields.list()),
+          revertEntryType(
+            value,
+            before,
+            after,
+            this.records.customFields.list(),
+          ),
         );
       };
     });
@@ -3733,7 +3610,7 @@ export class ProjectStore {
       const changed = await this.step(async () => {
         const plan = await planAdd(project, {
           statuses: this.statuses(),
-          customFields: this.customFields.list(),
+          customFields: this.records.customFields.list(),
         });
         const now = this.deps.clock.now();
         // Unit files first, the tree last.
@@ -3766,10 +3643,9 @@ export class ProjectStore {
         for (const id of project.starred) {
           const starred = plan.ids.get(id);
           if (starred)
-            await this.stars.set(STARRED_CONVERSATIONS, starred, true);
+            await this.records.stars.set(STARRED_CONVERSATIONS, starred, true);
         }
-        if (project.starred.size > 0)
-          this.emit({ type: 'conversationsChanged' });
+        if (project.starred.size > 0) this.emitRecords('stars');
         const outline = (await seriesOutline(project)).trim();
         if (plan.onlyBook === undefined && outline) {
           await this.changeUnit(outlineRef(PROJECT_OUTLINE), (value) => ({
@@ -4010,9 +3886,7 @@ export class ProjectStore {
       const file = imagePath(this.path, image);
       if (await this.deps.fs.exists(file)) await this.deps.fs.unlink(file);
     }
-    if (await this.todos.dropLinks((link) => link.id === newId)) {
-      this.emitTodos();
-    }
+    await this.references.dropGone(new Set([newId]));
     this.emit({
       type: 'unitReloaded',
       ref,
@@ -4128,39 +4002,7 @@ export class ProjectStore {
    * Scenes.
    */
   restore(id: string): Promise<Changed> {
-    if (this.customFields.trashed().some((field) => field.id === id)) {
-      return this.step(() => this.restoreCustomField(id));
-    }
-    if (this.snapshots.trashed().some((s) => s.id === id)) {
-      return this.step(() => this.untrashSnapshot(id));
-    }
     return this.step(() => this.trash.restore(id));
-  }
-
-  /**
-   * Brings a Custom field back from Trash, its values showing again in the
-   * Entries that kept them; refused while its type has another field of its
-   * label. Undo moves it to Trash again.
-   */
-  private async restoreCustomField(id: string): Promise<() => Promise<void>> {
-    const field = this.customFields.trashed().find((f) => f.id === id)!;
-    this.refuseLabel(field.label, field.type, id);
-    await this.customFields.restore(id);
-    this.emitCustomFields();
-    return async () => {
-      await this.customFields.trash(id, this.deps.clock.now());
-      this.emitCustomFields();
-    };
-  }
-
-  /** Brings a Snapshot back from Trash. Undo moves it to Trash again. */
-  private async untrashSnapshot(id: string): Promise<() => Promise<void>> {
-    await this.snapshots.untrash(id);
-    this.emitSnapshots();
-    return async () => {
-      await this.snapshots.trash(id);
-      this.emitSnapshots();
-    };
   }
 
   /**
@@ -4295,85 +4137,15 @@ export class ProjectStore {
     });
   }
 
-  /** Deletes everything in Trash for good. Nothing done before can be undone. */
+  /**
+   * Deletes everything in Trash for good, and every reference to what is
+   * gone with it. Nothing done before can be undone.
+   */
   emptyTrash(): Promise<void> {
     return this.enqueueWrite(async () => {
       this.latest = null;
-      const books = this.trash
-        .list()
-        .filter(
-          (item) =>
-            item.kind === 'book' && !isBook(this.manifest.tree, item.id),
-        )
-        .map((item) => item.id);
-      const entries = new Set(
-        this.trash
-          .list()
-          .filter((item) => item.kind === 'entry')
-          .map((item) => item.id),
-      );
-      const withSnapshots = [...this.snapshots.scenes()].filter(
-        (id) => this.trash.where(id) === 'trash',
-      );
       await this.trash.empty();
-      // A Scene's Snapshots go with it, unless it is in the Drawer too; those
-      // in Trash on their own go if listed there.
-      const scenesGone = new Set(
-        withSnapshots.filter(
-          (id) => !this.trash.where(id) && !this.files.has(id),
-        ),
-      );
-      if (await this.snapshots.empty((id) => this.files.has(id), scenesGone)) {
-        this.emitSnapshots();
-      }
-      // Their Relations go with them, unless they are in the Drawer too.
-      const gone = new Set(
-        [...entries].filter(
-          (id) => !this.trash.where(id) && !this.entries.has(id),
-        ),
-      );
-      if (gone.size > 0) {
-        await this.relations.drop(gone);
-        this.emitRelations();
-      }
-      // Their Evolutions and Relations go with them, unless the Book is in
-      // the Drawer too.
-      const goneBooks = books.filter((id) => !this.trash.where(id));
-      await this.dropEvolutions(goneBooks);
-      if (goneBooks.length > 0) {
-        await this.relations.dropBooks(new Set(goneBooks));
-        this.emitRelations();
-      }
-      // Their values stay in the Entries, never shown.
-      if (this.customFields.trashed().length > 0) {
-        await this.customFields.empty();
-        this.emitCustomFields();
-      }
     });
-  }
-
-  /**
-   * Takes the Evolutions of `books`, emptied from Trash, off every Entry:
-   * their values from the Entry's text, and their images with their files.
-   */
-  private async dropEvolutions(books: readonly string[]): Promise<void> {
-    if (books.length === 0) return;
-    for (const entry of this.listEntries()) {
-      const evolved = Object.keys(entry.evolved ?? {});
-      if (books.some((book) => evolved.includes(book))) {
-        await this.changeEntry(entry.id, (value) =>
-          books.reduce(withoutBook, value),
-        );
-      }
-      for (const book of books) {
-        if (entry.evolvedImages?.[book]) {
-          await this.changeImage(
-            { kind: 'entry', id: entry.id, book },
-            undefined,
-          );
-        }
-      }
-    }
   }
 
   /** Whether a Book, Part, Chapter or Scene of this id is in the Manuscript or Unplaced. */
@@ -4597,7 +4369,7 @@ export class ProjectStore {
       manuscript: () => manuscriptForAssistant(this.manuscript()),
       statuses: () => this.statuses(),
       listEntries: () => this.listEntries().map(forAssistant),
-      customFields: () => this.customFields.list(),
+      customFields: () => this.records.customFields.list(),
       listRelations: () => this.listRelations(),
       read: async (ref) => {
         // Refused at run time too, whatever a caller's types say.
@@ -4700,16 +4472,11 @@ export class ProjectStore {
    * doesn't list them. A log whose header can't be read is logged and left out.
    */
   async listConversations(): Promise<ConversationSummary[]> {
-    const starred = this.stars.on(STARRED_CONVERSATIONS);
+    const starred = this.records.stars.on(STARRED_CONVERSATIONS);
     return (await this.conversations.listConversations()).map((c) => ({
       ...c,
       starred: starred.has(c.id),
     }));
-  }
-
-  /** Reads the Starred Conversations as the Project opens, merging their copies. */
-  async readStars(): Promise<void> {
-    await this.stars.read();
   }
 
   /**
@@ -4719,10 +4486,9 @@ export class ProjectStore {
    * ignored.
    */
   starConversation(id: string, starred: boolean): Promise<void> {
-    return this.enqueueStructure(async () => {
-      await this.stars.set(STARRED_CONVERSATIONS, id, starred);
-      this.emit({ type: 'conversationsChanged' });
-    });
+    return this.changeRecords('stars', (stars) =>
+      stars.set(STARRED_CONVERSATIONS, id, starred),
+    );
   }
 
   /**
@@ -4929,29 +4695,6 @@ export class ProjectStore {
   }
 }
 
-function starsOf(projectPath: string, deps: StoreDeps): Switches {
-  return new Switches(path.join(projectPath, STARS), deps.fs, deps.clock);
-}
-
-function todosOf(projectPath: string, deps: StoreDeps): Todos {
-  return new Todos(path.join(projectPath, TODOS), deps.fs, deps.clock);
-}
-
-/** The folder of each Entry type's Key fields, which older apps never look in (ADR 0006). */
-const KEY_FIELDS = 'key-fields';
-
-function keyFieldsOf(projectPath: string, deps: StoreDeps): Switches {
-  return new Switches(path.join(projectPath, KEY_FIELDS), deps.fs, deps.clock);
-}
-
-function relationsOf(projectPath: string, deps: StoreDeps): Relations {
-  return new Relations(path.join(projectPath, RELATIONS), deps.fs, deps.clock);
-}
-
-function snapshotsOf(projectPath: string, deps: StoreDeps): Snapshots {
-  return new Snapshots(path.join(projectPath, SNAPSHOTS), deps.fs, deps.clock);
-}
-
 /** The private notes of the Entry `id`. */
 function privateRef(id: string): PrivateRef {
   return { kind: 'private', id };
@@ -4962,14 +4705,6 @@ function snapshotName(name: string): string {
   const trimmed = name.trim();
   if (!trimmed) throw new Error('A Snapshot needs a name');
   return trimmed;
-}
-
-function customFieldsOf(projectPath: string, deps: StoreDeps): CustomFields {
-  return new CustomFields(
-    path.join(projectPath, CUSTOM_FIELDS),
-    deps.fs,
-    deps.clock,
-  );
 }
 
 /** A Todo's text as one line; there must be some. */

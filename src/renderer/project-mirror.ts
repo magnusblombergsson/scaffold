@@ -5,6 +5,7 @@ import type {
   Conflict,
   Dropped,
   OpenedProject,
+  PinnedNote,
   ProjectApi,
   ProjectEvent,
   UnitReloaded,
@@ -80,7 +81,9 @@ export type MirrorEvent =
   /** A command failed, with `message`; null once one has succeeded. */
   | { type: 'error'; message: string | null }
   /** A structure change main can undo by `step`, offered as `message`. */
-  | { type: 'undoable'; message: string; step: number };
+  | { type: 'undoable'; message: string; step: number }
+  /** Main changed this computer's Pinned notes, as a Combine does, and saved them. */
+  | { type: 'pinnedNotesChanged'; notes: PinnedNote[] };
 
 type Listener = () => void;
 
@@ -310,6 +313,9 @@ export class ProjectMirror {
         flushPendingEdits();
         this.emit({ type: 'languageChanged' });
         this.set({ language: event.language });
+        break;
+      case 'pinnedNotesChanged':
+        this.emit({ type: 'pinnedNotesChanged', notes: event.notes });
         break;
       case 'foldedNoteImageChanged':
         this.set({ foldedNoteImage: event.on });

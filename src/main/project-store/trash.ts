@@ -2,6 +2,8 @@ import { randomUUID } from 'node:crypto';
 import path from 'node:path';
 import type { ProjectEvent } from '../../shared/api';
 import type { Mode } from '../../shared/conversation';
+import { labelRefusal, type CustomField } from '../../shared/custom-field';
+import type { Snapshot } from '../../shared/snapshot';
 import type { Orphaned } from '../../shared/proposal';
 import { entryTitle } from '../../shared/entry';
 import { readTags } from '../../shared/tags';
@@ -51,6 +53,8 @@ import {
   versionTrashPath,
 } from './layout';
 import { ProjectError } from './project-error';
+import type { HeldRecords, RecordKindName } from './record-kinds';
+import type { References } from './references';
 import { freeName, renameWithRetry, safeWrite } from './safe-write';
 import {
   asSeries,
@@ -515,9 +519,13 @@ export type TrashDeps = {
   sceneOrChapterRef: (id: string) => ImageRef;
   deleteOutlineAndNotes: (id: string) => Promise<void>;
   deleteUnitFile: (ref: UnitRef) => Promise<void>;
-  /** Todos linked to what is gone keep their text; the store says so. */
-  dropTodoLinks: (gone: (id: string) => boolean) => Promise<void>;
+  /** Drops what names the units gone once Trash is emptied. */
+  references: Pick<References, 'dropGone'>;
   findConflicts: () => Promise<void>;
+  /** The records that keep their own Trash: Custom fields and Snapshots. */
+  records: Pick<HeldRecords, 'customFields' | 'snapshots'>;
+  /** Tells the window a kind's records changed. */
+  emitRecords: (kind: RecordKindName) => void;
 };
 
 /** Reverts a move to Trash or a restore, while it is the latest change. */
@@ -542,10 +550,46 @@ type Row<T extends Trashed> = {
 
 type Rows = { [K in Trashed['kind']]: Row<Extract<Trashed, { kind: K }>> };
 
+/** A Custom field in Trash; the Entries keep its values. */
+type TrashedCustomField = CustomField & { trashedAt: number };
+
+/** A Snapshot in Trash. */
+type TrashedSnapshot = Snapshot & { trashedAt: number };
+
 /**
- * Trash: the Scenes, Chapters, Entries, Conversations and Conflict versions
- * that were deleted, and are kept until it is emptied. Each kind is a row of
- * one table; listing, restoring and emptying work from it. The Drawer is its
+ * How a kind whose records say themselves whether they are in Trash, in
+ * their own folder, is listed, restored and emptied.
+ */
+type RecordRow<T extends RecordItem> = {
+  /** Those listed in Trash. */
+  listed: () => T[];
+  describe: (item: T) => TrashItem;
+  /** Puts the item back, and says how to undo that. */
+  restore: (item: T) => Promise<Undo>;
+  /** Deletes those in Trash for good; whether any was. */
+  empty: () => Promise<boolean>;
+};
+
+type RecordRows = {
+  customFields: RecordRow<TrashedCustomField>;
+  snapshots: RecordRow<TrashedSnapshot>;
+};
+
+/** What a kind kept in its own records holds in Trash. */
+type RecordItem = { id: string; trashedAt: number };
+
+/** The kinds kept in records of their own. */
+function recordKinds(rows: RecordRows): (keyof RecordRows)[] {
+  return Object.keys(rows) as (keyof RecordRows)[];
+}
+
+/**
+ * Trash: the Scenes, Chapters, Parts, Books, Entries, Conversations and
+ * Conflict versions that were deleted, and are kept until it is emptied,
+ * and the Custom fields and Snapshots whose own records say they are in it.
+ * Each kind is a row of one table; listing, restoring and emptying work
+ * from it, and once it is emptied, References drop what named what is
+ * gone. The Drawer is its
  * second place, in `drawer/`, which emptying never touches.
  */
 export class Trash {
@@ -666,6 +710,65 @@ export class Trash {
     },
   };
 
+  /** The kinds kept in records of their own, by the name of their records. */
+  private readonly recordRows: RecordRows = {
+    customFields: {
+      listed: () => this.deps.records.customFields.trashed(),
+      describe: ({ id, type, label, trashedAt }) => ({
+        kind: 'custom-field',
+        id,
+        title: label,
+        trashedAt,
+        type,
+      }),
+      // Its values show again in the Entries that kept them; refused while
+      // its type has another field of its label.
+      restore: async (field) => {
+        const { customFields } = this.deps.records;
+        const refusal = labelRefusal(
+          field.label,
+          field.type,
+          customFields.list(),
+          field.id,
+        );
+        if (refusal) throw new ProjectError('label-taken', refusal);
+        await customFields.restore(field.id);
+        return () => customFields.trash(field.id, this.deps.clock.now());
+      },
+      // Their values stay in the Entries, never shown.
+      empty: async () => {
+        const { customFields } = this.deps.records;
+        if (customFields.trashed().length === 0) return false;
+        await customFields.empty();
+        return true;
+      },
+    },
+    snapshots: {
+      // Those of a Scene in Trash or the Drawer are with it, and those of a
+      // Scene not here yet are kept till it is.
+      listed: () =>
+        this.deps.records.snapshots
+          .trashed()
+          .filter((s) => this.deps.files.has(s.sceneId)),
+      describe: ({ id, name, trashedAt, sceneId }) => ({
+        kind: 'snapshot',
+        id,
+        title: name,
+        trashedAt,
+        sceneTitle:
+          tryFindScene(this.deps.tree(), sceneId)?.scene.title ??
+          UNPLACED_TITLE,
+      }),
+      restore: async (snapshot) => {
+        const { snapshots } = this.deps.records;
+        await snapshots.untrash(snapshot.id);
+        return () => snapshots.trash(snapshot.id);
+      },
+      empty: () =>
+        this.deps.records.snapshots.empty((id) => this.deps.files.has(id)),
+    },
+  };
+
   constructor(
     private readonly deps: TrashDeps,
     items: Map<string, Trashed>,
@@ -675,10 +778,18 @@ export class Trash {
 
   /** What is kept in `place`, latest first. */
   list(place: Place = 'trash'): TrashItem[] {
-    return [...this.items.values()]
+    const kept = [...this.items.values()]
       .filter((item) => placeOf(item) === place)
-      .sort((a, b) => b.trashedAt - a.trashedAt)
       .map((item) => this.row(item).describe(item));
+    // What keeps its own Trash is never in the Drawer.
+    const recorded =
+      place === 'trash'
+        ? recordKinds(this.recordRows).flatMap((kind) => {
+            const row = this.recordRow(kind);
+            return row.listed().map(row.describe);
+          })
+        : [];
+    return [...kept, ...recorded].sort((a, b) => b.trashedAt - a.trashedAt);
   }
 
   /** The kind of the item of `id`, if one is in Trash. */
@@ -827,8 +938,24 @@ export class Trash {
   /** Puts a Trash item back, and says how to move it to Trash again. */
   async restore(id: string): Promise<Undo> {
     const item = this.items.get(id);
-    if (!item) throw new Error(`Nothing in Trash has id ${id}`);
-    return this.row(item).restore(item);
+    if (item) return this.row(item).restore(item);
+    for (const kind of recordKinds(this.recordRows)) {
+      const row = this.recordRow(kind);
+      const listed = row.listed().find((each) => each.id === id);
+      if (!listed) continue;
+      const undo = await row.restore(listed);
+      this.deps.emitRecords(kind);
+      return async () => {
+        await undo();
+        this.deps.emitRecords(kind);
+      };
+    }
+    throw new Error(`Nothing in Trash has id ${id}`);
+  }
+
+  /** The row of a kind kept in records of its own. */
+  private recordRow(kind: keyof RecordRows): RecordRow<RecordItem> {
+    return this.recordRows[kind] as unknown as RecordRow<RecordItem>;
   }
 
   /** The row of an item's kind. */
@@ -1660,7 +1787,6 @@ export class Trash {
         await fs.unlink(file);
       }
     }
-    // A Todo linked to what was in Trash stays, as plain text.
     const inTrash = [...this.items.values()].filter(
       (item) => placeOf(item) === 'trash',
     );
@@ -1668,12 +1794,16 @@ export class Trash {
       inTrash.flatMap((item) => this.row(item).ids(item)),
     );
     for (const item of inTrash) this.items.delete(item.id);
-    await this.deps.dropTodoLinks(
-      (id) =>
-        emptied.has(id) &&
-        !this.deps.isLive(id) &&
-        !entries.has(id) &&
-        !drawered(id),
+    for (const kind of recordKinds(this.recordRows)) {
+      if (await this.recordRows[kind].empty()) this.deps.emitRecords(kind);
+    }
+    // What named them goes, unless another copy is back or in the Drawer.
+    await this.deps.references.dropGone(
+      new Set(
+        [...emptied].filter(
+          (id) => !this.deps.isLive(id) && !entries.has(id) && !drawered(id),
+        ),
+      ),
     );
   }
 }

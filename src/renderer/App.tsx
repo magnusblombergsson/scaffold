@@ -103,7 +103,6 @@ import { FloatingImagePanel, OutlineBarImage } from './FloatingImage';
 import { applyImageChange, floatImage } from './floating-image';
 import {
   applyChange,
-  repointed,
   textWithoutImage,
   togglePin,
   withoutTrashed,
@@ -1089,12 +1088,15 @@ function ProjectView({
           event.type === 'languageChanged'
         ) {
           // For the views that show Proposals, and the Prose editors.
+        } else if (event.type === 'pinnedNotesChanged') {
+          // Saved already, by main.
+          changePinnedNotes(event.notes, false);
         } else {
           // Main can no longer undo it.
           changeLatest(undefined);
         }
       }),
-    [mirror, onError, changeLatest],
+    [mirror, onError, changeLatest, changePinnedNotes],
   );
 
   // The Manuscript or Entries showing a change follow from main.
@@ -1485,10 +1487,6 @@ function ProjectView({
   async function undo(step: number) {
     changeLatest(undefined);
     await mirror.undo(step);
-    // Undoing a Combine puts the Pinned notes back, its other Entry back too.
-    const combined = notesBeforeCombine.current;
-    if (combined?.step === step) changePinnedNotes(combined.notes);
-    notesBeforeCombine.current = undefined;
   }
 
   /** Add a Book from a Backup…, while its dialog is open: before the add, then what was added. */
@@ -1522,7 +1520,6 @@ function ProjectView({
           project.read({ kind: 'entry', id: pair.here }),
           project.read({ kind: 'entry', id: pair.added }),
         ]);
-        changePinnedNotes(repointed(notesNow.current, pair.added, pair.here));
         return project.combineEntries(
           pair.here,
           pair.added,
@@ -1547,15 +1544,10 @@ function ProjectView({
   /** The Entry Combine with… is open on, if any. */
   const [combining, setCombining] = useState<string | null>(null);
   const combiningEntry = entries.find((e) => e.id === combining);
-  /** The Pinned notes before the latest Combine, by its step, for its Undo. */
-  const notesBeforeCombine = useRef<{ step: number; notes: PinnedNote[] }>(
-    undefined,
-  );
 
   /**
    * Combines `otherId` into `keptId`, as one step the Author can undo from
-   * its toast only; the other's Pinned note becomes the kept one's first,
-   * before it goes from the Story Bible.
+   * its toast only; main makes the other's Pinned note the kept one's.
    */
   async function combineEntries(
     keptId: string,
@@ -1563,8 +1555,6 @@ function ProjectView({
     choices: CombineChoices,
     names: { kept: string; other: string },
   ) {
-    const notes = notesNow.current;
-    changePinnedNotes(repointed(notes, otherId, keptId));
     const result = await mirror.run(
       (project) => project.combineEntries(keptId, otherId, choices),
       {
@@ -1575,11 +1565,7 @@ function ProjectView({
             : ''),
       },
     );
-    if (!result) {
-      changePinnedNotes(notes);
-      return;
-    }
-    notesBeforeCombine.current = { step: result.step, notes };
+    if (!result) return;
     undoOnlyInToast.current = result.step;
     showEntry(keptId);
   }

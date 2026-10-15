@@ -4,7 +4,6 @@ import {
   assistantMethods,
   projectMethods,
   replyTextChannel,
-  type AddedFromBackup,
   type AssistantApi,
   type Changed,
   type ProjectApi,
@@ -22,23 +21,21 @@ import {
 import { createConversationEngine } from './assistant/conversation-engine';
 import { createImagePrompts } from './assistant/image-prompt';
 import { newManuscript } from './import/manuscript-import';
-import { emit, register } from './electron-transport';
+import { register, windowContext } from './electron-transport';
 import { entryImageOf, imageDataUrl } from './entry-image';
 import { systemClock } from './project-store/clock';
 import type { ProjectStore } from './project-store/project-store';
 import { isModel } from '../shared/models';
 import {
   assistantProvider,
-  autoBackUp,
+  backupFlows,
+  backupPorts,
   defaultModel,
   lastFolder,
   projectWindows,
   rememberFolder,
   rememberModel,
-  restoreFolder,
 } from './shell';
-import { checkBackup } from './project-store/backup';
-import { ProjectError } from './project-store/project-error';
 import { trashConversationQuestion } from './trash-question';
 
 /** What a `project` handler works with: the window's Project, and the window. */
@@ -66,7 +63,8 @@ const projectHandlers: Handlers<
     store.movePart(partId, index, bookId),
   trashPart: ({ store }, partId) => store.trashPart(partId),
   createBook: ({ store }, index, title) => store.createBook(index, title),
-  addBookFromBackup: ({ store, sender }) => addBookFromBackup(sender, store),
+  addBookFromBackup: ({ store, sender }) =>
+    backupFlows.addBookFromBackup(store, backupPorts(windowContext(sender))),
   importBook: ({ store }, file, convention) =>
     store.importBook(
       file.name,
@@ -135,7 +133,8 @@ const projectHandlers: Handlers<
   readConflictVersion: ({ store }, ref, versionId) =>
     store.readConflictVersion(ref, versionId),
   resolveConflict: ({ store }, ref, kept) => store.resolveConflict(ref, kept),
-  emptyTrash: ({ store, sender }) => emptyTrash(sender, store),
+  emptyTrash: ({ store, sender }) =>
+    backupFlows.emptyTrash(store, backupPorts(windowContext(sender))),
   setLanguage: ({ store, sender }, language) =>
     setLanguage(sender, store, language),
   setStatus: ({ store }, unitId, statusId) => store.setStatus(unitId, statusId),
@@ -381,107 +380,6 @@ async function trashCustomField(
 /** A label with “a” or “an” before it, as in “an Allegiance”. */
 function withArticle(label: string): string {
   return `${/^[aeiou]/i.test(label) ? 'an' : 'a'} ${label}`;
-}
-
-/** The Projects whose Trash is being emptied, which isn't emptied again meanwhile. */
-const emptying = new WeakSet<ProjectStore>();
-
-/**
- * Empties Trash once the Author confirms it; there is no undo. An automatic
- * Backup is made first, Trash and all, and Trash is emptied whether it is
- * or not, unless the Project closed meanwhile.
- */
-async function emptyTrash(
-  sender: WebContents,
-  store: ProjectStore,
-): Promise<boolean> {
-  const count = store.listTrash().length;
-  if (count === 0 || emptying.has(store)) return false;
-  const options = {
-    type: 'warning' as const,
-    buttons: ['Empty Trash', 'Cancel'],
-    defaultId: 1,
-    cancelId: 1,
-    message: 'Empty Trash?',
-    detail: `${count === 1 ? 'The item' : `All ${count} items`} in Trash will be deleted for good. This can't be undone.`,
-  };
-  const window = BrowserWindow.fromWebContents(sender);
-  const { response } = window
-    ? await dialog.showMessageBox(window, options)
-    : await dialog.showMessageBox(options);
-  if (response !== 0 || emptying.has(store)) return false;
-  emptying.add(store);
-  try {
-    const backup = await autoBackUp(store, 'emptyTrash', (on) =>
-      emit(sender, 'shell', 'onBackingUp', on),
-    );
-    if (backup && 'cancelled' in backup) return false;
-    await store.emptyTrash();
-    return true;
-  } finally {
-    emptying.delete(store);
-  }
-}
-
-/**
- * Asks for a Backup of another Project and adds it as Books, as
- * `addBookFromBackup` says; first checks it, refusing one that can't be
- * restored, then backs up this Project by the rules of automatic Backups.
- * When none is made, the Author is told why and asked whether to go on.
- */
-async function addBookFromBackup(
-  sender: WebContents,
-  store: ProjectStore,
-): Promise<AddedFromBackup | null> {
-  const window = BrowserWindow.fromWebContents(sender);
-  const ask = (options: Electron.MessageBoxOptions) =>
-    window
-      ? dialog.showMessageBox(window, options)
-      : dialog.showMessageBox(options);
-  const options: Electron.OpenDialogOptions = {
-    title: 'Add a Book from a Backup',
-    buttonLabel: 'Add',
-    defaultPath: await restoreFolder(sender),
-    filters: [{ name: 'Backup', extensions: ['zip'] }],
-    properties: ['openFile'],
-  };
-  const chosen = window
-    ? await dialog.showOpenDialog(window, options)
-    : await dialog.showOpenDialog(options);
-  if (chosen.canceled || chosen.filePaths.length === 0) return null;
-  const zipPath = chosen.filePaths[0];
-  rememberFolder('backups', path.dirname(zipPath));
-  try {
-    await checkBackup(zipPath);
-  } catch (error) {
-    await ask({
-      type: 'warning',
-      buttons: ['OK'],
-      message:
-        error instanceof ProjectError
-          ? error.message
-          : `Can't read ${path.basename(zipPath)}.`,
-    });
-    return null;
-  }
-  const backup = await autoBackUp(store, 'addBook', (on) =>
-    emit(sender, 'shell', 'onBackingUp', on),
-  );
-  if (backup && 'cancelled' in backup) return null;
-  if (!backup || 'skipped' in backup) {
-    const { response } = await ask({
-      type: 'warning',
-      buttons: ['Add Without a Backup', 'Cancel'],
-      defaultId: 1,
-      cancelId: 1,
-      message: `No Backup of ${store.displayName} was made first.`,
-      detail: `${
-        backup ? backup.skipped.message : 'Automatic Backups are turned off.'
-      } Once Entries are combined after the add, a Backup is the only way back.`,
-    });
-    if (response !== 0) return null;
-  }
-  return store.addBookFromBackup(zipPath);
 }
 
 /**
