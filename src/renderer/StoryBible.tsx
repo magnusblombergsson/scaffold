@@ -71,7 +71,7 @@ export function StoryBible({
   onCombine,
 }: {
   /** In a Series, as of the Book `asOf`. */
-  entries: EntrySummary[];
+  entries: readonly EntrySummary[];
   /** The Relations among the Entries, which Places and Items nest by. */
   relations?: RelationsView;
   /** In a Series, the Books in reading order; none otherwise. */

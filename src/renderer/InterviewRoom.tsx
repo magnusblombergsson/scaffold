@@ -44,6 +44,8 @@ import { PanelResizer, type PaneSize } from './PanelResizer';
 import { ReadOnlyContext } from './read-only';
 import { RoomList } from './RoomList';
 import { useCustomFields } from './StatusAndTags';
+import { useStoryBibleAsOf } from './story-bible-lens';
+import type { StoryBibleLens } from '../shared/story-bible-as-of';
 
 /**
  * The Interview room: its Conversations with their focus on the left, the
@@ -210,6 +212,7 @@ export function InterviewRoom({
           <InFocus
             focus={focus}
             names={names}
+            book={conversation.book}
             onOpenEntry={onOpenEntry}
             showable={(id) => listed.some((c) => c.id === id)}
             onShow={(conversationId, proposalId) =>
@@ -244,21 +247,24 @@ function useChanges(): number {
   return changes;
 }
 
-/** The unit in focus, read-only, as it is now. */
+/** The unit in focus, read-only, as it is now; in a Series, an Entry as of the Conversation's `book`. */
 function InFocus({
   focus,
   names,
+  book,
   onOpenEntry,
   showable,
   onShow,
 }: {
   focus: InterviewFocus;
   names: Names;
+  book: string | undefined;
   onOpenEntry(entryId: string): void;
   showable(conversationId: string): boolean;
   onShow(conversationId: string, proposalId: string): void;
 }) {
   const changes = useChanges();
+  const lens = useStoryBibleAsOf(book);
   switch (focus.kind) {
     case 'open':
       return (
@@ -272,6 +278,8 @@ function InFocus({
         <FocusEntry
           key={focus.id}
           entryId={focus.id}
+          lens={lens}
+          books={names.manuscript.books}
           changes={changes}
           onOpen={onOpenEntry}
           showable={showable}
@@ -281,9 +289,10 @@ function InFocus({
     case 'entry-type':
       return (
         <EntriesInFocus
-          ids={names.entries
+          ids={lens.entries
             .filter((e) => e.type === focus.type)
             .map((e) => e.id)}
+          lens={lens}
           none="No Entries of this type yet."
           changes={changes}
           onOpen={onOpenEntry}
@@ -294,6 +303,7 @@ function InFocus({
         <TagFocus
           tag={focus.tag}
           names={names}
+          lens={lens}
           changes={changes}
           onOpenEntry={onOpenEntry}
         />
@@ -314,22 +324,29 @@ function InFocus({
 
 /**
  * An Entry in focus: each field its type has, its Custom fields last, with
- * what it holds and the values Proposals pending on it would give it.
+ * what it holds and the values Proposals pending on it would give it. In a
+ * Series, as `lens` sees it as of the Conversation's Book; one first
+ * appearing in a later Book shows only which.
  */
 function FocusEntry({
   entryId,
+  lens,
+  books,
   changes,
   onOpen,
   showable,
   onShow,
 }: {
   entryId: string;
+  lens: StoryBibleLens;
+  /** In a Series, the Books, to name the one it first appears in. */
+  books: readonly { id: string; title: string }[] | undefined;
   changes: number;
   onOpen(entryId: string): void;
   showable(conversationId: string): boolean;
   onShow(conversationId: string, proposalId: string): void;
 }) {
-  const [entry, setEntry] = useState<EntryValue | null | undefined>();
+  const [stored, setEntry] = useState<EntryValue | null | undefined>();
   const [pending, setPending] = useState<PendingProposal[]>([]);
   const customFields = useCustomFields();
   useEffect(() => {
@@ -347,10 +364,20 @@ function FocusEntry({
       current = false;
     };
   }, [entryId, changes]);
-  if (entry === undefined) return null;
-  if (entry === null) {
+  if (stored === undefined) return null;
+  if (stored === null) {
     return <p className="reference-empty">This Entry is no longer there.</p>;
   }
+  const later = lens.visible(entryId) ? undefined : lens.summary(entryId);
+  if (later) {
+    const first = books?.find((b) => b.id === later.firstAppears);
+    return (
+      <p className="reference-empty">
+        First appears in {first?.title ?? 'a later Book'}
+      </p>
+    );
+  }
+  const entry = lens.read(stored).entry;
   const fields = PROPOSAL_FIELDS.filter(
     (field) => fieldOf(entry, field) !== undefined,
   ).map((field) => ({ field, label: FIELD_LABELS[field] }));
@@ -420,11 +447,14 @@ function FocusEntry({
 /** The Entries in focus, of a type or with a Tag, at a glance; `none` when there are none. */
 function EntriesInFocus({
   ids,
+  lens,
   none,
   changes,
   onOpen,
 }: {
   ids: string[];
+  /** The Story Bible they are seen through. */
+  lens: StoryBibleLens;
   none: string;
   changes: number;
   onOpen(entryId: string): void;
@@ -451,7 +481,11 @@ function EntriesInFocus({
   return (
     <div className="reference-entries">
       {values.map((entry) => (
-        <EntryCard key={entry.id} entry={entry} onOpen={onOpen} />
+        <EntryCard
+          key={entry.id}
+          entry={lens.read(entry).entry}
+          onOpen={onOpen}
+        />
       ))}
     </div>
   );
@@ -464,11 +498,13 @@ function EntriesInFocus({
 function TagFocus({
   tag,
   names,
+  lens,
   changes,
   onOpenEntry,
 }: {
   tag: string;
   names: Names;
+  lens: StoryBibleLens;
   changes: number;
   onOpenEntry(entryId: string): void;
 }) {
@@ -494,7 +530,8 @@ function TagFocus({
   return (
     <>
       <EntriesInFocus
-        ids={names.entries.filter((e) => hasTag(e.tags, tag)).map((e) => e.id)}
+        ids={lens.entries.filter((e) => hasTag(e.tags, tag)).map((e) => e.id)}
+        lens={lens}
         none="No Entries with this Tag."
         changes={changes}
         onOpen={onOpenEntry}

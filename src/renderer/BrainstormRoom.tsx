@@ -34,6 +34,7 @@ import { PanelResizer, type PaneSize } from './PanelResizer';
 import { RoomList } from './RoomList';
 import { TagChips } from './TagsDialog';
 import { UnitStatusDot, useStatuses } from './StatusAndTags';
+import { useStoryBibleAsOf } from './story-bible-lens';
 
 /**
  * The Brainstorm room: its Conversations on the left, the one open in the
@@ -131,7 +132,7 @@ export function BrainstormRoom({
       <Reference
         width={referencePane.size}
         manuscript={names.manuscript}
-        entries={names.entries}
+        book={conversation.book}
         onOpenEntry={onOpenEntry}
         todos={todos}
       />
@@ -142,18 +143,19 @@ export function BrainstormRoom({
 /**
  * The Story Bible and the Outline skeleton, read-only, kept up to date as
  * Proposals are accepted, and the Todos. Each Entry says whether the
- * Assistant sees it.
+ * Assistant sees it. In a Series, the Story Bible is as of the
+ * Conversation's `book`.
  */
 function Reference({
   width,
   manuscript,
-  entries,
+  book,
   onOpenEntry,
   todos,
 }: {
   width: number;
   manuscript: Manuscript;
-  entries: Names['entries'];
+  book: string | undefined;
   onOpenEntry(entryId: string): void;
   todos: ReactNode;
 }) {
@@ -203,7 +205,7 @@ function Reference({
       <div role="tabpanel" aria-labelledby={`reference-${tab}-tab`}>
         {tab === 'bible' ? (
           <BibleReference
-            entries={entries}
+            book={book}
             changes={changes}
             onOpenEntry={onOpenEntry}
           />
@@ -217,16 +219,22 @@ function Reference({
   );
 }
 
-/** Every Entry of the Story Bible, its fields at a glance, narrowed by a Filter. */
+/**
+ * Every Entry of the Story Bible, its fields at a glance, narrowed by a
+ * Filter. In a Series, as of `book`, as the Assistant sees them: none first
+ * appearing in a later Book.
+ */
 function BibleReference({
-  entries,
+  book,
   changes,
   onOpenEntry,
 }: {
-  entries: Names['entries'];
+  book: string | undefined;
   changes: number;
   onOpenEntry(entryId: string): void;
 }) {
+  const lens = useStoryBibleAsOf(book);
+  const { entries } = lens;
   const { filter, setFilter, inUse } = useFilter('brainstorm-bible');
   const shown = useMemo(
     () => entries.filter((e) => matchesFilter(filter, e)),
@@ -264,7 +272,11 @@ function BibleReference({
       )}
       <div className="reference-entries">
         {values?.map((entry) => (
-          <EntryCard key={entry.id} entry={entry} onOpen={onOpenEntry} />
+          <EntryCard
+            key={entry.id}
+            entry={lens.read(entry).entry}
+            onOpen={onOpenEntry}
+          />
         ))}
       </div>
     </>

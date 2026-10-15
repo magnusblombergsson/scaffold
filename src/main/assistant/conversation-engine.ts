@@ -27,7 +27,12 @@ import {
   summaryRequest,
   type CompactionPolicy,
 } from './compaction';
-import { buildContext, defaultRequest, readableScene } from './context-builder';
+import {
+  buildContext,
+  defaultRequest,
+  readableScene,
+  storyBibleOf,
+} from './context-builder';
 import type { ProviderFor, ProviderRequest } from './provider';
 import { readProposals } from './proposal-blocks';
 import { finishedCall } from './reply-finishing';
@@ -168,7 +173,8 @@ export function createConversationEngine({
       ...defaultRequest(mode, focus[0] ?? null, messages, interviewFocus, book),
       ...(summary && { summary }),
     };
-    const context = await buildContext(store.assistantView(), asked);
+    const view = store.assistantView();
+    const context = await buildContext(view, asked);
     const reviewing = asked.mode === 'writing' && asked.command !== 'question';
     const request: ProviderRequest = {
       model: chosen,
@@ -200,9 +206,9 @@ export function createConversationEngine({
     const made = reviewing
       ? null
       : await readProposals(
-          store.assistantView(),
+          view,
           finished.proposals,
-          context.book,
+          storyBibleOf(view, context.book),
           mode,
         );
     const proposals = made?.proposals ?? [];

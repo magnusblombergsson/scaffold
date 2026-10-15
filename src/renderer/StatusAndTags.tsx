@@ -14,6 +14,8 @@ import { ImagePickerProvider } from './ImagePicker';
 import { ReadOnlyContext } from './read-only';
 import { ComposerHeightContext, type ComposerHeight } from './composer-height';
 import { TagInput } from './TagsDialog';
+import { StoryBibleContext } from './story-bible-lens';
+import type { LensSource } from '../shared/story-bible-as-of';
 
 /**
  * The Project's Status list, and how to give a Scene, Chapter or Part a Status or
@@ -52,6 +54,7 @@ export function ProjectContexts({
   customFields,
   keyFields,
   composerHeight,
+  storyBible,
   children,
 }: {
   readOnly: boolean;
@@ -61,6 +64,8 @@ export function ProjectContexts({
   customFields: CustomField[];
   keyFields: KeyFieldChoices;
   composerHeight: ComposerHeight;
+  /** What every reader's lens on the Story Bible is made from. */
+  storyBible: LensSource;
   children: ReactNode;
 }) {
   return (
@@ -69,9 +74,11 @@ export function ProjectContexts({
         <CustomFieldsContext.Provider value={customFields}>
           <KeyFieldsContext.Provider value={keyFields}>
             <ComposerHeightContext.Provider value={composerHeight}>
-              <ImagePickerProvider partLabel={partLabel}>
-                {children}
-              </ImagePickerProvider>
+              <StoryBibleContext.Provider value={storyBible}>
+                <ImagePickerProvider partLabel={partLabel}>
+                  {children}
+                </ImagePickerProvider>
+              </StoryBibleContext.Provider>
             </ComposerHeightContext.Provider>
           </KeyFieldsContext.Provider>
         </CustomFieldsContext.Provider>

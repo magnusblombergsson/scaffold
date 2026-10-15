@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { EntryValue } from '../shared/project-types';
+import type { StoryBibleLens } from '../shared/story-bible-as-of';
 import { PeekCard } from './PeekCard';
 import type { MentionClick } from './mention-highlight';
 
@@ -15,15 +16,15 @@ const PEEK_WIDTH = 340;
  */
 export function MentionPeek({
   peek,
-  asWritten = (entry) => entry,
+  lens,
   pinned,
   onOpen,
   onTogglePin,
   onClose,
 }: {
   peek: MentionClick;
-  /** An Entry as the Peek shows it: in a Series, as of the Book being written. */
-  asWritten?(entry: EntryValue): EntryValue;
+  /** The Story Bible the Peek shows its Entries through: in a Series, as of the Book being written. */
+  lens: StoryBibleLens;
   /** The ids of the Entries pinned. */
   pinned: readonly string[];
   onOpen(entryId: string): void;
@@ -52,7 +53,8 @@ export function MentionPeek({
       {entries?.map((entry) => (
         <PeekCard
           key={entry.id}
-          entry={asWritten(entry)}
+          entry={entry}
+          lens={lens}
           onOpen={onOpen}
           pin={{
             pinned: pinned.includes(entry.id),

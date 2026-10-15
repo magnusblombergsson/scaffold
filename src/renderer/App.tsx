@@ -29,7 +29,6 @@ import {
   unitKey,
   VISIBILITY_LABELS,
   type EntryType,
-  type EntryValue,
   type Manuscript,
   type ManuscriptBook,
   type ManuscriptChapter,
@@ -43,9 +42,8 @@ import {
   bookOf,
   splitsToNextChapter,
 } from '../shared/manuscript-order';
-import { entryAsOf, namesUpTo, summaryAsOf } from '../shared/evolution';
 import { ROOM_LABELS, ROOMS, type Room } from '../shared/room';
-import { relationsView } from '../shared/relation';
+import { bookBeingWritten, storyBibleAsOf } from '../shared/story-bible-as-of';
 import { ProjectMirror } from './project-mirror';
 import { SceneSnapshots, type ListenToProse } from './Snapshots';
 import { useProject } from './use-project';
@@ -94,7 +92,6 @@ import { PanelResizer, type PaneSize } from './PanelResizer';
 import { ProjectSettingsDialog } from './ProjectSettingsDialog';
 import { ProposalTargetContext } from './ProposalCard';
 import { ProposalPeek, type TargetPeek } from './ProposalPeek';
-import { PeekRelationsContext } from './PeekCard';
 import { PinnedNotes } from './PinnedNotes';
 import { CombineDialog } from './CombineDialog';
 import { AddFromBackupDialog } from './AddFromBackupDialog';
@@ -435,58 +432,42 @@ function ProjectView({
     () => (manuscript.books ?? []).map(({ id, title }) => ({ id, title })),
     [manuscript.books],
   );
-  const bookIds = useMemo(() => seriesBooks.map((b) => b.id), [seriesBooks]);
   /**
-   * In a Series, the Book being written: the one holding the Scene open in
-   * Writing, or else what is selected there, or else the last. A Peek, the
-   * Pinned notes and highlighting show the Entries as of it.
+   * In a Series, the Book being written, as `bookBeingWritten` says. A Peek,
+   * the Pinned notes and highlighting show the Entries as of it.
    */
-  const bookBeingWritten = manuscript.books
-    ? (writingBook?.id ??
-      (selected && selected.kind !== 'project'
-        ? bookOf(manuscript, selected)
-        : undefined) ??
-      bookIds[bookIds.length - 1])
-    : undefined;
-  /** An Entry as of the Book being written. */
-  const asWritten = useCallback(
-    (entry: EntryValue) => entryAsOf(entry, bookIds, bookBeingWritten).entry,
-    [bookIds, bookBeingWritten],
+  const writtenBook = bookBeingWritten(manuscript, selected);
+  // By the Books' order alone: a change elsewhere in the Manuscript, as to
+  // a Tag, changes no lens.
+  const bookOrder = manuscript.books?.map((b) => b.id).join();
+  /** What every lens in the window sees the Story Bible from. */
+  const storyBible = useMemo(
+    () => ({
+      manuscript:
+        bookOrder === undefined
+          ? {}
+          : { books: bookOrder.split(',').map((id) => ({ id })) },
+      entries,
+      relations,
+    }),
+    [bookOrder, entries, relations],
   );
-  /** The Entries' summaries as of the Book being written. */
-  const entriesAsWritten = useMemo(
-    () => entries.map((e) => summaryAsOf(e, bookIds, bookBeingWritten)),
-    [entries, bookIds, bookBeingWritten],
-  );
-  /** The Relations among the Entries as of the Book being written, as a Peek and the Pinned notes show them. */
-  const writtenRelations = useMemo(
-    () =>
-      relationsView(relations, entriesAsWritten, {
-        books: bookIds,
-        book: bookBeingWritten,
-      }),
-    [relations, entriesAsWritten, bookIds, bookBeingWritten],
+  /** The Story Bible as of the Book being written. */
+  const writtenLens = useMemo(
+    () => storyBibleAsOf(storyBible, writtenBook),
+    [storyBible, writtenBook],
   );
   /** The Book the Story Bible Room shows the Entries as of, if the Author chose one. */
   const [bibleBook, setBibleBook] = useState<string | null>(null);
   /** In a Series, the Book the Story Bible Room shows the Entries as of: the one chosen, or the Book being written. */
   const bibleAsOf =
-    bibleBook !== null && bookIds.includes(bibleBook)
+    bibleBook !== null && writtenLens.books.includes(bibleBook)
       ? bibleBook
-      : bookBeingWritten;
-  /** The Entries' summaries as the Story Bible Room shows them. */
-  const entriesAsOfBible = useMemo(
-    () => entries.map((e) => summaryAsOf(e, bookIds, bibleAsOf)),
-    [entries, bookIds, bibleAsOf],
-  );
-  /** The Relations among the Entries in the Story Bible in effect as of its Book, named as of it. */
-  const bibleRelations = useMemo(
-    () =>
-      relationsView(relations, entriesAsOfBible, {
-        books: bookIds,
-        book: bibleAsOf,
-      }),
-    [relations, entriesAsOfBible, bookIds, bibleAsOf],
+      : writtenBook;
+  /** The Story Bible as the Story Bible Room shows it. */
+  const bibleLens = useMemo(
+    () => storyBibleAsOf(storyBible, bibleAsOf),
+    [storyBible, bibleAsOf],
   );
   /** What the Project Outline is called: in a Series, the Series Outline. */
   const projectOutlineName = manuscript.books
@@ -728,6 +709,8 @@ function ProjectView({
       target,
       proposalId: proposal.id,
       name: proposal.name,
+      ...('book' in proposal &&
+        proposal.book !== undefined && { book: proposal.book }),
       anchor,
     });
 
@@ -873,9 +856,9 @@ function ProjectView({
   useEffect(
     () =>
       setMentionEntries(
-        entries.map((e) => namesUpTo(e, bookIds, bookBeingWritten)),
+        writtenLens.all.flatMap((e) => writtenLens.names(e.id) ?? []),
       ),
-    [entries, bookIds, bookBeingWritten],
+    [writtenLens],
   );
   const [corkboardView, setCorkboardView] = useCorkboardView();
   const [highlight, setHighlight] = useState(true);
@@ -1678,6 +1661,7 @@ function ProjectView({
       customFields={customFields}
       keyFields={keyFields}
       composerHeight={composerHeight}
+      storyBible={storyBible}
       statusAndTags={{
         statuses,
         setStatus: (unitId, statusId) => void setStatus(unitId, statusId),
@@ -1764,7 +1748,7 @@ function ProjectView({
                 <BrainstormRoom
                   active={room === 'brainstorm'}
                   names={{ manuscript, entries }}
-                  book={bookBeingWritten}
+                  book={writtenBook}
                   pane={pane}
                   onAddProvider={onAddProvider}
                   onOpenEntry={showEntry}
@@ -1787,7 +1771,7 @@ function ProjectView({
                 <InterviewRoom
                   active={room === 'interview'}
                   names={{ manuscript, entries }}
-                  book={bookBeingWritten}
+                  book={writtenBook}
                   pane={pane}
                   onAddProvider={onAddProvider}
                   onOpenEntry={showEntry}
@@ -2165,10 +2149,10 @@ function ProjectView({
               >
                 <div className="left-pane-list">
                   <StoryBible
-                    entries={entriesAsOfBible}
-                    relations={bibleRelations}
+                    entries={bibleLens.all}
+                    relations={bibleLens.relations}
                     books={seriesBooks}
-                    asOf={bibleAsOf}
+                    asOf={bibleLens.book}
                     onAsOf={setBibleBook}
                     openId={openEntry?.id ?? null}
                     conflicted={conflicted}
@@ -2216,14 +2200,12 @@ function ProjectView({
                   // A type change rewrites its description and fields, and a
                   // resolved Conflict the version kept: read them anew; so
                   // does seeing it as of another Book, or the Books reordered.
-                  key={`${openEntry.id}:${openEntry.type}:${resolutions}:${bibleAsOf}:${bookIds.join()}`}
-                  entry={summaryAsOf(openEntry, bookIds, bibleAsOf)}
-                  entries={entriesAsOfBible}
-                  relations={bibleRelations}
+                  key={`${openEntry.id}:${openEntry.type}:${resolutions}:${bibleLens.book}:${bibleLens.books.join()}`}
+                  entry={bibleLens.summary(openEntry.id) ?? openEntry}
+                  lens={bibleLens}
                   onOpenEntry={showEntry}
                   language={language}
                   books={seriesBooks}
-                  asOf={bibleAsOf}
                   onFirstAppears={(bookId) =>
                     void mirror.setFirstAppears(openEntry.id, bookId)
                   }
@@ -2325,73 +2307,65 @@ function ProjectView({
             onClose={() => setPickingEntryType(false)}
           />
         )}
-        <PeekRelationsContext.Provider value={writtenRelations}>
-          {peek && (
-            <MentionPeek
-              peek={peek}
-              asWritten={asWritten}
-              pinned={pinnedNotes.map((note) => note.entryId)}
-              onOpen={showEntry}
-              onTogglePin={(id, card) =>
-                changePinnedNotes(
-                  togglePin(notesNow.current, id, {
-                    x: card.left,
-                    y: card.top,
-                  }),
-                )
-              }
-              onClose={closePeek}
-            />
-          )}
-          {targetPeek && room !== 'writing' && (
-            <ProposalPeek
-              peek={targetPeek}
-              onOpen={() =>
-                goToTarget(targetPeek.target, targetPeek.proposalId)
-              }
-              onClose={closeTargetPeek}
-            />
-          )}
-          {/* Writing only: hidden in the other Rooms, back on return. */}
-          {room === 'writing' && (
-            <PinnedNotes
-              notes={pinnedNotes}
-              entries={entriesAsWritten}
-              asWritten={asWritten}
-              foldedImage={foldedNoteImage}
-              onChange={(entryId, change, save) => {
-                if (change.type === 'raise') setImageOnTop(false);
-                changePinnedNotes(
-                  applyChange(notesNow.current, entryId, change),
-                  save,
-                );
-              }}
-              onOpen={showEntry}
-            >
-              {/* While a Scene is open: not on a Corkboard or an Entry. */}
-              {floatingImage?.on &&
-                !resolvingConflict &&
-                open &&
-                !open.scene.missing && (
-                  <FloatingImagePanel
-                    image={floatingImage}
-                    scene={open.scene}
-                    onTop={imageOnTop}
-                    onChange={(change, save) => {
-                      const now = floatingNow.current;
-                      if (now) {
-                        changeFloatingImage(
-                          applyImageChange(now, change),
-                          save,
-                        );
-                      }
-                    }}
-                    onRaise={() => setImageOnTop(true)}
-                  />
-                )}
-            </PinnedNotes>
-          )}
-        </PeekRelationsContext.Provider>
+        {peek && (
+          <MentionPeek
+            peek={peek}
+            lens={writtenLens}
+            pinned={pinnedNotes.map((note) => note.entryId)}
+            onOpen={showEntry}
+            onTogglePin={(id, card) =>
+              changePinnedNotes(
+                togglePin(notesNow.current, id, {
+                  x: card.left,
+                  y: card.top,
+                }),
+              )
+            }
+            onClose={closePeek}
+          />
+        )}
+        {targetPeek && room !== 'writing' && (
+          <ProposalPeek
+            peek={targetPeek}
+            onOpen={() => goToTarget(targetPeek.target, targetPeek.proposalId)}
+            onClose={closeTargetPeek}
+          />
+        )}
+        {/* Writing only: hidden in the other Rooms, back on return. */}
+        {room === 'writing' && (
+          <PinnedNotes
+            notes={pinnedNotes}
+            lens={writtenLens}
+            foldedImage={foldedNoteImage}
+            onChange={(entryId, change, save) => {
+              if (change.type === 'raise') setImageOnTop(false);
+              changePinnedNotes(
+                applyChange(notesNow.current, entryId, change),
+                save,
+              );
+            }}
+            onOpen={showEntry}
+          >
+            {/* While a Scene is open: not on a Corkboard or an Entry. */}
+            {floatingImage?.on &&
+              !resolvingConflict &&
+              open &&
+              !open.scene.missing && (
+                <FloatingImagePanel
+                  image={floatingImage}
+                  scene={open.scene}
+                  onTop={imageOnTop}
+                  onChange={(change, save) => {
+                    const now = floatingNow.current;
+                    if (now) {
+                      changeFloatingImage(applyImageChange(now, change), save);
+                    }
+                  }}
+                  onRaise={() => setImageOnTop(true)}
+                />
+              )}
+          </PinnedNotes>
+        )}
         {taggingUnit && (
           <TagsDialog
             unitName={`${unitKindName(taggingUnit.kind, partNamed)} “${taggingUnit.node.title}”`}
@@ -2413,7 +2387,7 @@ function ProjectView({
         {exportOpen && (
           <ExportManuscriptDialog
             manuscript={manuscript}
-            book={bookBeingWritten}
+            book={writtenBook}
             onClose={() => setExportOpen(false)}
           />
         )}
@@ -2477,9 +2451,8 @@ function ProjectView({
         )}
         {storyBibleExportOpen && (
           <ExportStoryBibleDialog
-            entries={entries}
             books={manuscript.books}
-            book={bookBeingWritten}
+            book={writtenBook}
             onClose={() => setStoryBibleExportOpen(false)}
           />
         )}
