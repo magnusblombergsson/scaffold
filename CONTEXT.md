@@ -140,7 +140,7 @@ A few words beside a Character's Role saying what they are to the story, such as
 _Avoid_: Tagline, role description
 
 **Proposal**:
-A change to the Story Bible or an Outline suggested by the Assistant during a Conversation; it takes effect only when the Author accepts it, optionally after editing it. A Proposal to a field or Outline either replaces its text, appends text to it, or adds an item to a list; an append or add lands on whatever the target holds when accepted. The Author may also append a replacing Proposal's text instead of replacing. A replacing Proposal is stale when its target has changed since it was made. A Proposal may also add a Relation between two Entries already in the Story Bible; it never goes stale, but can be accepted only while the Relation's rules allow it, and of its parts only a free-text label can be edited. An accepted Proposal can be undone while its target still holds the accepted values; it then becomes pending again. A reply the Assistant didn't finish (cut short, failed partway, or empty) makes no Proposals. In a Series, a Proposal lands where the value the Conversation's Book sees comes from, the Entry's own value or the Evolution in effect, unless the Author accepts it "from this Book on", making it an Evolution; the Assistant never chooses that. Proposals never touch Prose, Notes, or private notes.
+A change to the Story Bible or an Outline suggested by the Assistant during a Conversation; it takes effect only when the Author accepts it, optionally after editing it. A Proposal to a field or Outline either replaces its text, appends text to it, or adds an item to a list; an append or add lands on whatever the target holds when accepted. The Author may also append a replacing Proposal's text instead of replacing. A replacing Proposal is stale when its target has changed since it was made. A Proposal may also add a Relation between two Entries already in the Story Bible; it never goes stale, but can be accepted only while the Relation's rules allow it, and of its parts only a free-text label can be edited. An accepted Proposal can be undone while its target still holds the accepted values; it then becomes pending again. A reply the Assistant didn't finish (cut short, failed partway, or empty) makes no Proposals. In a Series, a Proposal lands where the value the Conversation's Book sees comes from, the Entry's own value or the Evolution in effect, unless the Author accepts it "from this Book on", making it an Evolution; the Assistant never chooses that. Proposals never touch Prose or private notes, and touch Notes only by appending, in Plan.
 _Avoid_: Suggestion (when meaning a Story Bible change), auto-save
 
 **Outline**:
@@ -236,15 +236,15 @@ _Avoid_: Unsupported, unsafe
 ### Modes
 
 **Room**:
-One of the four places the Author switches between at the top of the window: Writing, Story Bible, Brainstorm and Interview. Each fills the window; all but the Story Bible are also Modes.
+One of the five places the Author switches between at the top of the window: Writing, Story Bible, Brainstorm, Interview and Plan. Each fills the window; all but the Story Bible are also Modes.
 _Avoid_: Place, view, tab, workspace
 
 **Mode**:
-One of the tool's working states, each giving the Assistant a different role: Brainstorm, Interview, or Writing.
+One of the tool's working states, each giving the Assistant a different role: Brainstorm, Interview, Plan, or Writing.
 _Avoid_: State, phase
 
 **Conversation**:
-A thread of exchanges between the Author and the Assistant, started by the Author and belonging to one Mode. In a Series, a Brainstorm or Interview Conversation also belongs to one Book, chosen when started and changeable later, and sees the Story Bible as of it; a Writing Conversation sees it as of the Book of the Scene in focus. In a Writing Conversation, the Scene in focus is the one open in the editor when a message is sent; each message notes it, and the Conversation is not bound to it. The Assistant sees only the current Conversation, never earlier ones.
+A thread of exchanges between the Author and the Assistant, started by the Author and belonging to one Mode. In a Series, a Brainstorm, Interview or Plan Conversation also belongs to one Book, chosen when started and changeable later, and sees the Story Bible as of it; a Writing Conversation sees it as of the Book of the Scene in focus. In a Writing Conversation, the Scene in focus is the one open in the editor when a message is sent; each message notes it, and the Conversation is not bound to it. The Assistant sees only the current Conversation, never earlier ones.
 _Avoid_: Chat, session, history
 
 **Starred**:
@@ -257,6 +257,10 @@ Mode for free idea generation with the Assistant.
 **Interview**:
 Mode where the Assistant asks the Author questions to capture facts about the story's world, characters, and plot into the Story Bible and Outlines. The Author chooses a focus (one Entry, one Entry type, a Tag, a Book, Part, Chapter or Scene, or open) and may change it at any time; within it the Assistant asks about what is missing, one question at a time, and turns each answer into Proposals.
 _Avoid_: Q&A, questionnaire
+
+**Plan**:
+Mode where the Assistant helps the Author choose a story structure for a Book and shape its Outline to it: it asks about the story's shape one question at a time, checks the plan, and turns what is agreed into Proposals to Outlines, Notes and the Manuscript's structure, never to the Story Bible. The Author chooses a focus (the Book, a Part or a Chapter) and may change it at any time. It reads the plan (Outlines, Notes, titles, Statuses and the Story Bible), never the Prose.
+_Avoid_: Planner, Outliner, Plotting
 
 **Writing**:
 Mode where the Author writes Prose in the editor and the Assistant advises on scenes and chapters — including revision of what is already written — pointing out what is missing or excessive.
