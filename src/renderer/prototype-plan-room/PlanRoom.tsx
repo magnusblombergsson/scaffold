@@ -22,6 +22,7 @@ import {
   beatName,
   demoState,
   FORMATS,
+  fitsBook,
   GENRES,
   holdsProse,
   kindName,
@@ -40,6 +41,7 @@ import {
   type Proposal,
 } from './model';
 import { usePlanVariant } from './PlanSwitcher';
+import { StructureGuide } from './Guide';
 import './plan.css';
 
 // ---------------------------------------------------------------- the store
@@ -63,6 +65,27 @@ function usePlan() {
     ];
     const said = text.trim();
     const author: Message = { role: 'author', text: said };
+    const asked = [...STRUCTURES, ...CONVENTIONS].find(
+      (x) => said === `Tell me about ${x.name}`,
+    );
+    if (asked) {
+      const { genres, format } = state.book;
+      const fit =
+        'fits' in asked
+          ? fitsBook(asked, state.book)
+            ? ` It fits a ${genres.join(' and ')} ${format} like this one.`
+            : ` It isn’t a natural fit for a ${genres.join(' and ')} ${format}, though it can be done.`
+          : '';
+      setMessages((m) => [
+        ...m,
+        author,
+        {
+          role: 'assistant',
+          text: `**${asked.name}**, ${asked.credit}. ${asked.description}${fit}\n\nIts Beats: ${asked.beats.map((b) => b.name).join(', ')}. Shall I show where they would fall in your plan?`,
+        },
+      ]);
+      return;
+    }
     if (!known.includes(said)) {
       setMessages((m) => [
         ...m,
@@ -1207,6 +1230,16 @@ function VariantB({ plan }: { plan: Plan }) {
         <div className="proto-plan-b-strip">
           <b>{BOOK_TITLE}</b>
           <BookDetailsForm plan={plan} inline />
+          <button
+            className="link-button"
+            onClick={() =>
+              document
+                .querySelector('.proto-plan-guide')
+                ?.scrollIntoView({ behavior: 'smooth', block: 'start' })
+            }
+          >
+            About Structures…
+          </button>
         </div>
         <div className="proto-plan-b-body">
           <BeatRail plan={plan} />
@@ -1224,15 +1257,16 @@ function VariantB({ plan }: { plan: Plan }) {
               )}
             />
           </div>
-          {plan.selected && (
-            <aside className="proto-plan-b-details">
+          <aside className="proto-plan-b-details">
+            {plan.selected && (
               <SceneDetails
                 plan={plan}
                 id={plan.selected}
                 onClose={() => plan.select(null)}
               />
-            </aside>
-          )}
+            )}
+            <StructureGuide plan={plan} />
+          </aside>
         </div>
       </main>
       <aside className="proto-plan-b-panel">

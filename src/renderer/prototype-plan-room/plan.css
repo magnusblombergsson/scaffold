@@ -868,3 +868,82 @@
   border-left-color: var(--status-teal);
   background: color-mix(in srgb, var(--status-teal) 10%, transparent);
 }
+
+/* B: the structure guide below Scene details */
+.proto-plan-b-details {
+  width: 340px;
+}
+.proto-plan-b-details .proto-plan-scene-details {
+  border-bottom: 1px solid var(--line);
+}
+.proto-plan-guide {
+  padding: 0.25rem 0.75rem 3rem;
+}
+.proto-plan-guide-h {
+  font-size: 0.8em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+  margin: 1rem 0 0.4rem;
+}
+.proto-plan-guide-sub {
+  font-size: 0.8em;
+  color: var(--muted);
+  margin: 0.6rem 0 0.2rem;
+}
+.proto-plan-guide-card {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 0.35rem 0.6rem;
+  margin-bottom: 0.4rem;
+}
+.proto-plan-guide-card[open] {
+  background: var(--accent-tint);
+}
+.proto-plan-guide-card summary {
+  cursor: pointer;
+}
+.proto-plan-guide-card p {
+  margin: 0.3rem 0;
+  font-size: 0.9em;
+}
+.proto-plan-guide-fits {
+  color: var(--muted);
+}
+.proto-plan-guide-fits [data-match] {
+  color: var(--accent);
+  font-weight: 600;
+}
+.proto-plan-guide-match {
+  color: var(--accent);
+  font-size: 0.8em;
+}
+.proto-plan-guide-beats {
+  margin: 0.3rem 0;
+  padding-left: 1.2rem;
+  font-size: 0.88em;
+}
+.proto-plan-guide-beats li + li {
+  margin-top: 0.3rem;
+}
+.proto-plan-guide-beat {
+  display: flex;
+  justify-content: space-between;
+  gap: 0.4rem;
+  flex-wrap: wrap;
+}
+.proto-plan-guide-purpose {
+  opacity: 0.85;
+}
+.proto-plan-guide-on .link-button {
+  margin-right: 0.4rem;
+}
+.proto-plan-warn {
+  color: var(--warning);
+  font-size: 0.85em;
+}
+.proto-plan-guide-rules {
+  margin: 0.2rem 0;
+  padding-left: 1.1rem;
+  font-size: 0.88em;
+}

@@ -39,32 +39,141 @@ export type PlanState = {
 export type Place = { parent: string; after: string | null };
 
 // ---------------------------------------------------------------- catalogue
+// Paraphrased from docs/research/story-structures.md on research/story-structures.
 
 export type Beat = {
   id: string;
   name: string;
   purpose: string;
-  /** Where it should fall, in % of the Book; null for a Genre convention's required Scene without one. */
+  /** Where it should fall, in % of the Book; null when only its order counts. */
   at: [number, number] | null;
+  /** Takes a run of Scenes rather than one. */
   run?: boolean;
+  /** Opens a Part (an Act), for act-based Structures. */
+  opensPart?: boolean;
 };
 
-export const STRUCTURES: {
+export type Fits = {
+  genres: string[];
+  formats: string[];
+  /** Whether it works per Book or across a Series too. */
+  span: 'Book' | 'Book or Series';
+};
+
+export type Structure = {
   id: string;
   name: string;
   credit: string;
+  description: string;
+  fits: Fits;
   beats: Beat[];
-}[] = [
+};
+
+export type Convention = {
+  id: string;
+  name: string;
+  genre: string;
+  credit: string;
+  description: string;
+  /** Required Scenes, marked on Scenes as Beats. */
+  beats: Beat[];
+  /** Order and position rules, checked but never marked. */
+  rules: string[];
+};
+
+const ALL_GENRES = [
+  'Mystery',
+  'Crime',
+  'Thriller',
+  'Horror',
+  'Fantasy',
+  'Science fiction',
+  'Romance',
+  'Literary',
+  'Other',
+];
+
+export const STRUCTURES: Structure[] = [
+  {
+    id: 'three-act',
+    name: 'Three-act',
+    credit: 'common usage, after Aristotle and Syd Field',
+    description:
+      'Setup, confrontation and resolution, turned at about a quarter and three quarters, with a reversal in the middle. The common denominator the other Structures refine.',
+    fits: {
+      genres: ALL_GENRES,
+      formats: ['Novelette', 'Novella', 'Novel'],
+      span: 'Book',
+    },
+    beats: [
+      {
+        id: 'three-act-setup',
+        name: 'Setup',
+        purpose: 'The lead, their world and what they want.',
+        at: [0, 23],
+        run: true,
+        opensPart: true,
+      },
+      {
+        id: 'three-act-turn1',
+        name: 'First turning point',
+        purpose: 'Something commits the lead to the story.',
+        at: [22, 27],
+      },
+      {
+        id: 'three-act-midpoint',
+        name: 'Midpoint',
+        purpose: 'A reversal that changes what the struggle is about.',
+        at: [47, 53],
+      },
+      {
+        id: 'three-act-turn2',
+        name: 'Second turning point',
+        purpose: 'The low point that forces the final push.',
+        at: [72, 78],
+        opensPart: true,
+      },
+      {
+        id: 'three-act-climax',
+        name: 'Climax',
+        purpose: 'The struggle is decided.',
+        at: [85, 95],
+        run: true,
+      },
+      {
+        id: 'three-act-resolution',
+        name: 'Resolution',
+        purpose: 'What the ending leaves behind.',
+        at: [95, 100],
+      },
+    ],
+  },
   {
     id: 'four-part',
     name: 'Four-part',
     credit: 'after K. M. Weiland and Larry Brooks',
+    description:
+      'Four quarters: setup, response, attack, resolution. The lead reacts in the second quarter and takes charge in the third; pinch points show the opposition’s strength.',
+    fits: {
+      genres: [
+        'Mystery',
+        'Crime',
+        'Thriller',
+        'Horror',
+        'Fantasy',
+        'Science fiction',
+        'Romance',
+      ],
+      formats: ['Novella', 'Novel'],
+      span: 'Book or Series',
+    },
     beats: [
       {
         id: 'hook',
         name: 'Hook',
         purpose: 'A question the reader wants answered.',
         at: [0, 3],
+        opensPart: true,
       },
       {
         id: 'inciting',
@@ -77,6 +186,7 @@ export const STRUCTURES: {
         name: 'First plot point',
         purpose: 'The lead commits; no way back.',
         at: [20, 27],
+        opensPart: true,
       },
       {
         id: 'pinch1',
@@ -89,6 +199,7 @@ export const STRUCTURES: {
         name: 'Midpoint',
         purpose: 'From reacting to acting; the truth glimpsed.',
         at: [47, 53],
+        opensPart: true,
       },
       {
         id: 'pinch2',
@@ -101,6 +212,7 @@ export const STRUCTURES: {
         name: 'Third plot point',
         purpose: 'All seems lost; the last piece arrives.',
         at: [72, 78],
+        opensPart: true,
       },
       {
         id: 'climax',
@@ -117,54 +229,417 @@ export const STRUCTURES: {
       },
     ],
   },
-  { id: 'three-act', name: 'Three-act', credit: 'common usage', beats: [] },
   {
     id: 'save-the-cat',
     name: 'Save the Cat',
     credit: 'after Blake Snyder and Jessica Brody',
-    beats: [],
+    description:
+      'Fifteen beats with tight positions, some a single Scene and some a run. The most precise of the Structures, so the easiest to check.',
+    fits: {
+      genres: [
+        'Mystery',
+        'Crime',
+        'Thriller',
+        'Horror',
+        'Fantasy',
+        'Science fiction',
+        'Romance',
+      ],
+      formats: ['Novella', 'Novel'],
+      span: 'Book',
+    },
+    beats: [
+      {
+        id: 'stc-opening',
+        name: 'Opening image',
+        purpose: 'A snapshot of the lead before the change.',
+        at: [0, 1],
+        opensPart: true,
+      },
+      {
+        id: 'stc-theme',
+        name: 'Theme stated',
+        purpose: 'Someone hints at what the lead must learn.',
+        at: [3, 7],
+      },
+      {
+        id: 'stc-setup',
+        name: 'Setup',
+        purpose: 'The lead’s world and what is wrong with it.',
+        at: [1, 10],
+        run: true,
+      },
+      {
+        id: 'stc-catalyst',
+        name: 'Catalyst',
+        purpose: 'The event that upends that world.',
+        at: [9, 11],
+      },
+      {
+        id: 'stc-debate',
+        name: 'Debate',
+        purpose: 'The lead hesitates.',
+        at: [10, 20],
+        run: true,
+      },
+      {
+        id: 'stc-break2',
+        name: 'Break into 2',
+        purpose: 'The lead chooses to act.',
+        at: [19, 21],
+        opensPart: true,
+      },
+      {
+        id: 'stc-bstory',
+        name: 'B story',
+        purpose: 'A second story, often a relationship, carrying the theme.',
+        at: [21, 23],
+      },
+      {
+        id: 'stc-fun',
+        name: 'Fun and games',
+        purpose: 'The premise delivered.',
+        at: [20, 50],
+        run: true,
+      },
+      {
+        id: 'stc-midpoint',
+        name: 'Midpoint',
+        purpose: 'A false victory or false defeat; stakes rise.',
+        at: [49, 51],
+      },
+      {
+        id: 'stc-badguys',
+        name: 'Bad guys close in',
+        purpose: 'Pressure from outside and doubt from inside.',
+        at: [50, 75],
+        run: true,
+      },
+      {
+        id: 'stc-lost',
+        name: 'All is lost',
+        purpose: 'The lowest point.',
+        at: [74, 76],
+      },
+      {
+        id: 'stc-dark',
+        name: 'Dark night of the soul',
+        purpose: 'The lead absorbs the loss.',
+        at: [75, 80],
+        run: true,
+      },
+      {
+        id: 'stc-break3',
+        name: 'Break into 3',
+        purpose: 'The answer, often from the B story.',
+        at: [79, 81],
+        opensPart: true,
+      },
+      {
+        id: 'stc-finale',
+        name: 'Finale',
+        purpose: 'The lead acts on what they learned.',
+        at: [80, 99],
+        run: true,
+      },
+      {
+        id: 'stc-final',
+        name: 'Final image',
+        purpose: 'The opening image, changed.',
+        at: [99, 100],
+      },
+    ],
   },
   {
     id: 'seven-point',
     name: 'Seven-point',
     credit: 'after Dan Wells',
-    beats: [],
+    description:
+      'Seven points in order, designed from the ends: settle the resolution, make the hook its opposite, then fill the middle. Works per plot line as well as for the whole Book.',
+    fits: {
+      genres: ['Fantasy', 'Science fiction', 'Thriller', 'Mystery'],
+      formats: ['Novelette', 'Novella', 'Novel'],
+      span: 'Book or Series',
+    },
+    beats: [
+      {
+        id: 'seven-hook',
+        name: 'Hook',
+        purpose: 'The opposite of where the story ends.',
+        at: null,
+      },
+      {
+        id: 'seven-turn1',
+        name: 'Plot turn 1',
+        purpose: 'What sets the story moving.',
+        at: null,
+      },
+      {
+        id: 'seven-pinch1',
+        name: 'Pinch 1',
+        purpose: 'Pressure that forces the lead to act.',
+        at: null,
+      },
+      {
+        id: 'seven-midpoint',
+        name: 'Midpoint',
+        purpose: 'From reacting to acting.',
+        at: null,
+      },
+      {
+        id: 'seven-pinch2',
+        name: 'Pinch 2',
+        purpose: 'Things get worse; the plan fails.',
+        at: null,
+      },
+      {
+        id: 'seven-turn2',
+        name: 'Plot turn 2',
+        purpose: 'The last piece the lead needs.',
+        at: null,
+      },
+      {
+        id: 'seven-resolution',
+        name: 'Resolution',
+        purpose: 'The end the story was designed from.',
+        at: null,
+      },
+    ],
   },
   {
     id: 'heros-journey',
     name: 'Hero’s Journey',
-    credit: 'after Christopher Vogler',
-    beats: [],
+    credit: 'after Joseph Campbell and Christopher Vogler',
+    description:
+      'Twelve stages of a journey out of the ordinary world and back, laid over three acts. Stages may be reordered, merged or skipped.',
+    fits: {
+      genres: ['Fantasy', 'Science fiction'],
+      formats: ['Novel'],
+      span: 'Book or Series',
+    },
+    beats: [
+      {
+        id: 'hj-ordinary',
+        name: 'Ordinary world',
+        purpose: 'Where the hero starts.',
+        at: null,
+        opensPart: true,
+      },
+      {
+        id: 'hj-call',
+        name: 'Call to adventure',
+        purpose: 'The challenge arrives.',
+        at: null,
+      },
+      {
+        id: 'hj-refusal',
+        name: 'Refusal of the call',
+        purpose: 'The hero holds back.',
+        at: null,
+      },
+      {
+        id: 'hj-mentor',
+        name: 'Meeting the mentor',
+        purpose: 'Help, advice or a gift.',
+        at: null,
+      },
+      {
+        id: 'hj-threshold',
+        name: 'Crossing the threshold',
+        purpose: 'The hero commits and leaves.',
+        at: null,
+        opensPart: true,
+      },
+      {
+        id: 'hj-tests',
+        name: 'Tests, allies, enemies',
+        purpose: 'Learning the rules of the new world.',
+        at: null,
+        run: true,
+      },
+      {
+        id: 'hj-approach',
+        name: 'Approach',
+        purpose: 'Preparing for the central ordeal.',
+        at: null,
+      },
+      {
+        id: 'hj-ordeal',
+        name: 'Ordeal',
+        purpose: 'A brush with death, near the middle.',
+        at: null,
+      },
+      {
+        id: 'hj-reward',
+        name: 'Reward',
+        purpose: 'What surviving the ordeal brings.',
+        at: null,
+      },
+      {
+        id: 'hj-road',
+        name: 'The road back',
+        purpose: 'Consequences chase the hero home.',
+        at: null,
+        opensPart: true,
+      },
+      {
+        id: 'hj-resurrection',
+        name: 'Resurrection',
+        purpose: 'A final test that proves the change.',
+        at: null,
+      },
+      {
+        id: 'hj-return',
+        name: 'Return with the elixir',
+        purpose: 'What the hero brings back.',
+        at: null,
+      },
+    ],
   },
   {
     id: 'freytag',
     name: 'Freytag’s pyramid',
     credit: 'after Gustav Freytag',
-    beats: [],
+    description:
+      'Five parts, symmetrical, with the climax in the middle and the second half following its consequences. Suits stories whose turn is central; fits most genre novels poorly.',
+    fits: {
+      genres: ['Literary', 'Horror', 'Other'],
+      formats: ['Short story', 'Novelette', 'Novella'],
+      span: 'Book',
+    },
+    beats: [
+      {
+        id: 'freytag-intro',
+        name: 'Introduction',
+        purpose: 'The situation and its people.',
+        at: [0, 20],
+        run: true,
+      },
+      {
+        id: 'freytag-rising',
+        name: 'Rising action',
+        purpose: 'Complications build.',
+        at: [20, 45],
+        run: true,
+      },
+      {
+        id: 'freytag-climax',
+        name: 'Climax',
+        purpose: 'The turn, at the centre.',
+        at: [45, 55],
+      },
+      {
+        id: 'freytag-falling',
+        name: 'Falling action',
+        purpose: 'The consequences unfold.',
+        at: [55, 85],
+        run: true,
+      },
+      {
+        id: 'freytag-end',
+        name: 'Catastrophe or resolution',
+        purpose: 'Where it all lands.',
+        at: [85, 100],
+      },
+    ],
   },
   {
     id: 'fichtean',
     name: 'Fichtean curve',
     credit: 'after John Gardner',
-    beats: [],
+    description:
+      'No long setup: it opens in a crisis and climbs through worse ones to the climax, with backstory fed in along the way and a short ending.',
+    fits: {
+      genres: ['Thriller', 'Horror', 'Crime', 'Other'],
+      formats: [
+        'Flash fiction',
+        'Short story',
+        'Novelette',
+        'Novella',
+        'Novel',
+      ],
+      span: 'Book',
+    },
+    beats: [
+      {
+        id: 'fichtean-open',
+        name: 'Opening crisis',
+        purpose: 'Start in trouble.',
+        at: [0, 5],
+      },
+      {
+        id: 'fichtean-crises',
+        name: 'Rising crises',
+        purpose: 'Each worse than the last.',
+        at: [5, 85],
+        run: true,
+      },
+      {
+        id: 'fichtean-climax',
+        name: 'Climax',
+        purpose: 'The worst crisis, decided.',
+        at: [85, 95],
+      },
+      {
+        id: 'fichtean-falling',
+        name: 'Falling action',
+        purpose: 'A short ending.',
+        at: [95, 100],
+      },
+    ],
   },
   {
     id: 'kishotenketsu',
     name: 'Kishōtenketsu',
     credit: 'East Asian tradition',
-    beats: [],
+    description:
+      'Four parts that need no conflict: introduce, develop, a twist whose link is not yet clear, then the reconciliation that shows how it fits.',
+    fits: {
+      genres: ['Literary', 'Fantasy', 'Other'],
+      formats: ['Flash fiction', 'Short story', 'Novelette', 'Novella'],
+      span: 'Book',
+    },
+    beats: [
+      {
+        id: 'kish-ki',
+        name: 'Ki',
+        purpose: 'Introduction.',
+        at: [0, 25],
+        run: true,
+      },
+      {
+        id: 'kish-sho',
+        name: 'Shō',
+        purpose: 'Development.',
+        at: [25, 50],
+        run: true,
+      },
+      {
+        id: 'kish-ten',
+        name: 'Ten',
+        purpose: 'A twist, seemingly unrelated.',
+        at: [50, 75],
+        run: true,
+      },
+      {
+        id: 'kish-ketsu',
+        name: 'Ketsu',
+        purpose: 'Reconciliation: how the twist belongs.',
+        at: [75, 100],
+        run: true,
+      },
+    ],
   },
 ];
 
-export const CONVENTIONS: {
-  id: string;
-  name: string;
-  beats: Beat[];
-  rules: string[];
-}[] = [
+export const CONVENTIONS: Convention[] = [
   {
     id: 'mystery',
     name: 'Mystery (fair play)',
+    genre: 'Mystery',
+    credit: 'after S. S. Van Dine, Ronald Knox and the Detection Club',
+    description:
+      'The reader could solve it: everything the solution uses is shown first.',
     beats: [
       {
         id: 'mystery.crime',
@@ -185,14 +660,197 @@ export const CONVENTIONS: {
         at: [85, 98],
       },
     ],
-    rules: ['Every clue the reveal uses is shown before it.'],
+    rules: [
+      'Every clue the reveal uses is shown before it.',
+      'The culprit appears early and plays a real part.',
+      'No solution by coincidence, sudden confession or the supernatural.',
+      'The detective is not the culprit.',
+    ],
   },
-  { id: 'crime', name: 'Crime', beats: [], rules: [] },
-  { id: 'thriller', name: 'Thriller', beats: [], rules: [] },
-  { id: 'horror', name: 'Horror', beats: [], rules: [] },
-  { id: 'fantasy', name: 'Fantasy', beats: [], rules: [] },
-  { id: 'romance', name: 'Romance', beats: [], rules: [] },
+  {
+    id: 'crime',
+    name: 'Crime',
+    genre: 'Crime',
+    credit: 'after Shawn Coyne',
+    description: 'A crime, someone who pursues it, and its exposure.',
+    beats: [
+      {
+        id: 'crime.crime',
+        name: 'The crime',
+        purpose: 'What starts it.',
+        at: [0, 15],
+      },
+      {
+        id: 'crime.exposure',
+        name: 'The exposure',
+        purpose: 'The criminal is revealed or caught.',
+        at: [85, 98],
+      },
+    ],
+    rules: [
+      'An investigator drives the story.',
+      'In an inverted story, the slip that convicts is shown.',
+    ],
+  },
+  {
+    id: 'thriller',
+    name: 'Thriller',
+    genre: 'Thriller',
+    credit: 'after Shawn Coyne',
+    description:
+      'A threat larger than a crime, aimed at the hero, against a clock.',
+    beats: [
+      {
+        id: 'thriller.inciting',
+        name: 'Inciting crime',
+        purpose: 'A sign of a larger threat.',
+        at: [0, 12],
+      },
+      {
+        id: 'thriller.villain',
+        name: 'The villain’s power shown',
+        purpose: 'Why the hero should fear them.',
+        at: null,
+      },
+      {
+        id: 'thriller.mercy',
+        name: 'Hero at the villain’s mercy',
+        purpose: 'The scene it all builds to.',
+        at: [72, 85],
+      },
+      {
+        id: 'thriller.false',
+        name: 'False ending',
+        purpose: 'It seems over; it isn’t.',
+        at: [90, 98],
+      },
+    ],
+    rules: [
+      'The hero, or someone dear, becomes the target.',
+      'A clock is ticking.',
+    ],
+  },
+  {
+    id: 'horror',
+    name: 'Horror',
+    genre: 'Horror',
+    credit: 'after Noël Carroll and Shawn Coyne',
+    description:
+      'A monster found, disbelieved and confronted. Stages may double or merge.',
+    beats: [
+      {
+        id: 'horror.onset',
+        name: 'Onset',
+        purpose: 'The monster’s presence shown.',
+        at: [0, 15],
+      },
+      {
+        id: 'horror.discovery',
+        name: 'Discovery',
+        purpose: 'The characters learn of it.',
+        at: null,
+      },
+      {
+        id: 'horror.confirmation',
+        name: 'Confirmation',
+        purpose: 'Others must be convinced, and aren’t.',
+        at: null,
+      },
+      {
+        id: 'horror.mercy',
+        name: 'Victim at the monster’s mercy',
+        purpose: 'The scene it all builds to.',
+        at: [72, 88],
+      },
+      {
+        id: 'horror.false',
+        name: 'False ending',
+        purpose: 'The monster returns.',
+        at: [90, 100],
+      },
+    ],
+    rules: [
+      'Discovery comes before confirmation, confirmation before the confrontation.',
+    ],
+  },
+  {
+    id: 'fantasy',
+    name: 'Fantasy',
+    genre: 'Fantasy',
+    credit: 'after Brandon Sanderson',
+    description: 'Promises set up before payoff, magic included.',
+    beats: [
+      {
+        id: 'fantasy.promise',
+        name: 'The promise',
+        purpose: 'What kind of story this will be.',
+        at: [0, 10],
+      },
+      {
+        id: 'fantasy.payoff',
+        name: 'The payoff',
+        purpose: 'The promise kept.',
+        at: [85, 100],
+      },
+    ],
+    rules: [
+      'The middle shows visible progress on the promises.',
+      'Magic that solves the climax is set up earlier.',
+    ],
+  },
+  {
+    id: 'romance',
+    name: 'Romance',
+    genre: 'Romance',
+    credit: 'after Romance Writers of America and Gwen Hayes',
+    description: 'A central love story with an optimistic ending.',
+    beats: [
+      {
+        id: 'romance.meet',
+        name: 'The leads meet',
+        purpose: 'Where it starts.',
+        at: [0, 25],
+      },
+      {
+        id: 'romance.midpoint',
+        name: 'Midpoint of love',
+        purpose: 'A first real intimacy or acknowledgement.',
+        at: [45, 55],
+      },
+      {
+        id: 'romance.breakup',
+        name: 'The break-up',
+        purpose: 'The low point.',
+        at: [70, 80],
+      },
+      {
+        id: 'romance.gesture',
+        name: 'Grand gesture',
+        purpose: 'One of them fights for it.',
+        at: [85, 95],
+      },
+      {
+        id: 'romance.ending',
+        name: 'Happy ending',
+        purpose: 'Happy ever after, or happy for now.',
+        at: [95, 100],
+      },
+    ],
+    rules: [
+      'The love story is the main plot, not a subplot.',
+      'The ending is happy ever after or happy for now.',
+    ],
+  },
 ];
+
+/** Whether a Structure fits the Book: what the app shortlists before any Model sees the catalogue. */
+export function fitsBook(s: Structure, book: BookDetails) {
+  return (
+    (!book.format || s.fits.formats.includes(book.format)) &&
+    (book.genres.length === 0 ||
+      book.genres.some((g) => s.fits.genres.includes(g)))
+  );
+}
 
 export const GENRES = [
   'Mystery',
