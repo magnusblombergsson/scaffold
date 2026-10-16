@@ -21,7 +21,7 @@ One story (a novel or short story), or a Series of them, with its own Story Bibl
 _Avoid_: Workspace, document, book (that is one volume of it)
 
 **Book**:
-One volume of a Project, with its own Manuscript. A Project's Books are in reading order, and Scenes, Chapters and Parts can move between them, keeping their Outline, Notes and details. A Book has the same details as a Part: a title, Status, Tags, its own Word target, image, Outline and Notes. Prose language, the Part label, Statuses, Custom fields and Key fields are the Project's, shared by every Book. In Writing, the Book is the one holding the Scene in focus. The Author may also add a Book from a Backup of another Project: its Books, Story Bible, Trash, Drawer and Conversations come into this Project, and the Author then chooses which of its Entries to Combine with those already here.
+One volume of a Project, with its own Manuscript. A Project's Books are in reading order, and Scenes, Chapters and Parts can move between them, keeping their Outline, Notes and details. A Book has the same details as a Part: a title, Status, Tags, its own Word target, image, Outline and Notes; besides those, its Genres and Format. Prose language, the Part label, Statuses, Custom fields and Key fields are the Project's, shared by every Book. In Writing, the Book is the one holding the Scene in focus. The Author may also add a Book from a Backup of another Project: its Books, Story Bible, Trash, Drawer and Conversations come into this Project, and the Author then chooses which of its Entries to Combine with those already here.
 _Avoid_: Volume, installment, novel (when meaning one of the Series)
 
 **Series**:
@@ -140,7 +140,7 @@ A few words beside a Character's Role saying what they are to the story, such as
 _Avoid_: Tagline, role description
 
 **Proposal**:
-A change to the Story Bible, an Outline, Notes or the Manuscript's structure suggested by the Assistant during a Conversation; it takes effect only when the Author accepts it, optionally after editing it. A Proposal to a field or Outline either replaces its text, appends text to it, or adds an item to a list; an append or add lands on whatever the target holds when accepted. The Author may also append a replacing Proposal's text instead of replacing. A replacing Proposal is stale when its target has changed since it was made. A Proposal may also add a Relation between two Entries already in the Story Bible; it never goes stale, but can be accepted only while the Relation's rules allow it, and of its parts only a free-text label can be edited. In Plan, a Proposal may also add, move, retitle or put in Trash a Scene, Chapter or Part of the Conversation's Book, never one in another Book; an added unit brings its title and Outline, and no Unit details. It never puts in Trash a unit that holds Prose or contains one, and never touches a Missing or Unplaced Scene, or one in Conflict. A move is stale when its unit, or the unit it is to follow, has moved since; a retitle when the title has changed; a move to Trash when the unit has changed. A Proposal that needs another still pending, such as a move into a Chapter only proposed, can be accepted only after it, and rejecting one rejects those that need it. An accepted Proposal can be undone while its target still holds the accepted values (an added unit holds no Prose, a moved one is still where it was put, a unit put in Trash is still there), and not while an accepted Proposal needs it; it then becomes pending again. A reply the Assistant didn't finish (cut short, failed partway, or empty) makes no Proposals. In a Series, a Proposal lands where the value the Conversation's Book sees comes from, the Entry's own value or the Evolution in effect, unless the Author accepts it "from this Book on", making it an Evolution; the Assistant never chooses that. Proposals never touch Prose or private notes, and touch Notes only by appending, in Plan.
+A change to the Story Bible, an Outline, Notes, the Manuscript's structure, a Word target, or a Book's Genres and Format suggested by the Assistant during a Conversation; it takes effect only when the Author accepts it, optionally after editing it. A Proposal to a field or Outline either replaces its text, appends text to it, or adds an item to a list; an append or add lands on whatever the target holds when accepted. The Author may also append a replacing Proposal's text instead of replacing. A replacing Proposal is stale when its target has changed since it was made. A Proposal may also add a Relation between two Entries already in the Story Bible; it never goes stale, but can be accepted only while the Relation's rules allow it, and of its parts only a free-text label can be edited. In Plan, a Proposal may also add, move, retitle or put in Trash a Scene, Chapter or Part of the Conversation's Book, never one in another Book; an added unit brings its title, its Outline and optionally a Word target, and no other Unit details. Plan may also propose setting or clearing the Word target of a Scene, Chapter, Part or the Manuscript of that Book, or setting the Book's Genres and Format; such a Proposal is stale when that value has changed since. It never puts in Trash a unit that holds Prose or contains one, and never touches a Missing or Unplaced Scene, or one in Conflict. A move is stale when its unit, or the unit it is to follow, has moved since; a retitle when the title has changed; a move to Trash when the unit has changed. A Proposal that needs another still pending, such as a move into a Chapter only proposed, can be accepted only after it, and rejecting one rejects those that need it. An accepted Proposal can be undone while its target still holds the accepted values (an added unit holds no Prose, a moved one is still where it was put, a unit put in Trash is still there), and not while an accepted Proposal needs it; it then becomes pending again. A reply the Assistant didn't finish (cut short, failed partway, or empty) makes no Proposals. In a Series, a Proposal lands where the value the Conversation's Book sees comes from, the Entry's own value or the Evolution in effect, unless the Author accepts it "from this Book on", making it an Evolution; the Assistant never chooses that. Proposals never touch Prose or private notes, and touch Notes only by appending, in Plan.
 _Avoid_: Suggestion (when meaning a Story Bible change), auto-save
 
 **Outline**:
@@ -160,15 +160,35 @@ A free word or phrase the Author attaches to Scenes, Chapters, Parts and Entries
 _Avoid_: Keyword, label, category
 
 **Word target**:
-The number of words the Author aims for in a Scene, a Chapter, a Part or a Book's Manuscript, shown beside its count; each unit has one or none. A Chapter's, Part's or the Manuscript's Word target is its own, not the sum of what it holds. Never sent to the Assistant.
+The number of words the Author aims for in a Scene, a Chapter, a Part or a Book's Manuscript, shown beside its count; each unit has one or none. A Chapter's, Part's or the Manuscript's Word target is its own, not the sum of what it holds. Sent to the Assistant only in Plan.
 _Avoid_: Goal, quota, target (that is what a Proposal changes)
+
+**Genre**:
+A kind of story a Book belongs to, chosen by the Author from a fixed list: Mystery, Crime, Thriller, Horror, Fantasy, Science fiction, Romance, Literary or Other. A Book may have several, or none.
+_Avoid_: Category, Tag (Tags are free words)
+
+**Format**:
+The length class of a Book: Flash fiction, Short story, Novelette, Novella or Novel, each with a rough band of words. A Book has one or none; a Series is not a Format.
+_Avoid_: Length, form, type
+
+**Structure**:
+A named pattern of Beats that a story can follow, such as Three-act, Save the Cat or Kishōtenketsu, from the catalogue built into the tool, credited to its source and described in the tool's own words. Each says which Genres and Formats it suits, and whether it fits one Book or a whole Series. Choosing no set Structure is also a choice.
+_Avoid_: Spine, template, formula, plot (when meaning the pattern)
+
+**Beat**:
+One step of a Structure: what it does in the story, where it falls (a share of the Book, or only its order among the other Beats), and whether it takes one Scene or a run of Scenes. Where a Scene falls is measured in planned words when every Scene of the Book has a Word target, and otherwise by Scene order.
+_Avoid_: Plot point, milestone, step
+
+**Genre convention**:
+Something a Genre's readers expect, from the catalogue built into the tool, such as a mystery's fair play or a romance's happy ending: a Scene that must exist, an order that must hold, or where something falls. A Book may follow several, with or without a Structure.
+_Avoid_: Overlay, trope, rule
 
 **Filter**:
 A narrowing of one list or view to the units matching chosen Statuses, Tags or Entry types, or Entries by the Book they first appear in; it changes only what the Author sees, never what the Assistant sees.
 _Avoid_: Search
 
 **Unit details**:
-What the Author sets on a Scene, Chapter, Part, Entry or the Manuscript with a click rather than by writing: its Status, Tags, Word target and image. When computers disagree on them, they merge one by one on their own, the later change of each winning; they never make a Conflict.
+What the Author sets on a Scene, Chapter, Part, Entry or the Manuscript with a click rather than by writing: its Status, Tags, Word target and image, and on a Book also its Genres and Format. When computers disagree on them, they merge one by one on their own, the later change of each winning; they never make a Conflict.
 _Avoid_: Metadata, properties, attributes, header keys
 
 **Todo**:
@@ -259,7 +279,7 @@ Mode where the Assistant asks the Author questions to capture facts about the st
 _Avoid_: Q&A, questionnaire
 
 **Plan**:
-Mode where the Assistant helps the Author choose a story structure for a Book and shape its Outline to it: it asks about the story's shape one question at a time, checks the plan, and turns what is agreed into Proposals to Outlines, Notes and the Manuscript's structure, never to the Story Bible. The Author chooses a focus (the Book, a Part or a Chapter) and may change it at any time. It reads the plan (Outlines, Notes, titles, Statuses and the Story Bible), never the Prose.
+Mode where the Assistant helps the Author choose a Structure and Genre conventions for a Book and shape its Outline to them: it asks about the story's shape one question at a time, checks the plan, and turns what is agreed into Proposals to Outlines, Notes, the Manuscript's structure, Word targets and the Book's Genres and Format, never to the Story Bible. The Author chooses a focus (the Book, a Part or a Chapter) and may change it at any time. It reads the plan (Outlines, Notes, titles, Statuses, Word targets, Genres, Format and the Story Bible), never the Prose.
 _Avoid_: Planner, Outliner, Plotting
 
 **Writing**:
