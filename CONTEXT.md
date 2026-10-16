@@ -144,11 +144,11 @@ A change to the Story Bible, an Outline, Notes, the Manuscript's structure, a Wo
 _Avoid_: Suggestion (when meaning a Story Bible change), auto-save
 
 **Outline**:
-Structural description of parts, chapters and scenes in bullet form (what happens, who, why). Not Prose; the Assistant may propose it.
+Structural description of parts, chapters and scenes in bullet form (what happens, who, why). Not Prose; the Assistant may propose it, in short bullets only: a Scene's at most six, each one short line, and a Chapter's, Part's or Book's naming its turns and threads rather than retelling its Scenes; never quoted speech, sensory description or the story's voice.
 _Avoid_: Beat sheet, synopsis, summary
 
 **Notes**:
-The Author's working notes on a Part, Chapter or Scene. Visible to the Assistant, unlike an Entry's private notes.
+The Author's working notes on a Part, Chapter or Scene. Visible to the Assistant, unlike an Entry's private notes. What Plan appends records only what the Author said or agreed, as bullets, never the Assistant's own ideas.
 _Avoid_: Comments (when meaning the Author's own), annotations
 
 **Status**:
