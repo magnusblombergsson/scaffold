@@ -1,0 +1,870 @@
+/* PROTOTYPE (throwaway): the Plan Room prototype's looks (#300). Tokens only,
+ * so light and dark follow the app's Theme Setting. Never merge to main. */
+
+.proto-plan {
+  display: flex;
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  gap: 0.5rem;
+  position: relative;
+  font-size: 0.92rem;
+}
+
+/* ------------------------------------------------ switcher */
+.proto-switcher {
+  position: fixed;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 6px;
+  border-radius: 999px;
+  background: #111;
+  color: #fff;
+  font:
+    13px/1.4 system-ui,
+    sans-serif;
+  box-shadow: 0 4px 16px rgb(0 0 0 / 35%);
+}
+.proto-switcher button {
+  all: unset;
+  cursor: pointer;
+  padding: 4px 9px;
+  border-radius: 999px;
+  color: #ddd;
+}
+.proto-switcher button:hover {
+  background: #333;
+}
+.proto-switcher-label {
+  min-width: 15rem;
+  text-align: center;
+}
+.proto-switcher-label b {
+  color: #ff3d7f;
+}
+
+/* ------------------------------------------------ shared atoms */
+.proto-plan-muted {
+  color: var(--muted);
+  font-size: 0.88em;
+}
+.proto-plan-hint {
+  color: var(--muted);
+  font-size: 0.85em;
+  margin: 0.2rem 0 0;
+}
+.proto-plan-needs {
+  color: var(--warning);
+  font-size: 0.85em;
+  margin: 0.25rem 0 0;
+}
+.proto-plan-conversation {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+.proto-plan-conv-head {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.5rem 1rem;
+  flex-wrap: wrap;
+}
+.proto-plan-messages {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  padding: 0.5rem 1rem 1rem;
+}
+.proto-plan-messages .message {
+  max-width: 46rem;
+}
+.proto-plan-messages .reply-text p + p {
+  margin-top: 0.6rem;
+}
+.proto-plan-empty {
+  margin: auto;
+  text-align: center;
+  color: var(--muted);
+  max-width: 26rem;
+}
+.proto-plan-starts,
+.proto-plan-next {
+  display: flex;
+  gap: 0.5rem;
+  justify-content: center;
+  flex-wrap: wrap;
+}
+.proto-plan-next {
+  justify-content: flex-start;
+}
+.proto-plan-marker {
+  align-self: center;
+  color: var(--muted);
+  font-size: 0.85em;
+}
+.proto-plan-composer {
+  display: flex;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem 0.75rem;
+  align-items: flex-end;
+}
+.proto-plan-composer textarea {
+  flex: 1;
+  resize: none;
+  font: inherit;
+}
+.proto-plan-findings {
+  margin: 0.5rem 0 0;
+  padding-left: 1.3rem;
+}
+.proto-plan-findings li + li {
+  margin-top: 0.45rem;
+}
+.proto-plan-units .link-button {
+  font-size: 0.85em;
+  margin-right: 0.4rem;
+}
+.proto-plan-batch {
+  margin-top: 0.5rem;
+}
+.proto-plan-acceptall {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: 8px;
+  background: var(--accent-tint);
+  font-size: 0.85em;
+}
+.proto-plan-proposal .proposal-title {
+  margin: 0;
+  font-weight: 600;
+}
+.proto-plan-proposal[data-state='rejected'] .proposal-title {
+  text-decoration: line-through;
+}
+.proto-plan-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  margin-top: 0.2rem;
+}
+.proto-plan-outline {
+  color: var(--fg);
+  font-size: 0.92em;
+  margin: 0.25rem 0;
+}
+.proto-plan-notes {
+  color: var(--muted);
+  font-size: 0.85em;
+  font-style: italic;
+}
+.proto-plan-meta {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+  align-items: center;
+  font-size: 0.85em;
+  margin: 0.2rem 0 0;
+}
+.proto-plan-proposal ins {
+  text-decoration: none;
+  background: color-mix(in srgb, var(--accent) 16%, transparent);
+  border-radius: 3px;
+  padding: 0 2px;
+}
+.proto-plan-proposal del,
+.proto-plan-row del {
+  color: var(--muted);
+}
+.proto-plan-edit {
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+  margin-top: 0.35rem;
+}
+.proto-plan-edit input,
+.proto-plan-edit textarea {
+  font: inherit;
+}
+
+.proto-plan-beat {
+  display: inline-block;
+  padding: 0 0.4rem;
+  border-radius: 999px;
+  font-size: 0.75rem;
+  line-height: 1.35rem;
+  white-space: nowrap;
+  background: color-mix(in srgb, var(--status-purple) 18%, transparent);
+  color: var(--fg);
+}
+.proto-plan-beat[data-convention] {
+  background: color-mix(in srgb, var(--status-teal) 20%, transparent);
+}
+.proto-plan-beat[data-ghost] {
+  background: transparent;
+  outline: 1.5px dashed var(--accent);
+  outline-offset: -1.5px;
+}
+.proto-plan-beat[data-gone] {
+  text-decoration: line-through;
+  opacity: 0.6;
+}
+.proto-plan-ghost-value {
+  margin-left: 0.4rem;
+  color: var(--accent);
+  font-size: 0.85em;
+  font-style: italic;
+}
+.proto-plan-check {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.9em;
+}
+
+/* Book details */
+.proto-plan-book {
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+.proto-plan-book > label {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  font-size: 0.85em;
+  color: var(--muted);
+}
+.proto-plan-book select,
+.proto-plan-book input[type='number'] {
+  font: inherit;
+  color: var(--fg);
+}
+.proto-plan-book fieldset {
+  border: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.15rem 0.5rem;
+}
+.proto-plan-book legend {
+  font-size: 0.85em;
+  color: var(--muted);
+  margin-bottom: 0.2rem;
+}
+.proto-plan-book.inline {
+  flex-direction: row;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 1rem;
+}
+.proto-plan-book.inline > label {
+  flex-direction: row;
+  align-items: center;
+  gap: 0.4rem;
+}
+.proto-plan-book.inline fieldset {
+  display: flex;
+  gap: 0.6rem;
+  align-items: center;
+}
+.proto-plan-book.inline fieldset legend {
+  float: left;
+  margin: 0 0.3rem 0 0;
+}
+
+/* Scene details */
+.proto-plan-scene-details {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.75rem;
+}
+.proto-plan-sd-head {
+  display: flex;
+  justify-content: space-between;
+}
+.proto-plan-kind {
+  font-size: 0.8em;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--muted);
+}
+.proto-plan-sd-title {
+  font: inherit;
+  font-size: 1.05rem;
+  font-weight: 600;
+  border: none;
+  border-bottom: 1px dashed var(--rule);
+  background: transparent;
+  color: var(--fg);
+}
+.proto-plan-sd-row {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  font-size: 0.9em;
+}
+.proto-plan-sd-row input {
+  width: 6rem;
+  font: inherit;
+}
+.proto-plan-sd-beats {
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+}
+
+/* The tree */
+.proto-plan-tree {
+  font-size: 0.9rem;
+  user-select: none;
+}
+.proto-plan-row {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.18rem 0.4rem;
+  border-radius: 5px;
+  cursor: default;
+  flex-wrap: wrap;
+}
+.proto-plan-row:hover {
+  background: var(--hover);
+}
+.proto-plan-row[data-selected] {
+  background: var(--accent-tint);
+  outline: 1px solid color-mix(in srgb, var(--accent) 40%, transparent);
+}
+.proto-plan-row[data-lit] {
+  outline: 2px solid var(--accent);
+}
+.proto-plan-row.book {
+  font-weight: 600;
+  justify-content: space-between;
+}
+.proto-plan-node[data-kind='part'] > .proto-plan-row {
+  font-weight: 600;
+  margin-top: 0.3rem;
+}
+.proto-plan-row[data-moving] .proto-plan-title,
+.proto-plan-row[data-trashing] .proto-plan-title {
+  color: var(--muted);
+}
+.proto-plan-row[data-trashing] .proto-plan-title {
+  text-decoration: line-through;
+}
+.proto-plan-row.ghost {
+  border: 1.5px dashed var(--accent);
+  background: var(--accent-tint);
+  margin: 2px 0;
+}
+.proto-plan-kind-dot {
+  width: 0.5rem;
+  height: 0.5rem;
+  border-radius: 2px;
+  background: var(--muted);
+  flex-shrink: 0;
+}
+.proto-plan-kind-dot[data-kind='part'] {
+  background: var(--status-blue);
+}
+.proto-plan-kind-dot[data-kind='chapter'] {
+  background: var(--status-orange);
+}
+.proto-plan-kind-dot[data-kind='scene'] {
+  border-radius: 50%;
+}
+.proto-plan-title {
+  flex: 0 1 auto;
+}
+.proto-plan-prose {
+  color: var(--muted);
+  font-size: 0.8em;
+}
+.proto-plan-words {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 0.78em;
+  font-variant-numeric: tabular-nums;
+}
+.proto-plan-tag {
+  font-size: 0.7rem;
+  padding: 0 0.35rem;
+  border-radius: 4px;
+  border: 1px solid var(--pill-line);
+  color: var(--muted);
+}
+.proto-plan-tag.accent {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.proto-plan-tag.danger {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+.proto-plan-row-outline {
+  margin: 0 0 0.2rem;
+  color: var(--muted);
+  font-size: 0.85em;
+}
+.proto-plan-inline-ghost .proposal-card {
+  margin: 0.15rem 0 0.35rem;
+  padding: 0.3rem 0.5rem;
+  font-size: 0.88em;
+}
+.proto-plan-inline-ghost .proposal-card.decided {
+  display: none;
+}
+
+/* Beat list */
+.proto-plan-beats {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+.proto-plan-beats li {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 0 0.5rem;
+}
+.proto-plan-beat-name {
+  font-weight: 600;
+}
+.proto-plan-beats li[data-empty] .proto-plan-beat-name {
+  color: var(--warning);
+}
+.proto-plan-beat-scenes {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+/* ------------------------------------------------ A */
+.proto-plan[data-variant='A'] .proto-plan-list {
+  width: 210px;
+}
+.proto-plan-list .room-conversation[aria-current] {
+  background: var(--accent-tint);
+}
+.proto-plan-list .room-detail {
+  display: block;
+  color: var(--muted);
+  font-size: 0.85em;
+}
+.proto-plan-reference {
+  width: 360px;
+  display: flex;
+  flex-direction: column;
+}
+.proto-plan-tabs {
+  margin: 0.5rem 0.75rem 0;
+}
+.proto-plan-reference .reference-body {
+  padding: 0.75rem;
+  overflow-y: auto;
+}
+
+/* ------------------------------------------------ B */
+.proto-plan-b-main {
+  min-width: 0;
+}
+.proto-plan-b-strip {
+  display: flex;
+  align-items: center;
+  gap: 1.2rem;
+  padding: 0.6rem 1rem;
+  border-bottom: 1px solid var(--line);
+  flex-wrap: wrap;
+}
+.proto-plan-b-body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+.proto-plan-b-tree {
+  flex: 1;
+  overflow-y: auto;
+  padding: 0.6rem 1rem 3rem;
+}
+.proto-plan-b-details {
+  width: 300px;
+  border-left: 1px solid var(--line);
+  overflow-y: auto;
+}
+.proto-plan-b-panel {
+  width: 380px;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--sheet);
+  border-radius: 8px;
+  box-shadow: var(--sheet-shadow);
+}
+.proto-plan-b-panel .binder-title {
+  margin: 0;
+  padding: 0.6rem 1rem 0;
+}
+.proto-plan-links {
+  list-style: none;
+  margin: 0.4rem 0 0;
+  padding: 0;
+  font-size: 0.85em;
+}
+.proto-plan-links li {
+  padding: 0.15rem 0.4rem;
+  border-left: 2px solid var(--accent);
+  margin-top: 0.15rem;
+  cursor: default;
+}
+.proto-plan-links li[data-state='accepted'] {
+  border-color: var(--muted);
+  color: var(--muted);
+}
+.proto-plan-links li[data-state='rejected'] {
+  border-color: var(--muted);
+  color: var(--muted);
+  text-decoration: line-through;
+}
+.proto-plan-links li[data-lit] {
+  background: var(--accent-tint);
+}
+.proto-plan-rail {
+  width: 112px;
+  flex-shrink: 0;
+  padding: 0.8rem 0 0.8rem 0.6rem;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--line);
+}
+.proto-plan-rail-track {
+  position: relative;
+  flex: 1;
+  border-left: 2px solid var(--line);
+}
+.proto-plan-rail-band {
+  position: absolute;
+  left: -2px;
+  right: 0.4rem;
+  border-left: 3px solid
+    color-mix(in srgb, var(--status-purple) 70%, transparent);
+  background: color-mix(in srgb, var(--status-purple) 10%, transparent);
+  font-size: 0.68rem;
+  line-height: 1.1;
+  padding-left: 0.25rem;
+  overflow: visible;
+  white-space: nowrap;
+}
+.proto-plan-rail-pin {
+  all: unset;
+  position: absolute;
+  left: -7px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--accent);
+  cursor: pointer;
+  border: 2px solid var(--sheet);
+}
+.proto-plan-rail-note {
+  padding-top: 0.3rem;
+}
+
+/* ------------------------------------------------ C */
+.proto-plan-c {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  gap: 0.5rem;
+}
+.proto-plan-c-top {
+  position: relative;
+  background: var(--sheet);
+  border-radius: 8px;
+  box-shadow: var(--sheet-shadow);
+  padding: 0.6rem 1rem 0.9rem;
+}
+.proto-plan-c-head {
+  position: relative;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  flex-wrap: wrap;
+  margin-bottom: 0.5rem;
+}
+.proto-plan-c-popover {
+  position: absolute;
+  top: 2.2rem;
+  left: 8rem;
+  z-index: 20;
+  width: 360px;
+  padding: 0.8rem;
+  background: var(--sheet);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--float-shadow);
+}
+.proto-plan-c-sheet {
+  position: absolute;
+  right: 0.6rem;
+  top: 0.6rem;
+  z-index: 15;
+  width: 320px;
+  max-height: calc(100% - 1.2rem);
+  overflow-y: auto;
+  background: var(--sheet);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  box-shadow: var(--float-shadow);
+}
+.proto-plan-timeline {
+  position: relative;
+}
+.proto-plan-tl-beats {
+  position: relative;
+  height: 4rem;
+}
+.proto-plan-tl-band {
+  position: absolute;
+  height: 1.15rem;
+  border-left: 3px solid var(--status-purple);
+  background: color-mix(in srgb, var(--status-purple) 14%, transparent);
+  font-size: 0.7rem;
+  white-space: nowrap;
+  padding-left: 0.2rem;
+  overflow: visible;
+}
+.proto-plan-tl-band[data-convention] {
+  border-color: var(--status-teal);
+  background: color-mix(in srgb, var(--status-teal) 14%, transparent);
+}
+.proto-plan-tl-guide {
+  position: absolute;
+  top: 4rem;
+  bottom: 0;
+  background: color-mix(in srgb, var(--status-purple) 7%, transparent);
+  pointer-events: none;
+}
+.proto-plan-tl-lane {
+  position: relative;
+  height: 1.4rem;
+  margin-top: 2px;
+}
+.proto-plan-tl-lane.scenes {
+  height: 4.6rem;
+}
+.proto-plan-tl-group {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  font-size: 0.75rem;
+  padding: 0 0.3rem;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  border-radius: 3px;
+  box-sizing: border-box;
+  border: 1px solid var(--sheet);
+}
+.proto-plan-tl-lane[data-kind='part'] .proto-plan-tl-group {
+  background: color-mix(in srgb, var(--status-blue) 22%, transparent);
+  font-weight: 600;
+}
+.proto-plan-tl-lane[data-kind='chapter'] .proto-plan-tl-group {
+  background: color-mix(in srgb, var(--status-orange) 18%, transparent);
+}
+.proto-plan-tl-scene {
+  all: unset;
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  box-sizing: border-box;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--desk);
+  font-size: 0.72rem;
+  padding: 0.15rem 0.25rem;
+  overflow: hidden;
+  cursor: pointer;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.proto-plan-tl-scene > span {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.proto-plan-tl-scene[data-prose] {
+  background: color-mix(in srgb, var(--fg) 10%, var(--desk));
+}
+.proto-plan-tl-scene[data-selected] {
+  outline: 2px solid var(--accent);
+}
+.proto-plan-tl-scene[data-new] {
+  border: 1.5px dashed var(--accent);
+  background: var(--accent-tint);
+}
+.proto-plan-tl-scene[data-moved] {
+  border: 1.5px solid var(--accent);
+}
+.proto-plan-tl-pin {
+  font-style: normal;
+  font-size: 0.65rem;
+  border-radius: 999px;
+  padding: 0 0.3rem;
+  background: color-mix(in srgb, var(--status-purple) 25%, transparent);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.proto-plan-tl-pin[data-convention] {
+  background: color-mix(in srgb, var(--status-teal) 25%, transparent);
+}
+.proto-plan-c-bottom {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  gap: 0.5rem;
+}
+.proto-plan-c-conv {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--sheet);
+  border-radius: 8px;
+  box-shadow: var(--sheet-shadow);
+}
+.proto-plan-c-count {
+  margin: 0.4rem 0 0;
+}
+.proto-plan-changes {
+  width: 420px;
+  overflow-y: auto;
+  background: var(--sheet);
+  border-radius: 8px;
+  box-shadow: var(--sheet-shadow);
+  padding: 0.6rem 0.8rem;
+}
+.proto-plan-changes-head {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  position: sticky;
+  top: -0.6rem;
+  background: var(--sheet);
+  padding: 0.3rem 0;
+  z-index: 1;
+}
+.proto-plan-changes-head button {
+  margin-left: auto;
+}
+.proto-plan-change-list,
+.proto-plan-change-list ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.proto-plan-needs-mark {
+  font-size: 0.75em;
+  color: var(--muted);
+}
+
+/* ------------------------------------------------ state readout */
+.proto-plan-state {
+  position: fixed;
+  right: 12px;
+  bottom: 14px;
+  z-index: 9999;
+  font:
+    12px/1.4 system-ui,
+    sans-serif;
+}
+.proto-plan-state-toggle {
+  all: unset;
+  cursor: pointer;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #111;
+  color: #ddd;
+}
+.proto-plan-state-body {
+  position: absolute;
+  right: 0;
+  bottom: 2rem;
+  width: 340px;
+  max-height: 60vh;
+  overflow: auto;
+  background: #111;
+  color: #ddd;
+  padding: 0.6rem;
+  border-radius: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+}
+.proto-plan-state-body button {
+  all: unset;
+  cursor: pointer;
+  padding: 3px 8px;
+  border: 1px solid #444;
+  border-radius: 6px;
+}
+.proto-plan-state-body button:hover {
+  background: #333;
+}
+.proto-plan-state-body pre {
+  white-space: pre-wrap;
+  font-size: 11px;
+  margin: 0.3rem 0 0;
+}
+
+/* While the Plan tab is open, the real Rooms stay mounted but hidden. */
+.project-body[data-proto-plan] > .room:not(.proto-plan-room) {
+  display: none;
+}
+
+.proto-plan .binder-title {
+  flex: none;
+  font-weight: 600;
+}
+.proto-plan-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  padding: 0.5rem;
+}
+.proto-plan-list .room-conversations {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.proto-plan-list .room-conversation {
+  padding: 0.3rem 0.4rem;
+  border-radius: 5px;
+}
+.proto-plan-rail-band[data-convention] {
+  left: 50%;
+  border-left-color: var(--status-teal);
+  background: color-mix(in srgb, var(--status-teal) 10%, transparent);
+}

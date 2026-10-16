@@ -85,6 +85,12 @@ import { ImportStoryBibleDialog } from './ImportStoryBibleDialog';
 import { ImportDialog } from './ImportDialog';
 import { chapterInsertion, sceneInsertion, type Current } from './insertion';
 import { InterviewRoom } from './InterviewRoom';
+// PROTOTYPE (throwaway): the Plan Room prototype (#300), development only.
+import { PlanRoom } from './prototype-plan-room/PlanRoom';
+import { PlanSwitcher } from './prototype-plan-room/PlanSwitcher';
+const protoEnv = (import.meta as unknown as { env: Record<string, unknown> })
+  .env;
+const PROTO_PLAN = protoEnv.DEV === true || protoEnv.VITE_PROTO === '1';
 import { Notices } from './Notices';
 import { OutlineNotes } from './OutlineNotes';
 import { OverviewPane } from './OverviewPane';
@@ -478,6 +484,7 @@ function ProjectView({
   /** What the Project calls a Part, as in “Act”. */
   const partNamed = partName(manuscript.partLabel);
   const [room, setRoom] = useState<Room>('writing');
+  const [planOpen, setPlanOpen] = useState(false);
   /**
    * The Rooms shown so far. Each stays mounted, hidden while another is
    * shown, so that a reply streaming in, a draft, a Conversation or an
@@ -601,6 +608,7 @@ function ProjectView({
   }, []);
 
   function switchRoom(next: Room) {
+    setPlanOpen(false);
     flushPendingEdits();
     setPeek(null);
     setTargetPeek(null);
@@ -1655,13 +1663,18 @@ function ProjectView({
             {ROOMS.map((value) => (
               <button
                 key={value}
-                aria-pressed={room === value}
+                aria-pressed={!planOpen && room === value}
                 title={withShortcut(ROOM_LABELS[value], SHORTCUTS[value], MAC)}
                 onClick={() => enterRoom(value)}
               >
                 {ROOM_LABELS[value]}
               </button>
             ))}
+            {PROTO_PLAN && (
+              <button aria-pressed={planOpen} onClick={() => setPlanOpen(true)}>
+                Plan
+              </button>
+            )}
           </div>
           <span className="scene-title">
             {room === 'storyBible'
@@ -1717,7 +1730,13 @@ function ProjectView({
           }}
         />
         {error && <p role="alert">{error}</p>}
-        <div className="project-body">
+        <div className="project-body" data-proto-plan={planOpen || undefined}>
+          {PROTO_PLAN && planOpen && (
+            <div className="room proto-plan-room">
+              <PlanRoom />
+              <PlanSwitcher />
+            </div>
+          )}
           <ProposalTargetContext.Provider value={peekAtTarget}>
             {visited.has('brainstorm') && (
               <div className="room" hidden={room !== 'brainstorm'}>
