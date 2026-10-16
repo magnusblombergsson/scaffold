@@ -279,8 +279,12 @@ Mode where the Assistant asks the Author questions to capture facts about the st
 _Avoid_: Q&A, questionnaire
 
 **Plan**:
-Mode where the Assistant helps the Author choose a Structure and Genre conventions for a Book and shape its Outline to them: it asks about the story's shape one question at a time, checks the plan, and turns what is agreed into Proposals to Outlines, Notes, the Manuscript's structure, Word targets, Scenes' Beats and the Book's Genres, Format, Structure and Genre conventions, never to the Story Bible. The Author chooses a focus (the Book, a Part or a Chapter) and may change it at any time. It reads the plan (Outlines, Notes, titles, Statuses, Word targets, Genres, Format, the Structure, Genre conventions and Beats, and the Story Bible), never the Prose.
+Mode where the Assistant helps the Author choose a Structure and Genre conventions for a Book and shape its Outline to them: it asks about the story's shape one question at a time, makes Plan checks, and turns what is agreed into Proposals to Outlines, Notes, the Manuscript's structure, Word targets, Scenes' Beats and the Book's Genres, Format, Structure and Genre conventions, never to the Story Bible. The Author chooses a focus (the Book, a Part or a Chapter) and may change it at any time. It reads the plan (Outlines, Notes, titles, Statuses, Word targets, Genres, Format, the Structure, Genre conventions and Beats, and the Story Bible), never the Prose.
 _Avoid_: Planner, Outliner, Plotting
+
+**Plan check**:
+An examination of the plan within a Plan Conversation's focus, answered as one reply of a short, ordered list of Findings, most consequential first; asked for by the Author, or made unasked when Plan opens on a Book already outlined. It looks for Beats missing, doubled or out of place, a Genre convention's order or position not holding, Outlines contradicting the Story Bible, units without an Outline or further along by Status than their Outline, stretches thin or crowded against the Beats, threads raised and never paid off, and Scenes that perform no Beat and move no thread. Notes are read as the Author's intent, quoted but never faulted. Where Scenes carry no Beats, it reads from their Outlines where the Beats seem to fall; with no Structure chosen it offers to find one; with No set Structure it says nothing of Beats. It makes no Proposals: those come after, on what the Author chooses to act on.
+_Avoid_: Review (that is Writing's), structure check, audit, analysis
 
 **Writing**:
 Mode where the Author writes Prose in the editor and the Assistant advises on scenes and chapters — including revision of what is already written — pointing out what is missing or excessive.
@@ -291,5 +295,5 @@ An examination of one Scene or one Chapter that the Author asks for in Writing m
 _Avoid_: Analysis, critique, feedback
 
 **Finding**:
-One point in a Review: a contradiction with the Story Bible or Outline, something missing against the Outline, something excessive, a line out of a character's Voice, or an Outline point not yet covered. It points at the Author's own Prose and usually ends in a question; it never proposes replacement Prose.
+One point in a Review or a Plan check. In a Review: a contradiction with the Story Bible or Outline, something missing against the Outline, something excessive, a line out of a character's Voice, or an Outline point not yet covered, pointing at the Author's own Prose. In a Plan check: one thing in the plan, naming the units it concerns. It usually ends in a question; it never proposes replacement Prose, and is no Proposal.
 _Avoid_: Issue, error, suggestion
