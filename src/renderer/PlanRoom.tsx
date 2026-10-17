@@ -1,4 +1,4 @@
-import { useContext, useEffect, useMemo, useState } from 'react';
+import { useContext, useEffect, useMemo, useRef, useState } from 'react';
 import type { PanelWidths } from '../shared/api';
 import {
   OPEN_FOCUS,
@@ -60,6 +60,18 @@ import { RoomList } from './RoomList';
 import { useMirror, useOutlines, useRun } from './use-project';
 
 /**
+ * A Scene to open Plan on, from a Beat chosen in Writing (spec: Outline
+ * planner §8): its Chapter, the focus, and in a Series its Book; a new
+ * `count` for each time it is asked.
+ */
+export type PlanOpening = {
+  sceneId: string;
+  chapterId: string;
+  book?: string;
+  count: number;
+};
+
+/**
  * The Plan Room (spec: Outline planner §7): its Conversations on the left;
  * in the centre, the Book's Outline tree, with the Outline Proposals of the
  * Conversation open drawn under their unit and decided there, and the
@@ -76,6 +88,7 @@ export function PlanRoom({
   title,
   language,
   pane,
+  opening,
   onAddProvider,
   onAddTodo,
 }: {
@@ -89,6 +102,8 @@ export function PlanRoom({
   language: ProseLanguage;
   /** The width of a side pane, and how to resize it. */
   pane(key: keyof PanelWidths): PaneSize;
+  /** The Scene last asked to open Plan on, from Writing. */
+  opening?: PlanOpening;
   onAddProvider(): void;
   /** Starts a Todo from a Plan check's Finding: its text, linked to the first unit it names. */
   onAddTodo(text: string, link: TodoLink | null): void;
@@ -203,6 +218,34 @@ export function PlanRoom({
     return { proposals: byUnit, adds, moves };
   }, [current]);
 
+  /**
+   * Opens Plan on the Scene asked for from Writing: its Chapter the focus,
+   * of the Plan open while that is its focus already, or else of a new one,
+   * and the Scene selected and brought into view once the tree shows it.
+   * Asked while a reply streams in, it waits until the reply is done.
+   */
+  const handled = useRef<PlanOpening | undefined>(undefined);
+  const revealing = useRef<string | null>(null);
+  useEffect(() => {
+    if (!opening || opening === handled.current || streaming !== null) return;
+    handled.current = opening;
+    const next: InterviewFocus = { kind: 'chapter', id: opening.chapterId };
+    const kept =
+      current &&
+      valueOf(planFocus(current.focus)) === valueOf(next) &&
+      conversation.book === opening.book;
+    if (!kept) conversation.startNew(opening.book);
+    setChosen(next);
+    setSelected(opening.sceneId);
+    revealing.current = opening.sceneId;
+    // Only a new opening is acted on, not the Plan it leaves open changing.
+  }, [opening, streaming]);
+  useEffect(() => {
+    if (revealing.current && scrollToUnit(revealing.current)) {
+      revealing.current = null;
+    }
+  }, [tree, selected]);
+
   /** Sets the focus from the picker: of the Plan open, or of a new one. */
   function pick(value: string) {
     const next = planFocus(focusOfValue(value));
@@ -213,9 +256,7 @@ export function PlanRoom({
   /** Highlights the unit `id` in the tree and brings it into view. */
   function point(id: string) {
     setLit(id);
-    document
-      .querySelector(`[data-plan-unit="${CSS.escape(id)}"]`)
-      ?.scrollIntoView?.({ block: 'center' });
+    scrollToUnit(id);
   }
 
   return (
@@ -698,6 +739,13 @@ function allNodes(nodes: PlanNode[]): PlanNode[] {
 /** The unit `id` among `nodes` or under them, if there. */
 function findNode(nodes: PlanNode[], id: string | null): PlanNode | null {
   return allNodes(nodes).find((n) => n.id === id) ?? null;
+}
+
+/** Brings the unit `id` into view in the tree; whether the tree shows it. */
+function scrollToUnit(id: string): boolean {
+  const unit = document.querySelector(`[data-plan-unit="${CSS.escape(id)}"]`);
+  unit?.scrollIntoView?.({ block: 'center' });
+  return !!unit;
 }
 
 /**

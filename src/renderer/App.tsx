@@ -85,7 +85,9 @@ import { ImportStoryBibleDialog } from './ImportStoryBibleDialog';
 import { ImportDialog } from './ImportDialog';
 import { chapterInsertion, sceneInsertion, type Current } from './insertion';
 import { InterviewRoom } from './InterviewRoom';
-import { PlanRoom } from './PlanRoom';
+import { PlanRoom, type PlanOpening } from './PlanRoom';
+import { WritingBeatsContext } from './Beats';
+import { sceneBeatsInWriting } from '../shared/beat-measure';
 import { Notices } from './Notices';
 import { OutlineNotes } from './OutlineNotes';
 import { OverviewPane } from './OverviewPane';
@@ -608,6 +610,28 @@ function ProjectView({
     setRoom(next);
     setVisited((visited) => new Set(visited).add(next));
   }
+
+  /** The Scene Plan was last asked to open on, from a Beat in Writing. */
+  const [planOpening, setPlanOpening] = useState<PlanOpening>();
+  /**
+   * Writing's Beat chips: which of a Scene's Beats show, and opening Plan on
+   * the Scene, its Chapter the focus and the Scene selected.
+   */
+  const writingBeats = {
+    manuscript,
+    onOpenPlan(sceneId: string) {
+      const shown = sceneBeatsInWriting(manuscript, sceneId);
+      if (!shown) return;
+      const { chapterId, book } = shown;
+      setPlanOpening((last) => ({
+        sceneId,
+        chapterId,
+        book,
+        count: (last?.count ?? 0) + 1,
+      }));
+      enterRoom('plan');
+    },
+  };
 
   /** Whether the Prose takes focus back once Writing shows again. */
   const refocusProse = useRef(false);
@@ -1762,6 +1786,7 @@ function ProjectView({
                   title={project.displayName}
                   language={language}
                   pane={pane}
+                  opening={planOpening}
                   onAddProvider={onAddProvider}
                   // Plan has no Todos dock: a Finding's Todo starts in Writing's.
                   onAddTodo={(text, link) => {
@@ -1774,353 +1799,357 @@ function ProjectView({
           </ProposalTargetContext.Provider>
           {visited.has('writing') && (
             <div className="room" hidden={room !== 'writing'} ref={writingRoom}>
-              {!docked.left && (
-                <div
-                  role="group"
-                  aria-label="Left pane, collapsed"
-                  className="edge-tabs edge-tabs-left"
-                >
-                  <button onClick={() => dockLeftPaneAt('manuscript')}>
-                    Manuscript
-                  </button>
-                </div>
-              )}
-              <aside
-                className="left-pane with-todo-dock"
-                hidden={!docked.left}
-                style={{ width: binderWidth }}
-              >
-                <div className="left-pane-bar">
+              <WritingBeatsContext.Provider value={writingBeats}>
+                {!docked.left && (
                   <div
-                    role="tablist"
-                    aria-label="Left pane"
-                    className="tabs"
-                    onKeyDown={(event) => {
-                      const next = tabAfter(event.key, tab, tabs);
-                      if (!next) return;
-                      event.preventDefault();
-                      setTab(next);
-                      document.getElementById(`${next}-tab`)?.focus();
-                    }}
+                    role="group"
+                    aria-label="Left pane, collapsed"
+                    className="edge-tabs edge-tabs-left"
                   >
-                    <button
-                      role="tab"
-                      aria-selected={tab === 'manuscript'}
-                      tabIndex={tab === 'manuscript' ? 0 : -1}
-                      id="manuscript-tab"
-                      onClick={() => setTab('manuscript')}
-                    >
+                    <button onClick={() => dockLeftPaneAt('manuscript')}>
                       Manuscript
                     </button>
-                    {tabs.includes('conflicts') && (
+                  </div>
+                )}
+                <aside
+                  className="left-pane with-todo-dock"
+                  hidden={!docked.left}
+                  style={{ width: binderWidth }}
+                >
+                  <div className="left-pane-bar">
+                    <div
+                      role="tablist"
+                      aria-label="Left pane"
+                      className="tabs"
+                      onKeyDown={(event) => {
+                        const next = tabAfter(event.key, tab, tabs);
+                        if (!next) return;
+                        event.preventDefault();
+                        setTab(next);
+                        document.getElementById(`${next}-tab`)?.focus();
+                      }}
+                    >
                       <button
                         role="tab"
-                        aria-selected={tab === 'conflicts'}
-                        tabIndex={tab === 'conflicts' ? 0 : -1}
-                        id="conflicts-tab"
-                        onClick={() => setTab('conflicts')}
+                        aria-selected={tab === 'manuscript'}
+                        tabIndex={tab === 'manuscript' ? 0 : -1}
+                        id="manuscript-tab"
+                        onClick={() => setTab('manuscript')}
                       >
-                        Conflicts
-                        {conflicts.length > 0 && (
-                          <span className="badge">{conflicts.length}</span>
-                        )}
+                        Manuscript
                       </button>
-                    )}
+                      {tabs.includes('conflicts') && (
+                        <button
+                          role="tab"
+                          aria-selected={tab === 'conflicts'}
+                          tabIndex={tab === 'conflicts' ? 0 : -1}
+                          id="conflicts-tab"
+                          onClick={() => setTab('conflicts')}
+                        >
+                          Conflicts
+                          {conflicts.length > 0 && (
+                            <span className="badge">{conflicts.length}</span>
+                          )}
+                        </button>
+                      )}
+                      <button
+                        role="tab"
+                        aria-selected={tab === 'trash'}
+                        tabIndex={tab === 'trash' ? 0 : -1}
+                        id="trash-tab"
+                        onClick={() => setTab('trash')}
+                      >
+                        Trash{trash.length > 0 && ` (${trash.length})`}
+                      </button>
+                      <button
+                        role="tab"
+                        aria-selected={tab === 'drawer'}
+                        tabIndex={tab === 'drawer' ? 0 : -1}
+                        id="drawer-tab"
+                        onClick={() => setTab('drawer')}
+                      >
+                        Drawer{drawer.length > 0 && ` (${drawer.length})`}
+                      </button>
+                    </div>
                     <button
-                      role="tab"
-                      aria-selected={tab === 'trash'}
-                      tabIndex={tab === 'trash' ? 0 : -1}
-                      id="trash-tab"
-                      onClick={() => setTab('trash')}
+                      className="collapse-pane"
+                      aria-label="Collapse the left pane"
+                      title={withShortcut(
+                        'Collapse the left pane',
+                        SHORTCUTS.leftPane,
+                        MAC,
+                      )}
+                      onClick={() => togglePane('left')}
                     >
-                      Trash{trash.length > 0 && ` (${trash.length})`}
-                    </button>
-                    <button
-                      role="tab"
-                      aria-selected={tab === 'drawer'}
-                      tabIndex={tab === 'drawer' ? 0 : -1}
-                      id="drawer-tab"
-                      onClick={() => setTab('drawer')}
-                    >
-                      Drawer{drawer.length > 0 && ` (${drawer.length})`}
+                      «
                     </button>
                   </div>
-                  <button
-                    className="collapse-pane"
-                    aria-label="Collapse the left pane"
-                    title={withShortcut(
-                      'Collapse the left pane',
-                      SHORTCUTS.leftPane,
-                      MAC,
+                  <div role="tabpanel" aria-labelledby={`${tab}-tab`}>
+                    {tab === 'manuscript' ? (
+                      <Binder
+                        manuscript={manuscript}
+                        entries={entries}
+                        selected={selected}
+                        onSelect={select}
+                        conflicted={conflicted}
+                        renaming={renaming}
+                        onRename={setRenaming}
+                        onUndo={undoLatest}
+                        statuses={statuses}
+                        onSetStatus={(unitId, statusId) =>
+                          void setStatus(unitId, statusId)
+                        }
+                        onEditTags={setTagging}
+                        onSetWordTarget={setSettingWordTarget}
+                        onAddTodo={startWritingTodo}
+                      />
+                    ) : tab === 'conflicts' ? (
+                      <ConflictList
+                        conflicts={conflicts}
+                        manuscript={manuscript}
+                        entries={entries}
+                        open={resolvingConflict ? resolving : null}
+                        onOpen={(ref) => {
+                          flushPendingEdits();
+                          setResolving(ref);
+                        }}
+                      />
+                    ) : (
+                      <TrashView
+                        key={tab}
+                        place={tab === 'drawer' ? 'drawer' : 'trash'}
+                        items={tab === 'drawer' ? drawer : trash}
+                        partLabel={manuscript.partLabel}
+                        reveal={trashReveal}
+                        onRestore={(item) =>
+                          change(
+                            (project) => project.restore(item.id),
+                            item.kind === 'version'
+                              ? `Restored ${trashTitle(item)}`
+                              : `Restored “${item.title}”`,
+                          )
+                        }
+                        onMove={(item) => {
+                          const to = tab === 'drawer' ? 'trash' : 'drawer';
+                          return change(
+                            (project) =>
+                              project.moveBetweenTrashAndDrawer(item.id, to),
+                            movedText(item, to),
+                          );
+                        }}
+                        {...(tab === 'trash' && {
+                          onEmpty: emptyTrash,
+                          emptying,
+                        })}
+                      />
                     )}
-                    onClick={() => togglePane('left')}
-                  >
-                    «
-                  </button>
-                </div>
-                <div role="tabpanel" aria-labelledby={`${tab}-tab`}>
-                  {tab === 'manuscript' ? (
-                    <Binder
-                      manuscript={manuscript}
-                      entries={entries}
-                      selected={selected}
-                      onSelect={select}
-                      conflicted={conflicted}
-                      renaming={renaming}
-                      onRename={setRenaming}
-                      onUndo={undoLatest}
-                      statuses={statuses}
-                      onSetStatus={(unitId, statusId) =>
-                        void setStatus(unitId, statusId)
-                      }
-                      onEditTags={setTagging}
-                      onSetWordTarget={setSettingWordTarget}
-                      onAddTodo={startWritingTodo}
-                    />
-                  ) : tab === 'conflicts' ? (
-                    <ConflictList
-                      conflicts={conflicts}
-                      manuscript={manuscript}
-                      entries={entries}
-                      open={resolvingConflict ? resolving : null}
-                      onOpen={(ref) => {
-                        flushPendingEdits();
-                        setResolving(ref);
-                      }}
-                    />
-                  ) : (
-                    <TrashView
-                      key={tab}
-                      place={tab === 'drawer' ? 'drawer' : 'trash'}
-                      items={tab === 'drawer' ? drawer : trash}
-                      partLabel={manuscript.partLabel}
-                      reveal={trashReveal}
-                      onRestore={(item) =>
-                        change(
-                          (project) => project.restore(item.id),
-                          item.kind === 'version'
-                            ? `Restored ${trashTitle(item)}`
-                            : `Restored “${item.title}”`,
-                        )
-                      }
-                      onMove={(item) => {
-                        const to = tab === 'drawer' ? 'trash' : 'drawer';
-                        return change(
-                          (project) =>
-                            project.moveBetweenTrashAndDrawer(item.id, to),
-                          movedText(item, to),
-                        );
-                      }}
-                      {...(tab === 'trash' && {
-                        onEmpty: emptyTrash,
-                        emptying,
-                      })}
-                    />
+                  </div>
+                  <TodoDockPane
+                    dock={todoDock}
+                    onDock={changeTodoDock}
+                    todos={todos}
+                    names={{ manuscript, entries, trash, drawer }}
+                    prelink={prelink}
+                    draft={draftIn('writing')}
+                    onOpen={openLink}
+                    onOpenTrash={openTrashItem}
+                  />
+                </aside>
+                {docked.left && (
+                  <PanelResizer
+                    label="Binder width"
+                    min={160}
+                    max={600}
+                    {...pane('binder')}
+                  />
+                )}
+                {overviewOpen &&
+                  !resolvingConflict &&
+                  open &&
+                  !open.scene.missing && (
+                    <>
+                      <OverviewPane
+                        manuscript={bookManuscript(manuscript, writingBook?.id)}
+                        book={writingBook}
+                        language={language}
+                        writing={{
+                          sceneId: open.scene.id,
+                          chapterId: open.chapter?.id ?? null,
+                        }}
+                        width={pane('overview').size}
+                        onOpenScene={(id) => select({ kind: 'scene', id })}
+                        onOpenChapter={(id) => select({ kind: 'chapter', id })}
+                        onOpenPart={(id) => select({ kind: 'part', id })}
+                        onOpenBook={(id) => select({ kind: 'book', id })}
+                        onOpenProject={() => select({ kind: 'project' })}
+                        onClose={toggleOverview}
+                      />
+                      <PanelResizer
+                        label="Overview width"
+                        min={200}
+                        max={600}
+                        {...pane('overview')}
+                      />
+                    </>
                   )}
-                </div>
-                <TodoDockPane
-                  dock={todoDock}
-                  onDock={changeTodoDock}
-                  todos={todos}
-                  names={{ manuscript, entries, trash, drawer }}
-                  prelink={prelink}
-                  draft={draftIn('writing')}
-                  onOpen={openLink}
-                  onOpenTrash={openTrashItem}
-                />
-              </aside>
-              {docked.left && (
-                <PanelResizer
-                  label="Binder width"
-                  min={160}
-                  max={600}
-                  {...pane('binder')}
-                />
-              )}
-              {overviewOpen &&
-                !resolvingConflict &&
-                open &&
-                !open.scene.missing && (
-                  <>
-                    <OverviewPane
-                      manuscript={bookManuscript(manuscript, writingBook?.id)}
-                      book={writingBook}
+                {/* A new key per unit: leaving one unmounts its editors, which
+            flushes their pending edits. */}
+                {resolvingConflict ? (
+                  <ConflictResolver
+                    key={unitKey(resolvingConflict.ref)}
+                    conflict={resolvingConflict}
+                    manuscript={manuscript}
+                    entries={entries}
+                    customFields={customFields}
+                    onResolve={(kept) => resolve(resolvingConflict.ref, kept)}
+                  />
+                ) : selected?.kind === 'project' ? (
+                  <main className="centre" key={PROJECT_OUTLINE}>
+                    <ProjectCorkboard
+                      manuscript={manuscript}
                       language={language}
-                      writing={{
-                        sceneId: open.scene.id,
-                        chapterId: open.chapter?.id ?? null,
-                      }}
-                      width={pane('overview').size}
+                      reveal={revealIn(PROJECT_OUTLINE)}
+                      view={corkboardView}
+                      onView={setCorkboardView}
                       onOpenScene={(id) => select({ kind: 'scene', id })}
                       onOpenChapter={(id) => select({ kind: 'chapter', id })}
                       onOpenPart={(id) => select({ kind: 'part', id })}
                       onOpenBook={(id) => select({ kind: 'book', id })}
-                      onOpenProject={() => select({ kind: 'project' })}
-                      onClose={toggleOverview}
+                      onAddTodo={startWritingTodo}
                     />
-                    <PanelResizer
-                      label="Overview width"
-                      min={200}
-                      max={600}
-                      {...pane('overview')}
-                    />
-                  </>
-                )}
-              {/* A new key per unit: leaving one unmounts its editors, which
-            flushes their pending edits. */}
-              {resolvingConflict ? (
-                <ConflictResolver
-                  key={unitKey(resolvingConflict.ref)}
-                  conflict={resolvingConflict}
-                  manuscript={manuscript}
-                  entries={entries}
-                  customFields={customFields}
-                  onResolve={(kept) => resolve(resolvingConflict.ref, kept)}
-                />
-              ) : selected?.kind === 'project' ? (
-                <main className="centre" key={PROJECT_OUTLINE}>
-                  <ProjectCorkboard
-                    manuscript={manuscript}
-                    language={language}
-                    reveal={revealIn(PROJECT_OUTLINE)}
-                    view={corkboardView}
-                    onView={setCorkboardView}
-                    onOpenScene={(id) => select({ kind: 'scene', id })}
-                    onOpenChapter={(id) => select({ kind: 'chapter', id })}
-                    onOpenPart={(id) => select({ kind: 'part', id })}
-                    onOpenBook={(id) => select({ kind: 'book', id })}
-                    onAddTodo={startWritingTodo}
-                  />
-                </main>
-              ) : openBook ? (
-                <main className="centre" key={openBook.id}>
-                  <BookCorkboard
-                    book={openBook}
-                    manuscript={manuscript}
-                    language={language}
-                    reveal={revealIn(openBook.id)}
-                    view={corkboardView}
-                    onView={setCorkboardView}
-                    onOpenScene={(id) => select({ kind: 'scene', id })}
-                    onOpenChapter={(id) => select({ kind: 'chapter', id })}
-                    onOpenPart={(id) => select({ kind: 'part', id })}
-                    onAddTodo={startWritingTodo}
-                  />
-                </main>
-              ) : openChapter ? (
-                <main className="centre" key={openChapter.id}>
-                  <ChapterCorkboard
-                    chapter={openChapter}
-                    language={language}
-                    reveal={revealIn(openChapter.id)}
-                    view={corkboardView}
-                    onView={setCorkboardView}
-                    onOpenScene={(id) => select({ kind: 'scene', id })}
-                    onAddTodo={startWritingTodo}
-                  />
-                </main>
-              ) : openPart ? (
-                <main className="centre" key={openPart.id}>
-                  <PartCorkboard
-                    part={openPart}
-                    // Its Chapters are numbered from its Book's first.
-                    manuscript={bookManuscript(manuscript, openPart.book)}
-                    language={language}
-                    reveal={revealIn(openPart.id)}
-                    view={corkboardView}
-                    onView={setCorkboardView}
-                    onOpenChapter={(id) => select({ kind: 'chapter', id })}
-                    onAddTodo={startWritingTodo}
-                  />
-                </main>
-              ) : !open ? (
-                <div className="editor empty">No Scene open</div>
-              ) : open.scene.missing ? (
-                <div className="editor missing" role="status">
-                  <p>
-                    <strong>{open.scene.title}</strong> is missing, possibly not
-                    synced yet. It opens here once its file has arrived.
-                  </p>
-                </div>
-              ) : (
-                <main className="centre" key={open.scene.id}>
-                  <section
-                    className="outline-notes"
-                    aria-label="Outline & Notes"
-                  >
-                    <div className="outline-notes-bar">
-                      <button
-                        className="outline-notes-toggle"
-                        aria-expanded={outlineNotesOpen}
-                        onClick={toggleOutlineNotes}
-                      >
-                        <span aria-hidden="true">
-                          {outlineNotesOpen ? '▾' : '▸'}
-                        </span>{' '}
-                        Outline & Notes
-                      </button>
-                      <div className="outline-notes-bar-end">
-                        <OutlineBarImage
-                          scene={open.scene}
-                          floating={floatingImage?.on === true}
-                          onFloat={showFloatingImage}
-                        />
-                        <button
-                          className="overview-button"
-                          aria-pressed={snapshotsOpen}
-                          onClick={() => setSnapshotsOpen(!snapshotsOpen)}
-                        >
-                          Snapshots
-                        </button>
-                        <button
-                          className="overview-button"
-                          aria-pressed={overviewOpen}
-                          onClick={toggleOverview}
-                        >
-                          <span aria-hidden="true">☰</span> Overview
-                        </button>
-                      </div>
-                    </div>
-                    {outlineNotesOpen && (
-                      <OutlineNotes
-                        unitId={open.scene.id}
-                        language={language}
-                        withNotes
-                        reveal={revealIn(open.scene.id)}
-                      />
-                    )}
-                  </section>
-                  <SceneSnapshots
-                    sceneId={open.scene.id}
-                    open={snapshotsOpen}
-                    inConflict={conflicted.has(open.scene.id)}
-                    listen={listenToProse}
-                  >
-                    <SceneEditor
-                      // Its editor's typography is made for one language.
-                      key={language}
-                      sceneId={open.scene.id}
+                  </main>
+                ) : openBook ? (
+                  <main className="centre" key={openBook.id}>
+                    <BookCorkboard
+                      book={openBook}
+                      manuscript={manuscript}
                       language={language}
-                      // Focus goes to the Outline instead, as a Proposal's title asks.
-                      autofocus={!revealIn(open.scene.id)}
-                      focusAt={
-                        jump?.sceneId === open.scene.id
-                          ? jump.cursor
-                          : undefined
-                      }
-                      quote={
-                        jump?.sceneId === open.scene.id ? jump.quote : undefined
-                      }
-                      onCursor={reportCursor}
-                      onProse={onSceneProse}
-                      onSelection={onSelection}
-                      splittable={splittable(open.scene.id)}
-                      splitsToNext={splitsToNext(open.scene.id)}
+                      reveal={revealIn(openBook.id)}
+                      view={corkboardView}
+                      onView={setCorkboardView}
+                      onOpenScene={(id) => select({ kind: 'scene', id })}
+                      onOpenChapter={(id) => select({ kind: 'chapter', id })}
+                      onOpenPart={(id) => select({ kind: 'part', id })}
+                      onAddTodo={startWritingTodo}
                     />
-                  </SceneSnapshots>
-                </main>
-              )}
-              {assistantSlot(writingAssistantSlot)}
+                  </main>
+                ) : openChapter ? (
+                  <main className="centre" key={openChapter.id}>
+                    <ChapterCorkboard
+                      chapter={openChapter}
+                      language={language}
+                      reveal={revealIn(openChapter.id)}
+                      view={corkboardView}
+                      onView={setCorkboardView}
+                      onOpenScene={(id) => select({ kind: 'scene', id })}
+                      onAddTodo={startWritingTodo}
+                    />
+                  </main>
+                ) : openPart ? (
+                  <main className="centre" key={openPart.id}>
+                    <PartCorkboard
+                      part={openPart}
+                      // Its Chapters are numbered from its Book's first.
+                      manuscript={bookManuscript(manuscript, openPart.book)}
+                      language={language}
+                      reveal={revealIn(openPart.id)}
+                      view={corkboardView}
+                      onView={setCorkboardView}
+                      onOpenChapter={(id) => select({ kind: 'chapter', id })}
+                      onAddTodo={startWritingTodo}
+                    />
+                  </main>
+                ) : !open ? (
+                  <div className="editor empty">No Scene open</div>
+                ) : open.scene.missing ? (
+                  <div className="editor missing" role="status">
+                    <p>
+                      <strong>{open.scene.title}</strong> is missing, possibly
+                      not synced yet. It opens here once its file has arrived.
+                    </p>
+                  </div>
+                ) : (
+                  <main className="centre" key={open.scene.id}>
+                    <section
+                      className="outline-notes"
+                      aria-label="Outline & Notes"
+                    >
+                      <div className="outline-notes-bar">
+                        <button
+                          className="outline-notes-toggle"
+                          aria-expanded={outlineNotesOpen}
+                          onClick={toggleOutlineNotes}
+                        >
+                          <span aria-hidden="true">
+                            {outlineNotesOpen ? '▾' : '▸'}
+                          </span>{' '}
+                          Outline & Notes
+                        </button>
+                        <div className="outline-notes-bar-end">
+                          <OutlineBarImage
+                            scene={open.scene}
+                            floating={floatingImage?.on === true}
+                            onFloat={showFloatingImage}
+                          />
+                          <button
+                            className="overview-button"
+                            aria-pressed={snapshotsOpen}
+                            onClick={() => setSnapshotsOpen(!snapshotsOpen)}
+                          >
+                            Snapshots
+                          </button>
+                          <button
+                            className="overview-button"
+                            aria-pressed={overviewOpen}
+                            onClick={toggleOverview}
+                          >
+                            <span aria-hidden="true">☰</span> Overview
+                          </button>
+                        </div>
+                      </div>
+                      {outlineNotesOpen && (
+                        <OutlineNotes
+                          unitId={open.scene.id}
+                          language={language}
+                          withNotes
+                          reveal={revealIn(open.scene.id)}
+                        />
+                      )}
+                    </section>
+                    <SceneSnapshots
+                      sceneId={open.scene.id}
+                      open={snapshotsOpen}
+                      inConflict={conflicted.has(open.scene.id)}
+                      listen={listenToProse}
+                    >
+                      <SceneEditor
+                        // Its editor's typography is made for one language.
+                        key={language}
+                        sceneId={open.scene.id}
+                        language={language}
+                        // Focus goes to the Outline instead, as a Proposal's title asks.
+                        autofocus={!revealIn(open.scene.id)}
+                        focusAt={
+                          jump?.sceneId === open.scene.id
+                            ? jump.cursor
+                            : undefined
+                        }
+                        quote={
+                          jump?.sceneId === open.scene.id
+                            ? jump.quote
+                            : undefined
+                        }
+                        onCursor={reportCursor}
+                        onProse={onSceneProse}
+                        onSelection={onSelection}
+                        splittable={splittable(open.scene.id)}
+                        splitsToNext={splitsToNext(open.scene.id)}
+                      />
+                    </SceneSnapshots>
+                  </main>
+                )}
+                {assistantSlot(writingAssistantSlot)}
+              </WritingBeatsContext.Provider>
             </div>
           )}
           {visited.has('storyBible') && (

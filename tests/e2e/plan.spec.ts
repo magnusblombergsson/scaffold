@@ -351,6 +351,121 @@ for (const theme of ['light', 'dark'] as const) {
 }
 
 for (const theme of ['light', 'dark'] as const) {
+  test(`a Scene's Beats show as chips on its Corkboard card and Overview row, never in the Binder, and choosing one opens Plan on it, ${theme}`, async () => {
+    const { app, page, chapters } = await newProject(theme);
+    try {
+      await roomButton(page, 'Plan').click();
+      const room = page.getByRole('main', { name: 'Plan' });
+      const strip = room.getByRole('region', { name: 'Book details' });
+      const tree = room.getByRole('region', { name: 'Outline tree' });
+      const details = page.getByRole('complementary', { name: 'Details' });
+      const sceneRow = tree
+        .getByRole('listitem', { name: 'Chapter “Chapter 1”' })
+        .getByRole('listitem', { name: 'Scene “Scene 1”' })
+        .locator('.plan-row');
+      await strip
+        .getByRole('combobox', { name: 'Structure' })
+        .selectOption('three-act');
+      await strip.getByRole('button', { name: 'Mystery (fair play)' }).click();
+      await sceneRow.click();
+      const beats = details.getByRole('region', { name: 'Beats' });
+      for (const beat of [/^Setup/, /^The crime/]) {
+        await beats.getByRole('checkbox', { name: beat }).click();
+        await expect(beats.getByRole('checkbox', { name: beat })).toBeChecked();
+      }
+      // Leaving the Scene unselected shows that Writing selects it.
+      await tree
+        .getByRole('listitem', { name: 'Chapter “Storm”' })
+        .locator('.plan-row')
+        .first()
+        .click();
+      await expect(sceneRow).toHaveAttribute('aria-pressed', 'false');
+      // A Plan about the whole story is open; opening Plan on the Scene
+      // shows a new one instead, the other kept in the list.
+      const panel = page.getByRole('complementary', {
+        name: 'Plan Conversation',
+      });
+      anthropic.calls.push({ reply: ['Where does it turn?'] });
+      await panel
+        .getByRole('textbox', { name: 'Message' })
+        .fill('Look at the whole story.');
+      await panel.getByRole('button', { name: 'Send' }).click();
+      await expect(panel).toContainText('Where does it turn?');
+
+      // On the Chapter's Corkboard, the Scene's card shows its Beats, to
+      // choose and nothing to set; the Binder stays plain.
+      await roomButton(page, 'Writing').click();
+      await page
+        .getByRole('button', { name: 'Chapter 1', exact: true })
+        .click();
+      const card = page.getByRole('article', { name: 'Scene 1' });
+      const chips = card.getByRole('list', { name: 'Beats' });
+      await expect(chips.getByRole('listitem')).toHaveText([
+        'Setup',
+        'The crime',
+      ]);
+      await expect(card.getByRole('checkbox')).toHaveCount(0);
+      await expect(
+        page.locator('.left-pane').getByRole('list', { name: 'Beats' }),
+      ).toHaveCount(0);
+      await expect(page).toHaveScreenshot(
+        `writing-beats-corkboard-${theme}.png`,
+        { mask: [page.locator('.save-status'), page.locator('.toasts')] },
+      );
+
+      // Choosing one opens Plan, the Scene's Chapter the focus and the
+      // Scene selected.
+      await chips.getByRole('button', { name: 'Setup' }).click();
+      await expect(room).toBeVisible();
+      await expect(room.getByRole('combobox', { name: 'Focus' })).toHaveValue(
+        `chapter:${chapters.one}`,
+      );
+      await expect(sceneRow).toHaveAttribute('aria-pressed', 'true');
+      await expect(panel).not.toContainText('Where does it turn?');
+      await expect(
+        page
+          .getByRole('navigation', { name: 'Plan Conversations' })
+          .getByRole('button', { name: /^Look at the whole story/ }),
+      ).toBeVisible();
+
+      // The Scene's row in the Overview pane shows them too, and opens Plan
+      // the same way.
+      await tree
+        .getByRole('listitem', { name: 'Chapter “Storm”' })
+        .locator('.plan-row')
+        .first()
+        .click();
+      await roomButton(page, 'Writing').click();
+      await page.getByRole('button', { name: 'Scene 1', exact: true }).click();
+      await page.getByRole('button', { name: 'Overview', exact: true }).click();
+      const overview = page.getByRole('complementary', {
+        name: 'Overview',
+        exact: true,
+      });
+      const row = overview.getByRole('region', {
+        name: 'Scene 1',
+        exact: true,
+      });
+      await expect(
+        row.getByRole('list', { name: 'Beats' }).getByRole('listitem'),
+      ).toHaveText(['Setup', 'The crime']);
+      await expect(page).toHaveScreenshot(
+        `writing-beats-overview-${theme}.png`,
+        { mask: [page.locator('.save-status'), page.locator('.toasts')] },
+      );
+      await row.getByRole('button', { name: 'The crime' }).click();
+      await expect(room).toBeVisible();
+      await expect(room.getByRole('combobox', { name: 'Focus' })).toHaveValue(
+        `chapter:${chapters.one}`,
+      );
+      await expect(sceneRow).toHaveAttribute('aria-pressed', 'true');
+    } finally {
+      await app.close();
+    }
+  });
+}
+
+for (const theme of ['light', 'dark'] as const) {
   test(`Plan is sent the Book's details and the shortlisted catalogue, proposes a Structure and Genre conventions as cards with ghost values in the strip, and is asked about an entry in full, ${theme}`, async () => {
     const { app, page } = await newProject(theme);
     try {

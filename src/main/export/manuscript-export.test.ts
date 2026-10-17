@@ -160,6 +160,34 @@ describe('Exporting the Manuscript to Markdown', () => {
     expect(markdown).toBe('# One\n\nKept.\n');
   });
 
+  it('leaves out the Beats a Scene carries and what the Book follows', async () => {
+    const planned: Manuscript = {
+      structure: 'three-act',
+      genreConventions: ['mystery'],
+      chapters: [
+        {
+          id: 'c1',
+          title: 'The Storm',
+          scenes: [
+            {
+              id: 's1',
+              title: 'Title s1',
+              beats: ['three-act/setup', 'mystery/crime'],
+            },
+          ],
+        },
+      ],
+      unplaced: [],
+    };
+
+    for (const text of [
+      await markdownOf(planned, prose),
+      Object.values(await docxOf(planned, prose)).join(''),
+    ]) {
+      expect(text).not.toMatch(/setup|crime|three-act|mystery/i);
+    }
+  });
+
   it('escapes what other Markdown readers would take for formatting', async () => {
     const markdown = await markdownOf(
       { chapters: [chapter('c1', '#1 [draft]', 's1')], unplaced: [] },
