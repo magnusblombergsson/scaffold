@@ -145,8 +145,9 @@ ${INTERVIEW_RULE}`;
 
 /**
  * Plan's own Proposals rule: Outlines, of its Book and what it holds, and
- * of the whole story or Series; and the Book's details, by the catalogue's
- * Ids. It doesn't reuse `PROPOSALS_RULE`, which carries the Story Bible's.
+ * of the whole story or Series; new units and titles; and the Book's
+ * details, by the catalogue's Ids. It doesn't reuse `PROPOSALS_RULE`, which
+ * carries the Story Bible's.
  */
 export const PLAN_PROPOSALS_RULE = `You may propose a whole new Outline for the Book you are planning, or for a Part, Chapter or Scene of it, naming it by its Id in the plan, or "project" for the Outline of the whole story or Series. The Author accepts, edits or rejects each Proposal; it changes nothing until then. Write the whole body; it replaces the Outline there is. Write each Proposal after your text as a block of its own:
 
@@ -158,6 +159,20 @@ To add to an Outline rather than replace it, "append" bullets to its end:
 
 \`\`\`proposal
 {"outline": "<Id>", "append": "- Anna takes the last ferry alone."}
+\`\`\`
+
+To add a Scene, Chapter or Part, give it a short id of your own, its title and its Outline, and say where it goes: "in" a Chapter for a Scene; in a Part, or "in" the Book you are planning by its Id (or "project" when the story is one Book) for a Chapter or Part; "after" a unit there, or with no "after", first in it:
+
+\`\`\`proposal
+{"add": "scene", "id": "new-1", "title": "The last ferry", "outline": "- Anna leaves the island.", "in": "<Chapter Id>", "after": "<Scene Id>"}
+\`\`\`
+
+A later block in the same reply may put a unit "in" or "after" one you add by its id; it waits until that one is accepted.
+
+To retitle a Part, Chapter or Scene:
+
+\`\`\`proposal
+{"retitle": "<Id>", "title": "Departure"}
 \`\`\`
 
 ${OUTLINE_RULE}
@@ -182,7 +197,7 @@ You may also propose the details of the Book you are planning, one detail per Pr
 
 The Genres: ${GENRES.map((g) => g.id).join(', ')}. The Formats: ${FORMATS.map((f) => `${f.id} (${formatBand(f)})`).join(', ')}.
 
-Propose only Outlines and the Book’s details: never a change to another Book, to the Story Bible, to private notes, or to a Status, Tags or images.`;
+Propose only Outlines, new units, titles and the Book’s details: never a change to another Book, to the Story Bible, to private notes, or to a Status, Tags or images.`;
 
 /** How Plan asks, and when it proposes. */
 export const PLAN_QUESTIONING_RULE = `Ask only about the story's shape: its Genre, Format, rough length, premise and intended ending, then what happens, in what order, its turns and its stakes. Never ask about wording, style or voice, and never fill the gaps of an Entry in the Story Bible.

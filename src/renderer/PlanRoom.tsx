@@ -18,7 +18,11 @@ import {
   type Span,
 } from '../shared/beat-measure';
 import { bookManuscript, topLevel } from '../shared/manuscript-order';
-import { proposalTarget, type ProposalView } from '../shared/proposal';
+import {
+  PLAN_UNIT_LABELS,
+  proposalTarget,
+  type ProposalView,
+} from '../shared/proposal';
 import {
   partName,
   PROJECT_OUTLINE,
@@ -50,7 +54,7 @@ import {
 import { anyAdded, NoProviderState, useProviders } from './Providers';
 import { ReadOnlyContext } from './read-only';
 import { RoomList } from './RoomList';
-import { useMirror, useOutlines } from './use-project';
+import { useMirror, useOutlines, useRun } from './use-project';
 
 /**
  * The Plan Room (spec: Outline planner §7): its Conversations on the left;
@@ -152,16 +156,24 @@ export function PlanRoom({
       ? undefined
       : (name: string) =>
           void conversation.send(`Tell me about ${name} for this Book.`);
-  /** Each unit's Outline Proposals made in the Conversation open. */
-  const proposals = useMemo(() => {
+  /**
+   * Each unit's Proposals made in the Conversation open, an Add once its
+   * unit is there; and the Adds still pending, drawn where they would land.
+   */
+  const { proposals, adds } = useMemo(() => {
     const byUnit = new Map<string, ProposalView[]>();
+    const adds: AddView[] = [];
     for (const m of current?.messages ?? []) {
       for (const p of m.proposals ?? []) {
-        if (p.kind !== 'outline') continue;
-        byUnit.set(p.outlineId, [...(byUnit.get(p.outlineId) ?? []), p]);
+        if (p.kind === 'add' && p.state.kind === 'pending') {
+          adds.push(p);
+          continue;
+        }
+        const unit = unitOf(p);
+        if (unit) byUnit.set(unit, [...(byUnit.get(unit) ?? []), p]);
       }
     }
-    return byUnit;
+    return { proposals: byUnit, adds };
   }, [current]);
 
   /** Sets the focus from the picker: of the Plan open, or of a new one. */
@@ -239,6 +251,7 @@ export function PlanRoom({
             inFocus={unitsInFocus(tree, focus)}
             conversationId={current?.id ?? null}
             proposals={proposals}
+            adds={adds}
             selected={selected}
             lit={lit}
             followed={followed}
@@ -359,6 +372,8 @@ function PlanStart({
 /**
  * A reply's Proposals: those on the Book's details as cards, decided here;
  * the rest as links to the unit each changes in the tree, decided there.
+ * With more than one still pending, Accept all takes them all, in the
+ * order they need each other, leaving stale ones and those needing them.
  */
 function PlanProposals({
   conversationId,
@@ -371,10 +386,38 @@ function PlanProposals({
   lit: string | null;
   onPoint(unitId: string): void;
 }) {
+  const readOnly = useContext(ReadOnlyContext);
+  const run = useRun();
+  const [busy, setBusy] = useState(false);
+  const pending = proposals.filter((p) => p.state.kind === 'pending');
   const details = proposals.filter((p) => p.kind === 'book-detail');
   const others = proposals.filter((p) => p.kind !== 'book-detail');
+
+  async function acceptAll() {
+    if (!conversationId) return;
+    setBusy(true);
+    await run(
+      () =>
+        window.assistant.acceptProposals(
+          conversationId,
+          pending.map((p) => p.id),
+        ),
+      { what: 'accept the Proposals' },
+    );
+    setBusy(false);
+  }
+
   return (
     <>
+      {pending.length > 1 && (
+        <button
+          className="plan-accept-all"
+          onClick={() => void acceptAll()}
+          disabled={readOnly || busy || !conversationId}
+        >
+          Accept all
+        </button>
+      )}
       {others.length > 0 && (
         <ProposalLinks proposals={others} lit={lit} onPoint={onPoint} />
       )}
@@ -404,34 +447,36 @@ function ProposalLinks({
   onPoint(unitId: string): void;
 }) {
   return (
-    <ul className="plan-proposal-links" aria-label="Proposals">
-      {proposals.map((p) => {
-        const target = proposalTarget(p);
-        const unit = target?.kind === 'outline' ? target.outlineId : null;
-        const state =
-          p.state.kind === 'pending'
-            ? 'in the plan'
-            : p.state.kind === 'accepted'
-              ? 'accepted'
-              : 'rejected';
-        return (
-          <li key={p.id} data-state={p.state.kind}>
-            {unit ? (
-              <button
-                className="link-button"
-                aria-current={unit === lit ? 'true' : undefined}
-                onClick={() => onPoint(unit)}
-              >
-                {proposalTitle(p)}
-              </button>
-            ) : (
-              <span>{proposalTitle(p)}</span>
-            )}{' '}
-            <span className="plan-proposal-state">· {state}</span>
-          </li>
-        );
-      })}
-    </ul>
+    <>
+      <ul className="plan-proposal-links" aria-label="Proposals">
+        {proposals.map((p) => {
+          const target = proposalTarget(p);
+          const unit = target?.kind === 'outline' ? target.outlineId : null;
+          const state =
+            p.state.kind === 'pending'
+              ? 'in the plan'
+              : p.state.kind === 'accepted'
+                ? 'accepted'
+                : 'rejected';
+          return (
+            <li key={p.id} data-state={p.state.kind}>
+              {unit ? (
+                <button
+                  className="link-button"
+                  aria-current={unit === lit ? 'true' : undefined}
+                  onClick={() => onPoint(unit)}
+                >
+                  {proposalTitle(p)}
+                </button>
+              ) : (
+                <span>{proposalTitle(p)}</span>
+              )}{' '}
+              <span className="plan-proposal-state">· {state}</span>
+            </li>
+          );
+        })}
+      </ul>
+    </>
   );
 }
 
@@ -445,7 +490,66 @@ type PlanNode = {
   /** Its Scenes, to tell whether it holds Prose; a Scene is its own. */
   scenes: ManuscriptScene[];
   children: PlanNode[];
+  /** The pending Add that would make it, for a unit only proposed. */
+  proposed?: AddView;
 };
+
+/** A pending Add, drawn as a dashed unit where it would land. */
+type AddView = Extract<ProposalView, { kind: 'add' }>;
+
+/** The unit of the tree a Proposal is shown under, if any. */
+function unitOf(proposal: ProposalView): string | null {
+  if (proposal.kind === 'outline') return proposal.outlineId;
+  if (proposal.kind === 'add' || proposal.kind === 'retitle') {
+    return proposal.unitId;
+  }
+  return null;
+}
+
+/**
+ * `children` of the container `id` with the pending Adds into it put
+ * where each would land: right after its anchor, at the end when the
+ * anchor is gone, or first; an Add after another goes after that one.
+ */
+function withAdds(
+  children: PlanNode[],
+  id: string,
+  adds: readonly AddView[],
+): PlanNode[] {
+  const list = [...children];
+  const into = adds.filter((a) => a.in === id);
+  // Those first in it in reverse, so the first proposed comes first.
+  for (const add of [...into].reverse().filter((a) => a.after === undefined)) {
+    list.unshift(proposedNode(add));
+  }
+  let left = into.filter((a) => a.after !== undefined);
+  for (let pass = 0; left.length > 0 && pass <= into.length; pass++) {
+    left = left.filter((add) => {
+      const at = list.findIndex((n) => n.id === add.after);
+      const placedLater = left.some(
+        (other) => other !== add && other.unitId === add.after,
+      );
+      if (at < 0 && placedLater) return true;
+      list.splice(at < 0 ? list.length : at + 1, 0, proposedNode(add));
+      return false;
+    });
+  }
+  return list;
+}
+
+/** The dashed unit a pending Add would make. */
+function proposedNode(add: AddView): PlanNode {
+  const label = PLAN_UNIT_LABELS[add.unit];
+  return {
+    id: add.unitId,
+    kind: add.unit,
+    name: `${label} “${add.proposed.title}” (proposed)`,
+    title: add.proposed.title,
+    scenes: [],
+    children: [],
+    proposed: add,
+  };
+}
 
 /**
  * The tree Plan shows: the whole story, with the Book's Parts and Loose
@@ -563,6 +667,7 @@ function PlanTree({
   inFocus,
   conversationId,
   proposals,
+  adds,
   selected,
   lit,
   followed,
@@ -572,12 +677,19 @@ function PlanTree({
   inFocus: Set<string>;
   conversationId: string | null;
   proposals: Map<string, ProposalView[]>;
+  adds: AddView[];
   selected: string | null;
   lit: string | null;
   followed: readonly FollowedBeat[];
   onSelect(id: string): void;
 }) {
   const every = allNodes(nodes);
+  // Adds into a container no longer in the plan, still to reject.
+  const drawn = new Set([
+    ...every.map((n) => n.id),
+    ...adds.map((a) => a.unitId),
+  ]);
+  const astray = adds.filter((a) => !drawn.has(a.in));
   const { outlines } = useOutlines(every.map((n) => n.id));
   const prose = useProse(
     every.filter((n) => n.kind === 'scene').flatMap((n) => n.scenes),
@@ -587,13 +699,23 @@ function PlanTree({
     (p.state.kind === 'accepted' && !p.state.undoBlocked);
 
   function unit(node: PlanNode) {
-    const body = outlines.get(node.id)?.trim();
+    const { proposed } = node;
+    const body = proposed
+      ? proposed.proposed.outline.trim()
+      : outlines.get(node.id)?.trim();
     const holds = node.scenes.some((s) => prose.has(s.id));
-    const mine = (proposals.get(node.id) ?? []).filter(shown);
+    const mine = proposed
+      ? [proposed]
+      : (proposals.get(node.id) ?? []).filter(shown);
+    const retitle = mine.find(
+      (p): p is Extract<ProposalView, { kind: 'retitle' }> =>
+        p.kind === 'retitle' && p.state.kind === 'pending',
+    );
+    const children = withAdds(node.children, node.id, adds);
     return (
       <li
         key={node.id}
-        className="plan-unit"
+        className={proposed ? 'plan-unit plan-unit-proposed' : 'plan-unit'}
         data-kind={node.kind}
         data-plan-unit={node.id}
         data-in-focus={inFocus.has(node.id) || undefined}
@@ -603,9 +725,16 @@ function PlanTree({
         <button
           className="plan-row"
           aria-pressed={selected === node.id}
-          onClick={() => onSelect(node.id)}
+          // A unit only proposed has no details yet.
+          onClick={() => !proposed && onSelect(node.id)}
         >
-          <span className="plan-title">{node.title}</span>
+          {retitle ? (
+            <span className="plan-title">
+              <del>{node.title}</del> <ins>{retitle.proposed}</ins>
+            </span>
+          ) : (
+            <span className="plan-title">{node.title}</span>
+          )}
           {holds && (
             <span
               className="plan-prose"
@@ -632,13 +761,21 @@ function PlanTree({
               proposal={p}
             />
           ))}
-        {node.children.length > 0 && <ul>{node.children.map(unit)}</ul>}
+        {children.length > 0 && <ul>{children.map(unit)}</ul>}
       </li>
     );
   }
   return (
     <section className="plan-tree" aria-label="Outline tree">
       <ul>{nodes.map(unit)}</ul>
+      {astray.length > 0 && (
+        <>
+          <p className="plan-astray">
+            Proposed for a unit no longer in the plan:
+          </p>
+          <ul>{astray.map((add) => unit(proposedNode(add)))}</ul>
+        </>
+      )}
     </section>
   );
 }

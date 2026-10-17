@@ -247,6 +247,25 @@ describe('a Proposal on a Book’s detail', () => {
     await again.close();
   });
 
+  it('is taken by Accept all with the rest of its reply', async () => {
+    const { store, conversationId } = await planned();
+    await store.conversations.appendProposal(conversationId, structure());
+    await store.conversations.appendProposal(conversationId, {
+      kind: 'book-detail',
+      id: 'p2',
+      bookId: PROJECT_OUTLINE,
+      detail: 'genreConventions',
+      base: null,
+      proposed: ['mystery'],
+    });
+
+    await store.conversations.acceptProposals(conversationId, ['p1', 'p2']);
+
+    expect(store.manuscript().structure).toBe('save-the-cat');
+    expect(store.manuscript().genreConventions).toEqual(['mystery']);
+    await store.close();
+  });
+
   it('leaves the detail alone when rejected', async () => {
     const { store, conversationId } = await planned();
     await store.conversations.appendProposal(conversationId, structure());

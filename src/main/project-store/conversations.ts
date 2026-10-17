@@ -66,6 +66,13 @@ import {
   type Refusal,
   type ProposalBasis,
   type Target,
+  PLAN_UNIT_LABELS,
+  type AddBasis,
+  type NewUnit,
+  type PlanUnit,
+  type Retitle,
+  type RetitleBasis,
+  type UnitAddition,
 } from '../../shared/proposal';
 import { capitalized, unitName } from '../../shared/unit-name';
 import {
@@ -166,6 +173,16 @@ export type ConversationsDeps = {
   changeRelations: <T>(
     change: (relations: Relations) => Promise<T>,
   ) => Promise<T>;
+  /** Adds the unit an Add proposed, titled `title`, where it lands; one in Trash comes back. */
+  addUnit: (addition: UnitAddition, title: string) => Promise<void>;
+  /** Gives a Scene, Chapter or Part `title`. */
+  retitleUnit: (id: string, title: string) => Promise<void>;
+  /** Moves a Scene, Chapter or Part to Trash, as undoing its Add. */
+  trashUnit: (kind: PlanUnit, id: string) => Promise<void>;
+  /** Whether a Scene, or one in a Chapter or Part, holds Prose. */
+  holdsProse: (id: string) => Promise<boolean>;
+  /** Whether a Scene's Prose is in Conflict. */
+  conflicted: (id: string) => boolean;
 };
 
 /**
@@ -438,14 +455,71 @@ ${text}`);
       ...conversation
     } = await this.readLogged(id);
     const messages = conversation.messages.map((m) => ({ ...m }));
+    const views = new Map<string, ProposalView>();
+    for (const proposal of proposals) {
+      views.set(proposal.id, await this.proposalView(proposal));
+    }
     for (const proposal of proposals) {
       const message = messages[proposal.message];
       message.proposals = [
         ...(message.proposals ?? []),
-        await this.proposalView(proposal),
+        withNeeds(views.get(proposal.id)!, views),
       ];
     }
     return { ...conversation, messages };
+  }
+
+  /**
+   * Accepts each of `ids`, Proposals of one reply, as proposed, those it
+   * needs first: one that is stale, out of reach or already decided is
+   * left as it is, and so is every one that needs it.
+   */
+  async acceptProposals(conversationId: string, ids: string[]): Promise<void> {
+    const { proposals } = await this.readLogged(conversationId);
+    const chosen = proposals.filter((p) => ids.includes(p.id));
+    const left = new Set<string>();
+    for (const proposal of dependencyOrder(chosen)) {
+      if (proposal.needs?.some((id) => left.has(id))) {
+        left.add(proposal.id);
+        continue;
+      }
+      try {
+        await this.acceptProposal(conversationId, proposal.id);
+      } catch (error) {
+        // A refusal leaves it for the Author; anything else stops here.
+        if (!(error instanceof ProjectError)) throw error;
+        left.add(proposal.id);
+      }
+    }
+  }
+
+  /** Refuses a Proposal that needs one not accepted yet, naming those. */
+  private refuseWaiting(
+    proposal: Proposal,
+    logged: readonly LoggedProposal[],
+  ): void {
+    const waiting = logged.filter(
+      (p) => proposal.needs?.includes(p.id) && p.decision.kind !== 'accepted',
+    );
+    if (waiting.length === 0) return;
+    const names = waiting.map((p) => this.proposalName(p)).join(', ');
+    throw new ProjectError('needs', `It needs ${names} accepted first`);
+  }
+
+  /** Refuses undoing a Proposal while an accepted one needs it. */
+  private refuseNeeded(
+    proposal: Proposal,
+    logged: readonly LoggedProposal[],
+  ): void {
+    const needing = logged.find(
+      (p) => p.needs?.includes(proposal.id) && p.decision.kind === 'accepted',
+    );
+    if (needing) {
+      throw new ProjectError(
+        'needed',
+        `${capitalized(this.proposalName(needing))} needs it.`,
+      );
+    }
   }
 
   private async readLogged(id: string): Promise<LoggedConversation> {
@@ -561,6 +635,8 @@ ${text}`);
   ): Promise<void> {
     return this.inLog(conversationId, async () => {
       const proposal = await this.decidedProposal(conversationId, proposalId);
+      const { proposals } = await this.readLogged(conversationId);
+      this.refuseWaiting(proposal, proposals);
       const value = edited === undefined ? proposal.proposed : edited;
       const how = { anyway, append };
       if (fromBook && this.evolvesFrom(proposal) === undefined) {
@@ -576,6 +652,18 @@ ${text}`);
         await this.appendEvent(
           conversationId,
           relationAcceptedEvent(proposalId, related, this.deps.clock.now()),
+        );
+        this.deps.emit({ type: 'proposalsChanged' });
+        return;
+      }
+      if (proposal.kind === 'add' || proposal.kind === 'retitle') {
+        const { replaced, wrote } =
+          proposal.kind === 'add'
+            ? await this.acceptAdd(proposal, value)
+            : await this.acceptRetitle(proposal, value, how);
+        await this.appendEvent(
+          conversationId,
+          acceptedEvent(proposal, replaced, wrote, this.deps.clock.now()),
         );
         this.deps.emit({ type: 'proposalsChanged' });
         return;
@@ -682,6 +770,41 @@ ${text}`);
     if (orphaned) return { orphaned };
     const details = bookDetailsOf(manuscript, ofProject ? undefined : bookId);
     return { current: detailValue(details, detail) };
+  }
+
+  /**
+   * Adds the unit an Add proposed, with its title and Outline as the
+   * Author edited them, if they did, as `acceptProposal`: the unit first,
+   * then its Outline.
+   */
+  private async acceptAdd(
+    proposal: DecidedProposal & UnitAddition,
+    value: ProposedValue,
+  ): Promise<Accepted> {
+    const { wrote } = granted(
+      accept(proposal, await this.addBasis(proposal), value),
+    );
+    const { title, outline } = wrote as NewUnit;
+    await this.deps.addUnit(proposal, title);
+    const ref = outlineRef(proposal.unitId);
+    const { after } = await this.deps.changeUnit(ref, (unit) => ({
+      ...unit,
+      body: outline,
+    }));
+    this.refuseUnsaved(ref, after);
+    return { wrote, reloaded: { ref, value: after } };
+  }
+
+  /** Gives a unit the title a Retitle proposed, or the Author's edit, as `acceptProposal`. */
+  private async acceptRetitle(
+    proposal: DecidedProposal & Retitle,
+    value: ProposedValue,
+    how: AcceptHow,
+  ): Promise<Accepted> {
+    const basis = this.retitleBasis(proposal);
+    const { wrote } = granted(accept(proposal, basis, value, how));
+    await this.deps.retitleUnit(proposal.unitId, wrote as string);
+    return { replaced: (basis as { current: string }).current, wrote };
   }
 
   /**
@@ -808,16 +931,34 @@ ${text}`);
     }
   }
 
-  /** Rejects a pending Proposal, stale or orphaned too; its target is left alone. */
+  /**
+   * Rejects a pending Proposal, stale or orphaned too; its target is left
+   * alone. Those still pending that need it, or need one of those, are
+   * rejected with it.
+   */
   rejectProposal(conversationId: string, proposalId: string): Promise<void> {
     return this.inLog(conversationId, async () => {
       const proposal = await this.decidedProposal(conversationId, proposalId);
       granted(reject(proposal, await this.basis(proposal)));
-      await this.appendEvent(conversationId, {
-        type: 'proposal.rejected',
-        id: proposalId,
-        at: this.deps.clock.now(),
-      });
+      const { proposals } = await this.readLogged(conversationId);
+      const rejected = new Set([proposalId]);
+      for (let more = true; more; ) {
+        more = false;
+        for (const p of proposals) {
+          if (rejected.has(p.id) || p.decision.kind !== 'pending') continue;
+          if (p.needs?.some((id) => rejected.has(id))) {
+            rejected.add(p.id);
+            more = true;
+          }
+        }
+      }
+      for (const id of rejected) {
+        await this.appendEvent(conversationId, {
+          type: 'proposal.rejected',
+          id,
+          at: this.deps.clock.now(),
+        });
+      }
       this.deps.emit({ type: 'proposalsChanged' });
     });
   }
@@ -833,6 +974,10 @@ ${text}`);
   undoProposal(conversationId: string, proposalId: string): Promise<void> {
     return this.inLog(conversationId, async () => {
       const proposal = await this.decidedProposal(conversationId, proposalId);
+      this.refuseNeeded(
+        proposal,
+        (await this.readLogged(conversationId)).proposals,
+      );
       const reloaded =
         proposal.kind === 'new-entry'
           ? await this.undoNewEntry(proposal)
@@ -840,7 +985,9 @@ ${text}`);
             ? await this.undoRelation(proposal)
             : proposal.kind === 'book-detail'
               ? await this.undoBookDetail(proposal)
-              : await this.undoChange(proposal);
+              : proposal.kind === 'add' || proposal.kind === 'retitle'
+                ? await this.undoStructure(proposal)
+                : await this.undoChange(proposal);
       await this.appendEvent(conversationId, {
         type: 'proposal.undone',
         id: proposalId,
@@ -884,6 +1031,25 @@ ${text}`);
       const { restore } = undone as { restore: BookDetailValue };
       return this.withUnknownIds(proposal, restore);
     });
+    return undefined;
+  }
+
+  /**
+   * Puts a unit an Add made in Trash, while it holds no Prose, or gives a
+   * retitled one back its title, while it still has the accepted one, as
+   * `undoProposal`.
+   */
+  private async undoStructure(
+    proposal: DecidedProposal & (UnitAddition | Retitle),
+  ): Promise<undefined> {
+    if (proposal.kind === 'add') {
+      granted(undo(proposal, await this.addBasis(proposal)));
+      await this.deps.trashUnit(proposal.unit, proposal.unitId);
+    } else {
+      const undone = granted(undo(proposal, this.retitleBasis(proposal)));
+      const { restore } = undone as { restore: string };
+      await this.deps.retitleUnit(proposal.unitId, restore);
+    }
     return undefined;
   }
 
@@ -989,9 +1155,79 @@ ${text}`);
       );
     }
     if (proposal.kind === 'book-detail') return this.bookDetailTarget(proposal);
+    if (proposal.kind === 'add') return this.addBasis(proposal);
+    if (proposal.kind === 'retitle') return this.retitleBasis(proposal);
     return proposal.kind === 'new-entry'
       ? this.newEntryPlace(proposal.entryId)
       : this.target(proposal);
+  }
+
+  /**
+   * An Add's basis: where its unit is now and whether it holds Prose, and
+   * why its container can't take it, if it can't.
+   */
+  private async addBasis(proposal: UnitAddition): Promise<AddBasis> {
+    const { unitId } = proposal;
+    const orphaned = this.deps.outlineOrphaned(unitId);
+    const kept = { trashed: 'trash', drawered: 'drawer' } as const;
+    const unit: AddBasis['unit'] =
+      orphaned === null
+        ? {
+            where: 'live',
+            name: this.outlineName(unitId),
+            prose: await this.deps.holdsProse(unitId),
+          }
+        : {
+            where:
+              orphaned === 'trashed' || orphaned === 'drawered'
+                ? kept[orphaned]
+                : 'gone',
+          };
+    // Proposed first in a Project of one Book, which has become a Series:
+    // its Book is no longer to be told.
+    const container =
+      proposal.in === PROJECT_OUTLINE && this.deps.manuscript().books
+        ? 'gone'
+        : this.deps.outlineOrphaned(proposal.in);
+    return {
+      unit,
+      container: container && {
+        orphaned: container,
+        name: this.outlineName(proposal.in),
+      },
+    };
+  }
+
+  /**
+   * A Retitle's basis: its unit's title now; refused for a Scene Missing,
+   * Unplaced or in Conflict, and an Unplaced Chapter.
+   */
+  private retitleBasis({ unitId }: Retitle): RetitleBasis {
+    const orphaned = this.deps.outlineOrphaned(unitId);
+    if (orphaned) return { orphaned };
+    const { parts = [], chapters, unplaced } = this.deps.manuscript();
+    const name = this.outlineName(unitId);
+    if (unplaced.some((s) => s.id === unitId)) {
+      return { refused: `${name} is Unplaced` };
+    }
+    const part = parts.find((p) => p.id === unitId);
+    if (part) return { current: part.title };
+    const chapter = chapters.find((c) => c.id === unitId);
+    if (chapter) {
+      return chapter.unplaced
+        ? { refused: `${name} is Unplaced` }
+        : { current: chapter.title };
+    }
+    const scene = chapters
+      .filter((c) => !c.unplaced)
+      .flatMap((c) => c.scenes)
+      .find((s) => s.id === unitId);
+    if (!scene) return { refused: `${name} is Unplaced` };
+    if (scene.missing) return { refused: `${name} is Missing` };
+    if (this.deps.conflicted(unitId)) {
+      return { refused: `${name} is in Conflict` };
+    }
+    return { current: scene.title };
   }
 
   /**
@@ -1115,7 +1351,23 @@ ${text}`);
         this.deps.trash.get(proposal.bookId);
       return book && 'title' in book ? `Book “${book.title}”` : 'A Book';
     }
-    const { outlineId } = proposal;
+    if (proposal.kind === 'add') {
+      // Before it is accepted, and once it is gone, by the title proposed.
+      const name = this.outlineName(proposal.unitId);
+      return name === 'An Outline'
+        ? `${PLAN_UNIT_LABELS[proposal.unit]} “${proposal.proposed.title}”`
+        : name;
+    }
+    if (proposal.kind === 'retitle') return this.outlineName(proposal.unitId);
+    return this.outlineName(proposal.outlineId);
+  }
+
+  /**
+   * How the Author knows the unit of an Outline: the story or Series, or a
+   * Book, Part, Chapter or Scene by its title, in Trash too; or as an
+   * Outline when it is gone.
+   */
+  private outlineName(outlineId: string): string {
     const {
       chapters,
       unplaced,
@@ -1318,6 +1570,67 @@ function uuidFrom(seed: string): string {
   hex[16] = ((parseInt(hex[16], 16) & 0x3) | 0x8).toString(16);
   const h = hex.join('');
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-${h.slice(12, 16)}-${h.slice(16, 20)}-${h.slice(20)}`;
+}
+
+/**
+ * A Proposal as its card shows it among the others of its Conversation,
+ * `views`: pending, it names those it needs that aren't accepted yet, an
+ * Add waiting on its container that way rather than as out of reach;
+ * accepted, it can't be undone while an accepted one needs it.
+ */
+function withNeeds(
+  view: ProposalView,
+  views: ReadonlyMap<string, ProposalView>,
+): ProposalView {
+  const { state } = view;
+  if (state.kind === 'pending') {
+    const needs = (view.needs ?? [])
+      .map((id) => views.get(id))
+      .filter((p) => p && p.state.kind !== 'accepted')
+      .map((p) => p!.name);
+    if (needs.length === 0) return view;
+    if ('current' in state) return { ...view, state: { ...state, needs } };
+    return view.kind === 'add'
+      ? {
+          ...view,
+          state: { kind: 'pending', current: null, stale: false, needs },
+        }
+      : view;
+  }
+  if (state.kind !== 'accepted' || state.undoBlocked) return view;
+  const needing = [...views.values()].find(
+    (p) => p.needs?.includes(view.id) && p.state.kind === 'accepted',
+  );
+  return needing
+    ? {
+        ...view,
+        state: {
+          ...state,
+          undoBlocked: `${capitalized(needing.name)} needs it.`,
+        },
+      }
+    : view;
+}
+
+/**
+ * `proposals` in an order that has each after those of them it needs,
+ * otherwise as given.
+ */
+function dependencyOrder(proposals: LoggedProposal[]): LoggedProposal[] {
+  const byId = new Map(proposals.map((p) => [p.id, p]));
+  const ordered: LoggedProposal[] = [];
+  const seen = new Set<string>();
+  const visit = (proposal: LoggedProposal) => {
+    if (seen.has(proposal.id)) return;
+    seen.add(proposal.id);
+    for (const id of proposal.needs ?? []) {
+      const needed = byId.get(id);
+      if (needed) visit(needed);
+    }
+    ordered.push(proposal);
+  };
+  proposals.forEach(visit);
+  return ordered;
 }
 
 /** What the Proposal allows, or its refusal, thrown for the Author. */

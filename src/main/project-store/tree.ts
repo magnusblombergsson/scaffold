@@ -298,3 +298,14 @@ export function asSeries(full: FullTree, newId: () => string): string {
   if (only) Object.assign(only, { id: newId(), title: 'Book 1' });
   return full.books[0].id;
 }
+
+/**
+ * Where a unit lands among the ids of its container's units, `list`: right
+ * after `after`, at the end when `after` is no longer there, or first
+ * with none.
+ */
+export function landing(list: readonly string[], after?: string): number {
+  if (after === undefined) return 0;
+  const at = list.indexOf(after);
+  return at < 0 ? list.length : at + 1;
+}

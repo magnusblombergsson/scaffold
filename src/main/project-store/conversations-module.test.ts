@@ -45,6 +45,11 @@ function conversationsOver() {
     relations: () => [],
     changeRelations: unsupported,
     changeBookDetail: unsupported,
+    addUnit: unsupported,
+    retitleUnit: unsupported,
+    trashUnit: unsupported,
+    holdsProse: unsupported,
+    conflicted: () => false,
   };
   return { conversations: new Conversations(deps), events, deps };
 }

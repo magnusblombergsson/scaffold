@@ -293,6 +293,8 @@ const assistantHandlers: Handlers<
     engine.retry(conversationId, replyTo(sender, askId)),
   acceptProposal: ({ store }, conversationId, proposalId, options) =>
     store.acceptProposal(conversationId, proposalId, options),
+  acceptProposals: ({ store }, conversationId, proposalIds) =>
+    store.acceptProposals(conversationId, proposalIds),
   rejectProposal: ({ store }, conversationId, proposalId) =>
     store.rejectProposal(conversationId, proposalId),
   undoProposal: ({ store }, conversationId, proposalId) =>

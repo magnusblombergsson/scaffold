@@ -167,12 +167,52 @@ export type BookDetailChange = {
   proposed: BookDetailValue;
 };
 
-/** What a Proposal changes: a field of an Entry, a new Entry, an Outline, the Relations, or a Book's detail. */
+/** What the Author calls each unit Plan adds. */
+export const PLAN_UNIT_LABELS: Record<PlanUnit, string> = {
+  scene: 'Scene',
+  chapter: 'Chapter',
+  part: 'Part',
+};
+
+/** The units Plan may add, retitle and place. */
+export const PLAN_UNITS = ['scene', 'chapter', 'part'] as const;
+export type PlanUnit = (typeof PLAN_UNITS)[number];
+
+/** What an Add brings: its title and Outline, and no other Unit details. */
+export type NewUnit = { title: string; outline: string };
+
+/**
+ * A new Scene, Chapter or Part, proposed in Plan: `unitId` is the id it
+ * gets when accepted. It lands in its container `in`, by id: a Chapter for
+ * a Scene; a Part, or the Book's top level for a Chapter or a Part, named
+ * by the Book's id, or `PROJECT_OUTLINE` in a Project of one Book. It goes
+ * right `after` a unit there, or first with none.
+ */
+export type UnitAddition = {
+  kind: 'add';
+  unit: PlanUnit;
+  unitId: string;
+  in: string;
+  after?: string;
+  proposed: NewUnit;
+};
+
+/** A new title for a Scene, Chapter or Part in place of its `base`, proposed in Plan. */
+export type Retitle = {
+  kind: 'retitle';
+  unitId: string;
+  base: string;
+  proposed: string;
+};
+
+/** What a Proposal changes: a field of an Entry, a new Entry, an Outline, the Relations, the structure, or a Book's detail. */
 export type ProposalChange =
   | EntryFieldChange
   | EntryCreation
   | OutlineChange
   | RelationAddition
+  | UnitAddition
+  | Retitle
   | BookDetailChange;
 
 /** The kinds of Proposal a Conversation in each Mode may make. */
@@ -180,7 +220,7 @@ const PROPOSAL_KINDS: Record<Mode, readonly ProposalChange['kind'][]> = {
   brainstorm: ['field', 'new-entry', 'outline', 'relation'],
   interview: ['field', 'new-entry', 'outline', 'relation'],
   writing: ['field', 'new-entry', 'outline'],
-  plan: ['outline', 'book-detail'],
+  plan: ['outline', 'add', 'retitle', 'book-detail'],
 };
 
 /** Whether a Conversation in `mode` may propose a change of `kind`. */
@@ -188,11 +228,15 @@ export function mayPropose(mode: Mode, kind: ProposalChange['kind']): boolean {
   return PROPOSAL_KINDS[mode].includes(kind);
 }
 
-/** A Proposal as logged: its id and the change. */
-export type Proposal = ProposalChange & { id: string };
+/**
+ * A Proposal as logged: its id and the change, and the ids of the other
+ * Proposals it `needs` accepted before it can be: an Add into a Chapter
+ * only proposed, or after a unit only proposed.
+ */
+export type Proposal = ProposalChange & { id: string; needs?: string[] };
 
-/** What a Proposal writes: a field's value, a new Entry, an Outline body, or a Relation. */
-export type ProposedValue = FieldValue | NewEntry | RelationChoice;
+/** What a Proposal writes: a field's value, a new Entry, an Outline body, a Relation, or a new unit. */
+export type ProposedValue = FieldValue | NewEntry | RelationChoice | NewUnit;
 
 /**
  * Why a Proposal's target is out of reach: its Entry, Chapter or Scene is in
@@ -215,7 +259,13 @@ export type Orphaned = 'trashed' | 'drawered' | 'gone' | 'field';
  * the accept wrote, or what it replaced isn't known.
  */
 export type ProposalState =
-  | { kind: 'pending'; current: FieldValue; stale: boolean }
+  | {
+      kind: 'pending';
+      current: FieldValue;
+      stale: boolean;
+      /** The Proposals it needs that aren't accepted yet, by name: until they are, it can't be. */
+      needs?: string[];
+    }
   | { kind: 'pending'; orphaned: Orphaned; of?: string }
   | { kind: 'pending'; refused: string }
   | {
@@ -274,7 +324,10 @@ export function orphanedText(
       ? `${name} has no ${fieldLabel(proposal)} now.`
       : `${name} no longer has that field.`;
   }
-  return proposal.kind === 'outline' || proposal.kind === 'book-detail'
+  return proposal.kind === 'outline' ||
+    proposal.kind === 'add' ||
+    proposal.kind === 'retitle' ||
+    proposal.kind === 'book-detail'
     ? `${name} is no longer in the Manuscript.`
     : `${name} is no longer in the Story Bible.`;
 }
@@ -534,8 +587,15 @@ function holdsAppended(change: AppendingChange, current: FieldValue): boolean {
  * Role, nor a new Entry. An Append or an Add appends already.
  */
 export function canAppend(change: ProposalChange): boolean {
-  if (change.kind === 'new-entry' || change.kind === 'relation') return false;
-  if (change.kind === 'book-detail') return false;
+  if (
+    change.kind === 'new-entry' ||
+    change.kind === 'relation' ||
+    change.kind === 'add' ||
+    change.kind === 'retitle' ||
+    change.kind === 'book-detail'
+  ) {
+    return false;
+  }
   if (isAppending(change)) return false;
   return change.kind === 'outline' || !isChoiceField(change.field);
 }
@@ -567,6 +627,10 @@ export function proposalTarget(proposal: ProposalView): ProposalTarget | null {
   }
   if (proposal.kind === 'outline') {
     return { kind: 'outline', outlineId: proposal.outlineId };
+  }
+  // In Plan, the unit in the tree, or where an Add would land.
+  if (proposal.kind === 'add' || proposal.kind === 'retitle') {
+    return { kind: 'outline', outlineId: proposal.unitId };
   }
   return { kind: 'entry', entryId: proposal.entryId, field: proposal.field };
 }
@@ -691,6 +755,20 @@ export function proposalBlock(change: ProposalChange): string {
     const { type, name, description } = change.proposed;
     return fencedProposal({ create: type, name, description });
   }
+  if (change.kind === 'add') {
+    const { unit, unitId, proposed, after } = change;
+    return fencedProposal({
+      add: unit,
+      id: unitId,
+      title: proposed.title,
+      outline: proposed.outline,
+      in: change.in,
+      ...(after !== undefined && { after }),
+    });
+  }
+  if (change.kind === 'retitle') {
+    return fencedProposal({ retitle: change.unitId, title: change.proposed });
+  }
   if (change.kind === 'relation') {
     const { from, to, proposed } = change;
     return fencedProposal(
@@ -789,7 +867,30 @@ export type NewEntryPlace =
  * A Proposal's target as the store read it: a Target, where a new Entry
  * is, or a Relation's Entries and the Relations held.
  */
-export type ProposalBasis = Target | NewEntryPlace | RelationBasis;
+export type ProposalBasis =
+  | Target
+  | NewEntryPlace
+  | RelationBasis
+  | AddBasis
+  | RetitleBasis;
+
+/**
+ * An Add's basis: where the unit of its id is now, by `name`, and whether
+ * it holds Prose there; and why its container can't take it, by name, or
+ * null while it can.
+ */
+export type AddBasis = {
+  unit:
+    | { where: 'live'; name: string; prose: boolean }
+    | { where: 'trash' | 'drawer' | 'gone' };
+  container: { orphaned: Orphaned; name: string } | null;
+};
+
+/**
+ * A Retitle's basis: its unit's title now, or why it has none, or why it
+ * may not be retitled, as a Scene Missing, Unplaced or in Conflict.
+ */
+export type RetitleBasis = Target | { refused: string };
 
 /** Why a Proposal can't be accepted or undone now, in words for the Author. */
 export type Refusal = {
@@ -802,7 +903,9 @@ export type Refusal = {
     | 'orphaned'
     | 'not-accepted'
     | 'changed'
-    | 'refused';
+    | 'refused'
+    | 'needs'
+    | 'needed';
   text: string;
 };
 
@@ -824,8 +927,14 @@ export function stateOf(
   if (logged.kind === 'relation') {
     return relationState(logged, basis as RelationBasis);
   }
+  if (logged.kind === 'add') return addState(logged, basis as AddBasis);
   const { decision } = logged;
   if (decision.kind === 'rejected') return { kind: 'rejected' };
+  if ('refused' in basis && logged.kind === 'retitle') {
+    return decision.kind === 'accepted'
+      ? { kind: 'accepted', edited: false, undoBlocked: basis.refused }
+      : { kind: 'pending', refused: basis.refused };
+  }
   return decision.kind === 'accepted'
     ? acceptedState(logged, decision, basis)
     : undecidedState(logged, decision.undid as ProposedValue, basis);
@@ -857,6 +966,19 @@ export function accept(
   }
   const state = stateOf(logged, basis);
   if (state.kind !== 'pending') return alreadyDecided(state);
+  if (logged.kind === 'add') {
+    const unit = asNewUnit(value);
+    if (!unit || !unit.title.trim()) {
+      return { refused: 'cannot-hold', text: 'A new unit needs a title' };
+    }
+    if ('orphaned' in state) {
+      return {
+        refused: 'orphaned',
+        text: orphanedText(logged, state.orphaned, state.of),
+      };
+    }
+    return { wrote: { title: unit.title.trim(), outline: unit.outline } };
+  }
   if (append && !canAppend(logged)) {
     return {
       refused: 'cannot-append',
@@ -896,7 +1018,9 @@ export function accept(
       ? isFieldValue(logged.field, value)
       : logged.kind === 'book-detail'
         ? isBookDetailValue(logged.detail, value)
-        : typeof value === 'string';
+        : logged.kind === 'retitle'
+          ? typeof value === 'string' && value.trim() !== ''
+          : typeof value === 'string';
   if (!holds) {
     return {
       refused: 'cannot-hold',
@@ -905,7 +1029,9 @@ export function accept(
           ? `${capitalized(fieldLabel(logged))} can't hold that value`
           : logged.kind === 'book-detail'
             ? `${BOOK_DETAIL_LABELS[logged.detail]} can't hold that value`
-            : "An Outline can't hold that value",
+            : logged.kind === 'retitle'
+              ? 'A title can’t be empty'
+              : "An Outline can't hold that value",
     };
   }
   if ('orphaned' in state) {
@@ -924,7 +1050,9 @@ export function accept(
       text: `${targetLabel(logged)} has changed since this was proposed`,
     };
   }
-  return { wrote: value };
+  return {
+    wrote: logged.kind === 'retitle' ? (value as string).trim() : value,
+  };
 }
 
 /**
@@ -964,12 +1092,14 @@ export function undo(
   if (state.undoBlocked || decision.kind !== 'accepted') {
     return { refused: 'changed', text: state.undoBlocked ?? NOT_LOGGED };
   }
-  if (logged.kind === 'new-entry') return { trash: true };
+  if (logged.kind === 'new-entry' || logged.kind === 'add') {
+    return { trash: true };
+  }
   return { restore: decision.replaced ?? null };
 }
 
-/** A Proposal as decided, of a field, a new Entry or an Outline: not a Relation. */
-type TargetProposal = Exclude<DecidedProposal, { kind: 'relation' }>;
+/** A Proposal as decided, of a field, a new Entry, an Outline or a title: not a Relation nor an Add. */
+type TargetProposal = Exclude<DecidedProposal, { kind: 'relation' | 'add' }>;
 
 /** Where a Proposal the log says is accepted stands, as `stateOf`. */
 function acceptedState(
@@ -1117,13 +1247,15 @@ export function sameJson(a: unknown, b: unknown): boolean {
   );
 }
 
-/** What a refusal calls the field or Outline a Proposal changes. */
+/** What a refusal calls the field, Outline or title a Proposal changes. */
 function targetLabel(
   change:
     | (EntryFieldChange & WithFieldLabel)
     | OutlineChange
+    | Retitle
     | BookDetailChange,
 ): string {
+  if (change.kind === 'retitle') return 'The title';
   if (change.kind === 'book-detail') return BOOK_DETAIL_LABELS[change.detail];
   return change.kind === 'field'
     ? capitalized(fieldLabel(change))
@@ -1136,7 +1268,7 @@ function capitalized(text: string): string {
 
 /** The field a Proposal changes, or `'outline'`, as `appended` takes it. */
 function targetOf(
-  change: EntryFieldChange | OutlineChange,
+  change: EntryFieldChange | OutlineChange | Retitle,
 ): ProposalField | 'outline' {
   return change.kind === 'field' ? change.field : 'outline';
 }
@@ -1151,8 +1283,63 @@ function placeOf(basis: ProposalBasis): NewEntryPlace {
 
 /** A field's or an Outline's basis: what it holds. */
 function heldIn(basis: ProposalBasis): Target {
-  if ('where' in basis || 'relations' in basis || 'name' in basis) {
+  if (
+    'where' in basis ||
+    'relations' in basis ||
+    'name' in basis ||
+    'unit' in basis ||
+    'refused' in basis
+  ) {
     throw new Error('A basis of a field or an Outline is what it holds');
   }
   return basis;
+}
+
+/** The value as a new unit's title and Outline, or null when it isn't one. */
+export function asNewUnit(value: unknown): NewUnit | null {
+  if (typeof value !== 'object' || value === null) return null;
+  const { title, outline } = value as Record<string, unknown>;
+  if (typeof title !== 'string' || typeof outline !== 'string') return null;
+  return { title, outline };
+}
+
+/**
+ * Where an Add stands, as `stateOf`. Accepted, it can be undone while its
+ * unit holds no Prose, which puts it in Trash, logged as undone; one the
+ * Author put in Trash or the Drawer is theirs. Undecided, its unit already there counts as applied; one the
+ * Author put in the Drawer is theirs; its container in Trash or gone
+ * leaves it only to reject. It is never stale.
+ */
+function addState(
+  logged: DecidedProposal & UnitAddition,
+  { unit, container }: AddBasis,
+): ProposalState {
+  const { decision } = logged;
+  if (decision.kind === 'rejected') return { kind: 'rejected' };
+  if (decision.kind === 'accepted') {
+    const edited = !sameValue(decision.wrote as NewUnit, logged.proposed);
+    const undoBlocked =
+      unit.where === 'live'
+        ? unit.prose
+          ? `${unit.name} holds Prose.`
+          : null
+        : unit.where === 'trash'
+          ? `${logged.name} is in Trash.`
+          : unit.where === 'drawer'
+            ? `${logged.name} is in the Drawer.`
+            : `${logged.name} is no longer in the Manuscript.`;
+    return { kind: 'accepted', edited, ...(undoBlocked && { undoBlocked }) };
+  }
+  if (unit.where === 'live') {
+    return { kind: 'accepted', edited: false, undoBlocked: NOT_LOGGED };
+  }
+  if (unit.where === 'drawer') return { kind: 'pending', orphaned: 'drawered' };
+  if (container) {
+    return {
+      kind: 'pending',
+      orphaned: container.orphaned,
+      of: container.name,
+    };
+  }
+  return { kind: 'pending', current: null, stale: false };
 }

@@ -20,6 +20,7 @@ import {
   textValue,
   type FieldValue,
   type NewEntry,
+  type NewUnit,
   type ProposalField,
   type ProposalTarget,
   type ProposalView,
@@ -52,6 +53,8 @@ export function proposalTitle(proposal: ProposalView): string {
   if (proposal.kind === 'new-entry') {
     return `New ${ENTRY_TYPE_LABELS[proposal.proposed.type]} · ${proposal.name}`;
   }
+  if (proposal.kind === 'add') return `Add ${proposal.name}`;
+  if (proposal.kind === 'retitle') return `${proposal.name} › Title`;
   return `${proposal.name} › Outline`;
 }
 
@@ -126,7 +129,7 @@ function Title({
  * What the Author edits a proposed value as, until accepted or cancelled: a
  * field's or an Outline's text, or a new Entry's type, name and description.
  */
-type Draft = string | NewEntry;
+type Draft = string | NewEntry | NewUnit;
 
 /**
  * A Proposal inline in the reply that made it: what it changes, and Accept,
@@ -226,6 +229,9 @@ export function ProposalCard({
       : proposal.kind !== 'book-detail';
   const current = 'current' in state ? state.current : null;
   const stale = 'stale' in state && state.stale;
+  // Until those it needs are accepted, it can only be rejected.
+  const needs = 'needs' in state ? state.needs : undefined;
+  const waiting = needs !== undefined && needs.length > 0;
 
   const accept = (edited?: ProposedValue, append = false) =>
     decide(
@@ -288,8 +294,15 @@ export function ProposalCard({
                 ? fieldLabel(proposal)
                 : proposal.kind === 'book-detail'
                   ? BOOK_DETAIL_LABELS[proposal.detail]
-                  : 'The Outline'}{' '}
+                  : proposal.kind === 'retitle'
+                    ? 'The title'
+                    : 'The Outline'}{' '}
               has changed since this was proposed.
+            </p>
+          )}
+          {waiting && (
+            <p className="proposal-needs">
+              Needs {needs.join(', ')} accepted first.
             </p>
           )}
           <Change proposal={proposal} current={current} stale={stale} />
@@ -315,7 +328,7 @@ export function ProposalCard({
             <button
               className="primary"
               onClick={() => void accept(editedValue(draft))}
-              disabled={readOnly || busy}
+              disabled={readOnly || busy || waiting}
             >
               {acceptLabel} edited
             </button>
@@ -338,7 +351,7 @@ export function ProposalCard({
                 <button
                   className="primary"
                   onClick={() => void accept()}
-                  disabled={readOnly || busy}
+                  disabled={readOnly || busy || waiting}
                 >
                   {stale ? 'Accept anyway' : acceptLabel}
                 </button>
@@ -408,6 +421,28 @@ function Change({
           <ins>{detailText(detail, proposed)}</ins>
         </dd>
       </dl>
+    );
+  }
+  if (proposal.kind === 'add') {
+    return (
+      <div className="proposal-diff" aria-label="Change">
+        <ins className="proposal-unit-title">{proposal.proposed.title}</ins>
+        {proposal.proposed.outline && (
+          <p className="proposal-unit-outline">
+            <ins>{proposal.proposed.outline}</ins>
+          </p>
+        )}
+      </div>
+    );
+  }
+  if (proposal.kind === 'retitle') {
+    return (
+      <p className="proposal-diff" aria-label="Change">
+        {stale && (
+          <span className="proposal-now">Now “{String(current)}” · </span>
+        )}
+        <del>{proposal.base}</del> <ins>{proposal.proposed}</ins>
+      </p>
     );
   }
   if (proposal.kind === 'new-entry') {
@@ -505,6 +540,7 @@ function draftOf(proposal: ProposalView): Draft {
   }
   // Never edited: accepted or rejected as proposed.
   if (proposal.kind === 'book-detail') return '';
+  if (proposal.kind === 'add') return { ...proposal.proposed };
   if (proposal.kind !== 'field') return proposal.proposed;
   const { field, proposed } = proposal;
   if (field === 'role') return proposed === null ? ROLES[0] : String(proposed);
@@ -531,6 +567,24 @@ function EditValue({
   draft: Draft;
   onChange(draft: Draft): void;
 }) {
+  if (typeof draft !== 'string' && 'outline' in draft) {
+    return (
+      <div className="proposal-edit-entry">
+        <input
+          aria-label="Edited title"
+          value={draft.title}
+          onChange={(event) =>
+            onChange({ ...draft, title: event.target.value })
+          }
+        />
+        <TextValue
+          label="Edited Outline"
+          text={draft.outline}
+          onChange={(outline) => onChange({ ...draft, outline })}
+        />
+      </div>
+    );
+  }
   if (typeof draft !== 'string') {
     const set = (change: Partial<NewEntry>) =>
       onChange({ ...draft, ...change });
