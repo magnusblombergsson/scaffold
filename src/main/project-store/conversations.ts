@@ -11,11 +11,17 @@ import {
   type Manuscript,
   type OutlineRef,
   type OutlineValue,
+  type BookDetailKey,
   type UnitRef,
   type UnitValue,
   type ValueOf,
 } from '../../shared/project-types';
 import { type AcceptOptions, type ProjectEvent } from '../../shared/api';
+import {
+  bookDetailsOf,
+  detailValue,
+  type BookDetailValue,
+} from '../../shared/book-details';
 import type { CustomField } from '../../shared/custom-field';
 import { newEntryValue } from '../../shared/entry';
 import { removeEvolution, withEvolved } from '../../shared/evolution';
@@ -41,6 +47,7 @@ import {
   stateOf,
   undo,
   withField,
+  type BookDetailChange,
   type DecidedProposal,
   type Decision,
   type EntryCreation,
@@ -142,6 +149,16 @@ export type ConversationsDeps = {
   /** Runs a structure operation, past the format gate. */
   enqueueWrite: <T>(operation: () => Promise<T>) => Promise<T>;
   passFormatGate: () => Promise<void>;
+  /**
+   * Sets one detail of a Book, or of the one Book a Project without Books
+   * is, by `PROJECT_OUTLINE`, to what `change` makes of the Manuscript as it
+   * is then, as a structure operation; null takes it away.
+   */
+  changeBookDetail: (
+    bookId: string,
+    key: BookDetailKey,
+    change: () => BookDetailValue,
+  ) => Promise<void>;
   /** Every Relation held, as last read or written. */
   relations: () => Relation[];
   /** Runs a change to the Relations as a structure operation, past the format gate, then tells the window. */
@@ -572,7 +589,9 @@ ${text}`);
       const { replaced, wrote, reloaded, landed } =
         proposal.kind === 'new-entry'
           ? await this.acceptNewEntry(proposal, value, how)
-          : await this.acceptChange(proposal, value, how, fromBook);
+          : proposal.kind === 'book-detail'
+            ? await this.acceptBookDetail(proposal, value, how)
+            : await this.acceptChange(proposal, value, how, fromBook);
       await this.appendEvent(
         conversationId,
         acceptedEvent(proposal, replaced, wrote, this.deps.clock.now(), landed),
@@ -610,6 +629,45 @@ ${text}`);
     });
     this.refuseUnsaved(ref, after);
     return { replaced, wrote, landed, reloaded: { ref, value: after } };
+  }
+
+  /**
+   * Sets the detail of a Book a Proposal changes, as `acceptProposal`,
+   * judged against what the Book holds just before it is written.
+   */
+  private async acceptBookDetail(
+    proposal: DecidedProposal & BookDetailChange,
+    value: ProposedValue,
+    how: AcceptHow,
+  ): Promise<Accepted> {
+    // Its Book may be out of reach, with nothing to set.
+    granted(accept(proposal, this.bookDetailTarget(proposal), value, how));
+    let replaced: FieldValue | undefined;
+    let wrote = value;
+    await this.deps.changeBookDetail(proposal.bookId, proposal.detail, () => {
+      const target = this.bookDetailTarget(proposal);
+      ({ wrote } = granted(accept(proposal, target, value, how)));
+      replaced = (target as { current: FieldValue }).current;
+      return wrote as BookDetailValue;
+    });
+    return { replaced, wrote };
+  }
+
+  /**
+   * What the detail of a Book a Proposal changes holds now, as a Proposal
+   * compares it; or why it holds nothing: its Book is in Trash, the Drawer
+   * or gone, or a Project of one Book it was proposed in is a Series now,
+   * whose Book 1 took the details.
+   */
+  private bookDetailTarget({ bookId, detail }: BookDetailChange): Target {
+    const manuscript = this.deps.manuscript();
+    const ofProject = bookId === PROJECT_OUTLINE;
+    const orphaned = ofProject
+      ? manuscript.books && 'gone'
+      : this.deps.outlineOrphaned(bookId);
+    if (orphaned) return { orphaned };
+    const details = bookDetailsOf(manuscript, ofProject ? undefined : bookId);
+    return { current: detailValue(details, detail) };
   }
 
   /**
@@ -766,7 +824,9 @@ ${text}`);
           ? await this.undoNewEntry(proposal)
           : proposal.kind === 'relation'
             ? await this.undoRelation(proposal)
-            : await this.undoChange(proposal);
+            : proposal.kind === 'book-detail'
+              ? await this.undoBookDetail(proposal)
+              : await this.undoChange(proposal);
       await this.appendEvent(conversationId, {
         type: 'proposal.undone',
         id: proposalId,
@@ -798,6 +858,18 @@ ${text}`);
     });
     this.refuseUnsaved(ref, after);
     return { ref, value: after };
+  }
+
+  /** Sets back the detail of a Book an accept replaced, while it holds what that wrote, as `undoProposal`. */
+  private async undoBookDetail(
+    proposal: DecidedProposal & BookDetailChange,
+  ): Promise<undefined> {
+    granted(undo(proposal, this.bookDetailTarget(proposal)));
+    await this.deps.changeBookDetail(proposal.bookId, proposal.detail, () => {
+      const undone = granted(undo(proposal, this.bookDetailTarget(proposal)));
+      return (undone as { restore: FieldValue }).restore;
+    });
+    return undefined;
   }
 
   /** Takes away what accepting a Relation wrote, if as written still, as `undoProposal`. */
@@ -901,6 +973,7 @@ ${text}`);
         fromItsBook ? [undefined, proposal.book] : [undefined],
       );
     }
+    if (proposal.kind === 'book-detail') return this.bookDetailTarget(proposal);
     return proposal.kind === 'new-entry'
       ? this.newEntryPlace(proposal.entryId)
       : this.target(proposal);
@@ -1019,6 +1092,13 @@ ${text}`);
     }
     if (proposal.kind === 'field') {
       return this.entryName(proposal.entryId) ?? 'An Entry';
+    }
+    if (proposal.kind === 'book-detail') {
+      if (proposal.bookId === PROJECT_OUTLINE) return 'The Book';
+      const book =
+        this.deps.manuscript().books?.find((b) => b.id === proposal.bookId) ??
+        this.deps.trash.get(proposal.bookId);
+      return book && 'title' in book ? `Book “${book.title}”` : 'A Book';
     }
     const { outlineId } = proposal;
     const {

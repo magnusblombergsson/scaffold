@@ -132,6 +132,26 @@ export function PlanRoom({
   const { measure, falls } = useMemo(() => sceneFalls(scenes), [scenes]);
   /** The titles of the Scenes carrying a Beat, by its qualified id. */
   const carrying = (beat: string) => carriers(scenes, beat).map((s) => s.title);
+  /** The Book's details proposed in the Conversation open, still to decide: ghosts in the strip. */
+  const proposedDetails = useMemo(
+    () =>
+      (current?.messages ?? [])
+        .flatMap((m) => m.proposals ?? [])
+        .filter(
+          (p) =>
+            p.kind === 'book-detail' &&
+            p.bookId === bookId &&
+            p.state.kind === 'pending' &&
+            !('orphaned' in p.state),
+        ),
+    [current, bookId],
+  );
+  /** Asks Plan about an entry of the catalogue, which is then sent in full. */
+  const askAbout =
+    readOnly || streaming !== null || !providers || !anyAdded(providers)
+      ? undefined
+      : (name: string) =>
+          void conversation.send(`Tell me about ${name} for this Book.`);
   /** Each unit's Outline Proposals made in the Conversation open. */
   const proposals = useMemo(() => {
     const byUnit = new Map<string, ProposalView[]>();
@@ -208,7 +228,11 @@ export function PlanRoom({
           </label>
           <BookPicker conversation={conversation} names={names} />
         </div>
-        <BookDetailsStrip bookId={bookId} book={bookDetails} />
+        <BookDetailsStrip
+          bookId={bookId}
+          book={bookDetails}
+          proposed={proposedDetails}
+        />
         <div className="plan-body">
           <PlanTree
             nodes={tree}
@@ -240,6 +264,7 @@ export function PlanRoom({
               bookId={bookId}
               book={bookDetails}
               carrying={carrying}
+              onAsk={askAbout}
             />
           </aside>
         </div>
@@ -273,7 +298,12 @@ export function PlanRoom({
                 }
                 onOpenSettings={onAddProvider}
                 proposals={(made) => (
-                  <ProposalLinks proposals={made} lit={lit} onPoint={point} />
+                  <PlanProposals
+                    conversationId={current?.id ?? null}
+                    proposals={made}
+                    lit={lit}
+                    onPoint={point}
+                  />
                 )}
               />
               {error && (
@@ -323,6 +353,40 @@ function PlanStart({
         ))}
       </div>
     </div>
+  );
+}
+
+/**
+ * A reply's Proposals: those on the Book's details as cards, decided here;
+ * the rest as links to the unit each changes in the tree, decided there.
+ */
+function PlanProposals({
+  conversationId,
+  proposals,
+  lit,
+  onPoint,
+}: {
+  conversationId: string | null;
+  proposals: ProposalView[];
+  lit: string | null;
+  onPoint(unitId: string): void;
+}) {
+  const details = proposals.filter((p) => p.kind === 'book-detail');
+  const others = proposals.filter((p) => p.kind !== 'book-detail');
+  return (
+    <>
+      {others.length > 0 && (
+        <ProposalLinks proposals={others} lit={lit} onPoint={onPoint} />
+      )}
+      {conversationId &&
+        details.map((p) => (
+          <ProposalCard
+            key={p.id}
+            conversationId={conversationId}
+            proposal={p}
+          />
+        ))}
+    </>
   );
 }
 

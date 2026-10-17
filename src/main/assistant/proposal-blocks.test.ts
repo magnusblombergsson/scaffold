@@ -7,6 +7,7 @@ import { nodeFileSystem } from '../project-store/file-system';
 import { createProject } from '../project-store/project-store';
 import { storyBibleOf } from './context-builder';
 import { readProposals } from './proposal-blocks';
+import { PROJECT_OUTLINE } from '../../shared/project-types';
 
 let dir: string;
 
@@ -127,5 +128,104 @@ describe('Proposals in Plan, on a Missing Scene', () => {
 
     expect(proposals).toEqual([]);
     expect(unreadable).toBe(1);
+  });
+});
+
+describe('Book detail Proposals', () => {
+  async function project() {
+    return createProject(path.join(dir, 'My Novel'), {
+      fs: nodeFileSystem,
+      clock: instantClock(1_000),
+    });
+  }
+
+  it('in Plan, set one detail of its Book, against what it holds; what it holds already is left out', async () => {
+    const store = await project();
+    await store.setBookDetail(PROJECT_OUTLINE, 'genres', ['romance']);
+    const view = store.assistantView();
+
+    const { proposals, unreadable } = await readProposals(
+      view,
+      [
+        { structure: 'save-the-cat' },
+        { genres: ['romance', 'mystery'] },
+        { format: 'novel' },
+        { genreConventions: ['romance', 'mystery'] },
+        { genres: ['romance'] },
+      ],
+      storyBibleOf(view, undefined),
+      'plan',
+    );
+
+    expect(unreadable).toBe(0);
+    expect(proposals).toEqual([
+      {
+        id: expect.any(String),
+        kind: 'book-detail',
+        bookId: PROJECT_OUTLINE,
+        detail: 'structure',
+        base: null,
+        proposed: 'save-the-cat',
+      },
+      expect.objectContaining({
+        detail: 'genres',
+        base: ['romance'],
+        proposed: ['mystery', 'romance'],
+      }),
+      expect.objectContaining({ detail: 'bookFormat', proposed: 'novel' }),
+      expect.objectContaining({
+        detail: 'genreConventions',
+        base: null,
+        proposed: ['mystery', 'romance'],
+      }),
+    ]);
+  });
+
+  it('are unreadable with an id the catalogue doesn’t know, more than one detail, or outside Plan', async () => {
+    const store = await project();
+    const view = store.assistantView();
+    const lens = storyBibleOf(view, undefined);
+
+    expect(
+      await readProposals(
+        view,
+        [
+          { structure: 'from-a-newer-app' },
+          { genres: 'mystery' },
+          { format: 'epic' },
+          { structure: 'freytag', format: 'novel' },
+        ],
+        lens,
+        'plan',
+      ),
+    ).toEqual({ proposals: [], unreadable: 4 });
+    for (const mode of ['brainstorm', 'interview', 'writing'] as const) {
+      expect(
+        await readProposals(view, [{ structure: 'freytag' }], lens, mode),
+      ).toEqual({ proposals: [], unreadable: 1 });
+    }
+  });
+
+  it('in a Series, are of the Plan’s own Book', async () => {
+    const store = await project();
+    const { id: two } = await store.createBook();
+    await store.setBookDetail(two, 'structure', 'none');
+    const view = store.assistantView();
+
+    const { proposals } = await readProposals(
+      view,
+      [{ structure: 'fichtean' }],
+      storyBibleOf(view, two),
+      'plan',
+    );
+
+    expect(proposals).toEqual([
+      expect.objectContaining({
+        bookId: two,
+        detail: 'structure',
+        base: 'none',
+        proposed: 'fichtean',
+      }),
+    ]);
   });
 });

@@ -7,6 +7,7 @@ import {
   GENRES,
   guideStructures,
   NO_STRUCTURE,
+  shortlist,
   shownIds,
   STRUCTURES,
 } from './structure-catalogue';
@@ -196,5 +197,102 @@ describe('the structure guide’s order', () => {
       guideStructures({ genres: ['from-a-newer-app'], bookFormat: 'epic' }),
     ).toEqual(all);
     expect(all.lessUsual).toEqual([]);
+  });
+});
+
+describe('the shortlist', () => {
+  const ids = (list: readonly { id: string }[]) => list.map((e) => e.id);
+
+  it('holds in full the Structures fitting the Book’s Genres and Format and the Genre conventions of its Genres, the rest by name', () => {
+    const { structures, conventions } = shortlist(
+      { genres: ['mystery'], bookFormat: 'novel' },
+      [],
+    );
+
+    expect(ids(structures.full)).toEqual([
+      'three-act',
+      'four-part',
+      'save-the-cat',
+      'seven-point',
+    ]);
+    expect(ids(structures.byName)).toEqual([
+      'heros-journey',
+      'freytag',
+      'fichtean',
+      'kishotenketsu',
+    ]);
+    expect(ids(conventions.full)).toEqual(['mystery']);
+    expect(ids(conventions.byName)).toEqual([
+      'crime',
+      'thriller',
+      'horror',
+      'fantasy',
+      'romance',
+    ]);
+  });
+
+  it('pays no heed to whether a Structure works per Book or across a Series', () => {
+    const { structures } = shortlist(
+      { genres: ['fantasy'], bookFormat: 'novella' },
+      [],
+    );
+
+    // Four-part and the Hero’s Journey work both ways, the rest per Book.
+    expect(ids(structures.full)).toEqual([
+      'three-act',
+      'four-part',
+      'save-the-cat',
+      'seven-point',
+      'heros-journey',
+      'kishotenketsu',
+    ]);
+  });
+
+  it('holds in full what the Book follows, fitting or not', () => {
+    const { structures, conventions } = shortlist(
+      {
+        genres: ['literary'],
+        bookFormat: 'short-story',
+        structure: 'save-the-cat',
+        genreConventions: ['romance'],
+      },
+      [],
+    );
+
+    expect(ids(structures.full)).toEqual([
+      'save-the-cat',
+      'freytag',
+      'fichtean',
+      'kishotenketsu',
+    ]);
+    expect(ids(conventions.full)).toEqual(['romance']);
+  });
+
+  it('holds in full any entry the Author asked about by name, however they wrote it', () => {
+    const { structures, conventions } = shortlist(
+      { genres: ['literary'], bookFormat: 'short-story' },
+      [
+        "Tell me about the Hero's Journey.",
+        'Would KISHOTENKETSU work, or Save the Cat?',
+        'Is it a three act story? And the thriller rules?',
+      ],
+    );
+
+    expect(ids(structures.full)).toEqual([
+      'three-act',
+      'save-the-cat',
+      'heros-journey',
+      'freytag',
+      'fichtean',
+      'kishotenketsu',
+    ]);
+    expect(ids(conventions.full)).toEqual(['thriller']);
+  });
+
+  it('holds no Genre convention in full for a Book with no Genres, and every Structure', () => {
+    const { structures, conventions } = shortlist({}, []);
+
+    expect(structures.byName).toEqual([]);
+    expect(conventions.full).toEqual([]);
   });
 });

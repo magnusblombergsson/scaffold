@@ -1,3 +1,4 @@
+import { bookDetailsOf } from '../../shared/book-details';
 import { createHash, randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import path from 'node:path';
@@ -353,6 +354,12 @@ export interface AssistantView {
   customFields(): CustomField[];
   /** Every Relation held; `relationsView` hides those it may not see. */
   listRelations(): Relation[];
+  /**
+   * The details of the Book `book`, or in a Project of one Book, the
+   * Manuscript's: hidden from the Manuscript above, as Plan alone is sent
+   * them (spec: Outline planner §12).
+   */
+  bookDetails(book: string | undefined): BookDetails;
   read<R extends AssistantRef>(ref: R): Promise<ValueOf<R>>;
 }
 
@@ -1216,6 +1223,10 @@ export class ProjectStore {
       passFormatGate: () => this.passFormatGate(),
       relations: () => this.records.relations.list(),
       changeRelations: (change) => this.changeRecords('relations', change),
+      changeBookDetail: (bookId, key, change) =>
+        this.enqueueWrite(async () => {
+          await this.setDetail(this.detailRef(bookId), key, change());
+        }),
     });
     this.sessions = new Sessions(
       {
@@ -1363,6 +1374,8 @@ export class ProjectStore {
         type: 'unitDetailsChanged',
         manuscript: this.manuscript(),
       });
+      // A Book's details among them: Plan's Proposals may stand otherwise now.
+      this.emit({ type: 'proposalsChanged' });
     }
     for (const kind of RECORD_KIND_NAMES) {
       if (await this.records[kind].read()) this.emitRecords(kind);
@@ -1887,7 +1900,10 @@ export class ProjectStore {
     value: BookDetails[K] | null,
   ): Promise<void> {
     return this.enqueueWrite(async () => {
-      await this.setDetail(this.detailRef(bookId), key, value);
+      if (await this.setDetail(this.detailRef(bookId), key, value)) {
+        // Plan's Proposals on it may be stale, or applied, now.
+        this.emit({ type: 'proposalsChanged' });
+      }
     });
   }
 
@@ -4440,6 +4456,7 @@ export class ProjectStore {
       listEntries: () => this.listEntries().map(forAssistant),
       customFields: () => this.records.customFields.list(),
       listRelations: () => this.listRelations(),
+      bookDetails: (book) => bookDetailsOf(this.manuscript(), book),
       read: async (ref) => {
         // Refused at run time too, whatever a caller's types say.
         if ((ref as UnitRef).kind === 'private') {

@@ -26,6 +26,7 @@ import {
   type ProposedValue,
 } from '../shared/proposal';
 import { relationVerb } from '../shared/relation-proposal';
+import { BOOK_DETAIL_LABELS, detailText } from '../shared/book-details';
 import { fieldDiff, textDiff, type DiffPart } from '../shared/diff';
 import { ReadOnlyContext } from './read-only';
 import { useRun } from './use-project';
@@ -37,10 +38,14 @@ export function proposalCardId(proposalId: string): string {
 
 /**
  * A Proposal's header: `Entry › Field`, `New <type> · <name>`, `Scene “…” ›
- * Outline`, or a Relation's sentence, as in `Mara is mother of Tobin`.
+ * Outline`, `The Book › Structure`, or a Relation's sentence, as in `Mara is
+ * mother of Tobin`.
  */
 export function proposalTitle(proposal: ProposalView): string {
   if (proposal.kind === 'relation') return proposal.name;
+  if (proposal.kind === 'book-detail') {
+    return `${proposal.name} › ${BOOK_DETAIL_LABELS[proposal.detail]}`;
+  }
   if (proposal.kind === 'field') {
     return `${proposal.name} › ${fieldLabel(proposal)}`;
   }
@@ -214,8 +219,11 @@ export function ProposalCard({
 
   const orphaned = 'orphaned' in state ? state.orphaned : null;
   const refused = 'refused' in state ? state.refused : null;
+  // A Book's detail is accepted or rejected as proposed.
   const editable =
-    proposal.kind !== 'relation' || proposal.proposed.kind === 'label';
+    proposal.kind === 'relation'
+      ? proposal.proposed.kind === 'label'
+      : proposal.kind !== 'book-detail';
   const current = 'current' in state ? state.current : null;
   const stale = 'stale' in state && state.stale;
 
@@ -276,7 +284,11 @@ export function ProposalCard({
         <>
           {stale && (
             <p className="proposal-warning">
-              {proposal.kind === 'field' ? fieldLabel(proposal) : 'The Outline'}{' '}
+              {proposal.kind === 'field'
+                ? fieldLabel(proposal)
+                : proposal.kind === 'book-detail'
+                  ? BOOK_DETAIL_LABELS[proposal.detail]
+                  : 'The Outline'}{' '}
               has changed since this was proposed.
             </p>
           )}
@@ -364,7 +376,8 @@ export function ProposalCard({
  * base body, struck through, and the proposed one side by side, or when
  * stale, its body now, the one proposed against and the one proposed; an
  * Append or an Add a diff from what its target holds now; a new Entry its
- * description. A Relation's title says it all.
+ * description; a Book's detail what it held and what is proposed, by name,
+ * or when stale, what it holds now too. A Relation's title says it all.
  */
 function Change({
   proposal,
@@ -376,6 +389,27 @@ function Change({
   stale: boolean;
 }) {
   if (proposal.kind === 'relation') return null;
+  if (proposal.kind === 'book-detail') {
+    const { detail, base, proposed } = proposal;
+    return (
+      <dl className="proposal-values">
+        {stale && (
+          <>
+            <dt>Now</dt>
+            <dd>{detailText(detail, current)}</dd>
+          </>
+        )}
+        <dt>{stale ? 'Proposed against' : 'Before'}</dt>
+        <dd>
+          <del>{detailText(detail, base)}</del>
+        </dd>
+        <dt>Proposed</dt>
+        <dd>
+          <ins>{detailText(detail, proposed)}</ins>
+        </dd>
+      </dl>
+    );
+  }
   if (proposal.kind === 'new-entry') {
     return (
       <p className="proposal-diff" aria-label="Change">
@@ -469,6 +503,8 @@ function draftOf(proposal: ProposalView): Draft {
   if (proposal.kind === 'relation') {
     return proposal.proposed.kind === 'label' ? proposal.proposed.label : '';
   }
+  // Never edited: accepted or rejected as proposed.
+  if (proposal.kind === 'book-detail') return '';
   if (proposal.kind !== 'field') return proposal.proposed;
   const { field, proposed } = proposal;
   if (field === 'role') return proposed === null ? ROLES[0] : String(proposed);

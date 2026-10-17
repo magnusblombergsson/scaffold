@@ -1,13 +1,14 @@
 import { useContext } from 'react';
 import {
+  beatWhere,
   carriers,
   shownBeats,
+  spanText,
   type FollowedBeat,
   type Measure,
   type Span,
 } from '../shared/beat-measure';
 import type { ManuscriptScene } from '../shared/project-types';
-import type { Beat } from '../shared/structure-catalogue';
 import { ReadOnlyContext } from './read-only';
 import { useRun } from './use-project';
 
@@ -15,17 +16,6 @@ import { useRun } from './use-project';
 // its row in the tree, checkboxes in its details, and the Beat rail beside
 // the tree. Only the Beats of what the Book follows are shown; a Scene's
 // other marks are set aside, kept but unseen.
-
-/** A share of the Book in whole %, as in “10–40%”, or “50%” when it starts where it ends. */
-function spanText({ from, to }: Span): string {
-  const [a, b] = [Math.round(from), Math.round(to)];
-  return a === b ? `${a}%` : `${a}–${b}%`;
-}
-
-/** Where a Beat should fall, as in “10–20%”, or “by order” when only its order counts. */
-export function beatWhere({ at }: Pick<Beat, 'at'>): string {
-  return at ? spanText(at) : 'by order';
-}
 
 const MEASURED: Record<Measure, string> = {
   words: 'by planned words',

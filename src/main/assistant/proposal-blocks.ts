@@ -1,5 +1,11 @@
 import { randomUUID } from 'node:crypto';
 import type { Mode } from '../../shared/conversation';
+import {
+  bookDetailOf,
+  detailsHolder,
+  detailValue,
+  isBookDetailBlock,
+} from '../../shared/book-details';
 import { bookManuscript } from '../../shared/manuscript-order';
 import { PROJECT_OUTLINE, type Manuscript } from '../../shared/project-types';
 import {
@@ -25,7 +31,8 @@ import type { AssistantView } from '../project-store/project-store';
  * `mode` may not propose, such as a Relation in Writing, is unreadable. In
  * Plan, an Outline is of the lens's Book, what it holds or the whole story
  * or Series: one of another Book, of what is Unplaced or of a Missing Scene
- * is unreadable.
+ * is unreadable. A Book's detail, in Plan only, is one of the lens's Book,
+ * or of the one Book a Project without Books is.
  */
 export async function readProposals(
   view: AssistantView,
@@ -50,12 +57,14 @@ export async function readProposals(
 
 /**
  * Which kind of change a block is shaped to propose: a new Entry, an
- * Outline, a Relation between two Entries, or else a field of an Entry.
+ * Outline, a Relation between two Entries, a Book's detail, or else a field
+ * of an Entry.
  */
 function kindOf(block: unknown): ProposalChange['kind'] {
   const { entry, outline, from } = (block ?? {}) as Record<string, unknown>;
   if (newEntryOf(block)) return 'new-entry';
   if (typeof outline === 'string') return 'outline';
+  if (isBookDetailBlock(block)) return 'book-detail';
   if (entry === undefined && from !== undefined) return 'relation';
   return 'field';
 }
@@ -102,6 +111,7 @@ async function changeOf(
     return outlineChangeOf(block, outline);
   }
   if (kind === 'relation') return relationOf(block, lens);
+  if (kind === 'book-detail') return bookDetailChangeOf(view, block, lens);
   if (typeof entryId !== 'string' || !lens.visible(entryId)) return null;
   const entry = await view.read({ kind: 'entry', id: entryId });
   const change = proposalOf(block, lens.read(entry).entry, view.customFields());
@@ -128,6 +138,29 @@ function outlinesIn(
       ...c.scenes.filter((s) => !s.missing).map((s) => s.id),
     ]),
   ]);
+}
+
+/**
+ * The change a block proposes to a detail of the lens's Book, or of the one
+ * Book a Project without Books is, against what it holds now; none in a
+ * Series without a Book the Series holds.
+ */
+function bookDetailChangeOf(
+  view: AssistantView,
+  block: unknown,
+  { book }: StoryBibleLens,
+): ProposalChange | 'unchanged' | null {
+  const manuscript = view.manuscript();
+  const bookId = detailsHolder(manuscript, book);
+  if (manuscript.books && !manuscript.books.some((b) => b.id === bookId)) {
+    return null;
+  }
+  const read = bookDetailOf(block);
+  if (!read) return null;
+  const { detail, proposed } = read;
+  const base = detailValue(view.bookDetails(book), detail);
+  if (JSON.stringify(base) === JSON.stringify(proposed)) return 'unchanged';
+  return { kind: 'book-detail', bookId, detail, base, proposed };
 }
 
 /** A change made as of the lens's Book, saying so; none for the whole Project. */
