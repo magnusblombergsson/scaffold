@@ -38,6 +38,7 @@ import {
 import { hasTag, tagged, tagSpelling } from '../../shared/tags';
 import {
   customFieldKey,
+  mayPropose,
   proposalBlock,
   type ProposalView,
 } from '../../shared/proposal';
@@ -130,7 +131,7 @@ export async function buildContext(
     ],
     request.mode === 'interview' ? request.focus : null,
     asOf,
-    request.mode !== 'writing',
+    mayPropose(request.mode, 'relation'),
   );
 
   const system: PromptBlock[] = [
