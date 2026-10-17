@@ -15,39 +15,7 @@ export type TestedModel = Model & {
  * Model is Untested. A Model tested against older prompts leaves the list
  * until its eval is run again; a test says which.
  */
-export const TESTED_MODELS: readonly TestedModel[] = [
-  {
-    provider: 'anthropic',
-    id: 'claude-sonnet-5-5',
-    sheet: 'docs/evals/never-prose/2026-10-08-anthropic-claude-sonnet-5-5.md',
-    prompts: '8f2badd7ea96',
-  },
-  {
-    provider: 'anthropic',
-    id: 'claude-haiku-4-5',
-    sheet: 'docs/evals/never-prose/2026-10-08-anthropic-claude-haiku-4-5.md',
-    prompts: '8f2badd7ea96',
-  },
-  {
-    provider: 'openrouter',
-    id: 'anthropic/claude-sonnet-5.5',
-    sheet:
-      'docs/evals/never-prose/2026-10-08-openrouter-anthropic-claude-sonnet-5.5.md',
-    prompts: '8f2badd7ea96',
-  },
-  {
-    provider: 'openrouter',
-    id: 'openai/gpt-5.6-sol',
-    sheet: 'docs/evals/never-prose/2026-10-08-openrouter-openai-gpt-5.6-sol.md',
-    prompts: '8f2badd7ea96',
-  },
-  {
-    provider: 'openrouter',
-    id: 'openai/gpt-6-sol',
-    sheet: 'docs/evals/never-prose/2026-10-08-openrouter-openai-gpt-6-sol.md',
-    prompts: '8f2badd7ea96',
-  },
-];
+export const TESTED_MODELS: readonly TestedModel[] = [];
 
 /** Whether `model` is on the tested list; else it is Untested. */
 export function isTested(

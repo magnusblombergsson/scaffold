@@ -18,7 +18,7 @@ import {
   type ProviderId,
   type ProviderStatus,
 } from '../../shared/models';
-import { isTested } from '../../shared/tested-models';
+import { isTested, type TestedModel } from '../../shared/tested-models';
 import type { AppSettings } from '../app-settings/app-settings';
 import type { Credential } from '../assistant/connect-provider';
 import {
@@ -55,6 +55,8 @@ export type ProviderSettingsDeps = {
   >;
   /** The Provider reached with `credential` as it is at each call. */
   connect(id: ProviderId, credential: () => Credential): ListingProvider;
+  /** The tested list, `TESTED_MODELS` unless given. */
+  tested?: readonly TestedModel[];
 };
 
 /** LM Studio's address as the Author entered it, made whole: `localhost:1234` is `http://localhost:1234`. */
@@ -222,7 +224,7 @@ export class ProviderSettings {
     return (
       find((model) => sameModel(model, lastUsed)) ??
       find((model) => sameModel(model, DEFAULT_MODEL)) ??
-      find((model) => isTested(model)) ??
+      find((model) => isTested(model, this.deps.tested)) ??
       offered[0] ??
       lastUsed
     );
