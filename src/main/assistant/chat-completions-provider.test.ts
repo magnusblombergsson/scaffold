@@ -439,6 +439,32 @@ describe('openRouterProvider', () => {
     },
   );
 
+  it.each([
+    'This endpoint\'s maximum context length is 131072 tokens. However, you requested about 140000 tokens. Please reduce the length of either one, or use the "middle-out" transform to compress your prompt automatically.',
+    "This model's maximum context length is 128000 tokens. However, your messages resulted in 130000 tokens.",
+  ])(
+    'types a 400 saying the request is past the window as a context failure: %s',
+    async (message) => {
+      routes['/api/v1/chat/completions'] = json(400, {
+        error: { code: 400, message },
+      });
+
+      const { error } = await collect(openRouter());
+
+      expect(error).toMatchObject({ kind: 'context', message });
+    },
+  );
+
+  it('types a 400 that says nothing of the window as another failure', async () => {
+    routes['/api/v1/chat/completions'] = json(400, {
+      error: { code: 400, message: 'Invalid model id' },
+    });
+
+    const { error } = await collect(openRouter());
+
+    expect(error?.kind).toBe('other');
+  });
+
   it('keeps what the service behind OpenRouter said, and how long to wait, for the log', async () => {
     routes['/api/v1/chat/completions'] = (response) => {
       response.writeHead(429, {
@@ -698,6 +724,20 @@ describe('lmStudioProvider', () => {
       ],
     });
   });
+
+  it.each([
+    'Trying to keep the first 9000 tokens when context the overflows. However, the model is loaded with context length of 4096 tokens, which is not enough. Try to load the model with a larger context length, or provide a shorter input',
+    'The number of tokens to keep from the initial prompt is greater than the context length. Try to load the model with a larger context length, or provide a shorter input',
+  ])(
+    'types LM Studio’s refusal of a prompt past the loaded window as a context failure: %s',
+    async (message) => {
+      routes['/v1/chat/completions'] = json(400, { error: message });
+
+      const { error } = await collect(lmStudio(), local());
+
+      expect(error).toMatchObject({ kind: 'context', message });
+    },
+  );
 
   it('records no usage for a reply that stopped partway, and looks nothing up', async () => {
     routes['/v1/chat/completions'] = dropsAfter([text('What does ')]);

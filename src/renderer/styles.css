@@ -4363,6 +4363,16 @@ p.message-used,
   margin: 0;
 }
 
+.message-system p + p,
+.too-big-parts {
+  margin-top: 0.4rem;
+}
+
+.too-big-parts {
+  margin-bottom: 0;
+  padding-left: 1.2rem;
+}
+
 .message-actions {
   display: flex;
   gap: 0.5rem;
@@ -5008,8 +5018,14 @@ button.finding-quote:hover {
   white-space: nowrap;
 }
 
-.bring-in-unsent {
+.bring-in-unsent,
+.bring-in-too-big {
   color: var(--warning);
+}
+
+.bring-in-too-big {
+  display: block;
+  font-size: 0.85em;
 }
 
 .bring-in-remove {

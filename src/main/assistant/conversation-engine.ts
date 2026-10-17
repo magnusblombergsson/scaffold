@@ -21,7 +21,15 @@ import {
   type Finding,
   type ReviewCommand,
 } from '../../shared/finding';
-import type { Model } from '../../shared/models';
+import type { Model, ModelWindow } from '../../shared/models';
+import {
+  pastWindow,
+  replyRoom,
+  tokens,
+  type KnownWindow,
+  type MeasuredSize,
+  type RequestSize,
+} from '../../shared/request-size';
 import { unitText } from '../../shared/project-types';
 import type { Clock } from '../project-store/clock';
 import type { ProjectStore } from '../project-store/project-store';
@@ -29,7 +37,6 @@ import {
   compactionPoint,
   DEFAULT_COMPACTION,
   summaryRequest,
-  tokens,
   type CompactionPolicy,
 } from './compaction';
 import {
@@ -68,6 +75,8 @@ export type EngineDeps = {
   clock: Clock;
   /** When a long Conversation is compacted; tests make it short. */
   compaction?: CompactionPolicy;
+  /** A Model's window as its listing says, if it is listed; without it, nothing is measured. */
+  windowOf?: (model: Model) => ModelWindow | null;
 };
 
 /**
@@ -81,7 +90,33 @@ export function createConversationEngine({
   defaultModel,
   clock,
   compaction = DEFAULT_COMPACTION,
+  windowOf = () => null,
 }: EngineDeps) {
+  /**
+   * The window a Plan's request on `model` is measured against (spec:
+   * Outline planner §9), or null when it is unknown or unreliable: LM
+   * Studio may report more than the Model is loaded with.
+   */
+  function measuredWindow(model: Model): KnownWindow | null {
+    if (model.provider === 'lmstudio') return null;
+    const window = windowOf(model);
+    return window?.contextWindow != null
+      ? { ...window, contextWindow: window.contextWindow }
+      : null;
+  }
+
+  /** A request of `size` as the Author is told of it: with `window`, if known, and the room for the reply in it. */
+  function againstWindow(
+    size: MeasuredSize,
+    window: KnownWindow | null,
+  ): RequestSize {
+    return {
+      ...size,
+      window: window?.contextWindow ?? null,
+      reply: window ? replyRoom(window) : 0,
+    };
+  }
+
   /**
    * What a message is about, as it logs it: in a Writing Conversation, the
    * Scene open, if the Assistant can read it; in an Interview, the Entry,
@@ -169,7 +204,9 @@ export function createConversationEngine({
    * The reply is logged once it has come, without its thinking: as
    * interrupted if the call fails partway, or cut short at the length limit,
    * or as empty if nothing is left of it; a call that fails before any reply
-   * logs nothing, unless it said what it used, which still counts. Only a
+   * logs nothing, unless it said what it used, which still counts. A Plan's
+   * request past its Model's window isn't sent at all, and fails with what
+   * it is made of, as one the Provider refuses as too long does. Only a
    * complete reply makes Proposals, and a Review's reply holds Findings,
    * never Proposals.
    */
@@ -202,6 +239,14 @@ export function createConversationEngine({
     };
     const view = store.assistantView();
     const context = await buildContext(view, asked);
+    const window = measuredWindow(chosen);
+    if (context.size && window && pastWindow(context.size.request, window)) {
+      return {
+        reply: null,
+        failure: 'context',
+        tooBig: againstWindow(context.size, window),
+      };
+    }
     const reviewing = asked.mode === 'writing' && asked.command !== 'question';
     const request: ProviderRequest = {
       model: chosen,
@@ -211,7 +256,11 @@ export function createConversationEngine({
     const finished = await finishedCall(providerFor(chosen), request, onText);
     const { metered } = finished;
     const failure = finished.failure?.kind ?? null;
-    if (finished.kind === 'nothing') return { reply: null, failure };
+    const tooBig =
+      failure === 'context' && context.size
+        ? { tooBig: againstWindow(context.size, window) }
+        : {};
+    if (finished.kind === 'nothing') return { reply: null, failure, ...tooBig };
     if (finished.kind === 'empty') {
       const empty: EmptyReply = {
         focus,
@@ -223,7 +272,7 @@ export function createConversationEngine({
         before: messages.length,
       };
       await store.appendEmptyReply(conversationId, empty, chosen);
-      return { reply: null, empty, failure };
+      return { reply: null, empty, failure, ...tooBig };
     }
     const findings =
       mode === 'writing'
@@ -262,7 +311,7 @@ export function createConversationEngine({
     for (const proposal of proposals) {
       await store.appendProposal(conversationId, proposal);
     }
-    return { reply, failure };
+    return { reply, failure, ...tooBig };
   }
 
   /**
@@ -345,6 +394,28 @@ export function createConversationEngine({
     );
   }
 
+  /**
+   * The Plan `plan`'s request as it would be sent now on `model`, measured,
+   * with the window it is measured against; null when that window is
+   * unknown or unreliable. A new Plan, not started yet, on the Book `book`,
+   * is measured empty.
+   */
+  async function planSize(
+    plan: Conversation | null,
+    model: Model,
+    book: string | undefined,
+  ): Promise<(MeasuredSize & { window: KnownWindow }) | null> {
+    const window = measuredWindow(model);
+    if (!window) return null;
+    const summary = plan?.compactions?.at(-1);
+    const { size } = await buildContext(store.assistantView(), {
+      ...defaultRequest('plan', null, plan?.messages ?? [], plan?.focus, book),
+      ...(summary && { summary }),
+      ...(plan && { broughtIn: await store.broughtInBrainstorms(plan.id) }),
+    });
+    return size ? { ...size, window } : null;
+  }
+
   return {
     /**
      * Asks the Assistant in a Conversation: calls `onText` with each piece of
@@ -398,28 +469,47 @@ export function createConversationEngine({
      * §6), or a new one, not started yet, on the Book `book`, Starred first,
      * then newest: each with its rough size, in tokens, as it would be sent
      * were it brought in now, and how far it is brought in already, if it
-     * is. Refused for a Conversation of another Mode.
+     * is; marked when bringing it in would push the Plan's request past its
+     * Model's window: a new one's is `model`, as chosen before it starts.
+     * Refused for a Conversation of another Mode.
      */
     async bringInChoices(
       planId: string | null,
       book?: string,
+      model?: Model,
     ): Promise<BringInChoice[]> {
-      const plan = planId ? await readPlan(planId) : { book, bringIns: [] };
-      const candidates = await store.bringInCandidates(plan.book);
-      const now = broughtInNow(plan.bringIns);
+      const plan = planId ? await readPlan(planId) : null;
+      const onBook = plan ? plan.book : book;
+      const candidates = await store.bringInCandidates(onBook);
+      const now = broughtInNow(plan?.bringIns);
+      const measured = await planSize(
+        plan,
+        plan?.model ?? model ?? defaultModel(),
+        onBook,
+      );
       return candidates
         .map(({ starred, ...conversation }) => {
           const { id, title, created } = conversation;
           const upTo = conversation.messages.length;
           const broughtIn = now.find((b) => b.conversation === id)?.messages;
+          const size = tokens(broughtInText({ conversation, upTo }));
+          const tooBig =
+            measured &&
+            pastWindow(
+              measured.request -
+                (measured.broughtIn.find((b) => b.id === id)?.size ?? 0) +
+                size,
+              measured.window,
+            );
           return {
             id,
             title,
             created,
             starred,
             messages: upTo,
-            size: tokens(broughtInText({ conversation, upTo })),
+            size,
             ...(broughtIn !== undefined && { broughtIn }),
+            ...(tooBig && { tooBig: true as const }),
           };
         })
         .sort(

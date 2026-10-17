@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { KeyKeeping, ProvidersView } from '../shared/api';
-import { addedMessage, failureMessage, statusLabel } from './provider-messages';
+import {
+  addedMessage,
+  failureMessage,
+  statusLabel,
+  tooBigMessage,
+} from './provider-messages';
 
 /** Every Provider added, its secret kept as `kept`. */
 function view(
@@ -138,6 +143,64 @@ describe('failureMessage', () => {
     };
     expect(failureMessage('key', openRouter, removed)).toBe(
       "OpenRouter isn't added. Add it in Settings, or choose another Model.",
+    );
+  });
+});
+
+describe('the explanation of a Plan’s request too big for its Model', () => {
+  const haiku = { provider: 'anthropic', id: 'claude-haiku-4-5' } as const;
+  const lmStudio = { provider: 'lmstudio', id: 'qwen3-8b' } as const;
+  const size = {
+    request: 230_000,
+    plan: 40_000,
+    storyBible: 25_000,
+    broughtIn: [
+      { id: 'b1', title: 'Heist ideas', size: 120_000 },
+      { id: 'b2', title: 'Names', size: 900 },
+    ],
+    window: 200_000,
+    reply: 32_000,
+  };
+
+  it('says nothing was sent, lists what is biggest first, and the ways out', () => {
+    expect(tooBigMessage(size, haiku, 'Haiku 4.5')).toEqual({
+      lead: 'This request is too big for Haiku 4.5, so nothing was sent: ≈ 262k tokens with room for the reply, and its window holds ≈ 200k tokens.',
+      parts: [
+        'Brought in: “Heist ideas”, ≈ 120k tokens',
+        'The plan, ≈ 40k tokens',
+        'The Story Bible, ≈ 25k tokens',
+        'Brought in: “Names”, ≈ 900 tokens',
+      ],
+      after: [
+        'To make room, remove a brought-in Brainstorm, narrow the focus to a Part or Chapter, or choose another Model, then retry.',
+      ],
+    });
+  });
+
+  it('gives a Provider’s refusal the same explanation, and with nothing brought in, offers no Brainstorm to remove', () => {
+    const refused = { ...size, broughtIn: [], window: null, reply: 0 };
+
+    expect(tooBigMessage(refused, haiku, 'Haiku 4.5')).toEqual({
+      lead: 'Haiku 4.5 refused this request as too big for its window: ≈ 230k tokens.',
+      parts: ['The plan, ≈ 40k tokens', 'The Story Bible, ≈ 25k tokens'],
+      after: [
+        'To make room, narrow the focus to a Part or Chapter, or choose another Model, then retry.',
+      ],
+    });
+  });
+
+  it('adds for LM Studio that the loaded Model’s window may be smaller than it reports', () => {
+    const refused = { ...size, window: null, reply: 0 };
+
+    expect(tooBigMessage(refused, lmStudio, 'Qwen3 8B').after).toEqual([
+      'To make room, remove a brought-in Brainstorm, narrow the focus to a Part or Chapter, or choose another Model, then retry.',
+      'The Model loaded in LM Studio may have a smaller window than it reports: raise its context length in LM Studio.',
+    ]);
+  });
+
+  it('tells a refusal outside Plan as any other failure', () => {
+    expect(failureMessage('context', haiku, encrypted)).toBe(
+      "The Assistant couldn't answer. Retry, or choose another Model.",
     );
   });
 });

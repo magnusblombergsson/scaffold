@@ -1,16 +1,15 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { AssistantFailure } from '../../shared/conversation';
 import { claudeListing } from '../../shared/models';
+import { MAX_REPLY_TOKENS } from '../../shared/request-size';
 import { NO_USAGE, type Usage } from '../../shared/usage';
 import { anthropicKeyCheck } from './claude-key-check';
 import {
   ProviderError,
+  saysPastWindow,
   type ListingProvider,
   type ProviderEvent,
 } from './provider';
-
-/** Room for thinking and a long answer; every model offered allows it. */
-const MAX_TOKENS = 32_000;
 
 /** A cache breakpoint: the next call within five minutes reads back all up to it. */
 const CACHE = { type: 'ephemeral', ttl: '5m' } as const;
@@ -55,7 +54,7 @@ export function claudeProvider({
       try {
         const stream = client.messages.stream({
           model: request.model.id,
-          max_tokens: MAX_TOKENS,
+          max_tokens: MAX_REPLY_TOKENS,
           system: request.system.map(({ text, cache }) => ({
             type: 'text',
             text,
@@ -151,6 +150,12 @@ function failureOf(error: unknown): AssistantFailure {
       error.type === 'rate_limit_error'
     ) {
       return 'rate-limit';
+    }
+    if (
+      error instanceof Anthropic.BadRequestError &&
+      saysPastWindow(error.message)
+    ) {
+      return 'context';
     }
     return 'other';
   }

@@ -8,20 +8,25 @@ import {
 import type { BringInChoice } from '../shared/conversation';
 import { roughTokens } from '../shared/usage';
 import type { ConversationState } from './Conversation';
+import { modelName } from './model-listing';
+import { NO_SHORTLISTS, useShortlists } from './Providers';
 import { ReadOnlyContext } from './read-only';
 
 /**
  * Brings Brainstorms into the Plan open, or a new one (spec: Outline
  * planner §6): a dropdown of those of its Book, Starred first, then newest,
  * each with its rough size. One brought in already offers the rest of it
- * once it has gone on, and nothing more until then.
+ * once it has gone on, and nothing more until then. One that would push
+ * the request past the Model's window is marked, and may still be brought
+ * in (§9).
  */
 export function BringInPicker({
-  conversation: { current, book, streaming, bringIn },
+  conversation: { current, book, streaming, bringIn, model },
 }: {
   conversation: ConversationState;
 }) {
   const readOnly = useContext(ReadOnlyContext);
+  const shortlists = useShortlists() ?? NO_SHORTLISTS;
   const [open, setOpen] = useState(false);
   const [choices, setChoices] = useState<BringInChoice[] | null>(null);
   const root = useRef<HTMLDivElement>(null);
@@ -32,7 +37,7 @@ export function BringInPicker({
     if (!open) return;
     let live = true;
     setChoices(null);
-    void window.assistant.bringInChoices(planId, book).then((listed) => {
+    void window.assistant.bringInChoices(planId, book, model).then((listed) => {
       if (live) setChoices(listed);
     });
     const close = (event: MouseEvent) => {
@@ -43,7 +48,7 @@ export function BringInPicker({
       live = false;
       document.removeEventListener('mousedown', close);
     };
-  }, [open, planId, book]);
+  }, [open, planId, book, model]);
 
   useEffect(() => {
     root.current
@@ -126,6 +131,12 @@ export function BringInPicker({
                       </span>
                     )}
                     {choice.title}
+                    {choice.tooBig && model && (
+                      <span className="bring-in-too-big">
+                        Too big for {modelName(model, shortlists)} with this
+                        Book
+                      </span>
+                    )}
                   </span>
                   <span className="bring-in-detail">
                     {roughTokens(choice.size)}

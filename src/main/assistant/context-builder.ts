@@ -64,6 +64,7 @@ import { MODE_PROMPTS, PLAN_REQUESTS, REVIEW_ASKS } from './system-prompts';
 import { followedBeats, spanText } from '../../shared/beat-measure';
 import { bookDetailsId, formatBand } from '../../shared/book-details';
 import { wordTargetText } from '../../shared/word-target';
+import { tokens, type MeasuredSize } from '../../shared/request-size';
 import {
   beatName,
   conventionOf,
@@ -117,13 +118,15 @@ export type ContextRequest = (
  * blocks, then the Conversation's earlier messages and the new one.
  * Cache breakpoints follow the skeleton and the last block before the new
  * message. `saw` lists what was sent, by id. In a Series, `book` is the Book
- * the turn is about, by id, as of which the Entries were sent.
+ * the turn is about, by id, as of which the Entries were sent. A Plan's
+ * request comes with its `size` as measured, in tokens.
  */
 export type AssistantContext = {
   system: PromptBlock[];
   messages: PromptMessage[];
   saw: Saw;
   book?: string;
+  size?: MeasuredSize;
 };
 
 export async function buildContext(
@@ -174,19 +177,25 @@ export async function buildContext(
       text: interviewFocusText(view, manuscript, request.focus, lens),
     });
   }
+  /** What of the system prompt is the plan, which narrowing the focus shrinks. */
+  const planned: string[] = [skeleton.text];
+  const pushPlanned = (text: string) => {
+    planned.push(text);
+    system.push({ text });
+  };
   if (request.mode === 'plan') {
-    system.push({ text: planFocusText(manuscript, book, request.focus) });
+    pushPlanned(planFocusText(manuscript, book, request.focus));
     // In a Series, the Book planned holds it; none while none is.
-    const planned = bookDetailsId(manuscript, book);
-    system.push({
-      text: bookDetailsText(
+    const details = bookDetailsId(manuscript, book);
+    pushPlanned(
+      bookDetailsText(
         view.bookDetails(book),
-        planned === undefined ? undefined : view.wordTarget(planned),
+        details === undefined ? undefined : view.wordTarget(details),
         request.messages.filter((m) => m.role === 'author').map((m) => m.text),
       ),
-    });
+    );
   }
-  if (focus.length > 0) system.push({ text: focusBlock(focus) });
+  if (focus.length > 0) pushPlanned(focusBlock(focus));
   // Re-sent each turn, and never part of the Plan's own summary.
   if (brought) system.push({ text: brought });
   if (summary) system.push({ text: summaryBlock(summary.text, covered) });
@@ -214,6 +223,23 @@ export async function buildContext(
       }),
     },
     ...(book !== undefined && { book }),
+    ...(request.mode === 'plan' && {
+      size: {
+        request: tokens(
+          [
+            ...system.map((b) => b.text),
+            ...messages.map((m) => m.content),
+          ].join(''),
+        ),
+        plan: tokens(planned.join('')),
+        storyBible: tokens(bible.text),
+        broughtIn: (request.broughtIn ?? []).map((b) => ({
+          id: b.conversation.id,
+          title: b.conversation.title,
+          size: tokens(broughtInText(b)),
+        })),
+      },
+    }),
   };
 }
 

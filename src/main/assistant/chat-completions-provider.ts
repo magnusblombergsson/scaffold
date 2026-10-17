@@ -1,8 +1,10 @@
 import type { AssistantFailure } from '../../shared/conversation';
 import type { ListedModel, Price, ProviderStatus } from '../../shared/models';
+import { MAX_REPLY_TOKENS } from '../../shared/request-size';
 import type { Usage } from '../../shared/usage';
 import {
   ProviderError,
+  saysPastWindow,
   statusOfFailure,
   type Finish,
   type ListingProvider,
@@ -14,9 +16,6 @@ import {
 // The Providers reached over OpenAI's Chat Completions format: OpenRouter and
 // LM Studio (ADR 0005). Both share the streaming here; they differ in where
 // they are, how they list their Models, and what they say a call cost.
-
-/** Room for thinking and a long answer, unless the Model allows less. */
-const MAX_TOKENS = 32_000;
 
 /** How long a listing, key check or lookup may take before it counts as failed. */
 const CHECK_TIMEOUT_MS = 15_000;
@@ -228,7 +227,8 @@ async function* streamChat(
           stream: true,
           // LM Studio gives usage only when asked; OpenRouter always does.
           stream_options: { include_usage: true },
-          max_tokens: Math.min(MAX_TOKENS, limit ?? MAX_TOKENS),
+          // Less when the Model allows less.
+          max_tokens: Math.min(MAX_REPLY_TOKENS, limit ?? MAX_REPLY_TOKENS),
           messages: caches ? cachedPrompt(request) : plainPrompt(request),
         }),
       },
@@ -412,7 +412,11 @@ async function httpError(response: Response): Promise<ProviderError> {
     // Not JSON: the status says enough.
   }
   const seconds = Number(response.headers.get('retry-after'));
-  return new ProviderError(failureOf(response.status), message, {
+  const kind =
+    response.status === 400 && saysPastWindow(message)
+      ? 'context'
+      : failureOf(response.status);
+  return new ProviderError(kind, message, {
     detail: [`HTTP ${response.status}`, detail].filter(Boolean).join(' · '),
     ...(seconds > 0 && { retryAfter: seconds }),
   });
