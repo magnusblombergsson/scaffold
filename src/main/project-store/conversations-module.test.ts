@@ -45,6 +45,7 @@ function conversationsOver() {
     relations: () => [],
     changeRelations: unsupported,
     changeBookDetail: unsupported,
+    changeBeats: unsupported,
     addUnit: unsupported,
     retitleUnit: unsupported,
     trashUnit: unsupported,

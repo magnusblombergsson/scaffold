@@ -94,6 +94,36 @@ export function shownBeats(
   return followed.filter((b) => marks?.includes(b.id));
 }
 
+/**
+ * A Scene's marks as a Beats Proposal compares them (spec: Outline planner
+ * §4): those of what the Book follows, each once and sorted, so that the
+ * same marks in another order are the same list; null for none. Set-aside
+ * marks play no part.
+ */
+export function beatsValue(
+  marks: readonly string[] | undefined,
+  followed: readonly FollowedBeat[],
+): string[] | null {
+  const shown = shownBeats(marks, followed).map((b) => b.id);
+  return shown.length > 0 ? shown.sort() : null;
+}
+
+/**
+ * What a Scene holding `marks` is given for a Beats Proposal's `value`: it,
+ * with the Scene's set-aside marks kept, unseen; null for none at all.
+ */
+export function withSetAside(
+  value: readonly string[] | null,
+  marks: readonly string[] | undefined,
+  followed: readonly FollowedBeat[],
+): string[] | null {
+  const aside = (marks ?? []).filter(
+    (id) => !followed.some((b) => b.id === id),
+  );
+  const all = [...new Set([...(value ?? []), ...aside])];
+  return all.length > 0 ? all : null;
+}
+
 /** Those of `scenes` marked with the Beat `beat`, qualified, set aside or not. */
 export function carriers<S extends { beats?: string[] }>(
   scenes: readonly S[],

@@ -150,6 +150,20 @@ export function PlanRoom({
         ),
     [current, bookId],
   );
+  /**
+   * The list each Scene's pending Beats Proposal in the Conversation open
+   * sets, the latest one's: dashed chips in the tree and in its details.
+   */
+  const proposedBeats = useMemo(() => {
+    const bySceneId = new Map<string, string[] | null>();
+    for (const m of current?.messages ?? []) {
+      for (const p of m.proposals ?? []) {
+        if (p.kind !== 'beats' || p.state.kind !== 'pending') continue;
+        if ('current' in p.state) bySceneId.set(p.sceneId, p.proposed);
+      }
+    }
+    return bySceneId;
+  }, [current]);
   /** Asks Plan about an entry of the catalogue, which is then sent in full. */
   const askAbout =
     readOnly || streaming !== null || !providers || !anyAdded(providers)
@@ -255,6 +269,7 @@ export function PlanRoom({
             selected={selected}
             lit={lit}
             followed={followed}
+            proposedBeats={proposedBeats}
             onSelect={setSelected}
           />
           <BeatRail
@@ -271,7 +286,7 @@ export function PlanRoom({
             <UnitDetails
               node={findNode(tree, selected)}
               language={language}
-              beats={{ falls, measure, followed }}
+              beats={{ falls, measure, followed, proposed: proposedBeats }}
             />
             <StructureGuide
               bookId={bookId}
@@ -503,6 +518,7 @@ function unitOf(proposal: ProposalView): string | null {
   if (proposal.kind === 'add' || proposal.kind === 'retitle') {
     return proposal.unitId;
   }
+  if (proposal.kind === 'beats') return proposal.sceneId;
   return null;
 }
 
@@ -671,6 +687,7 @@ function PlanTree({
   selected,
   lit,
   followed,
+  proposedBeats,
   onSelect,
 }: {
   nodes: PlanNode[];
@@ -681,6 +698,8 @@ function PlanTree({
   selected: string | null;
   lit: string | null;
   followed: readonly FollowedBeat[];
+  /** Each Scene's pending Beats Proposal's list, by its id. */
+  proposedBeats: ReadonlyMap<string, string[] | null>;
   onSelect(id: string): void;
 }) {
   const every = allNodes(nodes);
@@ -745,9 +764,26 @@ function PlanTree({
             </span>
           )}
         </button>
-        {node.kind === 'scene' && (
-          <BeatChips scene={node.scenes[0]} followed={followed} />
-        )}
+        {node.kind === 'scene' &&
+          (proposed ? (
+            // A Scene only proposed: the Beats it would bring are proposed
+            // too, or those a Beats Proposal on it would set.
+            <BeatChips
+              marks={[]}
+              proposed={
+                proposedBeats.has(node.id)
+                  ? proposedBeats.get(node.id)
+                  : (proposed.proposed.beats ?? null)
+              }
+              followed={followed}
+            />
+          ) : (
+            <BeatChips
+              marks={node.scenes[0].beats}
+              proposed={proposedBeats.get(node.id)}
+              followed={followed}
+            />
+          ))}
         {body ? (
           <p className="plan-outline">{body}</p>
         ) : (
@@ -795,6 +831,7 @@ function UnitDetails({
     falls: Map<string, Span>;
     measure: Measure;
     followed: readonly FollowedBeat[];
+    proposed: ReadonlyMap<string, string[] | null>;
   };
 }) {
   if (!node) {
@@ -819,6 +856,7 @@ function UnitDetails({
           falls={beats.falls.get(node.id)}
           measure={beats.measure}
           followed={beats.followed}
+          proposed={beats.proposed.get(node.id)}
         />
       )}
     </section>

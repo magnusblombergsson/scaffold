@@ -988,6 +988,30 @@ export function qualifiedBeatId(
 }
 
 /**
+ * A Beat as a Scene's marks hold it: qualified by its Structure or Genre
+ * convention, as in `save-the-cat/midpoint` (spec: Outline planner §11).
+ */
+const BEAT_ID = /^[a-z0-9]+(-[a-z0-9]+)*\/[a-z0-9]+(-[a-z0-9]+)*$/;
+
+/** Whether `raw` is of a qualified Beat's form, known to this catalogue or not. */
+export function isBeatId(raw: unknown): raw is string {
+  return typeof raw === 'string' && BEAT_ID.test(raw);
+}
+
+/**
+ * The name of a qualified Beat, as in “Midpoint”; one this catalogue
+ * doesn't know is one this version doesn't know.
+ */
+export function beatName(id: string): string {
+  const [source, beat] = id.split('/');
+  const entry = structureOf(source) ?? conventionOf(source);
+  return (
+    entry?.beats.find((b) => b.id === beat)?.name ??
+    'a Beat this version doesn’t know'
+  );
+}
+
+/**
  * A qualified Beat as this catalogue calls it: replaced whole when the map
  * names it, otherwise with its Structure or convention as now called.
  */

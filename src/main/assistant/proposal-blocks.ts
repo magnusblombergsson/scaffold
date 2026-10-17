@@ -6,6 +6,7 @@ import {
   detailValue,
   isBookDetailBlock,
 } from '../../shared/book-details';
+import { beatsValue, followedBeats } from '../../shared/beat-measure';
 import { bookManuscript, topItems } from '../../shared/manuscript-order';
 import { PROJECT_OUTLINE, type Manuscript } from '../../shared/project-types';
 import {
@@ -46,6 +47,8 @@ export async function readProposals(
   const proposals: Proposal[] = [];
   let unreadable = 0;
   const added = addedBy(earlier);
+  /** The Scenes a Beats Proposal of this reply marks already, by id. */
+  const marked = new Set<string>();
   for (const block of blocks) {
     const kind = kindOf(block);
     const id = randomUUID();
@@ -55,7 +58,9 @@ export async function readProposals(
         ? addOf(view, block, lens, added, id)
         : kind === 'retitle'
           ? retitleOf(view, block, lens, added)
-          : await changeOf(view, block, kind, lens, mode);
+          : kind === 'beats'
+            ? beatsOf(view, block, lens, added, marked)
+            : await changeOf(view, block, kind, lens, mode);
     if (change === null) unreadable++;
     else if (change !== 'unchanged') proposals.push({ id, ...change });
   }
@@ -64,9 +69,15 @@ export async function readProposals(
 
 /**
  * A unit an Add proposes, still to be accepted: the Add's id, and the
- * unit's id, kind and container.
+ * unit's id, kind and container, and for a Scene, the Beats it brings.
  */
-type Added = { proposal: string; unitId: string; unit: PlanUnit; in: string };
+type Added = {
+  proposal: string;
+  unitId: string;
+  unit: PlanUnit;
+  in: string;
+  beats?: string[];
+};
 
 /** The units `earlier` Adds still pending propose, by their ids. */
 function addedBy(earlier: readonly Proposal[]): Map<string, Added> {
@@ -76,7 +87,13 @@ function addedBy(earlier: readonly Proposal[]): Map<string, Added> {
         ? [
             [
               p.unitId,
-              { proposal: p.id, unitId: p.unitId, unit: p.unit, in: p.in },
+              {
+                proposal: p.id,
+                unitId: p.unitId,
+                unit: p.unit,
+                in: p.in,
+                ...(p.proposed.beats && { beats: p.proposed.beats }),
+              },
             ],
           ]
         : [],
@@ -116,6 +133,7 @@ function addOf(
     outline = '',
     in: within,
     after,
+    beats: brought,
   } = block as Record<string, unknown>;
   if (!PLAN_UNITS.includes(unit as PlanUnit) || typeof within !== 'string') {
     return null;
@@ -123,6 +141,14 @@ function addOf(
   if (typeof title !== 'string' || !title.trim()) return null;
   if (typeof outline !== 'string') return null;
   if (after !== undefined && typeof after !== 'string') return null;
+  // Only a Scene carries Beats.
+  const beats =
+    brought === undefined
+      ? null
+      : unit === 'scene'
+        ? proposedBeats(view, book, brought)
+        : undefined;
+  if (beats === undefined) return null;
   const needs = new Set<string>();
   const proposed = added.get(within);
   let container: { id: string; kind: keyof typeof TAKES; holds: string[] };
@@ -152,6 +178,7 @@ function addOf(
     unitId,
     unit: unit as PlanUnit,
     in: container.id,
+    ...(beats && { beats }),
   };
   added.set(unitId, made);
   if (typeof named === 'string' && named && !isUnitId(view, named)) {
@@ -163,9 +190,74 @@ function addOf(
     unitId,
     in: container.id,
     ...(anchor !== undefined && { after: anchor }),
-    proposed: { title: title.trim(), outline: outline.trim() },
+    proposed: {
+      title: title.trim(),
+      outline: outline.trim(),
+      ...(beats && { beats }),
+    },
     ...(needs.size > 0 && { needs: [...needs] }),
   };
+}
+
+/**
+ * The Beats a block proposes for a Scene of `book`: Beats of what the Book
+ * follows, by qualified id, each once and sorted, or null for none;
+ * undefined when it isn't such a list.
+ */
+function proposedBeats(
+  view: AssistantView,
+  book: string | undefined,
+  raw: unknown,
+): string[] | null | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const followed = followedBeats(view.bookDetails(book));
+  if (!raw.every((id) => followed.some((b) => b.id === id))) return undefined;
+  return beatsValue(raw as string[], followed);
+}
+
+/**
+ * The Beats Proposal a block makes: a Scene of the lens's Book by its id,
+ * and its whole list of `beats` of what the Book follows, against the marks
+ * it carries of those; never a Scene Missing, Unplaced or in Conflict. On a
+ * Scene an earlier Add still pending proposes, it needs that Add, and is
+ * against the Beats that Add brings. One per Scene of those not `marked`
+ * yet in the reply, which it adds the Scene to. `'unchanged'` when it
+ * carries those marks already.
+ */
+function beatsOf(
+  view: AssistantView,
+  block: unknown,
+  { book }: StoryBibleLens,
+  added: Map<string, Added>,
+  marked: Set<string>,
+): ProposalChange | 'unchanged' | null {
+  const { scene: named, beats } = block as Record<string, unknown>;
+  if (typeof named !== 'string') return null;
+  const proposed = proposedBeats(view, book, beats);
+  if (proposed === undefined) return null;
+  const pending = added.get(named);
+  if (pending && pending.unit !== 'scene') return null;
+  const sceneId = pending?.unitId ?? named;
+  if (marked.has(sceneId)) return null;
+  let base: string[] | null;
+  if (pending) base = pending.beats ?? null;
+  else {
+    const placed = bookManuscript(view.manuscript(), book).chapters.filter(
+      (c) => !c.unplaced,
+    );
+    const scene = placed
+      .flatMap((c) => c.scenes)
+      .find((s) => s.id === sceneId && !s.missing && !view.conflicted?.(s.id));
+    if (!scene) return null;
+    base = beatsValue(
+      view.beats(sceneId),
+      followedBeats(view.bookDetails(book)),
+    );
+  }
+  marked.add(sceneId);
+  if (JSON.stringify(base) === JSON.stringify(proposed)) return 'unchanged';
+  const needs = pending ? { needs: [pending.proposal] } : {};
+  return { kind: 'beats', sceneId, base, proposed, ...needs };
 }
 
 /** Whether `id` is the story's, or a Book's, Part's, Chapter's or Scene's anywhere in the Project. */
@@ -247,13 +339,12 @@ function retitleOf(
  * a Book's detail, or else a field of an Entry.
  */
 function kindOf(block: unknown): ProposalChange['kind'] {
-  const { entry, outline, from, add, retitle } = (block ?? {}) as Record<
-    string,
-    unknown
-  >;
+  const { entry, outline, from, add, retitle, scene, beats } = (block ??
+    {}) as Record<string, unknown>;
   // An item added to a list names its Entry.
   if (typeof add === 'string' && entry === undefined) return 'add';
   if (typeof retitle === 'string') return 'retitle';
+  if (scene !== undefined && beats !== undefined) return 'beats';
   if (newEntryOf(block)) return 'new-entry';
   if (typeof outline === 'string') return 'outline';
   if (isBookDetailBlock(block)) return 'book-detail';
