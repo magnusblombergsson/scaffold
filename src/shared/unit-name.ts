@@ -4,6 +4,7 @@ import {
   type Manuscript,
   type UnitRef,
 } from './project-types';
+import type { TodoLink } from './todo';
 
 /** How the Author is told which unit something is about, as in "Can't save …". */
 export function unitName(
@@ -32,14 +33,28 @@ export function capitalized(text: string): string {
 }
 
 function titleOf(id: string, manuscript: Manuscript): string | undefined {
+  return (
+    manuscriptUnit(id, manuscript)?.title ??
+    manuscript.unplaced.find((s) => s.id === id)?.title
+  );
+}
+
+/**
+ * The Book, Part, Chapter or Scene in a Chapter with the id `id`, as a Todo
+ * links it, with its title; null for none, such as one in Trash.
+ */
+export function manuscriptUnit(
+  id: string,
+  manuscript: Manuscript,
+): (TodoLink & { title: string }) | null {
   const book = manuscript.books?.find((b) => b.id === id);
-  if (book) return book.title;
+  if (book) return { kind: 'book', id, title: book.title };
   const part = manuscript.parts?.find((p) => p.id === id);
-  if (part) return part.title;
+  if (part) return { kind: 'part', id, title: part.title };
   for (const chapter of manuscript.chapters) {
-    if (chapter.id === id) return chapter.title;
+    if (chapter.id === id) return { kind: 'chapter', id, title: chapter.title };
     const scene = chapter.scenes.find((s) => s.id === id);
-    if (scene) return scene.title;
+    if (scene) return { kind: 'scene', id, title: scene.title };
   }
-  return manuscript.unplaced.find((s) => s.id === id)?.title;
+  return null;
 }

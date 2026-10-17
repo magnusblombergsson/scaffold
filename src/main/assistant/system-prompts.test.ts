@@ -4,6 +4,7 @@ import {
   MODE_PROMPTS,
   NEVER_PROSE_RULE,
   OUTLINE_RULE,
+  PLAN_CHECK_RULE,
   PLAN_REQUESTS,
   PROPOSALS_RULE,
   promptsFingerprint,
@@ -115,6 +116,49 @@ describe('the Plan prompt', () => {
     expect(plan).toMatch(/recommend one Structure from the catalogue/);
     expect(plan).toMatch(/one or two alternatives/);
     expect(plan).toMatch(/Offer to find a Structure only when none is chosen/);
+  });
+
+  it('answers a Plan check with a line naming the measure, then at most 7 Findings naming their units, most consequential first, and no Proposals', () => {
+    const plan = MODE_PROMPTS.plan;
+
+    expect(plan).toContain(PLAN_CHECK_RULE);
+    expect(PLAN_CHECK_RULE).toContain(
+      '{"kind": "gap", "units": ["<Id>", "<Id>"], "quote":',
+    );
+    for (const kind of ['beat', 'convention', 'contradiction', 'gap', 'idle']) {
+      expect(PLAN_CHECK_RULE).toContain(`- "${kind}": `);
+    }
+    expect(PLAN_CHECK_RULE).toMatch(
+      /one line naming how where a Scene falls is measured/,
+    );
+    expect(PLAN_CHECK_RULE).toMatch(
+      /at most 7 Findings, most consequential first/,
+    );
+    expect(PLAN_CHECK_RULE).toMatch(
+      /If there are more than 7, say so in your opening line/,
+    );
+    expect(PLAN_CHECK_RULE).toMatch(/only from an Outline or Notes/);
+    expect(PLAN_CHECK_RULE).toMatch(/never more than a sentence/);
+    expect(PLAN_CHECK_RULE).toMatch(/quote them, never fault them/);
+    expect(PLAN_CHECK_RULE).toMatch(/A Plan check holds no Proposals/);
+  });
+
+  it('checks no Beats with no Structure chosen and offers to find one; reads Beats from Outlines on unmarked Scenes and offers marks; never nudges No set Structure', () => {
+    expect(PLAN_CHECK_RULE).toMatch(
+      /With no Structure chosen, write no "beat" Findings, and end by offering to find a structure/,
+    );
+    expect(PLAN_CHECK_RULE).toMatch(
+      /carry none of its Beats, read from their Outlines where the Beats seem to fall.*offering to propose the marks, one Proposal per Scene/,
+    );
+    expect(PLAN_CHECK_RULE).toMatch(
+      /With No set Structure, write no "beat" Findings and never nudge the Book toward a Structure/,
+    );
+  });
+
+  it('is the only prompt with a Plan check', () => {
+    for (const mode of ['brainstorm', 'interview', 'writing'] as const) {
+      expect(MODE_PROMPTS[mode]).not.toContain('Plan check');
+    }
   });
 });
 

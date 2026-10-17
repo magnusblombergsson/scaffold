@@ -219,6 +219,42 @@ ${JSON.stringify({ type: 'message', role: 'assistant', text: 'Odd.', focus: [], 
     });
   });
 
+  it('logs a Plan check’s Findings in its reply, and leaves out what can’t be read', async () => {
+    const { projectPath, store } = await newProject();
+    const sceneId = store.manuscript().chapters[0].scenes[0].id;
+    const { id } = await store.conversations.startConversation('plan', 'Shape');
+    const planFindings = [
+      {
+        kind: 'idle' as const,
+        units: [sceneId],
+        quote: 'Mira waits.',
+        comment: 'The Scene moves no thread.',
+        question: 'What does the wait change?',
+      },
+    ];
+    await store.conversations.appendMessage(id, {
+      role: 'assistant',
+      text: 'By Scene order.',
+      focus: [],
+      at: 2_000,
+      planFindings,
+    });
+    await appendFile(
+      path.join(projectPath, 'conversations', `${id}.jsonl`),
+      `${JSON.stringify({ type: 'message', role: 'assistant', text: 'Odd.', focus: [], at: 3_000, planFindings: [{ kind: 'idle', units: sceneId, comment: 'Hm.' }] })}\n`,
+    );
+
+    const { messages } = await store.conversations.readConversation(id);
+
+    expect(messages[0].planFindings).toEqual(planFindings);
+    expect(messages[1]).toEqual({
+      role: 'assistant',
+      text: 'Odd.',
+      focus: [],
+      at: 3_000,
+    });
+  });
+
   it('lists Conversations by scanning conversations/, latest first, also after reopening', async () => {
     const { projectPath, store, clock } = await newProject();
     const first = await store.conversations.startConversation(

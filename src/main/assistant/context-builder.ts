@@ -10,7 +10,11 @@ import {
   type Saw,
   type SawUnit,
 } from '../../shared/conversation';
-import { findingBlock, type ReviewCommand } from '../../shared/finding';
+import {
+  findingBlock,
+  planFindingBlock,
+  type ReviewCommand,
+} from '../../shared/finding';
 import { roleText } from '../../shared/entry';
 import {
   customValues,
@@ -29,6 +33,7 @@ import {
   bookOf,
   conversationBook,
   partOf,
+  placedChapters,
   topLevel,
 } from '../../shared/manuscript-order';
 import { hasTag, tagged, tagSpelling } from '../../shared/tags';
@@ -61,7 +66,13 @@ import {
 import type { AssistantView } from '../project-store/project-store';
 import type { PromptBlock, PromptMessage } from './provider';
 import { MODE_PROMPTS, PLAN_REQUESTS, REVIEW_ASKS } from './system-prompts';
-import { followedBeats, spanText } from '../../shared/beat-measure';
+import {
+  followedBeats,
+  sceneFalls,
+  spanText,
+  type Measure,
+  type Span,
+} from '../../shared/beat-measure';
 import { bookDetailsId, formatBand } from '../../shared/book-details';
 import { wordTargetText } from '../../shared/word-target';
 import { tokens, type MeasuredSize } from '../../shared/request-size';
@@ -183,7 +194,7 @@ export async function buildContext(
     planned.push(text);
     system.push({ text });
   };
-  if (request.mode === 'plan') {
+  if (request.mode === 'plan' && plan) {
     pushPlanned(planFocusText(manuscript, book, request.focus));
     // In a Series, the Book planned holds it; none while none is.
     const details = bookDetailsId(manuscript, book);
@@ -191,6 +202,7 @@ export async function buildContext(
       bookDetailsText(
         view.bookDetails(book),
         details === undefined ? undefined : view.wordTarget(details),
+        plan.measure,
         request.messages.filter((m) => m.role === 'author').map((m) => m.text),
       ),
     );
@@ -260,8 +272,9 @@ export function storyBibleOf(
 
 /**
  * A message as it is sent: its text, the Review or Plan start button it
- * asked for, the Findings it made unless left out, and the Proposals made
- * in it, accepted ones only as a `mention` when asked.
+ * asked for, the Findings it made, of a Review or a Plan check, unless left
+ * out, and the Proposals made in it, accepted ones only as a `mention` when
+ * asked.
  */
 export function messageContent(
   m: ConversationMessage,
@@ -272,6 +285,7 @@ export function messageContent(
     m.command && REVIEW_ASKS[m.command],
     m.ask && PLAN_REQUESTS[m.ask],
     ...(findings ? (m.findings ?? []).map(findingBlock) : []),
+    ...(findings ? (m.planFindings ?? []).map(planFindingBlock) : []),
     ...(m.proposals ?? []).map((p) =>
       mention && p.state.kind === 'accepted'
         ? acceptedMention(p)
@@ -618,7 +632,7 @@ async function outlineSkeleton(
   async function planUnit(
     heading: string,
     node: ManuscriptBook | ManuscriptPart | ManuscriptChapter | ManuscriptScene,
-    { inFocus, prose, followsBeats }: PlanDetail,
+    { inFocus, prose, followsBeats, falls }: PlanDetail,
     scene: boolean,
   ): Promise<string> {
     if (!inFocus.has(node.id)) {
@@ -636,6 +650,9 @@ async function outlineSkeleton(
         ? [`Word target: ${wordTargetText(target)}`]
         : []),
       prose.has(node.id) ? 'Holds Prose' : 'No Prose yet',
+      ...(scene && followsBeats && falls.has(node.id)
+        ? [`Falls at ${spanText(falls.get(node.id)!)} of the Book`]
+        : []),
       ...(scene && followsBeats ? [beatsLine(view.beats(node.id))] : []),
       await outline(node.id),
       ...(notes.trim() ? [`Notes:\n${notes.trim()}`] : []),
@@ -695,7 +712,8 @@ async function outlineSkeleton(
 
 /**
  * What Plan sends in full: the units in its focus, by id, which of them
- * hold Prose, and the Notes of each, as the Assistant saw them.
+ * hold Prose, and the Notes of each, as the Assistant saw them; and how
+ * where each Scene of the Book falls is measured, and where it falls.
  */
 type PlanDetail = {
   inFocus: Set<string>;
@@ -703,6 +721,8 @@ type PlanDetail = {
   notes: SawUnit[];
   /** Whether the Book follows a Structure or Genre convention with Beats. */
   followsBeats: boolean;
+  measure: Measure;
+  falls: Map<string, Span>;
 };
 
 /** The Beats a Scene carries, by name and qualified id, as Plan is sent them. */
@@ -725,7 +745,7 @@ async function planDetail(
   focus: PlanFocus,
 ): Promise<PlanDetail> {
   const ofBook = bookManuscript(manuscript, book);
-  const placed = ofBook.chapters.filter((c) => !c.unplaced);
+  const placed = placedChapters(ofBook);
   const units: { id: string; scenes: ManuscriptScene[] }[] = [];
   const chapter = (c: ManuscriptChapter) => {
     units.push({ id: c.id, scenes: c.scenes });
@@ -758,7 +778,11 @@ async function planDetail(
       if (markdown.trim() !== '') withProse.add(s.id);
     }
   }
+  const inOrder = placed
+    .flatMap((c) => c.scenes)
+    .map((s) => ({ id: s.id, wordTarget: view.wordTarget(s.id) }));
   return {
+    ...sceneFalls(inOrder),
     inFocus: new Set(units.map((u) => u.id)),
     prose: new Set(
       units
@@ -825,10 +849,12 @@ function planFocusText(
  * about by name in full, the rest by name only. Whether a Structure is
  * chosen says whether to offer to find one; one this version doesn't know
  * is said to be so. Ids the catalogue doesn't know are left out otherwise.
+ * It says how where a Scene falls is measured, for a Plan check to name.
  */
 function bookDetailsText(
   details: BookDetails,
   wordTarget: number | undefined,
+  measure: Measure,
   asked: string[],
 ): string {
   const named = (entry: { id: string; name: string }) =>
@@ -854,6 +880,9 @@ function bookDetailsText(
     `Word target of the Manuscript: ${wordTarget === undefined ? 'none.' : wordTargetText(wordTarget)}`,
     `Structure: ${structureText(details.structure)}`,
     `Genre conventions: ${conventions.length > 0 ? conventions.map(named).join(', ') : 'none.'}`,
+    measure === 'words'
+      ? 'Where a Scene falls is measured in planned words: every Scene has a Word target.'
+      : 'Where a Scene falls is measured by Scene order, each an equal share: not every Scene has a Word target.',
     '## Structures in full: those fitting the Book’s Genres and Format, the one it follows, and any the Author asked about',
     ...structures.full.map((s) =>
       [
@@ -1247,6 +1276,43 @@ function atMentioned(text: string, manuscript: Manuscript): string[] {
     }
   }
   return ids;
+}
+
+/**
+ * The ids a Plan check's Findings may name, of the Book planned, `book` in a
+ * Series: the Book itself, its Parts, and its Chapters and their Scenes,
+ * never those Unplaced.
+ */
+export function planUnitIds(
+  manuscript: Manuscript,
+  book: string | undefined,
+): Set<string> {
+  const ofBook = bookManuscript(manuscript, book);
+  const placed = placedChapters(ofBook);
+  return new Set([
+    ...(book !== undefined ? [book] : []),
+    ...(ofBook.parts ?? []).map((p) => p.id),
+    ...placed.flatMap((c) => [c.id, ...c.scenes.map((s) => s.id)]),
+  ]);
+}
+
+/**
+ * Whether the Book planned, `book` in a Series, is already outlined: a
+ * Scene of it has an Outline, so Plan's first reply is a Plan check (spec:
+ * Outline planner §1).
+ */
+export async function isOutlined(
+  view: AssistantView,
+  book: string | undefined,
+): Promise<boolean> {
+  const ofBook = bookManuscript(view.manuscript(), book);
+  for (const chapter of placedChapters(ofBook)) {
+    for (const scene of chapter.scenes) {
+      const { body } = await view.read({ kind: 'outline', id: scene.id });
+      if (body.trim() !== '') return true;
+    }
+  }
+  return false;
 }
 
 /** Whether `sceneId` is a Scene whose Prose can be read: in the Project, and not Missing. */

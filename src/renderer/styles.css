@@ -4406,8 +4406,30 @@ p.message-used,
   color: var(--muted);
 }
 
-.finding-contradiction .finding-type {
+.finding-contradiction .finding-type,
+.plan-finding-contradiction .finding-type {
   color: var(--danger);
+}
+
+/* The units a Plan check's Finding names, beside its kind. */
+.finding-units {
+  display: inline;
+  margin: 0 0 0 0.4rem;
+  padding: 0;
+  list-style: none;
+  font-size: 0.85em;
+}
+
+.finding-units li {
+  display: inline;
+}
+
+.finding-units li + li::before {
+  content: ', ';
+}
+
+.finding-units .link-button {
+  font-size: inherit;
 }
 
 .finding-comment,
