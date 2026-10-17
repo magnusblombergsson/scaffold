@@ -218,6 +218,10 @@ export function createConversationEngine({
           finished.proposals,
           storyBibleOf(view, context.book),
           mode,
+          // An Add may go in or after a unit one still pending proposes.
+          messages.flatMap((m) =>
+            (m.proposals ?? []).filter((p) => p.state.kind === 'pending'),
+          ),
         );
     const proposals = made?.proposals ?? [];
     const unreadable = made ? finished.unreadable + made.unreadable : 0;

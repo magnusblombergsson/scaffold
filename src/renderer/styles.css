@@ -4618,6 +4618,21 @@ button.finding-quote:hover {
   font-size: 0.85em;
 }
 
+.proposal-needs {
+  margin: 0.3rem 0 0;
+  font-size: 0.85em;
+  color: var(--muted);
+}
+
+.proposal-unit-title {
+  font-weight: 600;
+}
+
+.proposal-unit-outline {
+  white-space: pre-wrap;
+  margin: 0.2rem 0 0;
+}
+
 .proposal-values {
   margin: 0.3rem 0 0;
 }
@@ -5185,6 +5200,31 @@ button.finding-quote:hover {
   margin: 0.25rem 0 0.5rem 0.4rem;
 }
 
+/* A unit a pending Add would make, where it would land. */
+.plan-unit-proposed {
+  border: 1px dashed var(--accent);
+  padding: 0.1rem 0;
+}
+
+.plan-astray {
+  margin: 0.75rem 0 0.25rem;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.plan-unit-proposed > .plan-row {
+  cursor: default;
+}
+
+.plan-row del {
+  color: var(--muted);
+  font-weight: 400;
+}
+
+.plan-row ins {
+  text-decoration: none;
+}
+
 .plan-details {
   flex-shrink: 0;
   width: 18rem;
@@ -5350,6 +5390,10 @@ button.finding-quote:hover {
   display: flex;
   flex-wrap: wrap;
   gap: 0.5rem;
+}
+
+.plan-accept-all {
+  margin-top: 0.5rem;
 }
 
 .plan-proposal-links {

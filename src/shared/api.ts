@@ -1245,6 +1245,13 @@ export interface AssistantApi {
     proposalId: string,
     options?: AcceptOptions,
   ): Promise<void>;
+  /**
+   * Accept all: accepts Proposals of one reply as proposed, each after those
+   * it needs; one that is stale or out of reach is left pending, and so is
+   * every one that needs it.
+   */
+  acceptProposals(conversationId: string, proposalIds: string[]): Promise<void>;
+  /** Rejects a pending Proposal, and those still pending that need it. */
   rejectProposal(conversationId: string, proposalId: string): Promise<void>;
   /**
    * Undoes an accepted Proposal: main writes back what the accept replaced,
@@ -1397,6 +1404,7 @@ export const assistantMethods = {
   planAsk: 'stream',
   retry: 'stream',
   acceptProposal: 'invoke',
+  acceptProposals: 'invoke',
   rejectProposal: 'invoke',
   undoProposal: 'invoke',
   pendingProposals: 'invoke',
