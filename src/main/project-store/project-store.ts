@@ -107,6 +107,8 @@ import {
 } from '../../shared/tags';
 import type {
   Compaction,
+  Bringing,
+  BroughtIn,
   Conversation,
   ConversationMessage,
   ConversationSummary,
@@ -4794,6 +4796,40 @@ export class ProjectStore {
    */
   renameConversation(id: string, title: string): Promise<void> {
     return this.conversations.renameConversation(id, title);
+  }
+
+  /**
+   * The Brainstorms a Plan on the Book `book` may bring in now (spec:
+   * Outline planner §6): those of that Book with anything said, never in
+   * Trash or the Drawer, each read as shown and saying whether it is
+   * starred.
+   */
+  async bringInCandidates(
+    book: string | undefined,
+  ): Promise<(Conversation & { starred: boolean })[]> {
+    const starred = this.records.stars.on(STARRED_CONVERSATIONS);
+    return (await this.conversations.bringInCandidates(book)).map((c) => ({
+      ...c,
+      starred: starred.has(c.id),
+    }));
+  }
+
+  /** The Brainstorms brought into a Plan that are sent now, with how many of their messages were. */
+  broughtInBrainstorms(planId: string): Promise<BroughtIn[]> {
+    return this.conversations.broughtInBrainstorms(planId);
+  }
+
+  /**
+   * Brings a Brainstorm into a Plan as far as its first `messages` go,
+   * logged with its rough size; refuses one it may not bring in.
+   */
+  bringIn(planId: string, brought: Bringing): Promise<void> {
+    return this.conversations.bringIn(planId, brought);
+  }
+
+  /** Removes a Brainstorm brought into a Plan: it is sent no more. */
+  removeBroughtIn(planId: string, brainstormId: string): Promise<void> {
+    return this.conversations.removeBroughtIn(planId, brainstormId);
   }
 
   /** How many of a Conversation's Proposals are still pending, as its cards show them. */

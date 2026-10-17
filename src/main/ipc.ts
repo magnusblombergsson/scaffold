@@ -278,6 +278,12 @@ const assistantHandlers: Handlers<
     trashConversation(sender, store, conversationId),
   setInterviewFocus: ({ store }, conversationId, focus) =>
     store.setInterviewFocus(conversationId, focus),
+  bringInChoices: ({ engine }, planId, book) =>
+    engine.bringInChoices(planId, book),
+  bringIn: ({ engine }, planId, brainstormId) =>
+    engine.bringIn(planId, brainstormId),
+  removeBroughtIn: ({ store }, planId, brainstormId) =>
+    store.removeBroughtIn(planId, brainstormId),
   ask: ({ engine, sender }, askId, conversationId, message, sceneId) =>
     engine.askAssistant(
       conversationId,

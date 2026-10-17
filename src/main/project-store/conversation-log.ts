@@ -1,8 +1,10 @@
 import {
+  broughtInNow,
   isInterviewFocus,
   MODES,
   PLAN_ASKS,
   type PlanAsk,
+  type BringIn,
   type Compaction,
   type Conversation,
   type ConversationMessage,
@@ -343,6 +345,32 @@ export type FocusChangedEvent = {
 };
 
 /**
+ * A Brainstorm the Author brought into a Plan (spec: Outline planner §6),
+ * by id, as far as its first `messages` went, which is its last message
+ * then, with its `title` and rough `size` in tokens then; a later one of
+ * the same Brainstorm brings in the rest. Apps from before it skip it
+ * (ADR 0006).
+ */
+export type BroughtInEvent = {
+  type: 'brainstorm.broughtIn';
+  conversation: string;
+  title: string;
+  messages: number;
+  size: number;
+  at: number;
+};
+
+/**
+ * A Brainstorm brought into a Plan is removed, by id: it is sent no more.
+ * Apps from before bringing in skip it, as they skip the bring-in.
+ */
+export type BringInRemovedEvent = {
+  type: 'brainstorm.removed';
+  conversation: string;
+  at: number;
+};
+
+/**
  * A summary of the first `covers` messages, which stands in for them when
  * the Assistant is asked; the latest one logged is the one used.
  */
@@ -394,6 +422,8 @@ export type ConversationEvent =
   | ModelChosenEvent
   | BookChosenEvent
   | FocusChangedEvent
+  | BroughtInEvent
+  | BringInRemovedEvent
   | SummaryEvent
   | UnusedSummaryEvent
   | RenamedEvent
@@ -489,6 +519,7 @@ export function parseLog(log: string): LoggedConversation | null {
   const emptyReplies: EmptyReply[] = [];
   const proposals = new Map<string, LoggedProposal>();
   const focusChanges: FocusChange[] = [];
+  const bringIns: BringIn[] = [];
   const compactions: Compaction[] = [];
   const unusedSummaries: UnusedSummary[] = [];
   let chosen: Model | undefined;
@@ -536,6 +567,10 @@ export function parseLog(log: string): LoggedConversation | null {
     if (isFocusChanged(event)) {
       const { focus, at } = event;
       focusChanges.push({ focus, at, before: messages.length });
+      continue;
+    }
+    if (isBroughtIn(event) || isBringInRemoved(event)) {
+      bringIns.push(bringInOf(event, bringIns, messages.length));
       continue;
     }
     if (isSummary(event, messages.length)) {
@@ -608,6 +643,7 @@ export function parseLog(log: string): LoggedConversation | null {
       focusChanges,
     }),
     messages,
+    ...(bringIns.length > 0 && { bringIns }),
     ...(emptyReplies.length > 0 && { emptyReplies }),
     ...(compactions.length > 0 && { compactions }),
     ...(unusedSummaries.length > 0 && { unusedSummaries }),
@@ -1559,6 +1595,52 @@ function isSummary(value: unknown, logged: number): value is SummaryEvent {
     Number.isInteger(event.covers) &&
     event.covers! > 0 &&
     event.covers! <= logged &&
+    typeof event.at === 'number'
+  );
+}
+
+/**
+ * The bring-in or removal an event logs, before the message `before`, the
+ * `earlier` ones logged before it; a bring-in with the total brought in
+ * once it is. A removal is titled as its Brainstorm was last brought in.
+ */
+function bringInOf(
+  event: BroughtInEvent | BringInRemovedEvent,
+  earlier: readonly BringIn[],
+  before: number,
+): BringIn {
+  const { conversation, at } = event;
+  if (event.type === 'brainstorm.removed') {
+    const title =
+      earlier.findLast((b) => b.conversation === conversation)?.title ?? '';
+    return { conversation, title, removed: true, at, before };
+  }
+  const { title, messages, size } = event;
+  const others = broughtInNow(earlier).filter(
+    (b) => b.conversation !== conversation,
+  );
+  const total = others.reduce((sum, b) => sum + b.size, size);
+  return { conversation, title, messages, size, total, at, before };
+}
+
+function isBroughtIn(value: unknown): value is BroughtInEvent {
+  const event = value as Partial<BroughtInEvent> | null;
+  return (
+    event?.type === 'brainstorm.broughtIn' &&
+    typeof event.conversation === 'string' &&
+    typeof event.title === 'string' &&
+    isCount(event.messages) &&
+    Number.isInteger(event.size) &&
+    event.size! >= 0 &&
+    typeof event.at === 'number'
+  );
+}
+
+function isBringInRemoved(value: unknown): value is BringInRemovedEvent {
+  const event = value as Partial<BringInRemovedEvent> | null;
+  return (
+    event?.type === 'brainstorm.removed' &&
+    typeof event.conversation === 'string' &&
     typeof event.at === 'number'
   );
 }

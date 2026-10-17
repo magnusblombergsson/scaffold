@@ -1942,3 +1942,294 @@ describe('Relation Proposals in a reply', () => {
     expect(writing).not.toContain('"from": "<Id>"');
   });
 });
+
+describe('Bringing in Brainstorms', () => {
+  /** A Brainstorm that has been asked once, on `book` if given; time moves on after it. */
+  async function brainstormed(
+    { store, engine, clock }: Awaited<ReturnType<typeof setUp>>,
+    title: string,
+    { book, text = 'Ideas?' }: { book?: string; text?: string } = {},
+  ): Promise<string> {
+    const { id } = await store.startConversation('brainstorm', title);
+    if (book) await store.chooseBook(id, book);
+    await engine.askAssistant(id, text, { sceneId: null }, () => {});
+    await clock.sleep(10);
+    return id;
+  }
+
+  it('offers the Brainstorms of the Plan’s Book, Starred first then newest, each with its rough size; never another Mode’s, another Book’s, one in Trash or the Drawer, or one with nothing said', async () => {
+    const setup = await setUp(() => ['A heist on the island.']);
+    const { store, engine } = setup;
+    const { id: two } = await store.createBook();
+    await brainstormed(setup, 'Old ideas');
+    const starred = await brainstormed(setup, 'Starred ideas', {
+      text: 'A long one. '.repeat(40),
+    });
+    await brainstormed(setup, 'Fresh ideas');
+    await brainstormed(setup, 'Other Book', { book: two });
+    const trashed = await brainstormed(setup, 'Trashed');
+    const drawered = await brainstormed(setup, 'Drawered');
+    await store.startConversation('brainstorm', 'Nothing said');
+    const { id: interview } = await store.startConversation('interview', 'Q');
+    await engine.askAssistant(interview, 'Who?', { sceneId: null }, () => {});
+    await store.starConversation(starred, true);
+    await store.trashConversation(trashed);
+    await store.moveToDrawer('conversation', drawered);
+    const { id: plan } = await store.startConversation('plan', 'Shape');
+
+    const choices = await engine.bringInChoices(plan);
+
+    expect(choices.map((c) => c.title)).toEqual([
+      'Starred ideas',
+      'Fresh ideas',
+      'Old ideas',
+    ]);
+    expect(choices[0]).toMatchObject({ id: starred, starred: true });
+    expect(choices[1]).toMatchObject({ starred: false });
+    expect(choices[1].size).toBeGreaterThan(0);
+    // Some 480 characters more, at about 4 a token.
+    expect(choices[0].size - choices[1].size).toBeGreaterThanOrEqual(100);
+    expect(choices.every((c) => c.broughtIn === undefined)).toBe(true);
+    // A new Plan, not started yet, is offered those of its Book.
+    expect((await engine.bringInChoices(null)).map((c) => c.id)).toEqual(
+      choices.map((c) => c.id),
+    );
+    expect(
+      (await engine.bringInChoices(null, two)).map((c) => c.title),
+    ).toEqual(['Other Book']);
+    await expect(engine.bringIn(plan, trashed)).rejects.toThrow(/can’t/);
+    await expect(engine.bringIn(plan, interview)).rejects.toThrow(/can’t/);
+    await expect(engine.bringInChoices(interview)).rejects.toThrow(/Plan/);
+  });
+
+  const block = (json: object) =>
+    `\`\`\`proposal\n${JSON.stringify(json)}\n\`\`\``;
+  const mira = { create: 'character', name: 'Mira', description: 'Sister.' };
+  const olle = { create: 'character', name: 'Olle', description: 'Father.' };
+  const kai = { create: 'character', name: 'Kai', description: 'Thief.' };
+
+  /** A Brainstorm whose one reply proposes Mira, accepted, Olle, rejected, and Kai, left. */
+  async function heist() {
+    const setup = await setUp((n) =>
+      n === 0
+        ? ['A heist.\n', block(mira), '\n', block(olle), '\n', block(kai)]
+        : ['Hm.'],
+    );
+    const { store, engine } = setup;
+    const { id: brainstorm } = await store.startConversation(
+      'brainstorm',
+      'Heist ideas',
+    );
+    await engine.askAssistant(
+      brainstorm,
+      'A robbery?',
+      { sceneId: null },
+      () => {},
+    );
+    const [, replied] = (await store.readConversation(brainstorm)).messages;
+    await store.acceptProposal(brainstorm, replied.proposals![0].id);
+    await store.rejectProposal(brainstorm, replied.proposals![1].id);
+    const { id: plan } = await store.startConversation('plan', 'Shape');
+    return { ...setup, brainstorm, plan };
+  }
+
+  it('logs each bring-in in the Plan with a marker of its size, and sends the Brainstorm as far as it went then, in a block of its own after the focus and Book details, every turn', async () => {
+    const { store, engine, provider, brainstorm, plan, clock } = await heist();
+    const [choice] = await engine.bringInChoices(plan);
+
+    await engine.bringIn(plan, brainstorm);
+    await engine.askAssistant(
+      brainstorm,
+      'Later idea',
+      { sceneId: null },
+      () => {},
+    );
+    await engine.askAssistant(plan, 'Shape it.', { sceneId: null }, () => {});
+    await engine.askAssistant(plan, 'More.', { sceneId: null }, () => {});
+
+    expect((await store.readConversation(plan)).bringIns).toEqual([
+      {
+        conversation: brainstorm,
+        title: 'Heist ideas',
+        messages: 2,
+        size: choice.size,
+        total: choice.size,
+        at: clock.now(),
+        before: 0,
+      },
+    ]);
+    for (const request of provider.requests.slice(-2)) {
+      const texts = request.system.map((b) => b.text);
+      const brought = texts.at(-1)!;
+      expect(texts.at(-2)).toMatch(/^The Book’s details/);
+      expect(brought).toMatch(/^Brainstorm Conversations the Author brought/);
+      expect(brought).toContain('## Brainstorm “Heist ideas”');
+      expect(brought).toContain('Author:\nA robbery?');
+      expect(brought).toContain(
+        '(The Author accepted a Proposal on the new Entry Mira.)',
+      );
+      expect(brought).not.toContain(block(mira));
+      expect(brought).toContain(
+        `${block(olle)}\n(The Author rejected this Proposal.)`,
+      );
+      expect(brought).toContain(
+        `${block(kai)}\n(The Author hasn't decided on this Proposal yet.)`,
+      );
+      expect(brought).not.toContain('Later idea');
+    }
+  });
+
+  it('brings in the rest of a Brainstorm that went on when brought in again, and offers no more once it is all in', async () => {
+    const { store, engine, provider, brainstorm, plan } = await heist();
+    await engine.bringIn(plan, brainstorm);
+    await engine.askAssistant(
+      brainstorm,
+      'Later idea',
+      { sceneId: null },
+      () => {},
+    );
+    expect((await engine.bringInChoices(plan))[0]).toMatchObject({
+      messages: 4,
+      broughtIn: 2,
+    });
+
+    await engine.bringIn(plan, brainstorm);
+    await engine.askAssistant(plan, 'Shape it.', { sceneId: null }, () => {});
+
+    expect(provider.requests.at(-1)!.system.at(-1)!.text).toContain(
+      'Author:\nLater idea',
+    );
+    const { bringIns } = await store.readConversation(plan);
+    expect(bringIns?.map((b) => !b.removed && b.messages)).toEqual([2, 4]);
+    await expect(engine.bringIn(plan, brainstorm)).rejects.toThrow(
+      /as far as it goes/,
+    );
+  });
+
+  it('stops sending one removed, marked in the thread, until it is brought in again', async () => {
+    const { store, engine, provider, brainstorm, plan } = await heist();
+    await engine.bringIn(plan, brainstorm);
+
+    await store.removeBroughtIn(plan, brainstorm);
+    await engine.askAssistant(plan, 'Shape it.', { sceneId: null }, () => {});
+
+    const sent = provider.requests.at(-1)!.system.map((b) => b.text);
+    expect(sent.join('\n')).not.toContain('Heist ideas');
+    const { bringIns } = await store.readConversation(plan);
+    expect(bringIns?.at(-1)).toMatchObject({
+      conversation: brainstorm,
+      title: 'Heist ideas',
+      removed: true,
+      before: 0,
+    });
+    await expect(store.removeBroughtIn(plan, brainstorm)).rejects.toThrow();
+  });
+
+  it('sends a Brainstorm as within itself: its summary valid at the cut-off, then the messages after it', async () => {
+    const long = (what: string) => `${what} `.repeat(120 / (what.length + 1));
+    let summaries = 0;
+    const { store, engine, provider } = await setUp(
+      (n, request) =>
+        /summarise/.test(request.system[0].text)
+          ? [`Summary ${++summaries}.`]
+          : [`Reply ${n}`],
+      { compaction: { compactAt: 50, keep: 40 } },
+    );
+    const { id: brainstorm } = await store.startConversation(
+      'brainstorm',
+      'Long',
+    );
+    for (const text of [long('Anna'), long('Mira'), 'And then?']) {
+      await engine.askAssistant(brainstorm, text, { sceneId: null }, () => {});
+    }
+    const { id: plan } = await store.startConversation('plan', 'Shape');
+    await engine.bringIn(plan, brainstorm);
+    // Summaries go on being made; the latest covering nothing past the
+    // cut-off, of the first 6 messages, is valid at it.
+    for (const text of [long('Wind'), long('Rain'), 'So?']) {
+      await engine.askAssistant(brainstorm, text, { sceneId: null }, () => {});
+    }
+    const { compactions } = await store.readConversation(brainstorm);
+    expect(compactions?.map((c) => c.covers)).toEqual([2, 4, 8]);
+
+    await engine.askAssistant(plan, 'Shape it.', { sceneId: null }, () => {});
+
+    const brought = provider.requests.at(-1)!.system.at(-1)!.text;
+    expect(brought).toContain('Summary 2.');
+    expect(brought).not.toContain('Summary 1.');
+    expect(brought).not.toContain('Summary 3.');
+    expect(brought).not.toContain(long('Mira').trim());
+    expect(brought).toContain('Author:\nAnd then?');
+    expect(brought).toMatch(/And then\?\n\nAssistant:\nReply \d/);
+    expect(brought).not.toContain(long('Wind').trim());
+    expect(brought).not.toContain('So?');
+  });
+
+  it('keeps a Brainstorm brought in out of the Plan’s own summary, sending it beside it', async () => {
+    const long = (what: string) => `${what} `.repeat(120 / (what.length + 1));
+    const { store, engine, provider } = await setUp(
+      (n, request) =>
+        /summarise/.test(request.system[0].text)
+          ? ['Plan summary.']
+          : [`Reply ${n}`],
+      { compaction: { compactAt: 50, keep: 40 } },
+    );
+    const { id: brainstorm } = await store.startConversation(
+      'brainstorm',
+      'Heist',
+    );
+    await engine.askAssistant(
+      brainstorm,
+      'A robbery?',
+      { sceneId: null },
+      () => {},
+    );
+    const { id: plan } = await store.startConversation('plan', 'Shape');
+    await engine.bringIn(plan, brainstorm);
+
+    for (const text of [long('Acts'), long('Turns'), 'And then?']) {
+      await engine.askAssistant(plan, text, { sceneId: null }, () => {});
+    }
+
+    const summarising = provider.requests.find((r) =>
+      /summarise/.test(r.system[0].text),
+    )!;
+    expect(JSON.stringify(summarising)).not.toContain('A robbery?');
+    const texts = provider.requests.at(-1)!.system.map((b) => b.text);
+    expect(texts.at(-2)).toContain('## Brainstorm “Heist”');
+    expect(texts.at(-1)).toContain('Plan summary.');
+  });
+
+  it('sends none that went to Trash or the Drawer, or is about another Book, its marker saying why, and sends it again once it is eligible', async () => {
+    const { store, engine, provider, brainstorm, plan } = await heist();
+    await engine.bringIn(plan, brainstorm);
+    const sentNow = async () => {
+      await engine.askAssistant(plan, 'Shape it.', { sceneId: null }, () => {});
+      return provider.requests
+        .at(-1)!
+        .system.some((b) => b.text.includes('## Brainstorm “Heist ideas”'));
+    };
+    const notSent = async () =>
+      (await store.readConversation(plan)).bringIns?.at(-1)?.notSent;
+
+    await store.trashConversation(brainstorm);
+    expect(await sentNow()).toBe(false);
+    expect(await notSent()).toBe('trash');
+    await store.restore(brainstorm);
+    expect(await sentNow()).toBe(true);
+    expect(await notSent()).toBeUndefined();
+
+    await store.moveToDrawer('conversation', brainstorm);
+    expect(await sentNow()).toBe(false);
+    expect(await notSent()).toBe('drawer');
+    await store.restore(brainstorm);
+
+    const { id: two } = await store.createBook();
+    expect(await sentNow()).toBe(true);
+    await store.chooseBook(plan, two);
+    expect(await sentNow()).toBe(false);
+    expect(await notSent()).toBe('other-book');
+    await store.chooseBook(brainstorm, two);
+    expect(await sentNow()).toBe(true);
+  });
+});

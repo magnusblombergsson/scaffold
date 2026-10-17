@@ -25,7 +25,7 @@ export const DEFAULT_COMPACTION: CompactionPolicy = {
 };
 
 /** About how many tokens a text is: some 4 characters each. */
-function tokens(text: string): number {
+export function tokens(text: string): number {
   return Math.ceil(text.length / 4);
 }
 

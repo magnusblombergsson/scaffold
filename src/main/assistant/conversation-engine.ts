@@ -1,9 +1,11 @@
 import {
+  broughtInNow,
   focusIds,
   OPEN_FOCUS,
   PLAN_ASK_LABELS,
   type PlanAsk,
   type AskResult,
+  type BringInChoice,
   type Compaction,
   type Conversation,
   type ConversationMessage,
@@ -30,9 +32,11 @@ import {
   compactionPoint,
   DEFAULT_COMPACTION,
   summaryRequest,
+  tokens,
   type CompactionPolicy,
 } from './compaction';
 import {
+  broughtInText,
   buildContext,
   defaultRequest,
   isOutlined,
@@ -58,6 +62,9 @@ export type EngineDeps = {
     | 'appendProposal'
     | 'appendSummary'
     | 'appendUnusedSummary'
+    | 'bringInCandidates'
+    | 'broughtInBrainstorms'
+    | 'bringIn'
   >;
   /** The Provider each Model is reached through. */
   providerFor: ProviderFor;
@@ -96,6 +103,15 @@ export function createConversationEngine({
     return readableScene(store.assistantView().manuscript(), sceneId)
       ? [sceneId]
       : [];
+  }
+
+  /** The Plan `planId`, refusing any other Conversation. */
+  async function readPlan(planId: string): Promise<Conversation> {
+    const plan = await store.readConversation(planId);
+    if (plan.mode !== 'plan') {
+      throw new Error('Only a Plan Conversation brings in Brainstorms');
+    }
+    return plan;
   }
 
   /**
@@ -203,6 +219,9 @@ export function createConversationEngine({
     const asked = {
       ...defaultRequest(mode, focus[0] ?? null, messages, interviewFocus, book),
       ...(summary && { summary }),
+      ...(mode === 'plan' && {
+        broughtIn: await store.broughtInBrainstorms(conversationId),
+      }),
     };
     const view = store.assistantView();
     const context = await buildContext(view, asked);
@@ -429,6 +448,62 @@ export function createConversationEngine({
       await store.flush();
       const text = PLAN_ASK_LABELS[planAsk];
       return ask(conversationId, { text, ask: planAsk }, null, onText);
+    },
+
+    /**
+     * The Brainstorms the Plan `planId` may bring in (spec: Outline planner
+     * §6), or a new one, not started yet, on the Book `book`, Starred first,
+     * then newest: each with its rough size, in tokens, as it would be sent
+     * were it brought in now, and how far it is brought in already, if it
+     * is. Refused for a Conversation of another Mode.
+     */
+    async bringInChoices(
+      planId: string | null,
+      book?: string,
+    ): Promise<BringInChoice[]> {
+      const plan = planId ? await readPlan(planId) : { book, bringIns: [] };
+      const candidates = await store.bringInCandidates(plan.book);
+      const now = broughtInNow(plan.bringIns);
+      return candidates
+        .map(({ starred, ...conversation }) => {
+          const { id, title, created } = conversation;
+          const upTo = conversation.messages.length;
+          const broughtIn = now.find((b) => b.conversation === id)?.messages;
+          return {
+            id,
+            title,
+            created,
+            starred,
+            messages: upTo,
+            size: tokens(broughtInText({ conversation, upTo })),
+            ...(broughtIn !== undefined && { broughtIn }),
+          };
+        })
+        .sort(
+          (a, b) =>
+            Number(b.starred) - Number(a.starred) || b.created - a.created,
+        );
+    },
+
+    /**
+     * Brings the Brainstorm `brainstormId` into the Plan `planId` as far as
+     * it goes now, or the rest of it, logged with its rough size; refuses
+     * one the Plan may not bring in.
+     */
+    async bringIn(planId: string, brainstormId: string): Promise<void> {
+      const { book } = await readPlan(planId);
+      const conversation = (await store.bringInCandidates(book)).find(
+        (c) => c.id === brainstormId,
+      );
+      if (!conversation) {
+        throw new Error('That Brainstorm can’t be brought into this Plan');
+      }
+      const upTo = conversation.messages.length;
+      await store.bringIn(planId, {
+        conversation: brainstormId,
+        messages: upTo,
+        size: tokens(broughtInText({ conversation, upTo })),
+      });
     },
 
     /**
