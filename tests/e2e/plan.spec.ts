@@ -199,3 +199,153 @@ for (const theme of ['light', 'dark'] as const) {
     }
   });
 }
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`the Book details are set with a click, and the structure guide follows a Structure and a Genre convention, ${theme}`, async () => {
+    const { app, page, projectPath } = await newProject(theme);
+    try {
+      await roomButton(page, 'Plan').click();
+      const strip = page.getByRole('region', { name: 'Book details' });
+      const guide = page.getByRole('region', { name: 'Structure guide' });
+      const header = async () =>
+        readFile(path.join(projectPath, 'outlines', 'project.md'), 'utf8');
+
+      await strip.getByRole('button', { name: 'Literary' }).click();
+      await strip
+        .getByRole('combobox', { name: 'Format' })
+        .selectOption('short-story');
+      await expect(
+        strip.getByRole('button', { name: 'Literary' }),
+      ).toHaveAttribute('aria-pressed', 'true');
+      await expect.poll(header).toContain('bookFormat: short-story');
+      expect(await header()).toMatch(/genres:\s*(- |\[)literary/);
+
+      // Fitting a literary short story: Freytag first, the rest less usual.
+      await strip.getByRole('button', { name: 'About Structures…' }).click();
+      await expect(guide).toBeInViewport();
+      await expect(guide.locator('details > summary').first()).toHaveText(
+        'Freytag’s pyramid',
+      );
+      await expect(guide).toContainText('Less usual for this Book');
+      await guide.locator('summary', { hasText: 'Kishōtenketsu' }).click();
+      await guide.getByRole('button', { name: 'Follow this' }).click();
+
+      await expect(
+        strip.getByRole('combobox', { name: 'Structure' }),
+      ).toHaveValue('kishotenketsu');
+      await expect(
+        guide.getByRole('article', { name: 'Kishōtenketsu' }),
+      ).toContainText('Not marked');
+      await guide.locator('summary', { hasText: 'Fantasy' }).click();
+      await guide.getByRole('button', { name: 'Follow too' }).click();
+      await expect(
+        strip.getByRole('button', { name: 'Fantasy (promises before payoff)' }),
+      ).toHaveAttribute('aria-pressed', 'true');
+      await expect.poll(header).toContain('structure: kishotenketsu');
+      expect(await header()).toMatch(/genreConventions:\s*(- |\[)fantasy/);
+
+      await strip
+        .getByRole('combobox', { name: 'Structure' })
+        .selectOption('none');
+      await expect(guide).toContainText('This Book follows no set Structure.');
+      await expect.poll(header).toContain('structure: none');
+      await expect(page).toHaveScreenshot(`plan-book-details-${theme}.png`, {
+        mask: [page.locator('.save-status'), page.locator('.toasts')],
+      });
+    } finally {
+      await app.close();
+    }
+  });
+}
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`a Scene is marked with Beats in its details, shown as chips and pins on the Beat rail, and set aside when the Book stops following them, ${theme}`, async () => {
+    const { app, page, projectPath } = await newProject(theme);
+    try {
+      const manifest = JSON.parse(
+        await readFile(path.join(projectPath, 'project.json'), 'utf8'),
+      ) as { tree: { chapters: { scenes: { id: string }[] }[] } };
+      const sceneId = manifest.tree.chapters[0].scenes[0].id;
+      const header = async () =>
+        readFile(path.join(projectPath, 'outlines', `${sceneId}.md`), 'utf8');
+      await roomButton(page, 'Plan').click();
+      const strip = page.getByRole('region', { name: 'Book details' });
+      const tree = page.getByRole('region', { name: 'Outline tree' });
+      const details = page.getByRole('complementary', { name: 'Details' });
+      const rail = page.getByRole('region', { name: 'Beat rail' });
+      const guide = page.getByRole('region', { name: 'Structure guide' });
+      const scene = tree
+        .getByRole('listitem', { name: 'Chapter “Chapter 1”' })
+        .getByRole('listitem', { name: 'Scene “Scene 1”' });
+
+      await strip
+        .getByRole('combobox', { name: 'Structure' })
+        .selectOption('three-act');
+      await strip.getByRole('button', { name: 'Mystery (fair play)' }).click();
+      await scene.locator('.plan-row').click();
+      const beats = details.getByRole('region', { name: 'Beats' });
+      await expect(beats).toContainText(
+        /Falls at 0–\d+% of the Book, by Scene order/,
+      );
+      // Each box shows the mark as saved, once it is.
+      await beats.getByRole('checkbox', { name: /^Setup/ }).click();
+      await expect(
+        beats.getByRole('checkbox', { name: /^Setup/ }),
+      ).toBeChecked();
+      await beats.getByRole('checkbox', { name: /^The crime/ }).click();
+      await expect(
+        beats.getByRole('checkbox', { name: /^The crime/ }),
+      ).toBeChecked();
+
+      await expect.poll(header).toMatch(/beats:\s*(- |\[)three-act\/setup/);
+      expect(await header()).toContain('mystery/crime');
+      await expect(
+        scene.getByRole('list', { name: 'Beats' }).getByRole('listitem'),
+      ).toHaveText(['Setup', 'The crime']);
+      await expect(rail).toContainText('Measured by Scene order');
+      await expect(
+        rail
+          .getByRole('list', { name: 'Structure' })
+          .getByRole('listitem', { name: 'Setup' })
+          .getByRole('button', { name: 'Scene “Scene 1”' }),
+      ).toBeVisible();
+      await expect(
+        rail
+          .getByRole('list', { name: 'Genre conventions' })
+          .getByRole('listitem', { name: 'The crime' })
+          .getByRole('button', { name: 'Scene “Scene 1”' }),
+      ).toBeVisible();
+      await expect(
+        guide.getByRole('article', { name: 'Three-act' }),
+      ).toContainText('Marked on “Scene 1”');
+      await expect(page).toHaveScreenshot(`plan-beats-${theme}.png`, {
+        mask: [page.locator('.save-status'), page.locator('.toasts')],
+      });
+
+      // Following another Structure sets the Three-act mark aside, unseen
+      // and unwritten; following it again brings it back.
+      await strip
+        .getByRole('combobox', { name: 'Structure' })
+        .selectOption('save-the-cat');
+      await expect(
+        scene.getByRole('list', { name: 'Beats' }).getByRole('listitem'),
+      ).toHaveText(['The crime']);
+      await expect(
+        beats.getByRole('checkbox', { name: /^Setup/ }),
+      ).not.toBeChecked();
+      expect(await header()).toContain('three-act/setup');
+      await strip
+        .getByRole('combobox', { name: 'Structure' })
+        .selectOption('three-act');
+      await expect(
+        scene.getByRole('list', { name: 'Beats' }).getByRole('listitem'),
+      ).toHaveText(['Setup', 'The crime']);
+
+      await beats.getByRole('checkbox', { name: /^The crime/ }).click();
+      await expect.poll(header).not.toContain('mystery/crime');
+      expect(await header()).toContain('three-act/setup');
+    } finally {
+      await app.close();
+    }
+  });
+}

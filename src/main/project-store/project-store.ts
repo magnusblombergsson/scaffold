@@ -6,6 +6,8 @@ import {
   ENTRY_TYPES,
   PROJECT_OUTLINE,
   partLabel,
+  type BookDetailKey,
+  type BookDetails,
   partName,
   proseLanguage,
   unitKey,
@@ -293,6 +295,19 @@ import {
 
 export { FORMAT };
 const MANIFEST = 'project.json';
+
+/**
+ * The details a Book has that a Part hasn't: its Word target and those of
+ * Outline planner §3. While the Project has one Book, the Manuscript holds
+ * them; Book 1 takes them when it becomes a Series.
+ */
+const BOOK_OWN_DETAILS = [
+  'wordTarget',
+  'genres',
+  'bookFormat',
+  'structure',
+  'genreConventions',
+] as const;
 /** How long edits are still saved once a newer app has upgraded the Project, for the window to hand its over. */
 const HANDOVER_MS = 2000;
 
@@ -1872,6 +1887,54 @@ export class ProjectStore {
   }
 
   /**
+   * Gives a Book, or with `PROJECT_OUTLINE` the one Book a Project without
+   * Books is, one of its own details (spec: Outline planner §3): its Genres,
+   * Format, Structure or Genre conventions, by catalogue id, or none with
+   * null or an empty list. Each is a header key of the Book's Outline file,
+   * a unit detail (ADR 0008), so it merges on its own. There is no undo.
+   */
+  setBookDetail<K extends BookDetailKey>(
+    bookId: string,
+    key: K,
+    value: BookDetails[K] | null,
+  ): Promise<void> {
+    return this.enqueueWrite(async () => {
+      await this.setDetail(this.detailRef(bookId), key, value);
+    });
+  }
+
+  /**
+   * Marks the Scene `sceneId` as carrying the Beat `beat`, qualified as in
+   * `save-the-cat/midpoint`, or takes the mark away (spec: Outline planner
+   * §3). Its other marks stay as they are, set-aside ones too: they are one
+   * header key of its Outline file, a unit detail (ADR 0008), saved as a
+   * whole list. Nothing checks where the Scene falls. There is no undo.
+   */
+  setBeat(sceneId: string, beat: string, carries: boolean): Promise<void> {
+    return this.enqueueWrite(async () => {
+      const ref = this.detailRef(sceneId);
+      const held = this.heldDetails(ref)?.beats ?? [];
+      const others = held.filter((id) => id !== beat);
+      // A mark already as asked is saved as it is, still refused on a Chapter.
+      const beats =
+        held.includes(beat) === carries
+          ? held
+          : carries
+            ? [...others, beat]
+            : others;
+      await this.setDetail(ref, 'beats', beats);
+    });
+  }
+
+  /** The Manuscript's details that are a Book's own, those it has, by key. */
+  private bookOwnDetails() {
+    const held = this.unitDetails.get(PROJECT_OUTLINE) ?? {};
+    return BOOK_OWN_DETAILS.flatMap((key) =>
+      held[key] === undefined ? [] : [[key, held[key]] as const],
+    );
+  }
+
+  /**
    * The detail ref of a unit by its id: the Manuscript for `PROJECT_OUTLINE`,
    * an Entry, a Part, a Chapter, or else a Scene.
    */
@@ -2745,7 +2808,9 @@ export class ProjectStore {
   manuscript(): Manuscript {
     const { tree } = this.manifest;
     const placed = new Set(sceneIds(tree));
-    const wordTarget = this.unitDetails.get(PROJECT_OUTLINE)?.wordTarget;
+    const own = Object.fromEntries(
+      structuredClone(this.bookOwnDetails()),
+    ) as Pick<Manuscript, 'wordTarget' | BookDetailKey>;
     const label = partLabel(this.manifest.partLabel);
     const withUnitDetails = <T extends { id: string }>(node: T): T => {
       const details = this.unitDetails.get(node.id);
@@ -2811,7 +2876,7 @@ export class ProjectStore {
         .filter((id) => !placed.has(id))
         .sort()
         .map((id) => withUnitDetails({ id, title: UNPLACED_TITLE })),
-      ...(wordTarget !== undefined && { wordTarget }),
+      ...own,
       ...(label !== 'part' && { partLabel: label }),
     };
   }
@@ -3716,15 +3781,19 @@ export class ProjectStore {
       });
       fill?.(tree);
     });
-    const target = this.unitDetails.get(PROJECT_OUTLINE)?.wordTarget;
+    const moving = this.bookOwnDetails();
     const book = bookOne;
-    if (book === undefined || target === undefined) return undefined;
-    await this.saveDetail(outlineRef(book), 'wordTarget', target);
-    await this.saveDetail(outlineRef(PROJECT_OUTLINE), 'wordTarget', undefined);
+    if (book === undefined || moving.length === 0) return undefined;
+    for (const [key, value] of moving) {
+      await this.saveDetail(outlineRef(book), key, value);
+      await this.saveDetail(outlineRef(PROJECT_OUTLINE), key, undefined);
+    }
     return async () => {
       await this.writeManifest({ ...this.manifest, tree: before });
-      await this.saveDetail(outlineRef(PROJECT_OUTLINE), 'wordTarget', target);
-      await this.saveDetail(outlineRef(book), 'wordTarget', undefined);
+      for (const [key, value] of moving) {
+        await this.saveDetail(outlineRef(PROJECT_OUTLINE), key, value);
+        await this.saveDetail(outlineRef(book), key, undefined);
+      }
     };
   }
 

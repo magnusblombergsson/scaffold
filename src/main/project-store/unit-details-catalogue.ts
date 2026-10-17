@@ -1,5 +1,6 @@
 import type { DetailRef } from '../../shared/project-types';
 import type { Status } from '../../shared/status';
+import { currentBeatId, currentId } from '../../shared/structure-catalogue';
 import { readTags, spelledTags } from '../../shared/tags';
 import { isWordTarget } from '../../shared/word-target';
 
@@ -14,12 +15,19 @@ export type DetailKey =
   | 'wordTarget'
   | 'image'
   | 'firstAppears'
-  | 'evolvedImages';
+  | 'evolvedImages'
+  | 'genres'
+  | 'bookFormat'
+  | 'structure'
+  | 'genreConventions'
+  | 'beats';
 export type DetailKind = DetailRef['kind'];
 
 /**
  * A unit's details as its header holds them: the Status id, Tags, image
- * file, Word target, and an Entry's first Book and image files by Book.
+ * file, Word target, an Entry's first Book and image files by Book, a
+ * Book's Genres, Format, Structure and Genre conventions, and a Scene's
+ * Beats.
  */
 export type HeldDetails = {
   status?: string;
@@ -28,6 +36,11 @@ export type HeldDetails = {
   wordTarget?: number;
   firstAppears?: string;
   evolvedImages?: Record<string, string>;
+  genres?: string[];
+  bookFormat?: string;
+  structure?: string;
+  genreConventions?: string[];
+  beats?: string[];
 };
 
 /** What a validator may read: the Project's current vocabulary. */
@@ -101,6 +114,81 @@ function evolvedImages(
     },
   );
   return files.length > 0 ? Object.fromEntries(files) : undefined;
+}
+
+/**
+ * A catalogue id as a header may hold it: a slug, or a UUID, which stays
+ * free for what the Author will define. One the catalogue doesn't know is
+ * kept, from a newer app.
+ */
+const CATALOGUE_ID = /^[a-z0-9]+(-[a-z0-9]+)*$/;
+
+const isCatalogueId = (raw: unknown): raw is string =>
+  typeof raw === 'string' && CATALOGUE_ID.test(raw);
+
+/** A header's catalogue id, an old one as now called; undefined for what isn't one. */
+function readId(raw: unknown): string | undefined {
+  return isCatalogueId(raw) ? currentId(raw) : undefined;
+}
+
+/** A header's list of catalogue ids, each once, old ones as now called; undefined for none. */
+function readIds(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const ids = [...new Set(raw.flatMap((id) => readId(id) ?? []))];
+  return ids.length > 0 ? ids : undefined;
+}
+
+/** A Book's detail of one catalogue id: absent with null or undefined. */
+function bookId(name: string, key: DetailKey): Row {
+  return {
+    key,
+    only: `Only a Book has a ${name}`,
+    kinds: ['book', 'manuscript'],
+    parse: readId,
+    validate(value) {
+      if (value === null || value === undefined) return undefined;
+      if (!isCatalogueId(value)) {
+        throw new Error(`Not a ${name}: ${String(value)}`);
+      }
+      return value;
+    },
+    split: 'stays',
+    // Plan alone is sent them, by its own means (spec: Outline planner §12).
+    assistant: 'hidden',
+    trash: 'stays',
+  };
+}
+
+/** A Book's detail of any number of catalogue ids: absent when empty. */
+function bookIds(name: string, key: DetailKey): Row {
+  return {
+    ...bookId(name, key),
+    only: `Only a Book has ${name}`,
+    parse: readIds,
+    validate(value) {
+      if (value === null || value === undefined) return undefined;
+      if (!Array.isArray(value) || !value.every(isCatalogueId)) {
+        throw new Error(`Not ${name}: ${JSON.stringify(value)}`);
+      }
+      return readIds(value);
+    },
+  };
+}
+
+/**
+ * A Beat as a Scene's header holds it: qualified by its Structure or Genre
+ * convention, as in `save-the-cat/midpoint` (spec: Outline planner §11).
+ */
+const BEAT_ID = /^[a-z0-9]+(-[a-z0-9]+)*\/[a-z0-9]+(-[a-z0-9]+)*$/;
+
+const isBeatId = (raw: unknown): raw is string =>
+  typeof raw === 'string' && BEAT_ID.test(raw);
+
+/** A header's Beats, each once, old ones as now called; undefined for none. */
+function readBeats(raw: unknown): string[] | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const ids = [...new Set(raw.filter(isBeatId).map((id) => currentBeatId(id)))];
+  return ids.length > 0 ? ids : undefined;
 }
 
 export const DETAILS: readonly Row[] = [
@@ -200,6 +288,29 @@ export const DETAILS: readonly Row[] = [
     split: 'stays',
     assistant: 'hidden',
     trash: 'moves',
+  },
+  bookIds('Genres', 'genres'),
+  bookId('Format', 'bookFormat'),
+  bookId('Structure', 'structure'),
+  bookIds('Genre conventions', 'genreConventions'),
+  {
+    // One list, merged whole: the later save of the marks wins (§11). Marks
+    // of what the Book no longer follows stay in it, set aside.
+    key: 'beats',
+    only: 'Only a Scene carries Beats',
+    kinds: ['scene'],
+    parse: readBeats,
+    validate(value) {
+      if (value === null || value === undefined) return undefined;
+      if (!Array.isArray(value) || !value.every(isBeatId)) {
+        throw new Error(`Not Beats: ${JSON.stringify(value)}`);
+      }
+      return readBeats(value);
+    },
+    split: 'stays',
+    // Plan alone is sent them, set-aside ones never (spec: Outline planner §12).
+    assistant: 'hidden',
+    trash: 'stays',
   },
 ];
 

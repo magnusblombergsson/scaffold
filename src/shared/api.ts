@@ -15,6 +15,8 @@ import type {
   UnitValue,
   ValueOf,
   Visibility,
+  BookDetailKey,
+  BookDetails,
 } from './project-types';
 import type {
   ExportBook,
@@ -562,6 +564,24 @@ export interface ProjectApi {
    * showing it follows as a `unitDetailsChanged`.
    */
   setWordTarget(unitId: string, words: number | null): Promise<void>;
+  /**
+   * Gives a Book, or with `project` the one Book of a Project without
+   * Books, its Genres, Format, Structure or Genre conventions by catalogue
+   * id, or none with null or an empty list; there is no undo. The
+   * Manuscript showing it follows as a `unitDetailsChanged`.
+   */
+  setBookDetail<K extends BookDetailKey>(
+    bookId: string,
+    key: K,
+    value: BookDetails[K] | null,
+  ): Promise<void>;
+  /**
+   * Marks a Scene as carrying a Beat, qualified as in
+   * `save-the-cat/midpoint`, or takes the mark away, its other marks kept;
+   * there is no undo. The Manuscript showing it follows as a
+   * `unitDetailsChanged`.
+   */
+  setBeat(sceneId: string, beat: string, carries: boolean): Promise<void>;
   /**
    * Adds, renames, recolours or moves a Status in the list, as now saved;
    * a Status leaves it only by `deleteStatus`. The list follows as a
@@ -1330,6 +1350,8 @@ export const projectMethods = {
   setPartLabel: 'invoke',
   setStatus: 'invoke',
   setWordTarget: 'invoke',
+  setBookDetail: 'invoke',
+  setBeat: 'invoke',
   editStatus: 'invoke',
   statusUses: 'invoke',
   deleteStatus: 'invoke',

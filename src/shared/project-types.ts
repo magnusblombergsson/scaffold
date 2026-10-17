@@ -391,8 +391,25 @@ export type Manuscript = {
   wordTarget?: number;
   /** What the Project calls its Parts; Part when absent. */
   partLabel?: PartLabel;
+} & BookDetails;
+/**
+ * A Book's own details (spec: Outline planner §3), as its Outline file's
+ * header holds them, ids from the catalogue (`structure-catalogue.ts`). Each
+ * may hold an id the catalogue doesn't know, from a newer app: kept, but
+ * not shown. While the Project has one Book, the Manuscript has them.
+ */
+export type BookDetails = {
+  /** Its Genres, by id; absent for none. */
+  genres?: string[];
+  /** Its Format, by id; absent for none. */
+  bookFormat?: string;
+  /** Its Structure by id, or `none` for No set Structure; absent while none is chosen yet. */
+  structure?: string;
+  /** The Genre conventions it follows, by id; absent for none. */
+  genreConventions?: string[];
 };
-/** A Book of a Series, with its Parts and Loose Chapters by id and its details, as a Part has them. */
+export type BookDetailKey = keyof BookDetails;
+/** A Book of a Series, with its Parts and Loose Chapters by id and its details, as a Part has them, and its own. */
 export type ManuscriptBook = {
   id: string;
   title: string;
@@ -401,7 +418,7 @@ export type ManuscriptBook = {
   tags?: string[];
   image?: string;
   wordTarget?: number;
-};
+} & BookDetails;
 /** A Part, with its Chapters by id and its details, as a Chapter has them. */
 export type ManuscriptPart = {
   id: string;
@@ -442,6 +459,11 @@ export type ManuscriptScene = SceneNode & {
   tags?: string[];
   image?: string;
   wordTarget?: number;
+  /**
+   * The Beats it carries, qualified as in `save-the-cat/midpoint`, those of
+   * what its Book no longer follows among them, set aside; absent for none.
+   */
+  beats?: string[];
 };
 
 /**
