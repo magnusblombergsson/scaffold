@@ -393,7 +393,7 @@ describe('ProviderSettings', () => {
     });
 
     it('is the first shortlisted when the one used last is gone and none is the default or tested', async () => {
-      const providers = await load();
+      const providers = await load(fakeEncryption(), []);
       await providers.add('anthropic', entry(ANTHROPIC_KEY));
       providers.setShortlist('anthropic', [
         { ...QWEN, id: 'claude-sonnet-5' },

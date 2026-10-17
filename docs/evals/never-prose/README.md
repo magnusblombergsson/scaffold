@@ -75,4 +75,9 @@ The 2026-10-06 prompt revision (blurbs, taglines and captions allowed; the Role 
 
 The 2026-10-17 Outline rule (proposed Outlines in short bullets, in every Mode: `OUTLINE_RULE`) took every Model off the list again. Every Model is Untested until its eval is run on the new prompts; the five that passed on 2026-10-08 are to be re-run before the Plan Mode ([Outline planner](https://github.com/magnusblombergsson/scaffold/issues/310)) ships.
 
-The Plan Mode's prompt and its two start buttons (Find a structure, Check my plan) changed the fingerprint once more. Every Model stays Untested until the sheet with Plan's cases is run on each (#325, #326).
+The Plan Mode's prompt and its two start buttons (Find a structure, Check my plan) changed the fingerprint once more. On 2026-10-17 sheets with Plan's cases (#326), these passed:
+
+- through Anthropic: Sonnet 5.5, Sonnet 5 (it sometimes replies in French) and Haiku 4.5
+- through OpenRouter: Sonnet 5.5, GPT-5.6 Sol (one grey-area case, let through), GPT-6 Sol, Gemini 3.8 Flash, DeepSeek V4.1 Flash, Qwen3.8 Flash and Mistral Medium 3.1
+
+These leaked and stay Untested: Kimi K2.5, Sonnet 5 through OpenRouter, and, in LM Studio, Ministral 3 3B, Dirty Muse Writer and Llama 3.2 Dark Champion. The Mistral Large re-run stays deferred.

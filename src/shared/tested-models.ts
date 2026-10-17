@@ -15,7 +15,72 @@ export type TestedModel = Model & {
  * Model is Untested. A Model tested against older prompts leaves the list
  * until its eval is run again; a test says which.
  */
-export const TESTED_MODELS: readonly TestedModel[] = [];
+export const TESTED_MODELS: readonly TestedModel[] = [
+  {
+    provider: 'anthropic',
+    id: 'claude-sonnet-5-5',
+    sheet: 'docs/evals/never-prose/2026-10-17-anthropic-claude-sonnet-5-5.md',
+    prompts: '4fba5b56325b',
+  },
+  {
+    provider: 'anthropic',
+    id: 'claude-sonnet-5',
+    sheet: 'docs/evals/never-prose/2026-10-17-anthropic-claude-sonnet-5.md',
+    prompts: '4fba5b56325b',
+  },
+  {
+    provider: 'anthropic',
+    id: 'claude-haiku-4-5',
+    sheet: 'docs/evals/never-prose/2026-10-17-anthropic-claude-haiku-4-5.md',
+    prompts: '4fba5b56325b',
+  },
+  {
+    provider: 'openrouter',
+    id: 'anthropic/claude-sonnet-5.5',
+    sheet:
+      'docs/evals/never-prose/2026-10-17-openrouter-anthropic-claude-sonnet-5.5.md',
+    prompts: '4fba5b56325b',
+  },
+  {
+    provider: 'openrouter',
+    id: 'openai/gpt-6-sol',
+    sheet: 'docs/evals/never-prose/2026-10-17-openrouter-openai-gpt-6-sol.md',
+    prompts: '4fba5b56325b',
+  },
+  {
+    provider: 'openrouter',
+    id: 'openai/gpt-5.6-sol',
+    sheet: 'docs/evals/never-prose/2026-10-17-openrouter-openai-gpt-5.6-sol.md',
+    prompts: '4fba5b56325b',
+  },
+  {
+    provider: 'openrouter',
+    id: 'google/gemini-3.8-flash',
+    sheet:
+      'docs/evals/never-prose/2026-10-17-openrouter-google-gemini-3.8-flash.md',
+    prompts: '4fba5b56325b',
+  },
+  {
+    provider: 'openrouter',
+    id: 'deepseek/deepseek-v4.1-flash',
+    sheet:
+      'docs/evals/never-prose/2026-10-17-openrouter-deepseek-deepseek-v4.1-flash.md',
+    prompts: '4fba5b56325b',
+  },
+  {
+    provider: 'openrouter',
+    id: 'qwen/qwen3.8-flash',
+    sheet: 'docs/evals/never-prose/2026-10-17-openrouter-qwen-qwen3.8-flash.md',
+    prompts: '4fba5b56325b',
+  },
+  {
+    provider: 'openrouter',
+    id: 'mistralai/mistral-medium-3.1',
+    sheet:
+      'docs/evals/never-prose/2026-10-17-openrouter-mistralai-mistral-medium-3.1.md',
+    prompts: '4fba5b56325b',
+  },
+];
 
 /** Whether `model` is on the tested list; else it is Untested. */
 export function isTested(
