@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import type { Mode } from './conversation';
 import type { CustomField } from './custom-field';
 import type { EntryValue } from './project-types';
 import {
@@ -8,6 +9,7 @@ import {
   canAppend,
   decided,
   fieldOf,
+  mayPropose,
   newEntryOf,
   outlineChangeOf,
   proposalBlock,
@@ -76,6 +78,18 @@ describe('fieldOf and withField', () => {
       withField(harbour, 'senses.smells', 'Tar').fields.senses?.smells,
     ).toBe('Tar');
     expect(withField(anna, 'description', 'New.').description).toBe('New.');
+  });
+});
+
+describe('mayPropose', () => {
+  it('lets Brainstorm and Interview propose every kind, and Writing all but a Relation', () => {
+    const kinds = ['field', 'new-entry', 'outline', 'relation'] as const;
+    const allowed = (mode: Mode) =>
+      kinds.filter((kind) => mayPropose(mode, kind));
+
+    expect(allowed('brainstorm')).toEqual(kinds);
+    expect(allowed('interview')).toEqual(kinds);
+    expect(allowed('writing')).toEqual(['field', 'new-entry', 'outline']);
   });
 });
 

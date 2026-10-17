@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import type { Mode } from '../../shared/conversation';
 import { PROJECT_OUTLINE } from '../../shared/project-types';
 import {
+  mayPropose,
   newEntryOf,
   outlineChangeOf,
   proposalOf,
@@ -19,8 +20,8 @@ import type { AssistantView } from '../project-store/project-store';
  * a Voice's example lines, is unreadable; one that proposes what its target
  * holds already is left out. In a Series, a change to a field is against
  * the Entry as the `lens` of the Book the turn was about sees it, and made
- * on that Book, and a Relation is checked as of it. Only a Brainstorm or an
- * Interview proposes a Relation.
+ * on that Book, and a Relation is checked as of it. A block of a kind its
+ * `mode` may not propose, such as a Relation in Writing, is unreadable.
  */
 export async function readProposals(
   view: AssistantView,
@@ -31,7 +32,10 @@ export async function readProposals(
   const proposals: Proposal[] = [];
   let unreadable = 0;
   for (const block of blocks) {
-    const change = await changeOf(view, block, lens, mode);
+    const kind = kindOf(block);
+    const change = mayPropose(mode, kind)
+      ? await changeOf(view, block, kind, lens)
+      : null;
     if (change === null) unreadable++;
     else if (change !== 'unchanged') {
       proposals.push({ id: randomUUID(), ...change });
@@ -41,27 +45,40 @@ export async function readProposals(
 }
 
 /**
- * What a block proposes: a new Entry, under the id it will get; a whole
- * Outline of a Part, Chapter or Scene in the Project, or of the story; a
- * change to a field of an Entry in the Story Bible, as `lens` sees it, never
- * one first appearing after its Book; or a Relation between two such Entries.
- * `'unchanged'` when it proposes what its target holds; null when it can't
- * be read as any.
+ * Which kind of change a block is shaped to propose: a new Entry, an
+ * Outline, a Relation between two Entries, or else a field of an Entry.
+ */
+function kindOf(block: unknown): ProposalChange['kind'] {
+  const { entry, outline, from } = (block ?? {}) as Record<string, unknown>;
+  if (newEntryOf(block)) return 'new-entry';
+  if (typeof outline === 'string') return 'outline';
+  if (entry === undefined && from !== undefined) return 'relation';
+  return 'field';
+}
+
+/**
+ * What a block of `kind` proposes: a new Entry, under the id it will get; a
+ * whole Outline of a Part, Chapter or Scene in the Project, or of the story;
+ * a change to a field of an Entry in the Story Bible, as `lens` sees it,
+ * never one first appearing after its Book; or a Relation between two such
+ * Entries. `'unchanged'` when it proposes what its target holds; null when
+ * it can't be read as one.
  */
 async function changeOf(
   view: AssistantView,
   block: unknown,
+  kind: ProposalChange['kind'],
   lens: StoryBibleLens,
-  mode: Mode,
 ): Promise<ProposalChange | 'unchanged' | null> {
-  const {
-    entry: entryId,
-    outline: outlineId,
-    from,
-  } = (block ?? {}) as Record<string, unknown>;
-  const proposed = newEntryOf(block);
-  if (proposed) return { kind: 'new-entry', entryId: randomUUID(), proposed };
-  if (typeof outlineId === 'string') {
+  const { entry: entryId, outline: outlineId } = (block ?? {}) as Record<
+    string,
+    unknown
+  >;
+  if (kind === 'new-entry') {
+    const proposed = newEntryOf(block);
+    return proposed && { kind, entryId: randomUUID(), proposed };
+  }
+  if (kind === 'outline' && typeof outlineId === 'string') {
     const { parts = [], chapters, unplaced } = view.manuscript();
     const known =
       outlineId === PROJECT_OUTLINE ||
@@ -75,9 +92,7 @@ async function changeOf(
     const outline = await view.read({ kind: 'outline', id: outlineId });
     return outlineChangeOf(block, outline);
   }
-  if (entryId === undefined && from !== undefined) {
-    return mode === 'writing' ? null : relationOf(block, lens);
-  }
+  if (kind === 'relation') return relationOf(block, lens);
   if (typeof entryId !== 'string' || !lens.visible(entryId)) return null;
   const entry = await view.read({ kind: 'entry', id: entryId });
   const change = proposalOf(block, lens.read(entry).entry, view.customFields());
