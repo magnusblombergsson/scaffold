@@ -20,6 +20,7 @@ import { type AcceptOptions, type ProjectEvent } from '../../shared/api';
 import {
   bookDetailsOf,
   detailValue,
+  withUnknownIds,
   type BookDetailValue,
 } from '../../shared/book-details';
 import type { CustomField } from '../../shared/custom-field';
@@ -648,9 +649,22 @@ ${text}`);
       const target = this.bookDetailTarget(proposal);
       ({ wrote } = granted(accept(proposal, target, value, how)));
       replaced = (target as { current: FieldValue }).current;
-      return wrote as BookDetailValue;
+      return this.withUnknownIds(proposal, wrote as BookDetailValue);
     });
     return { replaced, wrote };
+  }
+
+  /**
+   * What a Book is given for `value` of a Proposal's detail: a list with the
+   * ids its Book holds that this version doesn't know, kept unseen.
+   */
+  private withUnknownIds(
+    { bookId, detail }: BookDetailChange,
+    value: BookDetailValue,
+  ): BookDetailValue {
+    const book = bookId === PROJECT_OUTLINE ? undefined : bookId;
+    const held = bookDetailsOf(this.deps.manuscript(), book);
+    return withUnknownIds(detail, value, held);
   }
 
   /**
@@ -867,7 +881,8 @@ ${text}`);
     granted(undo(proposal, this.bookDetailTarget(proposal)));
     await this.deps.changeBookDetail(proposal.bookId, proposal.detail, () => {
       const undone = granted(undo(proposal, this.bookDetailTarget(proposal)));
-      return (undone as { restore: FieldValue }).restore;
+      const { restore } = undone as { restore: BookDetailValue };
+      return this.withUnknownIds(proposal, restore);
     });
     return undefined;
   }

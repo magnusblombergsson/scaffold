@@ -206,6 +206,29 @@ describe('Book detail Proposals', () => {
     }
   });
 
+  it('are judged against the ids the Book holds that this version knows', async () => {
+    const store = await project();
+    await store.setBookDetail(PROJECT_OUTLINE, 'genres', [
+      'literary',
+      'from-a-newer-app',
+    ]);
+    const view = store.assistantView();
+
+    const { proposals } = await readProposals(
+      view,
+      [{ genres: ['literary'] }, { genres: ['literary', 'mystery'] }],
+      storyBibleOf(view, undefined),
+      'plan',
+    );
+
+    expect(proposals).toEqual([
+      expect.objectContaining({
+        base: ['literary'],
+        proposed: ['literary', 'mystery'],
+      }),
+    ]);
+  });
+
   it('in a Series, are of the Plan’s own Book', async () => {
     const store = await project();
     const { id: two } = await store.createBook();

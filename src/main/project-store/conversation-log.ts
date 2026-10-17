@@ -45,7 +45,7 @@ import type {
 } from '../../shared/relation-proposal';
 import {
   BOOK_DETAIL_KEYS,
-  isBookDetailValue,
+  isLoggedDetailValue,
   type BookDetailValue,
 } from '../../shared/book-details';
 import type { BookDetailKey } from '../../shared/project-types';
@@ -792,8 +792,8 @@ function loggedBookDetail(event: Partial<BookDetailEvent>): Proposal | null {
   if (typeof id !== 'string' || typeof book !== 'string' || !book) return null;
   if (!BOOK_DETAIL_KEYS.includes(detail!)) return null;
   if (
-    !isBookDetailValue(detail!, base) ||
-    !isBookDetailValue(detail!, proposed)
+    !isLoggedDetailValue(detail!, base) ||
+    !isLoggedDetailValue(detail!, proposed)
   ) {
     return null;
   }
@@ -873,7 +873,7 @@ function acceptedOf(
     proposal.kind === 'field'
       ? isFieldValue(proposal.field, value)
       : proposal.kind === 'book-detail'
-        ? isBookDetailValue(proposal.detail, value)
+        ? isLoggedDetailValue(proposal.detail, value)
         : typeof value === 'string';
   if (!holds(replaced) || !holds(wrote)) return null;
   const { on, evolved } = event;

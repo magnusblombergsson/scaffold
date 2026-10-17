@@ -1,8 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import type { Mode } from '../../shared/conversation';
 import {
-  bookDetailOf,
-  detailsHolder,
+  proposedBookDetail,
+  bookDetailsId,
   detailValue,
   isBookDetailBlock,
 } from '../../shared/book-details';
@@ -151,11 +151,12 @@ function bookDetailChangeOf(
   { book }: StoryBibleLens,
 ): ProposalChange | 'unchanged' | null {
   const manuscript = view.manuscript();
-  const bookId = detailsHolder(manuscript, book);
+  const bookId = bookDetailsId(manuscript, book);
+  if (bookId === undefined) return null;
   if (manuscript.books && !manuscript.books.some((b) => b.id === bookId)) {
     return null;
   }
-  const read = bookDetailOf(block);
+  const read = proposedBookDetail(block);
   if (!read) return null;
   const { detail, proposed } = read;
   const base = detailValue(view.bookDetails(book), detail);

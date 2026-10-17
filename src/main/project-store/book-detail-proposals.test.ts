@@ -24,7 +24,9 @@ afterEach(async () => {
   await rm(dir, { recursive: true, force: true, maxRetries: 5 });
 });
 
-const structure = (bookId = PROJECT_OUTLINE): Proposal => ({
+const structure = (
+  bookId = PROJECT_OUTLINE,
+): Extract<Proposal, { kind: 'book-detail' }> => ({
   kind: 'book-detail',
   id: 'p1',
   bookId,
@@ -193,6 +195,56 @@ describe('a Proposal on a Book’s detail', () => {
 
     expect(events).toContain('proposalsChanged');
     await store.close();
+  });
+
+  it('keeps the ids this version doesn’t know, unseen, through accept and undo', async () => {
+    const { store, conversationId } = await planned();
+    await store.setBookDetail(PROJECT_OUTLINE, 'genres', [
+      'literary',
+      'from-a-newer-app',
+    ]);
+    await store.conversations.appendProposal(conversationId, {
+      kind: 'book-detail',
+      id: 'p1',
+      bookId: PROJECT_OUTLINE,
+      detail: 'genres',
+      base: ['literary'],
+      proposed: ['mystery'],
+    });
+
+    await store.acceptProposal(conversationId, 'p1');
+
+    expect(store.manuscript().genres).toEqual(['mystery', 'from-a-newer-app']);
+    expect((await cardOf(store, conversationId)).state).toEqual({
+      kind: 'accepted',
+      edited: false,
+    });
+    await store.undoProposal(conversationId, 'p1');
+    expect(store.manuscript().genres).toEqual(['literary', 'from-a-newer-app']);
+    await store.close();
+  });
+
+  it('on a Structure this version doesn’t know, is still read once the Project is opened again', async () => {
+    const { store, conversationId } = await planned();
+    await store.setBookDetail(PROJECT_OUTLINE, 'structure', 'from-a-newer-app');
+    await store.conversations.appendProposal(conversationId, {
+      ...structure(),
+      base: 'from-a-newer-app',
+    });
+    await store.acceptProposal(conversationId, 'p1');
+    await store.close();
+
+    const again = await openProject(projectPath, {
+      fs: nodeFileSystem,
+      clock: instantClock(2_000),
+    });
+    expect((await cardOf(again, conversationId)).state).toEqual({
+      kind: 'accepted',
+      edited: false,
+    });
+    await again.undoProposal(conversationId, 'p1');
+    expect(again.manuscript().structure).toBe('from-a-newer-app');
+    await again.close();
   });
 
   it('leaves the detail alone when rejected', async () => {

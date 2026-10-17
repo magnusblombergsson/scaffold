@@ -16,7 +16,7 @@ import {
 import type { Mode } from './conversation';
 import {
   BOOK_DETAIL_LABELS,
-  BLOCK_KEYS,
+  BOOK_DETAIL_BLOCK_KEYS,
   isBookDetailValue,
   type BookDetailValue,
 } from './book-details';
@@ -701,7 +701,7 @@ export function proposalBlock(change: ProposalChange): string {
   }
   if (change.kind === 'book-detail') {
     return fencedProposal({
-      [BLOCK_KEYS[change.detail]]: change.proposed ?? [],
+      [BOOK_DETAIL_BLOCK_KEYS[change.detail]]: change.proposed ?? [],
     });
   }
   const target =
