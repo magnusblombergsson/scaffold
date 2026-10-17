@@ -357,7 +357,7 @@ ${JSON.stringify({ type: 'message', role: 'assistant', text: 'Odd.', focus: [], 
     const interview = await store.startConversation('interview', 'Mara');
 
     await expect(store.chooseBook(writing.id, book)).rejects.toThrow(
-      'Only a Brainstorm or Interview Conversation is on a Book',
+      'Only a Brainstorm, Interview or Plan Conversation is on a Book',
     );
     await expect(store.chooseBook(interview.id, 'gone')).rejects.toThrow(
       'No such Book',
@@ -424,6 +424,46 @@ ${JSON.stringify({ type: 'message', role: 'assistant', text: 'Odd.', focus: [], 
     const conversation = await store.conversations.readConversation(id);
     expect(conversation).not.toHaveProperty('focus');
     expect(conversation).not.toHaveProperty('focusChanges');
+  });
+
+  it('sets a Plan’s focus to its Book, a Part or a Chapter, and refuses any other', async () => {
+    const { store } = await newProject();
+    const [chapter] = store.manuscript().chapters;
+    const { id } = await store.conversations.startConversation('plan', 'Shape');
+
+    await store.conversations.setInterviewFocus(id, {
+      kind: 'chapter',
+      id: chapter.id,
+    });
+    await expect(
+      store.conversations.setInterviewFocus(id, {
+        kind: 'scene',
+        id: chapter.scenes[0].id,
+      }),
+    ).rejects.toThrow(/Plan/);
+
+    const conversation = await store.conversations.readConversation(id);
+    expect(conversation.focus).toEqual({ kind: 'chapter', id: chapter.id });
+    expect(conversation.focusChanges).toHaveLength(1);
+  });
+
+  it('puts a Plan on a Book of the Series, and logs which start button sent a message', async () => {
+    const { store } = await newProject();
+    const { id: two } = await store.createBook();
+    const { id } = await store.startConversation('plan', 'Shape');
+
+    await store.chooseBook(id, two);
+    await store.appendMessage(id, {
+      role: 'author',
+      text: 'Find a structure',
+      ask: 'find-structure',
+      focus: [],
+      at: 1,
+    });
+
+    const conversation = await store.readConversation(id);
+    expect(conversation.book).toBe(two);
+    expect(conversation.messages[0].ask).toBe('find-structure');
   });
 
   it('appends a compaction summary as an event, keeping every message, and skips one that summarises more than came before it', async () => {

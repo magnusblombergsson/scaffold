@@ -8,13 +8,14 @@ import type { Usage } from './usage';
 // renderer about them. The log on disk holds more; these are what is shown.
 
 /** One of the tool's working states, each giving the Assistant a different role. */
-export const MODES = ['brainstorm', 'interview', 'writing'] as const;
+export const MODES = ['brainstorm', 'interview', 'writing', 'plan'] as const;
 export type Mode = (typeof MODES)[number];
 
 export const MODE_LABELS: Record<Mode, string> = {
   brainstorm: 'Brainstorm',
   interview: 'Interview',
   writing: 'Writing',
+  plan: 'Plan',
 };
 
 /**
@@ -54,10 +55,45 @@ export function isInterviewFocus(value: unknown): value is InterviewFocus {
   }
 }
 
-/** The ids of the Entry, Book, Part, Chapter or Scene an Interview's focus is, if any. */
+/** The ids of the Entry, Book, Part, Chapter or Scene an Interview's or Plan's focus is, if any. */
 export function focusIds(focus: InterviewFocus): string[] {
   return 'id' in focus ? [focus.id] : [];
 }
+
+/**
+ * What a Plan Conversation is about within its Book: the whole Book, which
+ * `OPEN_FOCUS` stands for, as a Plan with no focus set is, or one Part or
+ * Chapter of it. It is logged as an Interview's focus is.
+ */
+export type PlanFocus =
+  | { kind: 'open' }
+  | { kind: 'part'; id: string }
+  | { kind: 'chapter'; id: string };
+
+/** Whether `focus` is one a Plan may have: its Book, a Part or a Chapter. */
+export function isPlanFocus(focus: InterviewFocus): focus is PlanFocus {
+  return (
+    focus.kind === 'open' || focus.kind === 'part' || focus.kind === 'chapter'
+  );
+}
+
+/** A Plan's focus as last set; its Book when none, or one it can't have, was. */
+export function planFocus(focus: InterviewFocus | undefined): PlanFocus {
+  return focus && isPlanFocus(focus) ? focus : { kind: 'open' };
+}
+
+/**
+ * The two start buttons of an empty Plan Room, each sending a fixed request
+ * that the Author's message names: Find a structure and Check my plan.
+ */
+export const PLAN_ASKS = ['find-structure', 'check-plan'] as const;
+export type PlanAsk = (typeof PLAN_ASKS)[number];
+
+/** What a Plan start button says, and what the Author's message sent by it shows. */
+export const PLAN_ASK_LABELS: Record<PlanAsk, string> = {
+  'find-structure': 'Find a structure',
+  'check-plan': 'Check my plan',
+};
 
 /**
  * The Author set an Interview's focus: `before` is the index of the message
@@ -66,8 +102,9 @@ export function focusIds(focus: InterviewFocus): string[] {
 export type FocusChange = { focus: InterviewFocus; at: number; before: number };
 
 /**
- * A Conversation as the picker lists it; an Interview has the `focus` it was
- * last set to, if any. In a Series, a Brainstorm or Interview has the `book`
+ * A Conversation as the picker lists it; an Interview or Plan has the
+ * `focus` it was last set to, if any. In a Series, a Brainstorm, Interview
+ * or Plan has the `book`
  * it was last put on, by id, if any: `conversationBook` says which Book that
  * makes it about.
  */
@@ -105,8 +142,9 @@ export type Saw = {
 /**
  * One message in a Conversation: `focus` holds the ids of the Scenes in focus
  * when it was sent, which the Conversation isn't bound to. The Author's
- * message says which Review it asked for, if any, as its `command`; the
- * reply to it holds the Review's `findings`. An Assistant turn says which
+ * message says which Review it asked for, if any, as its `command`, or in
+ * Plan, which start button sent it, as its `ask`; the reply to a Review
+ * holds its `findings`. An Assistant turn says which
  * `model` answered and through which `provider`; a turn logged before
  * Providers names no Provider, as it was Anthropic's. It says what it used,
  * when that is known, and what it `cost` in USD when the Provider said. It
@@ -119,6 +157,7 @@ export type ConversationMessage = {
   role: 'author' | 'assistant';
   text: string;
   command?: ReviewCommand;
+  ask?: PlanAsk;
   focus: string[];
   /** When it was sent, in ms since the epoch. */
   at: number;

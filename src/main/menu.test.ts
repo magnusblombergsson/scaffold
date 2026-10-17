@@ -282,6 +282,7 @@ describe('menuTemplate', () => {
       'Story Bible',
       'Brainstorm',
       'Interview',
+      'Plan',
       'separator',
       'Zen Mode',
       'Left Pane',

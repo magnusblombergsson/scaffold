@@ -327,6 +327,7 @@ test('the toolbar keeps only the Room switch and, in Writing, Zen, and buttons s
       'Story Bible',
       'Brainstorm',
       'Interview',
+      'Plan',
       'Zen',
     ]);
     await expect(

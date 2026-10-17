@@ -283,6 +283,8 @@ const assistantHandlers: Handlers<
     ),
   review: ({ engine, sender }, askId, conversationId, command, sceneId) =>
     engine.review(conversationId, command, { sceneId }, replyTo(sender, askId)),
+  planAsk: ({ engine, sender }, askId, conversationId, planAsk) =>
+    engine.planAsk(conversationId, planAsk, replyTo(sender, askId)),
   retry: ({ engine, sender }, askId, conversationId) =>
     engine.retry(conversationId, replyTo(sender, askId)),
   acceptProposal: ({ store }, conversationId, proposalId, options) =>

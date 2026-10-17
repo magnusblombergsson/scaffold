@@ -1,6 +1,8 @@
 import {
   focusIds,
   OPEN_FOCUS,
+  PLAN_ASK_LABELS,
+  type PlanAsk,
   type AskResult,
   type Compaction,
   type Conversation,
@@ -76,13 +78,15 @@ export function createConversationEngine({
   /**
    * What a message is about, as it logs it: in a Writing Conversation, the
    * Scene open, if the Assistant can read it; in an Interview, the Entry,
-   * Chapter or Scene in focus, if any.
+   * Chapter or Scene in focus, if any, and in a Plan, the Part or Chapter.
    */
   function focusOf(
     { mode, focus }: Pick<Conversation, 'mode' | 'focus'>,
     sceneId: string | null,
   ): string[] {
-    if (mode === 'interview') return focusIds(focus ?? OPEN_FOCUS);
+    if (mode === 'interview' || mode === 'plan') {
+      return focusIds(focus ?? OPEN_FOCUS);
+    }
     if (mode !== 'writing' || !sceneId) return [];
     return readableScene(store.assistantView().manuscript(), sceneId)
       ? [sceneId]
@@ -105,12 +109,12 @@ export function createConversationEngine({
   }
 
   /**
-   * Logs the Author's message, with the Scene in focus and the Review it
-   * asks for, if any, and has the Assistant answer it.
+   * Logs the Author's message, with the Scene in focus and the Review or
+   * Plan start button it asks for, if any, and has the Assistant answer it.
    */
   async function ask(
     conversationId: string,
-    message: { text: string; command?: ReviewCommand },
+    message: { text: string; command?: ReviewCommand; ask?: PlanAsk },
     sceneId: string | null,
     onText: (text: string) => void,
   ): Promise<AskResult> {
@@ -119,10 +123,14 @@ export function createConversationEngine({
     if (message.command && mode !== 'writing') {
       throw new Error('Only a Writing Conversation has Reviews');
     }
+    if (message.ask && mode !== 'plan') {
+      throw new Error('Only a Plan Conversation has its start buttons');
+    }
     const authored: ConversationMessage = {
       role: 'author',
       text: message.text,
       ...(message.command && { command: message.command }),
+      ...(message.ask && { ask: message.ask }),
       focus: focusOf(conversation, sceneId),
       at: clock.now(),
     };
@@ -345,6 +353,21 @@ export function createConversationEngine({
       await store.flush();
       const text = reviewAsk(command, focus.sceneId);
       return ask(conversationId, { text, command }, focus.sceneId, onText);
+    },
+
+    /**
+     * Asks in a Plan Conversation what one of its start buttons asks, as
+     * `askAssistant` asks: the Author's message is the button's label, and
+     * its fixed request goes with it. Refused in another Mode.
+     */
+    async planAsk(
+      conversationId: string,
+      planAsk: PlanAsk,
+      onText: (text: string) => void,
+    ): Promise<AskResult> {
+      await store.flush();
+      const text = PLAN_ASK_LABELS[planAsk];
+      return ask(conversationId, { text, ask: planAsk }, null, onText);
     },
 
     /**

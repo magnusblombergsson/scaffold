@@ -25,6 +25,7 @@ describe('keyApplies', () => {
       'storyBible',
       'brainstorm',
       'interview',
+      'plan',
     ] as const) {
       expect(keyApplies({ type: 'room', room: 'storyBible' }, room)).toBe(true);
     }

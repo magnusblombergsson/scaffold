@@ -621,6 +621,33 @@ describe('a Proposal to replace an Outline', () => {
     await store.close();
   });
 
+  it('in a Series, names a Book’s Outline and the Series’', async () => {
+    const { store, conversationId } = await withReply();
+    const { id: two } = await store.createBook();
+    await store.conversations.appendProposal(conversationId, {
+      ...outline(two),
+      base: '',
+    });
+    await store.conversations.appendProposal(conversationId, {
+      ...outline('project'),
+      id: 'p2',
+      base: '',
+    });
+
+    const { messages } =
+      await store.conversations.readConversation(conversationId);
+    expect(messages[1].proposals?.map((p) => p.name)).toEqual([
+      'Book “Book 2”',
+      'The Series',
+    ]);
+    expect(messages[1].proposals?.[0].state).toEqual({
+      kind: 'pending',
+      current: '',
+      stale: false,
+    });
+    await store.close();
+  });
+
   it('accepting writes the Outline first, keeping its metadata, then logs what it replaced and wrote', async () => {
     const { store, sceneId, conversationId } = await withReply();
     await store.conversations.appendProposal(conversationId, outline(sceneId));

@@ -1,9 +1,11 @@
 import {
   OPEN_FOCUS,
+  planFocus,
   type Compaction,
   type ConversationMessage,
   type InterviewFocus,
   type Mode,
+  type PlanFocus,
   type Saw,
   type SawUnit,
 } from '../../shared/conversation';
@@ -55,7 +57,7 @@ import {
 } from '../../shared/project-types';
 import type { AssistantView } from '../project-store/project-store';
 import type { PromptBlock, PromptMessage } from './provider';
-import { MODE_PROMPTS, REVIEW_ASKS } from './system-prompts';
+import { MODE_PROMPTS, PLAN_REQUESTS, REVIEW_ASKS } from './system-prompts';
 
 // The context builder (MVP spec §10): what the Assistant is sent for one
 // turn, built afresh every turn from the Project as it is now. It reads
@@ -64,19 +66,21 @@ import { MODE_PROMPTS, REVIEW_ASKS } from './system-prompts';
 /** What the Author asks for in Writing: a free question, or a Review. */
 export type Command = 'question' | ReviewCommand;
 
-export type { InterviewFocus };
+export type { InterviewFocus, PlanFocus };
 
 /**
  * One turn: the Conversation's Mode and what it is about, and its messages
  * so far, ending with the Author's new one, with the latest `summary` of
  * the older ones once it is long. In Writing, `sceneId` is the Scene in
  * focus, and a Review Chapter reviews its Chapter. In a Series, a Brainstorm
- * or Interview is about the `book` it is on, as `conversationBook` says, and
- * Writing about the Book holding the Scene in focus.
+ * Interview or Plan is about the `book` it is on, as `conversationBook`
+ * says, and Writing about the Book holding the Scene in focus. A Plan is
+ * about its `focus` within that Book.
  */
 export type ContextRequest = (
   | { mode: 'brainstorm'; book?: string }
   | { mode: 'interview'; focus: InterviewFocus; book?: string }
+  | { mode: 'plan'; focus: PlanFocus; book?: string }
   | { mode: 'writing'; command: Command; sceneId: string | null }
 ) & {
   messages: ConversationMessage[];
@@ -105,7 +109,11 @@ export async function buildContext(
   const manuscript = view.manuscript();
   const book = bookAbout(manuscript, request);
   const lens = storyBibleOf(view, book);
-  const skeleton = await outlineSkeleton(view, manuscript, book);
+  const plan =
+    request.mode === 'plan'
+      ? await planDetail(view, manuscript, book, request.focus)
+      : undefined;
+  const skeleton = await outlineSkeleton(view, manuscript, book, plan);
   const focus = await inFocus(view, manuscript, request);
   const { summary } = request;
   const covered = request.messages.slice(0, summary?.covers ?? 0);
@@ -137,6 +145,9 @@ export async function buildContext(
       text: interviewFocusText(view, manuscript, request.focus, lens),
     });
   }
+  if (request.mode === 'plan') {
+    system.push({ text: planFocusText(manuscript, book, request.focus) });
+  }
   if (focus.length > 0) system.push({ text: focusBlock(focus) });
   if (summary) system.push({ text: summaryBlock(summary.text, covered) });
   // Every Review starts fresh, without the Findings of earlier ones.
@@ -156,7 +167,7 @@ export async function buildContext(
     messages,
     saw: {
       entries: bible.ids,
-      units: focus.map((unit) => unit.unit),
+      units: [...(plan?.notes ?? []), ...focus.map((unit) => unit.unit)],
       messages: Math.max(0, sent.length - 1),
       ...(summary && {
         summarised: covered.filter((m) => !m.interrupted).length,
@@ -182,8 +193,9 @@ export function storyBibleOf(
 }
 
 /**
- * A message as it is sent: its text, the Review it asked for, the Findings
- * it made unless left out, and the Proposals made in it.
+ * A message as it is sent: its text, the Review or Plan start button it
+ * asked for, the Findings it made unless left out, and the Proposals made
+ * in it.
  */
 export function messageContent(
   m: ConversationMessage,
@@ -192,6 +204,7 @@ export function messageContent(
   return [
     m.text,
     m.command && REVIEW_ASKS[m.command],
+    m.ask && PLAN_REQUESTS[m.ask],
     ...(findings ? (m.findings ?? []).map(findingBlock) : []),
     ...(m.proposals ?? []).map(proposalText),
   ]
@@ -434,11 +447,16 @@ function bookAbout(
  * In a Series, each Book's Outline under the Series', and the Parts,
  * Chapters and Scenes of the Book `book` alone, nested under it; never the
  * Unplaced Chapters, which are in no Book. `texts` holds the Outlines.
+ *
+ * In Plan, the `plan`: each unit in its focus with its Status, whether it
+ * holds Prose and its Notes, and the rest with only their titles and
+ * Outlines; never Tags. `texts` holds the Notes sent too.
  */
 async function outlineSkeleton(
   view: AssistantView,
   manuscript: Manuscript,
   book: string | undefined,
+  plan?: PlanDetail,
 ): Promise<{ text: string; texts: string[] }> {
   const texts: string[] = [];
   const statuses = view.statuses();
@@ -451,6 +469,7 @@ async function outlineSkeleton(
     heading: string,
     node: ManuscriptBook | ManuscriptPart | ManuscriptChapter | ManuscriptScene,
   ): Promise<string> {
+    if (plan) return planUnit(heading, node, plan);
     const status = statusOf(statuses, node.status);
     return [
       heading,
@@ -458,6 +477,27 @@ async function outlineSkeleton(
       ...(status ? [`Status: ${status.name}`] : []),
       ...(node.tags ? [`Tags: ${node.tags.join(', ')}`] : []),
       await outline(node.id),
+    ].join('\n');
+  }
+  /** A unit of the plan: in full in its focus, else its title and Outline. */
+  async function planUnit(
+    heading: string,
+    node: ManuscriptBook | ManuscriptPart | ManuscriptChapter | ManuscriptScene,
+    { inFocus, prose }: PlanDetail,
+  ): Promise<string> {
+    if (!inFocus.has(node.id)) {
+      return [heading, `Id: ${node.id}`, await outline(node.id)].join('\n');
+    }
+    const status = statusOf(statuses, node.status);
+    const { body: notes } = await view.read({ kind: 'notes', id: node.id });
+    texts.push(notes);
+    return [
+      heading,
+      `Id: ${node.id}`,
+      ...(status ? [`Status: ${status.name}`] : []),
+      prose.has(node.id) ? 'Holds Prose' : 'No Prose yet',
+      await outline(node.id),
+      ...(notes.trim() ? [`Notes:\n${notes.trim()}`] : []),
     ].join('\n');
   }
   const label = partName(manuscript.partLabel);
@@ -470,11 +510,13 @@ async function outlineSkeleton(
     ? `each ${label}, Chapter and Scene in Manuscript order with its Outline, a Chapter in ${withArticle(label)} under it`
     : 'each Chapter and Scene in Manuscript order with its Outline';
   const blocks = [
-    !books
-      ? `The Outline skeleton: the Outline of the whole story, then ${listed}, each under its Id and, if the Author gave them, its Status and Tags. It holds no Prose.`
-      : about
-        ? `The Outline skeleton: the Outline of the whole Series, then each Book's in reading order, and under the Book this turn is about, “${about.title}”, ${listed}; the other Books' are not sent. Each is under its Id and, if the Author gave them, its Status and Tags. It holds no Prose.`
-        : "The Outline skeleton: the Outline of the whole Series, then each Book's in reading order, each under its Id and, if the Author gave them, its Status and Tags. No Book's Parts, Chapters and Scenes are sent, as this turn is about none. It holds no Prose.",
+    plan
+      ? planHeading(listed, books ? (about?.title ?? null) : undefined)
+      : !books
+        ? `The Outline skeleton: the Outline of the whole story, then ${listed}, each under its Id and, if the Author gave them, its Status and Tags. It holds no Prose.`
+        : about
+          ? `The Outline skeleton: the Outline of the whole Series, then each Book's in reading order, and under the Book this turn is about, “${about.title}”, ${listed}; the other Books' are not sent. Each is under its Id and, if the Author gave them, its Status and Tags. It holds no Prose.`
+          : "The Outline skeleton: the Outline of the whole Series, then each Book's in reading order, each under its Id and, if the Author gave them, its Status and Tags. No Book's Parts, Chapters and Scenes are sent, as this turn is about none. It holds no Prose.",
     `## The ${books ? 'Series' : 'story'}\nId: ${PROJECT_OUTLINE}\n${await outline(PROJECT_OUTLINE)}`,
   ];
   async function chapter(node: ManuscriptChapter, level: string) {
@@ -508,6 +550,121 @@ async function outlineSkeleton(
     }
   }
   return { text: blocks.join('\n\n'), texts };
+}
+
+/**
+ * What Plan sends in full: the units in its focus, by id, which of them
+ * hold Prose, and the Notes of each, as the Assistant saw them.
+ */
+type PlanDetail = {
+  inFocus: Set<string>;
+  prose: Set<string>;
+  notes: SawUnit[];
+};
+
+/**
+ * The units of a Plan's `focus` within its Book, `book` in a Series: the
+ * Book itself and all it holds, or a Part or Chapter of it and what it
+ * holds; none for a focus no longer in the Book. Never an Unplaced Chapter
+ * or Scene, which is in no Book. A unit holds Prose when a Scene in it has
+ * any; the Prose is read only to tell, and never sent.
+ */
+async function planDetail(
+  view: AssistantView,
+  manuscript: Manuscript,
+  book: string | undefined,
+  focus: PlanFocus,
+): Promise<PlanDetail> {
+  const ofBook = bookManuscript(manuscript, book);
+  const placed = ofBook.chapters.filter((c) => !c.unplaced);
+  const units: { id: string; scenes: ManuscriptScene[] }[] = [];
+  const chapter = (c: ManuscriptChapter) => {
+    units.push({ id: c.id, scenes: c.scenes });
+    for (const s of c.scenes) units.push({ id: s.id, scenes: [s] });
+  };
+  /** A Part, and with `within`, its Chapters and their Scenes. */
+  const part = (p: ManuscriptPart, within: boolean) => {
+    const held = placed.filter((c) => c.part === p.id);
+    units.push({ id: p.id, scenes: held.flatMap((c) => c.scenes) });
+    if (within) held.forEach(chapter);
+  };
+  if (focus.kind === 'open') {
+    if (book !== undefined) {
+      units.push({ id: book, scenes: placed.flatMap((c) => c.scenes) });
+    }
+    for (const p of ofBook.parts ?? []) part(p, false);
+    placed.forEach(chapter);
+  } else if (focus.kind === 'part') {
+    const found = ofBook.parts?.find((p) => p.id === focus.id);
+    if (found) part(found, true);
+  } else {
+    const found = placed.find((c) => c.id === focus.id);
+    if (found) chapter(found);
+  }
+  const withProse = new Set<string>();
+  for (const { scenes } of units) {
+    for (const s of scenes) {
+      if (s.missing || withProse.has(s.id)) continue;
+      const { markdown } = await view.read({ kind: 'scene', id: s.id });
+      if (markdown.trim() !== '') withProse.add(s.id);
+    }
+  }
+  return {
+    inFocus: new Set(units.map((u) => u.id)),
+    prose: new Set(
+      units
+        .filter((u) => u.scenes.some((s) => withProse.has(s.id)))
+        .map((u) => u.id),
+    ),
+    notes: units.map((u) => ({ kind: 'notes', id: u.id })),
+  };
+}
+
+/**
+ * What the plan holds, which stands in for the Outline skeleton in Plan:
+ * `listed` says what of the Book is listed, and in a Series, `book` names
+ * the Book planned.
+ */
+function planHeading(listed: string, book: string | null | undefined): string {
+  const full =
+    'Within the focus, each is sent in full: its Status, if the Author gave one, whether it holds Prose, and its Notes, the Author’s own. Outside it, only its title and Outline. It holds no Prose.';
+  if (book === undefined) {
+    return `The plan: the Outline of the whole story, then ${listed}, each under its Id. ${full}`;
+  }
+  return `The plan: the Outline of the whole Series, then each Book's in reading order, and under the Book you are planning, “${book ?? ''}”, ${listed}, each under its Id. ${full}`;
+}
+
+/**
+ * What a Plan is about within its Book, by name and id as the Project has
+ * it now; a Part or Chapter no longer in the Book is named as gone.
+ */
+function planFocusText(
+  manuscript: Manuscript,
+  book: string | undefined,
+  focus: PlanFocus,
+): string {
+  const heading = 'The Plan’s focus, as the Author set it:';
+  const ofBook = bookManuscript(manuscript, book);
+  const gone =
+    'which is no longer in this Book. Tell the Author, and suggest a new focus.';
+  const title = manuscript.books?.find((b) => b.id === book)?.title;
+  const label = partName(manuscript.partLabel);
+  switch (focus.kind) {
+    case 'open':
+      return `${heading} ${title === undefined ? 'the whole story' : `the Book “${title}”, Id: ${book}`}. Plan its shape as a whole.`;
+    case 'part': {
+      const part = ofBook.parts?.find((p) => p.id === focus.id);
+      if (!part) return `${heading} ${withArticle(label)} ${gone}`;
+      return `${heading} the ${label} “${part.title}”, Id: ${part.id}. Plan its shape; the rest of the Book is there for reference.`;
+    }
+    case 'chapter': {
+      const chapter = ofBook.chapters.find(
+        (c) => c.id === focus.id && !c.unplaced,
+      );
+      if (!chapter) return `${heading} a Chapter ${gone}`;
+      return `${heading} the Chapter “${chapter.title}”, Id: ${chapter.id}. Plan its shape; the rest of the Book is there for reference.`;
+    }
+  }
 }
 
 /** One unit's text in focus, under a heading that names it. */
@@ -854,7 +1011,8 @@ export function readableScene(
  * For a log that names the Mode: the request a Mode's turn makes. In
  * Writing, a Review when the Author's message asks for one; in an Interview,
  * about the focus it was last set to; in a Brainstorm or Interview, about
- * the `book` it was last put on, if any.
+ * the `book` it was last put on, if any; in a Plan, about the focus it was
+ * last set to within that Book, or the whole Book.
  */
 export function defaultRequest(
   mode: Mode,
@@ -867,6 +1025,9 @@ export function defaultRequest(
   if (mode === 'brainstorm') return { mode, messages, ...onBook };
   if (mode === 'interview') {
     return { mode, focus: interviewFocus, messages, ...onBook };
+  }
+  if (mode === 'plan') {
+    return { mode, focus: planFocus(interviewFocus), messages, ...onBook };
   }
   const command = messages.findLast((m) => !m.interrupted)?.command;
   return { mode, command: command ?? 'question', sceneId, messages };

@@ -10,6 +10,7 @@ export const ROOMS = [
   'storyBible',
   'brainstorm',
   'interview',
+  'plan',
 ] as const;
 export type Room = (typeof ROOMS)[number];
 

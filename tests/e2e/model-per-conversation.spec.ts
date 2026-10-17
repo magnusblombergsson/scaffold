@@ -97,16 +97,17 @@ test('the Author switches Model mid-Conversation: each reply names its Model, an
   const picker = assistant.getByRole('button', { name: /^Model: / });
   const models = assistant.getByRole('menu', { name: 'Models' });
   // A new Conversation starts on the Model used last: none yet, so the default, Sonnet 5.5.
-  await expect(picker).toHaveText('Anthropic · Sonnet 5.5 ▾');
+  await expect(picker).toHaveText('Anthropic · Sonnet 5.5 · Untested ▾');
 
   // The dropdown groups the shortlisted Models under their Provider, and
-  // marks those not on the tested list.
+  // marks those not on the tested list: every one, until the never-Prose
+  // eval is run again on Plan's prompt (#326).
   await picker.click();
   const claude = models.getByRole('group', { name: 'Anthropic' });
   await expect(claude.getByRole('menuitemradio')).toHaveText([
     'Opus 5.5 · 1M · $$$$ · Untested',
-    'Sonnet 5.5 · 1M · $$$',
-    'Haiku 4.5 · 200k · $$',
+    'Sonnet 5.5 · 1M · $$$ · Untested',
+    'Haiku 4.5 · 200k · $$ · Untested',
   ]);
   await expect(
     claude
@@ -142,7 +143,7 @@ test('the Author switches Model mid-Conversation: each reply names its Model, an
   // Switched in the header, from the next message on.
   await picker.click();
   await models.getByRole('menuitemradio', { name: /Haiku 4\.5/ }).click();
-  await expect(picker).toHaveText('Anthropic · Haiku 4.5 ▾');
+  await expect(picker).toHaveText('Anthropic · Haiku 4.5 · Untested ▾');
   await send('And Mira?');
   await expect(replies).toHaveCount(2);
   await expect(replies.last()).toContainText('On Haiku.');
@@ -197,7 +198,7 @@ test('the Author switches Model mid-Conversation: each reply names its Model, an
     name: 'Conversation',
   });
   await conversation.selectOption('New Conversation');
-  await expect(picker).toHaveText('Anthropic · Haiku 4.5 ▾');
+  await expect(picker).toHaveText('Anthropic · Haiku 4.5 · Untested ▾');
 
   // Haiku taken off the shortlist: a new Conversation starts on the default,
   // Sonnet 5.5, and the one on Haiku still shows it, greyed.
@@ -210,10 +211,10 @@ test('the Author switches Model mid-Conversation: each reply names its Model, an
   await choose.getByRole('checkbox', { name: /Haiku 4\.5/ }).uncheck();
   await choose.getByRole('button', { name: 'Save' }).click();
   await again.getByRole('button', { name: 'Done' }).click();
-  await expect(picker).toHaveText('Anthropic · Sonnet 5.5 ▾');
+  await expect(picker).toHaveText('Anthropic · Sonnet 5.5 · Untested ▾');
 
   await conversation.selectOption('Why does Anna leave?');
-  await expect(picker).toHaveText('Anthropic · Haiku 4.5 ▾');
+  await expect(picker).toHaveText('Anthropic · Haiku 4.5 · Untested ▾');
   await picker.click();
   const haiku = models.getByRole('menuitemradio', { name: /Haiku 4\.5/ });
   await expect(haiku).toBeDisabled();
@@ -222,8 +223,8 @@ test('the Author switches Model mid-Conversation: each reply names its Model, an
     models.getByRole('group', { name: 'Anthropic' }).getByRole('menuitemradio'),
   ).toHaveText([
     'Opus 5.5 · 1M · $$$$ · Untested',
-    'Sonnet 5.5 · 1M · $$$',
-    'Haiku 4.5',
+    'Sonnet 5.5 · 1M · $$$ · Untested',
+    'Haiku 4.5 · Untested',
   ]);
   await app.close();
 });

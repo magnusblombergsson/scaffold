@@ -85,6 +85,7 @@ import { ImportStoryBibleDialog } from './ImportStoryBibleDialog';
 import { ImportDialog } from './ImportDialog';
 import { chapterInsertion, sceneInsertion, type Current } from './insertion';
 import { InterviewRoom } from './InterviewRoom';
+import { PlanRoom } from './PlanRoom';
 import { Notices } from './Notices';
 import { OutlineNotes } from './OutlineNotes';
 import { OverviewPane } from './OverviewPane';
@@ -1749,6 +1750,19 @@ function ProjectView({
                   pane={pane}
                   onAddProvider={onAddProvider}
                   onOpenEntry={showEntry}
+                />
+              </div>
+            )}
+            {visited.has('plan') && (
+              <div className="room" hidden={room !== 'plan'}>
+                <PlanRoom
+                  active={room === 'plan'}
+                  names={{ manuscript, entries }}
+                  book={writtenBook}
+                  title={project.displayName}
+                  language={language}
+                  pane={pane}
+                  onAddProvider={onAddProvider}
                 />
               </div>
             )}

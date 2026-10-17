@@ -1,7 +1,7 @@
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   claudeListing,
   DEFAULT_MODEL,
@@ -20,6 +20,25 @@ import { instantClock } from '../project-store/clock';
 import { nodeFileSystem } from '../project-store/file-system';
 import { projectLookup } from '../project-store/project-store';
 import { loadProviderSettings, lmStudioAddress } from './provider-settings';
+
+// The tested list as it stood with Haiku 4.5 on it, whatever it holds now.
+vi.mock('../../shared/tested-models', async (actual) => {
+  const tested = await actual<typeof import('../../shared/tested-models')>();
+  const list = [
+    {
+      provider: 'anthropic',
+      id: 'claude-haiku-4-5',
+      sheet: 'sheet.md',
+      prompts: 'abc',
+    },
+  ] as const;
+  return {
+    ...tested,
+    TESTED_MODELS: list,
+    isTested: (model: Parameters<typeof tested.isTested>[0]) =>
+      tested.isTested(model, list),
+  };
+});
 
 const ANTHROPIC_KEY = 'sk-ant-api03-secret-abcd';
 const OPENROUTER_KEY = 'sk-or-v1-secret-0123456789';
