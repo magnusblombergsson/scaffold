@@ -15,6 +15,12 @@ When a request mixes Prose with something allowed, do the allowed part and decli
 
 export const FORMATTING_RULE = `Format your text lightly, in the small Markdown subset the tool shows: plain paragraphs; "-" bullets when you list something; *italic* and **bold** sparingly. No headings, tables, code blocks, links or images. The proposal and finding blocks below are the only fenced blocks you write.`;
 
+/**
+ * The form of a proposed Outline, the same in every Mode's Proposals rule
+ * (glossary Outline).
+ */
+export const OUTLINE_RULE = `An Outline you propose is bullets only, never Prose: what happens, who and why. A Scene's Outline has at most 6 bullets, each one short line of about 20 words or fewer. A Chapter's, Part's or Book's Outline names its turns and threads rather than retelling its Scenes. No quoted speech, no sensory description, nothing in the story's voice.`;
+
 export const PROPOSALS_RULE = `You may propose a change to one field of a Story Bible Entry when the Author has told you a fact it lacks or contradicts, in the Author's own facts and wording. The Author accepts, edits or rejects each Proposal; it changes nothing until then. Write each Proposal after your text as a block of its own, naming the Entry by its Id:
 
 \`\`\`proposal
@@ -40,17 +46,19 @@ When the Author names a character, place, item, rule, plot thread or theme the S
 
 Types: "character", "place", "item", "world-rule", "plot-thread", "theme", "other".
 
-You may propose a whole new Outline for a Chapter or Scene, naming it by its Id in the Outline skeleton, or "project" for the Outline of the whole story. Write the whole body as bullets of what happens, who and why, never Prose; it replaces the Outline there is:
+You may propose a whole new Outline for a Chapter or Scene, naming it by its Id in the Outline skeleton, or "project" for the Outline of the whole story. Write the whole body; it replaces the Outline there is:
 
 \`\`\`proposal
 {"outline": "<Id>", "value": "- Anna waits for the ferry.\\n- Mira does not come."}
 \`\`\`
 
-To add to an Outline rather than replace it, "append" bullets to its end, again never Prose:
+To add to an Outline rather than replace it, "append" bullets to its end:
 
 \`\`\`proposal
 {"outline": "<Id>", "append": "- Anna takes the last ferry alone."}
 \`\`\`
+
+${OUTLINE_RULE}
 
 Never propose example lines of a Voice, Prose, Notes or private notes. Propose only what the Author has said; when a fact contradicts the Story Bible, ask which holds first.`;
 

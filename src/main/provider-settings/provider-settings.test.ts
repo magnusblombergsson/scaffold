@@ -19,6 +19,7 @@ import type { Encryption } from '../key-store/key-store';
 import { instantClock } from '../project-store/clock';
 import { nodeFileSystem } from '../project-store/file-system';
 import { projectLookup } from '../project-store/project-store';
+import type { TestedModel } from '../../shared/tested-models';
 import { loadProviderSettings, lmStudioAddress } from './provider-settings';
 
 const ANTHROPIC_KEY = 'sk-ant-api03-secret-abcd';
@@ -82,7 +83,10 @@ function fakeConnect(id: ProviderId, credential: () => Credential) {
 let dir: string;
 let appSettings: AppSettings;
 
-async function load(encryption = fakeEncryption()) {
+async function load(
+  encryption = fakeEncryption(),
+  tested?: readonly TestedModel[],
+) {
   appSettings = await loadAppSettings(path.join(dir, 'settings.json'), {
     fs: nodeFileSystem,
     clock: instantClock(),
@@ -94,6 +98,7 @@ async function load(encryption = fakeEncryption()) {
     encryption,
     settings: appSettings,
     connect: fakeConnect,
+    tested,
   });
 }
 
@@ -403,7 +408,14 @@ describe('ProviderSettings', () => {
     });
 
     it('is the default Model, or else a tested one, before an Untested one when the one used last is gone', async () => {
-      const providers = await load();
+      const providers = await load(fakeEncryption(), [
+        {
+          provider: 'anthropic',
+          id: 'claude-haiku-4-5',
+          sheet: '',
+          prompts: '',
+        },
+      ]);
       await providers.add('anthropic', entry(ANTHROPIC_KEY));
       await providers.add('lmstudio', entry(''));
       providers.setShortlist('lmstudio', [QWEN]);
