@@ -576,6 +576,13 @@ export interface ProjectApi {
     value: BookDetails[K] | null,
   ): Promise<void>;
   /**
+   * Marks a Scene as carrying a Beat, qualified as in
+   * `save-the-cat/midpoint`, or takes the mark away, its other marks kept;
+   * there is no undo. The Manuscript showing it follows as a
+   * `unitDetailsChanged`.
+   */
+  setBeat(sceneId: string, beat: string, carries: boolean): Promise<void>;
+  /**
    * Adds, renames, recolours or moves a Status in the list, as now saved;
    * a Status leaves it only by `deleteStatus`. The list follows as a
    * `statusesChanged`. False when it can't be saved, which main has told
@@ -1337,6 +1344,7 @@ export const projectMethods = {
   setStatus: 'invoke',
   setWordTarget: 'invoke',
   setBookDetail: 'invoke',
+  setBeat: 'invoke',
   editStatus: 'invoke',
   statusUses: 'invoke',
   deleteStatus: 'invoke',

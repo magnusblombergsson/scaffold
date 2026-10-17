@@ -1891,6 +1891,26 @@ export class ProjectStore {
     });
   }
 
+  /**
+   * Marks the Scene `sceneId` as carrying the Beat `beat`, qualified as in
+   * `save-the-cat/midpoint`, or takes the mark away (spec: Outline planner
+   * §3). Its other marks stay as they are, set-aside ones too: they are one
+   * header key of its Outline file, a unit detail (ADR 0008), saved as a
+   * whole list. Nothing checks where the Scene falls. There is no undo.
+   */
+  setBeat(sceneId: string, beat: string, carries: boolean): Promise<void> {
+    return this.enqueueWrite(async () => {
+      const ref = this.detailRef(sceneId);
+      const held = this.heldDetails(ref)?.beats ?? [];
+      const beats = carries
+        ? held.includes(beat)
+          ? held
+          : [...held, beat]
+        : held.filter((id) => id !== beat);
+      await this.setDetail(ref, 'beats', beats);
+    });
+  }
+
   /** The Manuscript's details that are a Book's own, those it has, by key. */
   private bookOwnDetails() {
     const held = this.unitDetails.get(PROJECT_OUTLINE) ?? {};
