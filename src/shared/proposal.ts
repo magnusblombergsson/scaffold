@@ -14,6 +14,13 @@ import {
   type Voice,
 } from './project-types';
 import type { Mode } from './conversation';
+import {
+  BOOK_DETAIL_LABELS,
+  BOOK_DETAIL_BLOCK_KEYS,
+  isBookDetailValue,
+  type BookDetailValue,
+} from './book-details';
+import type { BookDetailKey } from './project-types';
 import { newEntryValue } from './entry';
 import {
   customValue,
@@ -146,6 +153,20 @@ export type OutlineChange = {
   outlineId: string;
 } & Operation<string, 'append'>;
 
+/**
+ * One detail of a Book in place of the one it had, its `base` (spec:
+ * Outline planner §4): its Genres, Format, Structure or Genre conventions,
+ * by catalogue id, null for none. `bookId` is the Book's id, or in a Project
+ * of one Book, `PROJECT_OUTLINE`. Only Plan proposes one.
+ */
+export type BookDetailChange = {
+  kind: 'book-detail';
+  bookId: string;
+  detail: BookDetailKey;
+  base: BookDetailValue;
+  proposed: BookDetailValue;
+};
+
 /** What the Author calls each unit Plan adds. */
 export const PLAN_UNIT_LABELS: Record<PlanUnit, string> = {
   scene: 'Scene',
@@ -184,21 +205,22 @@ export type Retitle = {
   proposed: string;
 };
 
-/** What a Proposal changes: a field of an Entry, a new Entry, an Outline, the Relations, or the structure. */
+/** What a Proposal changes: a field of an Entry, a new Entry, an Outline, the Relations, the structure, or a Book's detail. */
 export type ProposalChange =
   | EntryFieldChange
   | EntryCreation
   | OutlineChange
   | RelationAddition
   | UnitAddition
-  | Retitle;
+  | Retitle
+  | BookDetailChange;
 
 /** The kinds of Proposal a Conversation in each Mode may make. */
 const PROPOSAL_KINDS: Record<Mode, readonly ProposalChange['kind'][]> = {
   brainstorm: ['field', 'new-entry', 'outline', 'relation'],
   interview: ['field', 'new-entry', 'outline', 'relation'],
   writing: ['field', 'new-entry', 'outline'],
-  plan: ['outline', 'add', 'retitle'],
+  plan: ['outline', 'add', 'retitle', 'book-detail'],
 };
 
 /** Whether a Conversation in `mode` may propose a change of `kind`. */
@@ -304,7 +326,8 @@ export function orphanedText(
   }
   return proposal.kind === 'outline' ||
     proposal.kind === 'add' ||
-    proposal.kind === 'retitle'
+    proposal.kind === 'retitle' ||
+    proposal.kind === 'book-detail'
     ? `${name} is no longer in the Manuscript.`
     : `${name} is no longer in the Story Bible.`;
 }
@@ -568,7 +591,8 @@ export function canAppend(change: ProposalChange): boolean {
     change.kind === 'new-entry' ||
     change.kind === 'relation' ||
     change.kind === 'add' ||
-    change.kind === 'retitle'
+    change.kind === 'retitle' ||
+    change.kind === 'book-detail'
   ) {
     return false;
   }
@@ -594,6 +618,8 @@ export function proposalTarget(proposal: ProposalView): ProposalTarget | null {
   if (state.kind === 'pending' && 'orphaned' in state) return null;
   // Its card links each of its two Entries.
   if (proposal.kind === 'relation') return null;
+  // Its card stands in the Conversation; the strip shows it as a ghost.
+  if (proposal.kind === 'book-detail') return null;
   if (proposal.kind === 'new-entry') {
     return state.kind === 'accepted'
       ? { kind: 'entry', entryId: proposal.entryId }
@@ -750,6 +776,11 @@ export function proposalBlock(change: ProposalChange): string {
         ? { from, to, label: proposed.label }
         : { from, to, relation: proposed.kind },
     );
+  }
+  if (change.kind === 'book-detail') {
+    return fencedProposal({
+      [BOOK_DETAIL_BLOCK_KEYS[change.detail]]: change.proposed ?? [],
+    });
   }
   const target =
     change.kind === 'field'
@@ -985,25 +1016,30 @@ export function accept(
   const holds =
     logged.kind === 'field'
       ? isFieldValue(logged.field, value)
-      : logged.kind === 'retitle'
-        ? typeof value === 'string' && value.trim() !== ''
-        : typeof value === 'string';
+      : logged.kind === 'book-detail'
+        ? isBookDetailValue(logged.detail, value)
+        : logged.kind === 'retitle'
+          ? typeof value === 'string' && value.trim() !== ''
+          : typeof value === 'string';
   if (!holds) {
     return {
       refused: 'cannot-hold',
       text:
         logged.kind === 'field'
           ? `${capitalized(fieldLabel(logged))} can't hold that value`
-          : logged.kind === 'retitle'
-            ? 'A title can’t be empty'
-            : "An Outline can't hold that value",
+          : logged.kind === 'book-detail'
+            ? `${BOOK_DETAIL_LABELS[logged.detail]} can't hold that value`
+            : logged.kind === 'retitle'
+              ? 'A title can’t be empty'
+              : "An Outline can't hold that value",
     };
   }
   if ('orphaned' in state) {
     return { refused: 'orphaned', text: orphanedText(logged, state.orphaned) };
   }
   if ('refused' in state) return { refused: 'refused', text: state.refused };
-  if (append || isAppending(logged)) {
+  // A Book's detail can't be appended: `canAppend` refused it above.
+  if ((append || isAppending(logged)) && logged.kind !== 'book-detail') {
     return {
       wrote: appended(targetOf(logged), state.current, value as FieldValue),
     };
@@ -1213,9 +1249,14 @@ export function sameJson(a: unknown, b: unknown): boolean {
 
 /** What a refusal calls the field, Outline or title a Proposal changes. */
 function targetLabel(
-  change: (EntryFieldChange & WithFieldLabel) | OutlineChange | Retitle,
+  change:
+    | (EntryFieldChange & WithFieldLabel)
+    | OutlineChange
+    | Retitle
+    | BookDetailChange,
 ): string {
   if (change.kind === 'retitle') return 'The title';
+  if (change.kind === 'book-detail') return BOOK_DETAIL_LABELS[change.detail];
   return change.kind === 'field'
     ? capitalized(fieldLabel(change))
     : 'The Outline';

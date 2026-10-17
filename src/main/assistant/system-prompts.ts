@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import type { ReviewCommand } from '../../shared/finding';
 import type { Mode, PlanAsk } from '../../shared/conversation';
+import { formatBand } from '../../shared/book-details';
+import { FORMATS, GENRES } from '../../shared/structure-catalogue';
 
 // The Assistant's system prompts. The never-Prose rule is the same in every
 // Mode, with no override (MVP spec §4).
@@ -142,9 +144,10 @@ ${PROPOSALS_RULE}
 ${INTERVIEW_RULE}`;
 
 /**
- * Plan's own Proposals rule: only Outlines, of its Book and what it holds,
- * and of the whole story or Series. It doesn't reuse `PROPOSALS_RULE`,
- * which carries the Story Bible's.
+ * Plan's own Proposals rule: Outlines, of its Book and what it holds, and
+ * of the whole story or Series; new units and titles; and the Book's
+ * details, by the catalogue's Ids. It doesn't reuse `PROPOSALS_RULE`, which
+ * carries the Story Bible's.
  */
 export const PLAN_PROPOSALS_RULE = `You may propose a whole new Outline for the Book you are planning, or for a Part, Chapter or Scene of it, naming it by its Id in the plan, or "project" for the Outline of the whole story or Series. The Author accepts, edits or rejects each Proposal; it changes nothing until then. Write the whole body; it replaces the Outline there is. Write each Proposal after your text as a block of its own:
 
@@ -174,7 +177,27 @@ To retitle a Part, Chapter or Scene:
 
 ${OUTLINE_RULE}
 
-Propose only Outlines, new units and titles: never a change to another Book, to the Story Bible, to private notes, or to a Status, Tags or images.`;
+You may also propose the details of the Book you are planning, one detail per Proposal, each by the Ids given: its Structure ("none" for No set Structure), the Genre conventions it follows, its Genres and its Format. A list replaces the whole list the Book has:
+
+\`\`\`proposal
+{"structure": "<Id>"}
+\`\`\`
+
+\`\`\`proposal
+{"genreConventions": ["<Id>", "<Id>"]}
+\`\`\`
+
+\`\`\`proposal
+{"genres": ["mystery", "romance"]}
+\`\`\`
+
+\`\`\`proposal
+{"format": "novel"}
+\`\`\`
+
+The Genres: ${GENRES.map((g) => g.id).join(', ')}. The Formats: ${FORMATS.map((f) => `${f.id} (${formatBand(f)})`).join(', ')}.
+
+Propose only Outlines, new units, titles and the Book’s details: never a change to another Book, to the Story Bible, to private notes, or to a Status, Tags or images.`;
 
 /** How Plan asks, and when it proposes. */
 export const PLAN_QUESTIONING_RULE = `Ask only about the story's shape: its Genre, Format, rough length, premise and intended ending, then what happens, in what order, its turns and its stakes. Never ask about wording, style or voice, and never fill the gaps of an Entry in the Story Bible.
@@ -183,7 +206,9 @@ Read the plan as it is before you ask. If the Book is empty, ask for the facts o
 
 Ask one question at a time; two short linked questions may share a message. Never a form or a list of questions.
 
-Propose only what the Author has agreed to, and never restructure unasked. Write the Proposals together, after your text.
+Propose only what the Author has agreed to, and never restructure unasked. Write the Proposals together, after your text. When the Author tells you the Book's Genres or Format, propose them.
+
+To find a structure, recommend one Structure from the catalogue you are given, with the Genre conventions that match the Book, and say why from what you know of its shape; then name one or two alternatives and what each would change. Propose the Structure and those Genre conventions with it, for the Author to accept or reject. Recommend only from the catalogue; of an entry sent by name only, say no more than what is generally known of it. Offer to find a Structure only when none is chosen. A Book with No set Structure follows a pattern of the Author's own: never nudge it toward one. When the Book's Structure is one this version of the app doesn't know, say so, and check no Beats.
 
 When planning shows that a Character, Place, Plot Thread or other Entry is missing, name it and suggest Interview or Brainstorm for it. When the Author asks you to change the Story Bible, say that belongs to Interview, and propose nothing.`;
 
@@ -200,7 +225,7 @@ ${PLAN_QUESTIONING_RULE}`;
 /** What each Plan start button asks the Assistant to do, sent after the Author's message it names. */
 export const PLAN_REQUESTS: Record<PlanAsk, string> = {
   'find-structure':
-    'Help me find a structure for this Book. Ask what you need to know about its shape, one question at a time, before you suggest one.',
+    'Help me find a structure for this Book. Ask what you need to know about its shape, one question at a time, then recommend one from the catalogue.',
   'check-plan':
     'Check the plan within the focus: what is missing, thin or crowded, what contradicts the Story Bible, and Scenes that move nothing. Quote the Outlines and Notes where it helps, never rewrite them, and propose nothing yet.',
 };

@@ -1,4 +1,8 @@
-import { useContext, useState } from 'react';
+import { useContext, useState, type ReactNode } from 'react';
+import { beatWhere } from '../shared/beat-measure';
+import { detailText, formatBand } from '../shared/book-details';
+import type { ProposalView } from '../shared/proposal';
+import { proposalCardId } from './ProposalCard';
 import type {
   BookDetailKey,
   BookDetails,
@@ -15,11 +19,9 @@ import {
   shownIds,
   STRUCTURES,
   structureOf,
-  type Format,
   type GenreConvention,
   type Structure,
 } from '../shared/structure-catalogue';
-import { beatWhere } from './Beats';
 import { ReadOnlyContext } from './read-only';
 import { useRun } from './use-project';
 import { WordTargetForm } from './WordTarget';
@@ -50,27 +52,30 @@ function toggled(ids: readonly string[] | undefined, id: string): string[] {
   return all.includes(id) ? all.filter((i) => i !== id) : [...all, id];
 }
 
-/** A Format's band of words, as in “7,500–17,499 words”. */
-export function formatBand({ words: { min, max } }: Format): string {
-  const n = (words: number) => words.toLocaleString('en-US');
-  if (min === undefined) return `under ${n(max! + 1)} words`;
-  if (max === undefined) return `${n(min)}+ words`;
-  return `${n(min)}–${n(max)} words`;
-}
-
 /**
  * The strip above the Outline tree: the Book's Structure, Genre
  * conventions, Genres, Format and Word target, each set with a click, and
- * a link to the structure guide.
+ * a link to the structure guide. A detail `proposed` in the Conversation
+ * open shows as a ghost value beside it, which goes to its card.
  */
 export function BookDetailsStrip({
   bookId,
   book,
+  proposed = [],
 }: {
   /** The Book's id, or `project` for a Project of one Book. */
   bookId: string;
   book: PlannedBook;
+  /** The Book's details proposed and still to decide. */
+  proposed?: ProposalView[];
 }) {
+  const ghost = (key: BookDetailKey) => (
+    <Ghost
+      proposal={proposed.findLast(
+        (p) => p.kind === 'book-detail' && p.detail === key,
+      )}
+    />
+  );
   const readOnly = useContext(ReadOnlyContext);
   const set = useSetBookDetail(bookId);
   const run = useRun();
@@ -108,6 +113,7 @@ export function BookDetailsStrip({
             </option>
           )}
         </select>
+        {ghost('structure')}
       </label>
       <Chips
         label="Genre conventions"
@@ -117,6 +123,7 @@ export function BookDetailsStrip({
         onToggle={(id) =>
           void set('genreConventions', toggled(book.genreConventions, id))
         }
+        ghost={ghost('genreConventions')}
       />
       <Chips
         label="Genres"
@@ -124,6 +131,7 @@ export function BookDetailsStrip({
         chosen={book.genres}
         disabled={readOnly}
         onToggle={(id) => void set('genres', toggled(book.genres, id))}
+        ghost={ghost('genres')}
       />
       <label className="book-detail">
         Format
@@ -147,6 +155,7 @@ export function BookDetailsStrip({
             </option>
           )}
         </select>
+        {ghost('bookFormat')}
       </label>
       <div className="book-detail">
         Word target
@@ -188,6 +197,31 @@ export function BookDetailsStrip({
   );
 }
 
+/**
+ * A detail proposed and still to decide, as a ghost value beside the one
+ * the Book has: it goes to its card in the Conversation.
+ */
+function Ghost({ proposal }: { proposal: ProposalView | undefined }) {
+  if (proposal?.kind !== 'book-detail') return null;
+  const text = detailText(proposal.detail, proposal.proposed);
+  return (
+    <button
+      className="link-button book-detail-ghost"
+      title="Proposed in the Conversation: decide it there"
+      aria-label={`Proposed: ${text}`}
+      onClick={(event) => {
+        // Inside a label, a click would open its select too.
+        event.preventDefault();
+        document
+          .getElementById(proposalCardId(proposal.id))
+          ?.scrollIntoView?.({ block: 'center', behavior: 'smooth' });
+      }}
+    >
+      {text}
+    </button>
+  );
+}
+
 /** A choice of any number, each a chip that toggles with a click. */
 function Chips({
   label,
@@ -195,12 +229,15 @@ function Chips({
   chosen,
   disabled,
   onToggle,
+  ghost,
 }: {
   label: string;
   options: readonly { id: string; name: string }[];
   chosen: readonly string[] | undefined;
   disabled: boolean;
   onToggle(id: string): void;
+  /** What is proposed for it, if anything. */
+  ghost?: ReactNode;
 }) {
   return (
     <fieldset className="book-detail book-detail-chips">
@@ -216,6 +253,7 @@ function Chips({
           {o.name}
         </button>
       ))}
+      {ghost}
     </fieldset>
   );
 }
@@ -223,18 +261,27 @@ function Chips({
 /**
  * The structure guide: what the Book follows opened out, every other
  * Structure folded, those fitting the Book first, then the less usual for
- * it, and every other Genre convention; each to follow with a click.
+ * it, and every other Genre convention; each to follow with a click, and
+ * to ask Plan about, which sends it in full.
  */
 export function StructureGuide({
   bookId,
   book,
   carrying,
+  onAsk,
 }: {
   bookId: string;
   book: PlannedBook;
   /** The titles of the Scenes carrying a Beat, by its qualified id. */
   carrying(beat: string): string[];
+  /** Asks Plan about an entry by its name; unset while Plan can't be asked. */
+  onAsk?(name: string): void;
 }) {
+  const ask = (entry: Structure | GenreConvention) => (
+    <button disabled={!onAsk} onClick={() => onAsk?.(entry.name)}>
+      Ask Plan about it
+    </button>
+  );
   const readOnly = useContext(ReadOnlyContext);
   const set = useSetBookDetail(bookId);
   const followed = structureOf(book.structure);
@@ -270,6 +317,7 @@ export function StructureGuide({
         <article className="guide-entry" aria-label={followed.name} data-open>
           <h4>{followed.name}</h4>
           <StructureBody structure={followed} book={book} carrying={carrying} />
+          {ask(followed)}
         </article>
       )}
       {conventions.map((c) => (
@@ -279,6 +327,7 @@ export function StructureGuide({
           <button disabled={readOnly} onClick={() => followToo(c)}>
             Stop following
           </button>
+          {ask(c)}
         </article>
       ))}
       <h4 className="guide-group">
@@ -291,6 +340,7 @@ export function StructureGuide({
           book={book}
           disabled={readOnly}
           onFollow={follow}
+          ask={ask(s)}
         />
       ))}
       {lessUsual.length > 0 && (
@@ -303,6 +353,7 @@ export function StructureGuide({
           book={book}
           disabled={readOnly}
           onFollow={follow}
+          ask={ask(s)}
         />
       ))}
       {book.structure !== NO_STRUCTURE && (
@@ -328,23 +379,26 @@ export function StructureGuide({
           <button disabled={readOnly} onClick={() => followToo(c)}>
             Follow too
           </button>
+          {ask(c)}
         </details>
       ))}
     </section>
   );
 }
 
-/** A Structure the Book doesn't follow, folded, to follow with a click. */
+/** A Structure the Book doesn't follow, folded, to follow with a click or `ask` about. */
 function FoldedStructure({
   structure,
   book,
   disabled,
   onFollow,
+  ask,
 }: {
   structure: Structure;
   book: PlannedBook;
   disabled: boolean;
   onFollow(structure: Structure): void;
+  ask: ReactNode;
 }) {
   return (
     <details className="guide-entry">
@@ -353,6 +407,7 @@ function FoldedStructure({
       <button disabled={disabled} onClick={() => onFollow(structure)}>
         Follow this
       </button>
+      {ask}
     </details>
   );
 }

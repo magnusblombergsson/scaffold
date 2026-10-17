@@ -44,6 +44,7 @@ function conversationsOver() {
     passFormatGate: async () => {},
     relations: () => [],
     changeRelations: unsupported,
+    changeBookDetail: unsupported,
     addUnit: unsupported,
     retitleUnit: unsupported,
     trashUnit: unsupported,

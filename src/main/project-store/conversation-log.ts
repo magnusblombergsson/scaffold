@@ -48,6 +48,12 @@ import type {
   RelationWritten,
 } from '../../shared/relation-proposal';
 import {
+  BOOK_DETAIL_KEYS,
+  isLoggedDetailValue,
+  type BookDetailValue,
+} from '../../shared/book-details';
+import type { BookDetailKey } from '../../shared/project-types';
+import {
   isModel,
   isProviderId,
   loggedModel,
@@ -117,6 +123,23 @@ export type RelatedEvent = {
   relation: Relation['kind'];
   label?: string;
   book?: string;
+  at: number;
+};
+
+/**
+ * A Proposal of Plan's on one detail of a Book (spec: Outline planner §4):
+ * the `book` by id, or `project` for the one Book a Project without Books
+ * is, the detail, and the value it had and the one proposed, catalogue ids
+ * or null for none. Apps from before Plan's Proposals skip it, and so its
+ * accept, reject and undo (spec §11).
+ */
+export type BookDetailEvent = {
+  type: 'proposal.bookDetail';
+  id: string;
+  book: string;
+  detail: BookDetailKey;
+  base: BookDetailValue;
+  proposed: BookDetailValue;
   at: number;
 };
 
@@ -285,6 +308,7 @@ export type ConversationEvent =
   | ProposedEvent
   | OfferedEvent
   | RelatedEvent
+  | BookDetailEvent
   | AddEvent
   | RetitleEvent
   | AcceptedEvent
@@ -430,6 +454,7 @@ export function parseLog(log: string): LoggedConversation | null {
       event.type === 'proposal.proposed' ||
       event.type === 'proposal.offered' ||
       event.type === 'proposal.related' ||
+      event.type === 'proposal.bookDetail' ||
       event.type === 'proposal.add' ||
       event.type === 'proposal.retitle'
     ) {
@@ -440,7 +465,11 @@ export function parseLog(log: string): LoggedConversation | null {
             ? loggedOffer(event as Partial<OfferedEvent>)
             : event.type === 'proposal.related'
               ? loggedRelation(event as Partial<RelatedEvent>)
-              : loggedStructure(event as Parameters<typeof loggedStructure>[0]);
+              : event.type === 'proposal.bookDetail'
+                ? loggedBookDetail(event as Partial<BookDetailEvent>)
+                : loggedStructure(
+                    event as Parameters<typeof loggedStructure>[0],
+                  );
       if (proposal && !known && messages.length > 0) {
         proposals.set(proposal.id, {
           ...proposal,
@@ -531,9 +560,27 @@ function combine(
 export function proposedEvent(
   proposal: Proposal,
   at: number,
-): ProposedEvent | OfferedEvent | RelatedEvent | AddEvent | RetitleEvent {
+):
+  | ProposedEvent
+  | OfferedEvent
+  | RelatedEvent
+  | AddEvent
+  | RetitleEvent
+  | BookDetailEvent {
   const { id } = proposal;
   const needs = proposal.needs?.length ? { needs: proposal.needs } : {};
+  if (proposal.kind === 'book-detail') {
+    const { bookId, detail, base, proposed } = proposal;
+    return {
+      type: 'proposal.bookDetail',
+      id,
+      book: bookId,
+      detail,
+      base,
+      proposed,
+      at,
+    };
+  }
   if (proposal.kind === 'add') {
     const { unit, unitId, after, proposed } = proposal;
     return {
@@ -672,7 +719,10 @@ export function acceptedEvent(
     };
   }
   const field = fieldOfChange(
-    proposal as Extract<Proposal, { kind: 'field' | 'outline' | 'retitle' }>,
+    proposal as Extract<
+      Proposal,
+      { kind: 'field' | 'outline' | 'retitle' | 'book-detail' }
+    >,
   );
   return {
     type: 'proposal.accepted',
@@ -782,11 +832,18 @@ function loggedStructure(
   };
 }
 
-/** The field an accept of a change logs what it replaced and wrote under. */
+/**
+ * The field an accept of a change logs what it replaced and wrote under:
+ * an Entry's field, an Outline's `body`, a `title`, or a Book's detail.
+ */
 function fieldOfChange(
-  proposal: Extract<Proposal, { kind: 'field' | 'outline' | 'retitle' }>,
+  proposal: Extract<
+    Proposal,
+    { kind: 'field' | 'outline' | 'retitle' | 'book-detail' }
+  >,
 ): string {
   if (proposal.kind === 'field') return proposal.field;
+  if (proposal.kind === 'book-detail') return proposal.detail;
   return proposal.kind === 'retitle' ? 'title' : 'body';
 }
 
@@ -859,6 +916,30 @@ function loggedRelation(event: Partial<RelatedEvent>): Proposal | null {
     ...bookOf(event),
   };
   return { ...addition, id };
+}
+
+/**
+ * The Proposal on a Book's detail an event logs, if this app can take it:
+ * a Book, a detail it knows, and values of ids the catalogue knows.
+ */
+function loggedBookDetail(event: Partial<BookDetailEvent>): Proposal | null {
+  const { id, book, detail, base, proposed } = event;
+  if (typeof id !== 'string' || typeof book !== 'string' || !book) return null;
+  if (!BOOK_DETAIL_KEYS.includes(detail!)) return null;
+  if (
+    !isLoggedDetailValue(detail!, base) ||
+    !isLoggedDetailValue(detail!, proposed)
+  ) {
+    return null;
+  }
+  return {
+    kind: 'book-detail',
+    id,
+    bookId: book,
+    detail: detail!,
+    base,
+    proposed,
+  };
 }
 
 /** What an accept of a Relation Proposal logs it wrote, if it can be read. */
@@ -934,7 +1015,9 @@ function acceptedOf(
   const holds = (value: unknown): value is FieldValue =>
     proposal.kind === 'field'
       ? isFieldValue(proposal.field, value)
-      : typeof value === 'string';
+      : proposal.kind === 'book-detail'
+        ? isLoggedDetailValue(proposal.detail, value)
+        : typeof value === 'string';
   if (!holds(replaced) || !holds(wrote)) return null;
   const { on, evolved } = event;
   return {

@@ -349,3 +349,110 @@ for (const theme of ['light', 'dark'] as const) {
     }
   });
 }
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`Plan is sent the Book's details and the shortlisted catalogue, proposes a Structure and Genre conventions as cards with ghost values in the strip, and is asked about an entry in full, ${theme}`, async () => {
+    const { app, page } = await newProject(theme);
+    try {
+      await roomButton(page, 'Plan').click();
+      const strip = page.getByRole('region', { name: 'Book details' });
+      const guide = page.getByRole('region', { name: 'Structure guide' });
+      const panel = page.getByRole('complementary', {
+        name: 'Plan Conversation',
+      });
+      const structure = strip.getByRole('combobox', { name: 'Structure' });
+      await strip.getByRole('button', { name: 'Literary' }).click();
+      await strip
+        .getByRole('combobox', { name: 'Format' })
+        .selectOption('short-story');
+      await expect(
+        strip.getByRole('button', { name: 'Literary' }),
+      ).toHaveAttribute('aria-pressed', 'true');
+
+      anthropic.calls.push({
+        reply: [
+          'Freytag’s pyramid suits a literary short story, with Horror’s rules if it turns dark.\n\n',
+          block({ structure: 'freytag' }),
+          '\n\n',
+          block({ genreConventions: ['horror'] }),
+        ],
+      });
+      await panel.getByRole('button', { name: 'Find a structure' }).click();
+      const reply = panel.getByRole('article', { name: 'Assistant' });
+      await expect(reply.locator('.message-text')).toContainText(
+        'Freytag’s pyramid suits',
+      );
+      const system = JSON.stringify(anthropic.sent[0].system);
+      expect(system).toContain('Genres: Literary (literary)');
+      expect(system).toContain('Id: freytag');
+      expect(system).toContain('Hero’s Journey (heros-journey)');
+      expect(system).not.toContain('Joseph Campbell');
+
+      const structureCard = reply.getByRole('region', {
+        name: 'Proposal: The Book › Structure',
+      });
+      const conventionsCard = reply.getByRole('region', {
+        name: 'Proposal: The Book › Genre conventions',
+      });
+      await expect(structureCard).toContainText('Freytag’s pyramid');
+      await expect(conventionsCard).toContainText('Horror');
+      await expect(
+        strip.getByRole('button', { name: 'Proposed: Freytag’s pyramid' }),
+      ).toBeVisible();
+      await expect(
+        strip.getByRole('button', { name: 'Proposed: Horror' }),
+      ).toBeVisible();
+      await expect(page).toHaveScreenshot(
+        `plan-book-detail-proposals-${theme}.png`,
+        { mask: [page.locator('.save-status'), page.locator('.toasts')] },
+      );
+
+      // Accepted, the Book follows it and the ghost goes; Undo brings both back.
+      await structureCard.getByRole('button', { name: 'Accept' }).click();
+      await expect(structure).toHaveValue('freytag');
+      await expect(
+        strip.getByRole('button', { name: 'Proposed: Freytag’s pyramid' }),
+      ).toHaveCount(0);
+      await structureCard.getByRole('button', { name: 'Undo' }).click();
+      await expect(structure).toHaveValue('');
+      await expect(
+        strip.getByRole('button', { name: 'Proposed: Freytag’s pyramid' }),
+      ).toBeVisible();
+
+      // Changed since, it is stale: accepted anyway, it replaces the value.
+      await structure.selectOption('fichtean');
+      await expect(structureCard).toContainText(
+        'Structure has changed since this was proposed.',
+      );
+      await structureCard
+        .getByRole('button', { name: 'Accept anyway' })
+        .click();
+      await expect(structure).toHaveValue('freytag');
+
+      await conventionsCard.getByRole('button', { name: 'Reject' }).click();
+      await expect(conventionsCard).toContainText('Rejected');
+      await expect(
+        strip.getByRole('button', { name: 'Proposed: Horror' }),
+      ).toHaveCount(0);
+
+      // Asked about in the guide, a less usual Structure is sent in full.
+      anthropic.calls.push({ reply: ['It is long for a short story.'] });
+      await guide.locator('summary', { hasText: 'Hero’s Journey' }).click();
+      await guide
+        .locator('details[open]')
+        .getByRole('button', { name: 'Ask Plan about it' })
+        .click();
+      await expect(
+        panel.getByRole('article', { name: 'Assistant' }),
+      ).toHaveCount(2);
+      expect(JSON.stringify(anthropic.sent[1].messages)).toContain(
+        'Tell me about Hero’s Journey for this Book.',
+      );
+      expect(JSON.stringify(anthropic.sent[1].system)).toContain(
+        'Joseph Campbell',
+      );
+    } finally {
+      await app.close();
+    }
+  });
+}

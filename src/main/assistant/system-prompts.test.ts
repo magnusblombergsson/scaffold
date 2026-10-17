@@ -38,13 +38,37 @@ describe('the Plan prompt', () => {
     expect(plan).not.toMatch(/"create":|"entry":/);
   });
 
-  it('proposes Outlines only, and asks one question at a time about shape', () => {
+  it('proposes Outlines, new units, titles and the Book’s details only, and asks one question at a time about shape', () => {
     const plan = MODE_PROMPTS.plan;
 
     expect(plan).toContain('{"outline": "<Id>", "value":');
-    expect(plan).toMatch(/Propose only Outlines/);
+    expect(plan).toContain('{"structure": "<Id>"}');
+    expect(plan).toContain('{"genreConventions": ["<Id>", "<Id>"]}');
+    expect(plan).toContain('{"genres": ["mystery", "romance"]}');
+    expect(plan).toContain('{"format": "novel"}');
+    expect(plan).toMatch(
+      /Propose only Outlines, new units, titles and the Book’s details/,
+    );
     expect(plan).toMatch(/one question at a time/);
     expect(plan).toMatch(/that belongs to Interview/);
+  });
+
+  it('names every Genre and Format by its Id', () => {
+    const plan = MODE_PROMPTS.plan;
+
+    for (const id of ['science-fiction', 'literary', 'other']) {
+      expect(plan).toContain(id);
+    }
+    expect(plan).toContain('flash-fiction (under 1,000 words)');
+    expect(plan).toContain('novel (40,000+ words)');
+  });
+
+  it('recommends one Structure from the catalogue with its Genre conventions and reasons, names alternatives, and proposes the pick', () => {
+    const plan = MODE_PROMPTS.plan;
+
+    expect(plan).toMatch(/recommend one Structure from the catalogue/);
+    expect(plan).toMatch(/one or two alternatives/);
+    expect(plan).toMatch(/Offer to find a Structure only when none is chosen/);
   });
 });
 

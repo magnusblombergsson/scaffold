@@ -1052,3 +1052,66 @@ export function guideStructures(book: Fitted): {
     lessUsual: others.filter((s) => !fitsBook(s, book)),
   };
 }
+
+/** Entries of the catalogue as Plan is sent them: in full, or by name only. */
+export type Shortlisted<E> = { full: E[]; byName: E[] };
+
+/**
+ * The catalogue as the app shortlists it for Plan (spec: Outline planner
+ * §2), before any Model sees it. In full: the Structures fitting the Book's
+ * Genres and Format, as `fitsBook` judges, whether they work per Book or
+ * across a Series playing no part; the Genre conventions of its Genres;
+ * what the Book follows; and any entry the Author named in `asked`, their
+ * messages. The rest by name only. Each in catalogue order.
+ */
+export function shortlist(
+  book: BookDetails,
+  asked: readonly string[],
+): {
+  structures: Shortlisted<Structure>;
+  conventions: Shortlisted<GenreConvention>;
+} {
+  const words = asked.map(matchable);
+  const named = (entry: Structure | GenreConvention) =>
+    namesOf(entry).some((name) => words.some((w) => w.includes(` ${name} `)));
+  const split = <E extends Structure | GenreConvention>(
+    entries: readonly E[],
+    inFull: (entry: E) => boolean,
+  ): Shortlisted<E> => {
+    const full = entries.filter((e) => inFull(e) || named(e));
+    return { full, byName: entries.filter((e) => !full.includes(e)) };
+  };
+  return {
+    structures: split(
+      STRUCTURES,
+      (s) => s.id === book.structure || fitsBook(s, book),
+    ),
+    conventions: split(
+      CONVENTIONS,
+      (c) =>
+        !!book.genreConventions?.includes(c.id) ||
+        !!book.genres?.includes(c.genre),
+    ),
+  };
+}
+
+/** What an entry may be called: its name without what follows in brackets, and its id. */
+function namesOf(entry: Structure | GenreConvention): string[] {
+  const name = entry.name.replace(/\s*\(.*\)$/, '');
+  return [name, entry.id].map((n) => matchable(n).trim());
+}
+
+/**
+ * `text` as names are looked for in it: lower case, without accents or
+ * apostrophes, each word between single spaces, and one at each end.
+ */
+function matchable(text: string): string {
+  const plain = text
+    .normalize('NFD')
+    .replace(/\p{M}/gu, '')
+    .toLowerCase()
+    .replace(/['’]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+  return ` ${plain} `;
+}

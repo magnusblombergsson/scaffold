@@ -2038,4 +2038,117 @@ describe('Plan', () => {
     expect(skeleton).toContain('Chapter “Arrival”');
     expect(skeleton).not.toContain('Storm');
   });
+
+  describe('the Book’s details and the structure catalogue', () => {
+    const detailsOf = (context: Awaited<ReturnType<typeof buildContext>>) =>
+      context.system.find((b) => b.text.startsWith('The Book’s details'))
+        ?.text ?? '';
+
+    it('are sent: its Genres and Format, the Structures and Genre conventions fitting them in full, the rest by name', async () => {
+      const { store, view } = await planned();
+      await store.setBookDetail(PROJECT_OUTLINE, 'genres', ['mystery']);
+      await store.setBookDetail(PROJECT_OUTLINE, 'bookFormat', 'novel');
+
+      const details = detailsOf(await plan(view, { kind: 'open' }));
+
+      expect(details).toContain('Genres: Mystery (mystery)');
+      expect(details).toContain('Format: Novel, 40,000+ words (novel)');
+      expect(details).toContain('Id: save-the-cat');
+      expect(details).toContain(
+        'Opening Image, Id: save-the-cat/opening-image: A snapshot of the protagonist before the story changes them.',
+      );
+      expect(details).toContain('Id: mystery');
+      expect(details).toContain('Hero’s Journey (heros-journey)');
+      expect(details).toContain('Romance (romance)');
+      expect(details).not.toContain('Joseph Campbell');
+    });
+
+    it('offer to find a Structure only while none is chosen', async () => {
+      const { store, view } = await planned();
+
+      let details = detailsOf(await plan(view, { kind: 'open' }));
+      expect(details).toContain('Structure: none chosen yet');
+      expect(details).toMatch(/offer to find one/);
+
+      await store.setBookDetail(PROJECT_OUTLINE, 'structure', 'none');
+      details = detailsOf(await plan(view, { kind: 'open' }));
+      expect(details).toContain('Structure: No set Structure');
+      expect(details).not.toMatch(/offer to find one/);
+
+      await store.setBookDetail(PROJECT_OUTLINE, 'structure', 'seven-point');
+      details = detailsOf(await plan(view, { kind: 'open' }));
+      expect(details).toContain('Structure: Seven-point (seven-point)');
+      expect(details).not.toMatch(/offer to find one/);
+    });
+
+    it('say a Structure this version doesn’t know is one, and to check no Beats', async () => {
+      const { store, view } = await planned();
+      await store.setBookDetail(
+        PROJECT_OUTLINE,
+        'structure',
+        'from-a-newer-app',
+      );
+
+      const details = detailsOf(await plan(view, { kind: 'open' }));
+
+      expect(details).toMatch(
+        /Structure: one this version of the app doesn’t know \(from-a-newer-app\)\. Tell the Author so, and check no Beats\./,
+      );
+    });
+
+    it('send an entry the Author asked about in full', async () => {
+      const { store, view } = await planned();
+      await store.setBookDetail(PROJECT_OUTLINE, 'genres', ['mystery']);
+
+      const details = detailsOf(
+        await plan(view, { kind: 'open' }, "Tell me about the Hero's Journey."),
+      );
+
+      expect(details).toContain('Joseph Campbell');
+      expect(details).toContain('Id: heros-journey');
+    });
+
+    it('in a Series, are those of the Book planned', async () => {
+      const { store, view } = await planned();
+      await store.createBook();
+      const [one, two] = store.manuscript().books!;
+      await store.setBookDetail(one.id, 'genres', ['romance']);
+      await store.setBookDetail(two.id, 'genres', ['horror']);
+
+      const details = detailsOf(
+        await plan(view, { kind: 'open' }, 'Go on.', one.id),
+      );
+
+      expect(details).toContain('Genres: Romance (romance)');
+      expect(details).not.toContain('Genres: Horror');
+    });
+
+    it('are never sent in another Mode', async () => {
+      const { store, view, scenes } = await planned();
+      await store.setBookDetail(PROJECT_OUTLINE, 'genres', ['mystery']);
+      await store.setBookDetail(PROJECT_OUTLINE, 'structure', 'save-the-cat');
+      await store.setBookDetail(PROJECT_OUTLINE, 'genreConventions', [
+        'mystery',
+      ]);
+      const asked = [message('author', "Save the Cat? The Hero's Journey?")];
+      const requests: ContextRequest[] = [
+        { mode: 'brainstorm', messages: asked },
+        { mode: 'interview', focus: OPEN, messages: asked },
+        {
+          mode: 'writing',
+          command: 'question',
+          sceneId: scenes.harbour,
+          messages: asked,
+        },
+      ];
+
+      for (const request of requests) {
+        const text = sent(await buildContext(view, request));
+        expect(text).not.toContain('The Book’s details');
+        expect(text).not.toContain('save-the-cat');
+        expect(text).not.toContain('Joseph Campbell');
+        expect(text).not.toContain('Mystery (fair play)');
+      }
+    });
+  });
 });

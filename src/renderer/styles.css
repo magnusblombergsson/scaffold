@@ -5471,6 +5471,23 @@ button.finding-quote:hover {
   font-weight: 600;
 }
 
+/* A detail proposed and still to decide, beside the one the Book has. */
+.book-detail-ghost {
+  align-self: flex-start;
+  padding: 0.05rem 0.55rem;
+  border: 1px dashed var(--accent);
+  border-radius: 999px;
+  color: var(--accent);
+  font-style: italic;
+  text-decoration: none;
+}
+
+.book-detail-ghost::before {
+  content: 'Proposed: ';
+  font-style: normal;
+  color: var(--muted);
+}
+
 .book-details-about {
   align-self: center;
   margin-left: auto;
