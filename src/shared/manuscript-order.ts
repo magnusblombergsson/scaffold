@@ -1,7 +1,8 @@
-import type {
-  Manuscript,
-  ManuscriptChapter,
-  ManuscriptPart,
+import {
+  PROJECT_OUTLINE,
+  type Manuscript,
+  type ManuscriptChapter,
+  type ManuscriptPart,
 } from './project-types';
 
 // The Manuscript in order, as the Binder, the Overview pane, the Corkboards
@@ -159,4 +160,54 @@ export function splitsToNextChapter(
     (c) => c.book === chapter.book,
   );
   return inBook.findIndex((c) => c.id === chapterId) < inBook.length - 1;
+}
+
+/**
+ * The ids a container of a Book holds, in order, as Plan places units
+ * (spec: Outline planner §4): a Book's top level, by the Book's id or by
+ * `PROJECT_OUTLINE` in a Project of one Book; a Part; or a placed Chapter,
+ * with its Scenes. Null for anything else.
+ */
+export function heldBy(manuscript: Manuscript, id: string): string[] | null {
+  const book = manuscript.books?.find((b) => b.id === id);
+  if (book || (id === PROJECT_OUTLINE && !manuscript.books)) {
+    return topItems(bookManuscript(manuscript, book?.id)).map((item) =>
+      item.kind === 'part' ? item.part.id : item.chapter.id,
+    );
+  }
+  const part = manuscript.parts?.find((p) => p.id === id);
+  if (part) {
+    const placed = new Set(placedChapters(manuscript).map((c) => c.id));
+    return part.chapters.filter((c) => placed.has(c));
+  }
+  const chapter = placedChapters(manuscript).find((c) => c.id === id);
+  return chapter ? chapter.scenes.map((s) => s.id) : null;
+}
+
+/** Every unit a container holds, and those they hold, by id; none for a Scene. */
+export function unitsWithin(manuscript: Manuscript, id: string): string[] {
+  return (heldBy(manuscript, id) ?? []).flatMap((held) => [
+    held,
+    ...unitsWithin(manuscript, held),
+  ]);
+}
+
+/**
+ * The container a placed Scene, Chapter or Part is in, by id as `heldBy`
+ * takes it, and what that holds; null for one Unplaced or not in the
+ * Manuscript.
+ */
+export function placeOfUnit(
+  manuscript: Manuscript,
+  id: string,
+): { in: string; holds: string[] } | null {
+  const top = (book: string | undefined) => book ?? PROJECT_OUTLINE;
+  const placed = placedChapters(manuscript);
+  const container =
+    placed.find((c) => c.scenes.some((s) => s.id === id))?.id ??
+    placed.filter((c) => c.id === id).map((c) => c.part ?? top(c.book))[0] ??
+    manuscript.parts?.filter((p) => p.id === id).map((p) => top(p.book))[0];
+  if (container === undefined) return null;
+  const holds = heldBy(manuscript, container);
+  return holds && holds.includes(id) ? { in: container, holds } : null;
 }

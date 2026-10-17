@@ -5216,6 +5216,25 @@ button.finding-quote:hover {
   cursor: default;
 }
 
+/* A unit a pending Move would bring, where it would go; and where it is. */
+.plan-unit-moved {
+  border: 1px dashed var(--accent);
+  padding: 0.1rem 0;
+}
+
+.plan-unit[data-moving] > .plan-row,
+.plan-unit[data-moving] > .plan-outline {
+  opacity: 0.6;
+}
+
+/* “moving” or “to Trash” beside a unit's title. */
+.plan-mark {
+  margin-left: 0.4rem;
+  font-size: 0.8em;
+  color: var(--muted);
+  font-style: italic;
+}
+
 .plan-row del {
   color: var(--muted);
   font-weight: 400;

@@ -1731,7 +1731,9 @@ describe('Relation Proposals in a reply', () => {
     );
 
     const [, replied] = (await store.readConversation(id)).messages;
-    expect(replied.proposals?.map((p) => [p.name, p.proposed])).toEqual([
+    expect(
+      replied.proposals?.map((p) => [p.name, 'proposed' in p && p.proposed]),
+    ).toEqual([
       ['Mara is mother of Tobin', { kind: 'label', label: 'mother of' }],
       ['Tobin is the same as Mara', { kind: 'same-as' }],
     ]);

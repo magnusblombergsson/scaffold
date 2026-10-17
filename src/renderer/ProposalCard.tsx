@@ -50,6 +50,8 @@ export function proposalTitle(proposal: ProposalView): string {
   }
   if (proposal.kind === 'add') return `Add ${proposal.name}`;
   if (proposal.kind === 'retitle') return `${proposal.name} › Title`;
+  if (proposal.kind === 'move') return `Move ${proposal.name}`;
+  if (proposal.kind === 'trash') return `Put ${proposal.name} in Trash`;
   return `${proposal.name} › Outline`;
 }
 
@@ -217,8 +219,11 @@ export function ProposalCard({
 
   const orphaned = 'orphaned' in state ? state.orphaned : null;
   const refused = 'refused' in state ? state.refused : null;
+  // A Move or Put in Trash is accepted or rejected only.
   const editable =
-    proposal.kind !== 'relation' || proposal.proposed.kind === 'label';
+    proposal.kind === 'relation'
+      ? proposal.proposed.kind === 'label'
+      : proposal.kind !== 'move' && proposal.kind !== 'trash';
   const current = 'current' in state ? state.current : null;
   const stale = 'stale' in state && state.stale;
   // Until those it needs are accepted, it can only be rejected.
@@ -286,7 +291,11 @@ export function ProposalCard({
                 ? fieldLabel(proposal)
                 : proposal.kind === 'retitle'
                   ? 'The title'
-                  : 'The Outline'}{' '}
+                  : proposal.kind === 'move'
+                    ? 'Its place'
+                    : proposal.kind === 'trash'
+                      ? 'It'
+                      : 'The Outline'}{' '}
               has changed since this was proposed.
             </p>
           )}
@@ -391,6 +400,20 @@ function Change({
   stale: boolean;
 }) {
   if (proposal.kind === 'relation') return null;
+  if (proposal.kind === 'move') {
+    return (
+      <p className="proposal-diff" aria-label="Change">
+        Moves here from where it is marked moving.
+      </p>
+    );
+  }
+  if (proposal.kind === 'trash') {
+    return (
+      <p className="proposal-diff" aria-label="Change">
+        <del>{proposal.base.title}</del> to Trash
+      </p>
+    );
+  }
   if (proposal.kind === 'add') {
     return (
       <div className="proposal-diff" aria-label="Change">
@@ -507,6 +530,7 @@ function draftOf(proposal: ProposalView): Draft {
     return proposal.proposed.kind === 'label' ? proposal.proposed.label : '';
   }
   if (proposal.kind === 'add') return { ...proposal.proposed };
+  if (proposal.kind === 'move' || proposal.kind === 'trash') return '';
   if (proposal.kind !== 'field') return proposal.proposed;
   const { field, proposed } = proposal;
   if (field === 'role') return proposed === null ? ROLES[0] : String(proposed);

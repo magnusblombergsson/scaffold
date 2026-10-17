@@ -19,6 +19,7 @@ import {
 } from '../shared/beat-measure';
 import { bookManuscript, topLevel } from '../shared/manuscript-order';
 import {
+  isStructural,
   PLAN_UNIT_LABELS,
   proposalTarget,
   type ProposalView,
@@ -138,22 +139,28 @@ export function PlanRoom({
   const carrying = (beat: string) => carriers(scenes, beat).map((s) => s.title);
   /**
    * Each unit's Proposals made in the Conversation open, an Add once its
-   * unit is there; and the Adds still pending, drawn where they would land.
+   * unit is there; and the Adds and Moves still pending, drawn where they
+   * would land.
    */
-  const { proposals, adds } = useMemo(() => {
+  const { proposals, adds, moves } = useMemo(() => {
     const byUnit = new Map<string, ProposalView[]>();
     const adds: AddView[] = [];
+    const moves: MoveView[] = [];
     for (const m of current?.messages ?? []) {
       for (const p of m.proposals ?? []) {
         if (p.kind === 'add' && p.state.kind === 'pending') {
           adds.push(p);
           continue;
         }
+        if (p.kind === 'move' && p.state.kind === 'pending') {
+          moves.push(p);
+          continue;
+        }
         const unit = unitOf(p);
         if (unit) byUnit.set(unit, [...(byUnit.get(unit) ?? []), p]);
       }
     }
-    return { proposals: byUnit, adds };
+    return { proposals: byUnit, adds, moves };
   }, [current]);
 
   /** Sets the focus from the picker: of the Plan open, or of a new one. */
@@ -228,6 +235,7 @@ export function PlanRoom({
             conversationId={current?.id ?? null}
             proposals={proposals}
             adds={adds}
+            moves={moves}
             selected={selected}
             lit={lit}
             followed={followed}
@@ -435,49 +443,61 @@ type PlanNode = {
   children: PlanNode[];
   /** The pending Add that would make it, for a unit only proposed. */
   proposed?: AddView;
+  /** The pending Move that would bring it here, for a unit drawn where it would go. */
+  moving?: MoveView;
 };
 
 /** A pending Add, drawn as a dashed unit where it would land. */
 type AddView = Extract<ProposalView, { kind: 'add' }>;
 
+/** A pending Move, drawn as its unit where it would go, its origin marked moving. */
+type MoveView = Extract<ProposalView, { kind: 'move' }>;
+
 /** The unit of the tree a Proposal is shown under, if any. */
 function unitOf(proposal: ProposalView): string | null {
   if (proposal.kind === 'outline') return proposal.outlineId;
-  if (proposal.kind === 'add' || proposal.kind === 'retitle') {
-    return proposal.unitId;
-  }
+  if (isStructural(proposal)) return proposal.unitId;
   return null;
 }
 
+/** A unit drawn where a pending Add or Move would put it. */
+type Landing = { node: PlanNode; in: string; after?: string };
+
 /**
- * `children` of the container `id` with the pending Adds into it put
- * where each would land: right after its anchor, at the end when the
- * anchor is gone, or first; an Add after another goes after that one.
+ * `children` of the container `id` with the units pending Adds and Moves
+ * would put in it drawn where each would land: right after its anchor, at
+ * the end when the anchor is gone, or first; one after another goes after
+ * that one.
  */
-function withAdds(
+function withLandings(
   children: PlanNode[],
   id: string,
-  adds: readonly AddView[],
+  landings: readonly Landing[],
 ): PlanNode[] {
   const list = [...children];
-  const into = adds.filter((a) => a.in === id);
+  const into = landings.filter((l) => l.in === id);
   // Those first in it in reverse, so the first proposed comes first.
-  for (const add of [...into].reverse().filter((a) => a.after === undefined)) {
-    list.unshift(proposedNode(add));
+  for (const l of [...into].reverse().filter((l) => l.after === undefined)) {
+    list.unshift(l.node);
   }
-  let left = into.filter((a) => a.after !== undefined);
+  let left = into.filter((l) => l.after !== undefined);
   for (let pass = 0; left.length > 0 && pass <= into.length; pass++) {
-    left = left.filter((add) => {
-      const at = list.findIndex((n) => n.id === add.after);
+    left = left.filter((l) => {
+      const at = list.findIndex((n) => n.id === l.after);
       const placedLater = left.some(
-        (other) => other !== add && other.unitId === add.after,
+        (other) => other !== l && other.node.id === l.after,
       );
       if (at < 0 && placedLater) return true;
-      list.splice(at < 0 ? list.length : at + 1, 0, proposedNode(add));
+      list.splice(at < 0 ? list.length : at + 1, 0, l.node);
       return false;
     });
   }
   return list;
+}
+
+/** The unit a pending Move would bring, drawn where it would go, without what it holds. */
+function movedNode(move: MoveView, node: PlanNode): PlanNode {
+  return { ...node, children: [], moving: move };
 }
 
 /** The dashed unit a pending Add would make. */
@@ -601,9 +621,12 @@ function unitsInFocus(nodes: PlanNode[], focus: PlanFocus): Set<string> {
 
 /**
  * The Book's Outline tree: each unit's title, Outline and a ¶ when it holds
- * Prose, those in the focus marked; under each, the Outline Proposals of
- * the Conversation open still to decide, or accepted and undoable, as
- * cards with Accept, Reject, Edit and Undo.
+ * Prose, those in the focus marked; under each, the Proposals of the
+ * Conversation open still to decide, or accepted and undoable, as cards
+ * with Accept, Reject, Edit and Undo. A pending Add is a dashed unit where
+ * it would land; a pending Move draws its unit where it would go, with its
+ * card, and marks it moving where it is; a pending Put in Trash strikes its
+ * unit through, marked to Trash.
  */
 function PlanTree({
   nodes,
@@ -611,6 +634,7 @@ function PlanTree({
   conversationId,
   proposals,
   adds,
+  moves,
   selected,
   lit,
   followed,
@@ -621,18 +645,34 @@ function PlanTree({
   conversationId: string | null;
   proposals: Map<string, ProposalView[]>;
   adds: AddView[];
+  moves: MoveView[];
   selected: string | null;
   lit: string | null;
   followed: readonly FollowedBeat[];
   onSelect(id: string): void;
 }) {
   const every = allNodes(nodes);
-  // Adds into a container no longer in the plan, still to reject.
+  const byId = new Map(every.map((n) => [n.id, n]));
+  const landings: Landing[] = [
+    ...adds.map((add) => ({
+      node: proposedNode(add),
+      in: add.in,
+      after: add.after,
+    })),
+    ...moves.flatMap((move) => {
+      const node = byId.get(move.unitId);
+      return node
+        ? [{ node: movedNode(move, node), in: move.in, after: move.after }]
+        : [];
+    }),
+  ];
+  // Those into a container, or of a unit, no longer in the plan, still to reject.
   const drawn = new Set([
     ...every.map((n) => n.id),
     ...adds.map((a) => a.unitId),
   ]);
-  const astray = adds.filter((a) => !drawn.has(a.in));
+  const astray = landings.filter((l) => !drawn.has(l.in));
+  const unmoved = moves.filter((m) => !byId.has(m.unitId));
   const { outlines } = useOutlines(every.map((n) => n.id));
   const prose = useProse(
     every.filter((n) => n.kind === 'scene').flatMap((n) => n.scenes),
@@ -642,28 +682,48 @@ function PlanTree({
     (p.state.kind === 'accepted' && !p.state.undoBlocked);
 
   function unit(node: PlanNode) {
-    const { proposed } = node;
+    const { proposed, moving } = node;
     const body = proposed
       ? proposed.proposed.outline.trim()
       : outlines.get(node.id)?.trim();
     const holds = node.scenes.some((s) => prose.has(s.id));
+    // Where a Move would bring it, only the Move; where it is, the rest.
     const mine = proposed
       ? [proposed]
-      : (proposals.get(node.id) ?? []).filter(shown);
+      : moving
+        ? [moving]
+        : (proposals.get(node.id) ?? []).filter(shown);
     const retitle = mine.find(
       (p): p is Extract<ProposalView, { kind: 'retitle' }> =>
         p.kind === 'retitle' && p.state.kind === 'pending',
     );
-    const children = withAdds(node.children, node.id, adds);
+    const toTrash = mine.some(
+      (p) => p.kind === 'trash' && p.state.kind === 'pending',
+    );
+    const movingAway = !moving && moves.some((m) => m.unitId === node.id);
+    const children = withLandings(node.children, node.id, landings);
     return (
       <li
-        key={node.id}
-        className={proposed ? 'plan-unit plan-unit-proposed' : 'plan-unit'}
+        key={moving ? `${node.id}:moved` : node.id}
+        className={
+          proposed
+            ? 'plan-unit plan-unit-proposed'
+            : moving
+              ? 'plan-unit plan-unit-moved'
+              : 'plan-unit'
+        }
         data-kind={node.kind}
         data-plan-unit={node.id}
         data-in-focus={inFocus.has(node.id) || undefined}
         data-lit={lit === node.id || undefined}
-        aria-label={node.name}
+        data-moving={movingAway || undefined}
+        aria-label={
+          moving
+            ? `${node.name} (moved here)`
+            : movingAway
+              ? `${node.name} (moving)`
+              : node.name
+        }
       >
         <button
           className="plan-row"
@@ -675,9 +735,15 @@ function PlanTree({
             <span className="plan-title">
               <del>{node.title}</del> <ins>{retitle.proposed}</ins>
             </span>
+          ) : toTrash ? (
+            <span className="plan-title">
+              <del>{node.title}</del>
+            </span>
           ) : (
             <span className="plan-title">{node.title}</span>
           )}
+          {toTrash && <span className="plan-mark">to Trash</span>}
+          {movingAway && <span className="plan-mark">moving</span>}
           {holds && (
             <span
               className="plan-prose"
@@ -711,12 +777,20 @@ function PlanTree({
   return (
     <section className="plan-tree" aria-label="Outline tree">
       <ul>{nodes.map(unit)}</ul>
-      {astray.length > 0 && (
+      {(astray.length > 0 || unmoved.length > 0) && (
         <>
           <p className="plan-astray">
             Proposed for a unit no longer in the plan:
           </p>
-          <ul>{astray.map((add) => unit(proposedNode(add)))}</ul>
+          <ul>{astray.map((l) => unit(l.node))}</ul>
+          {conversationId &&
+            unmoved.map((p) => (
+              <ProposalCard
+                key={p.id}
+                conversationId={conversationId}
+                proposal={p}
+              />
+            ))}
         </>
       )}
     </section>

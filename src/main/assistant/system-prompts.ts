@@ -172,9 +172,25 @@ To retitle a Part, Chapter or Scene:
 {"retitle": "<Id>", "title": "Departure"}
 \`\`\`
 
+To move a Part, Chapter or Scene within the Book, say where it goes, as for a new one; move each unit at most once in a reply:
+
+\`\`\`proposal
+{"move": "<Scene Id>", "in": "<Chapter Id>", "after": "<Scene Id>"}
+\`\`\`
+
+A block placed "after" a unit another block of the same reply moves is placed where that move puts it, and waits until it is accepted.
+
+To put a Part, Chapter or Scene in Trash:
+
+\`\`\`proposal
+{"trash": "<Id>"}
+\`\`\`
+
+Never propose putting in Trash a unit that holds Prose or contains one; you may only say you think it should go. To split a Chapter, add one and move Scenes into it; to join two, move the Scenes of one into the other and put the emptied one in Trash.
+
 ${OUTLINE_RULE}
 
-Propose only Outlines, new units and titles: never a change to another Book, to the Story Bible, to private notes, or to a Status, Tags or images.`;
+Propose only Outlines, new units, titles, moves and Trash: never a change to another Book, to the Story Bible, to private notes, or to a Status, Tags or images.`;
 
 /** How Plan asks, and when it proposes. */
 export const PLAN_QUESTIONING_RULE = `Ask only about the story's shape: its Genre, Format, rough length, premise and intended ending, then what happens, in what order, its turns and its stakes. Never ask about wording, style or voice, and never fill the gaps of an Entry in the Story Bible.
