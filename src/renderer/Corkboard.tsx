@@ -40,6 +40,7 @@ import {
   UnitThumbnail,
 } from './UnitImage';
 import { useImagePicker } from './ImagePicker';
+import { WritingBeatChips } from './Beats';
 
 /** Whether the cards show their images large, not their Outline and Notes. */
 const ImagesContext = createContext(false);
@@ -700,6 +701,7 @@ function SceneCard({
       number={number}
       className="card"
       missing={scene.missing}
+      beats={<WritingBeatChips sceneId={scene.id} />}
       language={language}
       onOpen={onOpen}
       onAddTodo={onAddTodo}
@@ -715,6 +717,8 @@ type UnitCardProps = {
   className: string;
   /** Set for a Scene whose file hasn't arrived. */
   missing?: boolean;
+  /** A Scene's Beats, shown under its Status and Tags. */
+  beats?: ReactNode;
   language: ProseLanguage;
   onOpen(): void;
   onAddTodo(): void;
@@ -728,8 +732,16 @@ type UnitCardProps = {
 function UnitCard(props: UnitCardProps) {
   const images = useContext(ImagesContext);
   if (images) return <ImageCard {...props} />;
-  const { unit, number, className, missing, language, onOpen, onAddTodo } =
-    props;
+  const {
+    unit,
+    number,
+    className,
+    missing,
+    beats,
+    language,
+    onOpen,
+    onAddTodo,
+  } = props;
   return (
     <article className={className} aria-label={unit.title}>
       <CardTitle
@@ -744,6 +756,7 @@ function UnitCard(props: UnitCardProps) {
         <>
           <OutlineNotes unitId={unit.id} language={language} withNotes />
           <StatusAndTagsEditor unit={unit} />
+          {beats}
         </>
       )}
     </article>
@@ -760,6 +773,7 @@ function ImageCard({
   number,
   className,
   missing,
+  beats,
   onOpen,
   onAddTodo,
 }: UnitCardProps) {
@@ -788,7 +802,12 @@ function ImageCard({
         onOpen={onOpen}
         onAddTodo={onAddTodo}
       />
-      {!missing && <StatusAndTagsEditor unit={unit} />}
+      {!missing && (
+        <>
+          <StatusAndTagsEditor unit={unit} />
+          {beats}
+        </>
+      )}
     </article>
   );
 }

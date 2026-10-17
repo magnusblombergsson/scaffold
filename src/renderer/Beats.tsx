@@ -1,20 +1,22 @@
-import { useContext } from 'react';
+import { createContext, useContext } from 'react';
 import {
   beatWhere,
   carriers,
+  sceneBeatsInWriting,
   spanText,
   type FollowedBeat,
   type Measure,
   type Span,
 } from '../shared/beat-measure';
-import type { ManuscriptScene } from '../shared/project-types';
+import type { Manuscript, ManuscriptScene } from '../shared/project-types';
 import { ReadOnlyContext } from './read-only';
 import { useRun } from './use-project';
 
 // A Scene's Beats in the Plan Room (spec: Outline planner §3, §7): chips on
 // its row in the tree, checkboxes in its details, and the Beat rail beside
-// the tree. Only the Beats of what the Book follows are shown; a Scene's
-// other marks are set aside, kept but unseen.
+// the tree; and in Writing (§8), read-only chips on its Corkboard card and
+// Overview row. Only the Beats of what the Book follows are shown; a
+// Scene's other marks are set aside, kept but unseen.
 
 const MEASURED: Record<Measure, string> = {
   words: 'by planned words',
@@ -52,6 +54,41 @@ export function BeatChips({
           title={change ? PROPOSED_LABELS[change] : undefined}
         >
           {change === 'removed' ? <del>{beat.name}</del> : beat.name}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+/**
+ * In Writing, the whole Manuscript, whose Books' details say which of a
+ * Scene's Beats show, and opening Plan on a Scene; none outside Writing.
+ */
+export const WritingBeatsContext = createContext<{
+  manuscript: Manuscript;
+  onOpenPlan(sceneId: string): void;
+} | null>(null);
+
+/**
+ * A Scene's Beats of what its Book follows, as chips on its Corkboard card
+ * or Overview row (spec: Outline planner §8). They are set only in Plan:
+ * choosing one opens Plan on the Scene.
+ */
+export function WritingBeatChips({ sceneId }: { sceneId: string }) {
+  const writing = useContext(WritingBeatsContext);
+  const shown = writing && sceneBeatsInWriting(writing.manuscript, sceneId);
+  if (!shown || shown.beats.length === 0) return null;
+  return (
+    <ul className="beat-chips writing-beat-chips" aria-label="Beats">
+      {shown.beats.map((beat) => (
+        <li key={beat.id} className="beat-chip" data-column={beat.column}>
+          <button
+            className="beat-chip-open"
+            title="Open in Plan"
+            onClick={() => writing.onOpenPlan(sceneId)}
+          >
+            {beat.name}
+          </button>
         </li>
       ))}
     </ul>

@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { followedBeats, sceneFalls, shownBeats } from './beat-measure';
+import type { Manuscript } from './project-types';
+import {
+  followedBeats,
+  sceneBeatsInWriting,
+  sceneFalls,
+  shownBeats,
+} from './beat-measure';
 
 describe('where each Scene falls', () => {
   it('is measured in planned words when every Scene has a Word target', () => {
@@ -101,5 +107,80 @@ describe('the marks shown on a Scene', () => {
         (b) => b.id,
       ),
     ).toEqual(['save-the-cat/midpoint']);
+  });
+});
+
+describe('a Scene’s Beats as Writing shows them', () => {
+  const scene = (id: string, beats?: string[]) => ({
+    id,
+    title: id,
+    ...(beats && { beats }),
+  });
+
+  it('are those of what the Book follows, with the Chapter Plan opens on', () => {
+    const manuscript: Manuscript = {
+      structure: 'three-act',
+      genreConventions: ['mystery'],
+      chapters: [
+        {
+          id: 'c1',
+          title: 'One',
+          scenes: [
+            scene('s1'),
+            scene('s2', ['mystery/reveal', 'save-the-cat/midpoint']),
+          ],
+        },
+      ],
+      unplaced: [],
+    };
+
+    const shown = sceneBeatsInWriting(manuscript, 's2');
+
+    expect(shown?.chapterId).toBe('c1');
+    expect(shown?.book).toBeUndefined();
+    expect(shown?.beats.map((b) => b.id)).toEqual(['mystery/reveal']);
+  });
+
+  it('in a Series are those of what its own Book follows', () => {
+    const marks = ['three-act/midpoint', 'save-the-cat/midpoint'];
+    const manuscript: Manuscript = {
+      books: [
+        { id: 'b1', title: 'First', top: ['c1'], structure: 'three-act' },
+        { id: 'b2', title: 'Second', top: ['c2'], structure: 'save-the-cat' },
+      ],
+      top: ['c1', 'c2'],
+      chapters: [
+        { id: 'c1', title: 'One', book: 'b1', scenes: [scene('s1', marks)] },
+        { id: 'c2', title: 'Two', book: 'b2', scenes: [scene('s2', marks)] },
+      ],
+      unplaced: [],
+    };
+
+    const first = sceneBeatsInWriting(manuscript, 's1');
+    const second = sceneBeatsInWriting(manuscript, 's2');
+
+    expect(first?.book).toBe('b1');
+    expect(first?.beats.map((b) => b.id)).toEqual(['three-act/midpoint']);
+    expect(second).toMatchObject({ book: 'b2', chapterId: 'c2' });
+    expect(second?.beats.map((b) => b.id)).toEqual(['save-the-cat/midpoint']);
+  });
+
+  it('are none for a Scene in no Book: Unplaced, or in an Unplaced Chapter', () => {
+    const marks = ['three-act/midpoint'];
+    const manuscript: Manuscript = {
+      structure: 'three-act',
+      chapters: [
+        {
+          id: 'c1',
+          title: 'Stray',
+          unplaced: true,
+          scenes: [scene('s1', marks)],
+        },
+      ],
+      unplaced: [scene('s2', marks)],
+    };
+
+    expect(sceneBeatsInWriting(manuscript, 's1')).toBeNull();
+    expect(sceneBeatsInWriting(manuscript, 's2')).toBeNull();
   });
 });
