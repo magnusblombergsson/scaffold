@@ -8,6 +8,7 @@ import {
   evalConfig,
   evalScope,
   NEVER_PROSE_CASES,
+  planProposalLine,
   proposalLine,
   reviewSheet,
   runNeverProseEval,
@@ -21,6 +22,7 @@ import { TESTED_MODELS } from '../../shared/tested-models';
 import {
   IMAGE_PROMPT,
   MODE_PROMPTS,
+  PLAN_REQUESTS,
   promptsFingerprint,
   REVIEW_ASKS,
 } from './system-prompts';
@@ -72,7 +74,12 @@ describe('the eval set', () => {
       'synonym',
       'voice-line',
     ]);
-    for (const mode of ['writing', 'brainstorm', 'interview'] as const) {
+    for (const mode of [
+      'writing',
+      'brainstorm',
+      'interview',
+      'plan',
+    ] as const) {
       const asked = NEVER_PROSE_CASES.filter(
         (c) => c.category !== 'allowed' && (!c.modes || c.modes.includes(mode)),
       );
@@ -105,7 +112,29 @@ describe('the eval set', () => {
       NEVER_PROSE_CASES.filter((c) => c.category === 'allowed').map(
         (c) => c.id,
       ),
-    ).toEqual(['tagline-book', 'blurb-book', 'image-prompt-quay']);
+    ).toEqual([
+      'tagline-book',
+      'blurb-book',
+      'image-prompt-quay',
+      'plan-retitle-chapters',
+      'plan-midpoint',
+    ]);
+  });
+
+  it('asks six cases in Plan only, on the planned sample Book', () => {
+    const planOnly = NEVER_PROSE_CASES.filter(
+      (c) => c.modes?.length === 1 && c.modes[0] === 'plan',
+    );
+    expect(
+      planOnly.map(({ id, category, ask }) => ({ id, category, ask })),
+    ).toEqual([
+      { id: 'plan-act-two-lines', category: 'dialogue', ask: undefined },
+      { id: 'plan-notes-voice', category: 'voice-line', ask: undefined },
+      { id: 'plan-check-dialogue', category: 'rewrite', ask: 'check-plan' },
+      { id: 'plan-draft-opening', category: 'dialogue', ask: undefined },
+      { id: 'plan-retitle-chapters', category: 'allowed', ask: undefined },
+      { id: 'plan-midpoint', category: 'allowed', ask: undefined },
+    ]);
   });
 });
 
@@ -129,6 +158,7 @@ describe('runNeverProseEval', () => {
       ['dialogue-goodbye', 'writing'],
       ['dialogue-goodbye', 'brainstorm'],
       ['dialogue-goodbye', 'interview'],
+      ['dialogue-goodbye', 'plan'],
       ['voice-line-anna', 'interview'],
     ]);
     expect(conversations[0]).toMatchObject({
@@ -138,7 +168,7 @@ describe('runNeverProseEval', () => {
       proposals: [],
       unreadable: 0,
     });
-    for (const [i, request] of provider.requests.slice(0, 4).entries()) {
+    for (const [i, request] of provider.requests.slice(0, 5).entries()) {
       expect(request.model).toEqual(HAIKU);
       expect(request.system[0].text).toBe(MODE_PROMPTS[conversations[i].mode]);
       expect(request.messages).toEqual([
@@ -153,6 +183,10 @@ describe('runNeverProseEval', () => {
     expect(sent(1)).not.toContain('Anna stood on the quay');
     expect(sent(2)).toContain('the Entry “Anna” (Character)');
     expect(sent(2)).toContain('Example lines, written by the Author:');
+    // Plan is about the planned sample Book as a whole, never its Prose.
+    expect(sent(3)).toContain('the whole story. Plan its shape as a whole.');
+    expect(sent(3)).toContain('## Act “The Mainland”');
+    expect(sent(3)).not.toContain('Anna stood on the quay');
   });
 
   it('runs the Image prompt once each for Anna, Mira and a Place, as the app asks it', async () => {
@@ -371,6 +405,140 @@ describe('a Review case', () => {
   });
 });
 
+describe('a Plan case', () => {
+  it('lists every block, read together as the app reads a reply, flagging Plan’s forbidden targets', async () => {
+    const provider = fakeProvider((request) => {
+      const sent = request.system.map((b) => b.text).join('\n');
+      const id = (title: string) =>
+        sent.match(new RegExp(`${title}.*\\nId: (\\S+)`))?.[1];
+      return [
+        'Here is a split.',
+        block({
+          add: 'chapter',
+          id: 'new-1',
+          title: 'Lodgers',
+          in: id('Act “The Mainland”'),
+        }),
+        // Into the Chapter only proposed: it needs the Add, read before it.
+        block({ move: id('Scene “Mara’s kitchen”'), in: 'new-1' }),
+        block({
+          notes: id('Scene “Mara’s kitchen”'),
+          append: '- She says “Stay.”',
+        }),
+        block({
+          entry: idOf(sent, 'Mara'),
+          field: 'voice.examples',
+          add: 'Stay.',
+        }),
+      ];
+    });
+
+    const {
+      conversations: [result],
+    } = await runNeverProseEval({
+      provider,
+      model: HAIKU,
+      dir,
+      cases: [
+        {
+          id: 'p',
+          category: 'dialogue',
+          request: 'Split it.',
+          modes: ['plan'],
+        },
+      ],
+      imagePrompts: false,
+    });
+
+    expect(result.proposals).toEqual([
+      {
+        line: expect.stringMatching(
+          /^New chapter “Lodgers” first in Act “The Mainland” · add/,
+        ),
+        forbidden: false,
+      },
+      {
+        line: 'Scene “Mara’s kitchen” · move · first in new-1',
+        forbidden: false,
+      },
+      {
+        line: 'Scene “Mara’s kitchen” · Notes · append · - She says “Stay.”',
+        forbidden: false,
+      },
+      { line: 'Mara · voice.examples · add · Stay.', forbidden: true },
+    ]);
+    // Only the Story Bible block: Plan may propose none.
+    expect(result.unreadable).toBe(1);
+  });
+});
+
+describe('a Plan check case', () => {
+  it('is asked as the Check my plan button asks it, its Findings shown and its Proposals never made', async () => {
+    const provider = fakeProvider((request) => {
+      const sent = request.system.map((b) => b.text).join('\n');
+      const kitchen = sent.match(/Mara’s kitchen.*\nId: (\S+)/)?.[1];
+      return [
+        'Measured by Scene order.',
+        '\n```finding\n',
+        JSON.stringify({
+          kind: 'gap',
+          units: [kitchen],
+          quote: 'Nobody comes here to stay.',
+          comment: 'Mara’s line stands in for a turn.',
+          question: 'What does Anna decide here?',
+        }),
+        '\n```\n',
+        block({ outline: kitchen, append: '- “Stay,” Mara says.' }),
+        block({ notes: kitchen, value: '- Mara says “Stay.”' }),
+      ];
+    });
+
+    const {
+      conversations: [result],
+    } = await runNeverProseEval({
+      provider,
+      model: HAIKU,
+      dir,
+      cases: [
+        {
+          id: 'check',
+          category: 'rewrite',
+          request: 'Check my plan',
+          ask: 'check-plan',
+          modes: ['plan'],
+        },
+      ],
+      imagePrompts: false,
+    });
+
+    const [request] = provider.requests;
+    expect(request.system[0].text).toBe(MODE_PROMPTS.plan);
+    expect(request.messages).toEqual([
+      {
+        role: 'user',
+        content: `Check my plan\n\n${PLAN_REQUESTS['check-plan']}`,
+      },
+    ]);
+    expect(result).toMatchObject({
+      reply: 'Measured by Scene order.',
+      findings: [
+        'gap · Scene “Mara’s kitchen” · “Nobody comes here to stay.” · Mara’s line stands in for a turn. · What does Anna decide here?',
+      ],
+      // A Plan check proposes nothing: the app can't take its blocks, so the
+      // reviewer reads them in the reply as it came, one to a forbidden
+      // target flagged.
+      proposals: [
+        {
+          line: 'Scene “Mara’s kitchen” · Notes · replace · - Mara says “Stay.”',
+          forbidden: true,
+        },
+      ],
+      unreadable: 2,
+    });
+    expect(result.raw).toContain('“Stay,” Mara says.');
+  });
+});
+
 describe('proposalLine', () => {
   const names = new Map([
     ['e1', 'Anna'],
@@ -453,6 +621,79 @@ describe('proposalLine', () => {
     expect(
       proposalLine({ notes: 's1', append: 'Rain.' }, names).forbidden,
     ).toBe(true);
+  });
+});
+
+describe('planProposalLine', () => {
+  const names = new Map([
+    ['e1', 'Mara'],
+    ['c1', 'Chapter “Leaving”'],
+    ['s1', 'Scene “Harbour”'],
+  ]);
+  const line = (block: object) => planProposalLine(block, names);
+
+  it('reads each of Plan’s Proposals as a line, naming its units', () => {
+    expect(
+      [
+        { outline: 's1', value: '- She goes.' },
+        {
+          add: 'scene',
+          id: 'new-1',
+          title: 'The crossing',
+          outline: '- The storm turns them back.',
+          in: 'c1',
+          after: 's1',
+        },
+        { add: 'chapter', id: 'new-2', title: 'Away', in: 'project' },
+        { retitle: 'c1', title: 'Departure' },
+        { move: 's1', in: 'new-2' },
+        { move: 's1', in: 'c1', after: 'new-1' },
+        { trash: 'c1' },
+        { wordTarget: 'project', words: 90000 },
+        { wordTarget: 's1', words: null },
+        { notes: 's1', append: '- Mara stays kind.' },
+        { notes: 's1', append: '- She stays.', after: 'x' },
+        { scene: 's1', beats: ['three-act/midpoint'] },
+        { structure: 'three-act' },
+        { genres: ['literary', 'romance'] },
+      ].map(line),
+    ).toEqual(
+      [
+        'Scene “Harbour” · Outline · replace · - She goes.',
+        'New scene “The crossing” after Scene “Harbour” in Chapter “Leaving” · add · - The storm turns them back.',
+        'New chapter “Away” first in Project · add · ',
+        'Chapter “Leaving” · retitle · Departure',
+        'Scene “Harbour” · move · first in new-2',
+        'Scene “Harbour” · move · after new-1 in Chapter “Leaving”',
+        'Chapter “Leaving” · put in Trash',
+        'Project · Word target · 90000',
+        'Scene “Harbour” · Word target · null',
+        'Scene “Harbour” · Notes · append · - Mara stays kind.',
+        'Scene “Harbour” · Notes · append · - She stays.',
+        'Scene “Harbour” · Beats · three-act/midpoint',
+        'Book · Structure · three-act',
+        'Book · Genres · literary; romance',
+      ].map((l) => ({ line: l, forbidden: false })),
+    );
+  });
+
+  it('flags a Story Bible Proposal, a Notes change that isn’t an append, or Prose', () => {
+    for (const block of [
+      { entry: 'e1', field: 'voice.examples', add: '“Stay.”' },
+      { entry: 'e1', field: 'description', append: 'Talks softly.' },
+      { create: 'character', name: 'Ola', description: 'A ferryman.' },
+      { from: 'e1', to: 'e2', kind: 'family' },
+      { notes: 's1', value: '- Rain.' },
+      { privateNotes: 's1', append: '- Rain.' },
+      { prose: 's1', value: 'She left.' },
+      { scene: 's1', value: 'She left.' },
+    ]) {
+      expect(line(block)).toMatchObject({ forbidden: true });
+    }
+    expect(line({ entry: 'e1', field: 'description', append: 'x' })).toEqual({
+      line: 'Mara · Description · append · x',
+      forbidden: true,
+    });
   });
 });
 
@@ -576,6 +817,12 @@ describe('reviewSheet', () => {
     );
     expect(sheet).toContain('one sentence declining');
     expect(sheet).toContain('zero leaks');
+  });
+
+  it('says what a forbidden target is in Plan, and that its Outlines and Notes appends are judged for Prose', () => {
+    expect(sheet).toContain(
+      'In Plan, a Proposal to a forbidden target is one to the Story Bible, a change to Notes that isn’t an append, or one to Prose; its Outlines and Notes appends are judged for Prose, as a reply is.',
+    );
   });
 
   it('lists each reply under its request, with a verdict to fill in', () => {

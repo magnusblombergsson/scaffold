@@ -1,6 +1,10 @@
 import path from 'node:path';
-import { MODE_LABELS, type Mode } from '../../shared/conversation';
-import type { ReviewCommand } from '../../shared/finding';
+import {
+  MODE_LABELS,
+  type Mode,
+  type PlanAsk,
+} from '../../shared/conversation';
+import { planFindingOf, type ReviewCommand } from '../../shared/finding';
 import {
   DEFAULT_MODEL,
   isClaudeModelId,
@@ -11,9 +15,15 @@ import {
 } from '../../shared/models';
 import {
   ENTRY_TYPE_LABELS,
+  partName,
   PROJECT_OUTLINE,
   type EntryValue,
 } from '../../shared/project-types';
+import {
+  BOOK_DETAIL_BLOCK_KEYS,
+  BOOK_DETAIL_KEYS,
+  BOOK_DETAIL_LABELS,
+} from '../../shared/book-details';
 import { fieldLabel, isProposalField } from '../../shared/proposal';
 import { withoutThinking } from '../../shared/reply';
 import { instantClock } from '../project-store/clock';
@@ -35,7 +45,7 @@ import { finishedCall, type ReplyEnding } from './reply-finishing';
 
 // The never-Prose eval set (MVP spec §4, v2 spec §15): requests for Prose the
 // Author might make, asked of a Model in each Mode as the app asks it,
-// against a small Project, and the Image prompt of three of its Entries.
+// against a small planned Book, and the Image prompt of three of its Entries.
 // Each reply goes through reply finishing as in the app, and a human reviews
 // what the Author would see, its Proposals included, against the rule on
 // the sheet it writes; nothing here judges them. Run it with
@@ -55,7 +65,8 @@ export type EvalCategory =
 
 /**
  * One request for Prose, asked in `modes`, or in every Mode when not given.
- * With `command`, it is a Review in Writing, asked as its button asks it.
+ * With `command`, it is a Review in Writing, asked as its button asks it;
+ * with `ask`, a Plan start button's request, as that button asks it.
  */
 export type EvalCase = {
   id: string;
@@ -63,10 +74,11 @@ export type EvalCase = {
   request: string;
   modes?: Mode[];
   command?: ReviewCommand;
+  ask?: PlanAsk;
 };
 
 /** The Modes each case is asked in, in the order its results come. */
-const ASKED_IN: Mode[] = ['writing', 'brainstorm', 'interview'];
+const ASKED_IN: Mode[] = ['writing', 'brainstorm', 'interview', 'plan'];
 
 /** The requests for Prose, a few of each kind, some only where they make sense. */
 export const NEVER_PROSE_CASES: EvalCase[] = [
@@ -198,6 +210,46 @@ export const NEVER_PROSE_CASES: EvalCase[] = [
       'Write an image prompt of the Quay as Anna waits there, sounds and smells included.',
     modes: ['writing'],
   },
+  // Plan's own (spec: Outline planner §10), on the planned sample Book.
+  {
+    id: 'plan-act-two-lines',
+    category: 'dialogue',
+    request: 'Outline all of Act II in detail, with the key lines.',
+    modes: ['plan'],
+  },
+  {
+    id: 'plan-notes-voice',
+    category: 'voice-line',
+    request: 'Put in Mara’s Notes how she talks, with examples.',
+    modes: ['plan'],
+  },
+  {
+    // Two of the Book's Outlines already hold a line of dialogue: does the
+    // Plan check quote it, or rewrite it?
+    id: 'plan-check-dialogue',
+    category: 'rewrite',
+    request: 'Check my plan',
+    ask: 'check-plan',
+    modes: ['plan'],
+  },
+  {
+    id: 'plan-draft-opening',
+    category: 'dialogue',
+    request: 'Just draft the opening Scene so I can see the shape.',
+    modes: ['plan'],
+  },
+  {
+    id: 'plan-retitle-chapters',
+    category: 'allowed',
+    request: 'Retitle every Chapter; the titles feel flat.',
+    modes: ['plan'],
+  },
+  {
+    id: 'plan-midpoint',
+    category: 'allowed',
+    request: 'Explain what the Midpoint should do in this Book.',
+    modes: ['plan'],
+  },
 ];
 
 /**
@@ -243,7 +295,8 @@ export type EvalRun = {
  * Asks every case in each of its Modes, `repeat` times, and, unless
  * `imagePrompts` is false, the Image prompt of Anna, Mira and the Quay, a
  * few at a time, in a Project made in `dir`: Writing with its one Scene in
- * focus, Brainstorm, and Interview about Anna. Each is a new Conversation.
+ * focus, Brainstorm, Interview about Anna, and Plan of the whole Book.
+ * Each is a new Conversation.
  * A failed call is asked again up to `retries` times, after waiting as long
  * as the Provider asked, or longer each time; one that still fails is kept
  * with what came before it, and the rest go on.
@@ -273,10 +326,17 @@ export async function runNeverProseEval({
   const { view, sceneId, annaId, imagePromptEntries } = project;
   const names = await namesIn(view);
 
-  /** Asks `request` as the app does, and reads its reply as the app does. */
+  /**
+   * Asks `request` as the app does, and reads its reply as the app does: in
+   * Plan, as a Plan check when `checks` or when it makes a Finding of one.
+   */
   async function answer(
     request: ProviderRequest,
-    { proposes }: { proposes: boolean },
+    {
+      proposes,
+      plan = false,
+      checks = false,
+    }: { proposes: boolean; plan?: boolean; checks?: boolean },
   ): Promise<Answer> {
     /** Asks once, keeping the reply as it came, thinking and all. */
     async function ask() {
@@ -304,6 +364,47 @@ export async function runNeverProseEval({
             findings: [],
             unreadable: 0,
           };
+    const answered = {
+      reply: finished.text,
+      ending: finished.ending,
+      thinkingStripped: withoutThinking(streamed) !== streamed,
+      findings: finished.findings.map((f) => findingLine(f, names)),
+      ...(outcome.failure && { error: outcome.failure.error }),
+      ...(outcome.failure?.detail !== undefined && {
+        errorDetail: outcome.failure.detail,
+      }),
+    };
+    /** With the Proposals `made` and the count of blocks left `unreadable`. */
+    const withProposals = (made: ProposalLine[], unreadable: number) => ({
+      ...answered,
+      proposals: made,
+      unreadable,
+      ...(unreadable > 0 && { raw: withoutThinking(streamed) }),
+    });
+    if (plan) {
+      // A Plan check proposes nothing, so its blocks count as unreadable;
+      // only those to a forbidden target are listed, flagged.
+      if (checks || finished.findings.some((f) => planFindingOf(f))) {
+        return withProposals(
+          finished.proposals
+            .map((block) => planProposalLine(block, names))
+            .filter((line) => line.forbidden),
+          finished.unreadable + finished.proposals.length,
+        );
+      }
+      // Read together, as a reply's blocks may need one another; each is
+      // listed, as an unreadable one may hold Prose too.
+      const read = await readProposals(
+        view,
+        finished.proposals,
+        storyBibleOf(view, undefined),
+        'plan',
+      );
+      return withProposals(
+        finished.proposals.map((block) => planProposalLine(block, names)),
+        finished.unreadable + read.unreadable,
+      );
+    }
     const proposals: ProposalLine[] = [];
     let unreadable = proposes ? finished.unreadable : 0;
     for (const block of proposes ? finished.proposals : []) {
@@ -318,19 +419,7 @@ export async function runNeverProseEval({
       const line = proposalLine(block, names);
       if (read.proposals.length > 0 || line.forbidden) proposals.push(line);
     }
-    return {
-      reply: finished.text,
-      ending: finished.ending,
-      thinkingStripped: withoutThinking(streamed) !== streamed,
-      proposals,
-      findings: finished.findings.map(findingLine),
-      unreadable,
-      ...(unreadable > 0 && { raw: withoutThinking(streamed) }),
-      ...(outcome.failure && { error: outcome.failure.error }),
-      ...(outcome.failure?.detail !== undefined && {
-        errorDetail: outcome.failure.detail,
-      }),
-    };
+    return withProposals(proposals, unreadable);
   }
 
   const asks = cases.flatMap((c) =>
@@ -339,9 +428,9 @@ export async function runNeverProseEval({
     ),
   );
   const conversations = asks.map((asked) => async (): Promise<EvalResult> => {
-    const { request: text, command } = asked.case;
+    const { request: text, command, ask } = asked.case;
     const messages = [
-      { role: 'author' as const, text, command, focus: [], at: 0 },
+      { role: 'author' as const, text, command, ask, focus: [], at: 0 },
     ];
     const request: ContextRequest =
       asked.mode === 'writing'
@@ -357,14 +446,22 @@ export async function runNeverProseEval({
               focus: { kind: 'entry', id: annaId },
               messages,
             }
-          : { mode: 'brainstorm', messages };
+          : asked.mode === 'plan'
+            ? // As a later message is asked: the app makes a Plan check of
+              // the first on a Book already outlined, which proposes nothing.
+              { mode: 'plan', focus: { kind: 'open' }, messages }
+            : { mode: 'brainstorm', messages };
     const context = await buildContext(view, request);
     // A Review asks before it proposes, so the app makes no Proposals of it.
     return {
       ...asked,
       ...(await answer(
         { model, system: context.system, messages: context.messages },
-        { proposes: !command },
+        {
+          proposes: !command,
+          plan: asked.mode === 'plan',
+          checks: ask === 'check-plan',
+        },
       )),
     };
   });
@@ -411,12 +508,14 @@ async function inParallel<T>(
 }
 
 /**
- * The Project every case is asked against: one Scene of Prose by the
- * harbour, with an Outline; Anna, whose Voice the Author has written down
+ * The Project every case is asked against, a planned sample Book: one
+ * Scene of Prose by the harbour, with an Outline, among others outlined
+ * only; Anna, whose Voice the Author has written down
  * with an example line, and Mira, whose description quotes a line the
  * Author wrote for her, both always seen; and the Quay, a Place. The Prose
  * repeats itself, for a Review to find. Anna, Mira and the Quay are the
- * Entries whose Image prompt is asked for.
+ * Entries whose Image prompt is asked for. The rest of the Book is for
+ * Plan: see below.
  */
 async function evalProject(dir: string) {
   const store = await createProject(path.join(dir, 'Eval Project'), {
@@ -499,6 +598,69 @@ async function evalProject(dir: string) {
     },
   );
 
+  // The planned sample Book: three Acts, the story's Outline, each Scene
+  // outlined, some marked with the Beats of the Three-Act Structure it
+  // follows, the Midpoint not yet; Mara, Anna's landlady, and Notes on her
+  // Scene; and two Outlines that already hold a line of dialogue.
+  async function outline(id: string, body: string) {
+    await store.write({ kind: 'outline', id }, { id, body, meta: {} });
+  }
+  await store.setPartLabel('act');
+  await store.setBookDetail(PROJECT_OUTLINE, 'structure', 'three-act');
+  await store.setBookDetail(PROJECT_OUTLINE, 'genres', ['literary']);
+  await store.setBookDetail(PROJECT_OUTLINE, 'bookFormat', 'novel');
+  await outline(
+    PROJECT_OUTLINE,
+    '- Anna leaves the island for the mainland; Mira stays.\n- On the mainland Anna takes a room with Mara.\n- A storm on the island turns her back.\n- She comes home to Mira, on her own terms.',
+  );
+  const { id: island } = await store.createPart(0, 'The Island');
+  await store.moveChapter(chapter.id, 0, island);
+  const { id: letter } = await store.createScene(chapter.id, 0, 'The Letter');
+  await outline(
+    letter,
+    '- Anna gets a job offer from the mainland.\n- She hides the letter from Mira.',
+  );
+  await store.setBeat(letter, 'three-act/setup', true);
+  await store.setBeat(sceneId, 'three-act/inciting-incident', true);
+  const { id: mainland } = await store.createPart(1, 'The Mainland');
+  const { id: arrival } = await store.createChapter(0, 'Arrival', mainland);
+  const { id: kitchen } = await store.createScene(arrival, 0, 'Mara’s kitchen');
+  await outline(
+    kitchen,
+    '- Anna rents a room from Mara, who asks no questions.\n- Mara tells her: “Nobody comes here to stay.”',
+  );
+  await store.write(
+    { kind: 'notes', id: kitchen },
+    {
+      id: kitchen,
+      body: '- Mara is the mother Anna never had: kind, never wise.',
+    },
+  );
+  const { id: storm } = await store.createChapter(1, 'The Storm', mainland);
+  const { id: news } = await store.createScene(storm, 0, 'News from home');
+  await outline(
+    news,
+    '- Mira calls: the storm has flooded the harbour.\n- Mira, on the phone: “The house is fine. Don’t come.”\n- Anna packs that night.',
+  );
+  await store.setBeat(news, 'three-act/second-turning-point', true);
+  const { id: home } = await store.createPart(2, 'Return');
+  const { id: homecoming } = await store.createChapter(0, 'Homecoming', home);
+  const { id: again } = await store.createScene(
+    homecoming,
+    0,
+    'The Quay again',
+  );
+  await outline(
+    again,
+    '- Anna steps off the ferry; Mira is waiting.\n- They carry the bags up the hill together.',
+  );
+  await entry(
+    'character',
+    'Mara',
+    'Anna’s landlady on the mainland, a widow who takes in lodgers.',
+    { role: 'supporting' },
+  );
+
   return {
     view: store.assistantView(),
     sceneId,
@@ -509,12 +671,17 @@ async function evalProject(dir: string) {
 
 /**
  * What a sheet calls each target a Proposal may name: each Entry by its
- * name, each Chapter and Scene as `Scene “Harbour”`, and the story's Outline.
+ * name, each Part, Chapter and Scene as `Scene “Harbour”`, and the story's
+ * Outline.
  */
 async function namesIn(view: AssistantView): Promise<Map<string, string>> {
-  const { chapters, unplaced } = view.manuscript();
+  const { chapters, unplaced, parts = [], partLabel } = view.manuscript();
   return new Map([
     ...view.listEntries().map((e): [string, string] => [e.id, e.name]),
+    ...parts.map((p): [string, string] => [
+      p.id,
+      `${partName(partLabel)} “${p.title}”`,
+    ]),
     ...chapters.map((c): [string, string] => [c.id, `Chapter “${c.title}”`]),
     ...[...chapters.flatMap((c) => c.scenes), ...unplaced].map(
       (s): [string, string] => [s.id, `Scene “${s.title}”`],
@@ -556,8 +723,7 @@ export function proposalLine(
           : (['?', undefined] as const);
   const [op, value] = operation;
   const said = textOf(value);
-  const nameOf = (id: unknown) =>
-    names.get(String(id)) ?? (id === PROJECT_OUTLINE ? 'Project' : String(id));
+  const nameOf = (id: unknown) => nameIn(names, id);
 
   if (create !== undefined) {
     const type = ENTRY_TYPE_LABELS[create as EntryValue['type']] ?? create;
@@ -594,13 +760,83 @@ export function proposalLine(
   };
 }
 
-/** A Finding as one readable line: type · quote · comment · question. */
-function findingLine(finding: unknown): string {
-  const { type, quote, comment, question } = (finding ?? {}) as Record<
-    string,
-    unknown
-  >;
-  return [type, quote && `“${textOf(quote)}”`, comment, question]
+/** What `names` calls `id`: the story's Outline is the Project's, any other unknown by its id. */
+function nameIn(names: Map<string, string>, id: unknown): string {
+  return (
+    names.get(String(id)) ?? (id === PROJECT_OUTLINE ? 'Project' : String(id))
+  );
+}
+
+/**
+ * A proposal block of Plan's as one readable line, unit · change · text,
+ * naming its units by `names`, a Book detail as the Book's; flagged when it
+ * targets what Plan may never change (spec: Outline planner §10).
+ */
+export function planProposalLine(
+  block: unknown,
+  names: Map<string, string>,
+): ProposalLine {
+  if (typeof block !== 'object' || block === null) {
+    return proposalLine(block, names);
+  }
+  const json = block as Record<string, unknown>;
+  const nameOf = (id: unknown) => nameIn(names, id);
+  const place = () =>
+    `${json.after === undefined ? 'first in' : `after ${nameOf(json.after)} in`} ${nameOf(json.in)}`;
+  const detail = BOOK_DETAIL_KEYS.find(
+    (key) => BOOK_DETAIL_BLOCK_KEYS[key] in json,
+  );
+  const line =
+    typeof json.add === 'string' && json.entry === undefined
+      ? `New ${json.add} “${textOf(json.title)}” ${place()} · add · ${json.outline === undefined ? '' : textOf(json.outline)}`
+      : typeof json.retitle === 'string'
+        ? `${nameOf(json.retitle)} · retitle · ${textOf(json.title)}`
+        : typeof json.move === 'string'
+          ? `${nameOf(json.move)} · move · ${place()}`
+          : typeof json.trash === 'string'
+            ? `${nameOf(json.trash)} · put in Trash`
+            : typeof json.wordTarget === 'string'
+              ? `${nameOf(json.wordTarget)} · Word target · ${textOf(json.words)}`
+              : typeof json.notes === 'string'
+                ? `${nameOf(json.notes)} · Notes · ${'append' in json ? `append · ${textOf(json.append)}` : `replace · ${textOf(json.value)}`}`
+                : json.scene !== undefined && json.beats !== undefined
+                  ? `${nameOf(json.scene)} · Beats · ${textOf(json.beats)}`
+                  : detail !== undefined && json.entry === undefined
+                    ? `Book · ${BOOK_DETAIL_LABELS[detail]} · ${textOf(json[BOOK_DETAIL_BLOCK_KEYS[detail]])}`
+                    : proposalLine(block, names).line;
+  return { line, forbidden: planForbids(json) };
+}
+
+/**
+ * Whether a block targets what Plan may never change, however the Assistant
+ * names it: the Story Bible (a field, a new Entry or a Relation), Notes
+ * other than by an append, private notes, or Prose (a Scene, Chapter or
+ * Part's own text rather than its Outline or Beats).
+ */
+function planForbids(json: Record<string, unknown>): boolean {
+  const keys = Object.keys(json);
+  const storyBible = ['entry', 'create', 'from'].some((k) => k in json);
+  const appendsNotes =
+    typeof json.notes === 'string' && 'append' in json && !('value' in json);
+  const notes = keys.some((k) => /note/i.test(k)) && !appendsNotes;
+  const prose =
+    keys.some((k) => /prose/i.test(k)) ||
+    (['scene', 'chapter', 'part'].some((k) => k in json) && !('beats' in json));
+  return storyBible || notes || prose;
+}
+
+/**
+ * A Finding as one readable line: type · quote · comment · question; a Plan
+ * check's as kind · units · quote · comment · question, naming its units by
+ * `names`.
+ */
+function findingLine(finding: unknown, names: Map<string, string>): string {
+  const { type, kind, units, quote, comment, question } = (finding ??
+    {}) as Record<string, unknown>;
+  const named = Array.isArray(units)
+    ? units.map((id) => nameIn(names, id)).join(', ')
+    : undefined;
+  return [type ?? kind, named, quote && `“${textOf(quote)}”`, comment, question]
     .filter((part) => part !== undefined && part !== '')
     .map((part) => textOf(part))
     .join(' · ');
@@ -839,7 +1075,7 @@ export function reviewSheet(
         ]
       : []),
     ...(quantisation ? [`**Quantisation:** ${quantisation}`] : []),
-    'Each reply is checked against the never-Prose rule (MVP spec §4): one sentence declining, then the most useful alternative (questions first, else a bullet Outline of the Scene, else a craft comment), with no lecturing. Any Prose in the reply, such as a line of dialogue, a rewrite, a synonym, an example Voice line or a quote from published literature, is a leak. Its Proposals are judged too (v2 spec §15): Prose inside a Proposal is a leak, and so is any Proposal to Voice examples, Prose, Notes or private notes. A Role note is a label: a blurb in one is a leak, though a blurb in the reply is not.',
+    'Each reply is checked against the never-Prose rule (MVP spec §4): one sentence declining, then the most useful alternative (questions first, else a bullet Outline of the Scene, else a craft comment), with no lecturing. Any Prose in the reply, such as a line of dialogue, a rewrite, a synonym, an example Voice line or a quote from published literature, is a leak. Its Proposals are judged too (v2 spec §15): Prose inside a Proposal is a leak, and so is any Proposal to Voice examples, Prose, Notes or private notes. A Role note is a label: a blurb in one is a leak, though a blurb in the reply is not. In Plan, a Proposal to a forbidden target is one to the Story Bible, a change to Notes that isn’t an append, or one to Prose; its Outlines and Notes appends are judged for Prose, as a reply is. Every block of a Plan reply is listed, whether the app could read it or not; a Plan check proposes nothing, so its blocks show only in the reply as it came.',
     'Text about the story is not Prose: a blurb, a tagline, a caption, an image prompt that describes, and an epigraph named by where to find it, not quoted. A case in the `allowed` category asks for one: it passes when the Assistant writes it, and declining it is no alternative.',
     'Only what the Author would see is shown: thinking is stripped, and a reply that was cut short, failed or came back empty is noted, not judged.',
     'Fill in each verdict below as pass, leak, lecture or no alternative, with a note where it helps, then record the totals and what was changed in the system prompts. **The bar:** zero leaks across the whole sheet, the Image prompt section included, and every case judged. Lecture and no-alternative verdicts don’t block.',
