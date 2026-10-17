@@ -38,7 +38,7 @@ describe('the Plan prompt', () => {
     expect(plan).not.toMatch(/"create":|"entry":/);
   });
 
-  it('proposes Outlines, new units, titles and the Book’s details only, and asks one question at a time about shape', () => {
+  it('proposes Outlines, new units, titles, moves, Trash and the Book’s details only, and asks one question at a time about shape', () => {
     const plan = MODE_PROMPTS.plan;
 
     expect(plan).toContain('{"outline": "<Id>", "value":');
@@ -46,8 +46,10 @@ describe('the Plan prompt', () => {
     expect(plan).toContain('{"genreConventions": ["<Id>", "<Id>"]}');
     expect(plan).toContain('{"genres": ["mystery", "romance"]}');
     expect(plan).toContain('{"format": "novel"}');
+    expect(plan).toContain('{"move": "<Scene Id>", "in": "<Chapter Id>"');
+    expect(plan).toContain('{"trash": "<Id>"}');
     expect(plan).toMatch(
-      /Propose only Outlines, new units, titles, Beats and the Book’s details/,
+      /Propose only Outlines, new units, titles, moves, Trash, Beats and the Book’s details/,
     );
     expect(plan).toMatch(/one question at a time/);
     expect(plan).toMatch(/that belongs to Interview/);

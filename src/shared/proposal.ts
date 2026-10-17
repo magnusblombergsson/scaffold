@@ -222,6 +222,41 @@ export type Retitle = {
   proposed: string;
 };
 
+/**
+ * Where a unit is placed: in a container, by id as an Add names it, right
+ * `after` a unit there, or first with none.
+ */
+export type UnitPlace = { in: string; after?: string };
+
+/**
+ * A Scene, Chapter or Part moved within its Book, proposed in Plan: out of
+ * the container it was in then, `from`, into `in`, which may be the same
+ * one, right `after` a unit there, or first with none. Containers are named
+ * as an Add's.
+ */
+export type UnitMove = {
+  kind: 'move';
+  unit: PlanUnit;
+  unitId: string;
+  from: string;
+  in: string;
+  after?: string;
+};
+
+/**
+ * A Scene, Chapter or Part put in Trash, proposed in Plan, with what it was
+ * then: its title, its Outline, and the units it held by id.
+ */
+export type UnitTrashing = {
+  kind: 'trash';
+  unit: PlanUnit;
+  unitId: string;
+  base: TrashedBase;
+};
+
+/** A unit as a Put in Trash found it: its title, its Outline and the units it held by id. */
+export type TrashedBase = { title: string; outline: string; holds: string[] };
+
 /** What a Proposal changes: a field of an Entry, a new Entry, an Outline, the Relations, the structure, or a Book's detail. */
 export type ProposalChange =
   | EntryFieldChange
@@ -230,6 +265,8 @@ export type ProposalChange =
   | RelationAddition
   | UnitAddition
   | Retitle
+  | UnitMove
+  | UnitTrashing
   | BookDetailChange
   | BeatsChange;
 
@@ -238,12 +275,27 @@ const PROPOSAL_KINDS: Record<Mode, readonly ProposalChange['kind'][]> = {
   brainstorm: ['field', 'new-entry', 'outline', 'relation'],
   interview: ['field', 'new-entry', 'outline', 'relation'],
   writing: ['field', 'new-entry', 'outline'],
-  plan: ['outline', 'add', 'retitle', 'book-detail', 'beats'],
+  plan: ['outline', 'add', 'retitle', 'move', 'trash', 'book-detail', 'beats'],
 };
 
 /** Whether a Conversation in `mode` may propose a change of `kind`. */
 export function mayPropose(mode: Mode, kind: ProposalChange['kind']): boolean {
   return PROPOSAL_KINDS[mode].includes(kind);
+}
+
+/** A change to the structure Plan proposes: an Add, Retitle, Move or Put in Trash. */
+export type StructuralChange = UnitAddition | Retitle | UnitMove | UnitTrashing;
+
+/** Whether a change is to the structure, of a unit in the tree. */
+export function isStructural<C extends { kind: ProposalChange['kind'] }>(
+  change: C,
+): change is C & StructuralChange {
+  return (
+    change.kind === 'add' ||
+    change.kind === 'retitle' ||
+    change.kind === 'move' ||
+    change.kind === 'trash'
+  );
 }
 
 /**
@@ -283,6 +335,11 @@ export type ProposalState =
       stale: boolean;
       /** The Proposals it needs that aren't accepted yet, by name: until they are, it can't be. */
       needs?: string[];
+      /**
+       * A Move stale only because its anchor isn't in its destination, which
+       * a Move it needs may yet put there.
+       */
+      anchorAway?: true;
     }
   | { kind: 'pending'; orphaned: Orphaned; of?: string }
   | { kind: 'pending'; refused: string }
@@ -343,8 +400,7 @@ export function orphanedText(
       : `${name} no longer has that field.`;
   }
   return proposal.kind === 'outline' ||
-    proposal.kind === 'add' ||
-    proposal.kind === 'retitle' ||
+    isStructural(proposal) ||
     proposal.kind === 'book-detail' ||
     proposal.kind === 'beats'
     ? `${name} is no longer in the Manuscript.`
@@ -609,8 +665,7 @@ export function canAppend(change: ProposalChange): boolean {
   if (
     change.kind === 'new-entry' ||
     change.kind === 'relation' ||
-    change.kind === 'add' ||
-    change.kind === 'retitle' ||
+    isStructural(change) ||
     change.kind === 'book-detail' ||
     change.kind === 'beats'
   ) {
@@ -649,7 +704,7 @@ export function proposalTarget(proposal: ProposalView): ProposalTarget | null {
     return { kind: 'outline', outlineId: proposal.outlineId };
   }
   // In Plan, the unit in the tree, or where an Add would land.
-  if (proposal.kind === 'add' || proposal.kind === 'retitle') {
+  if (isStructural(proposal)) {
     return { kind: 'outline', outlineId: proposal.unitId };
   }
   if (proposal.kind === 'beats') {
@@ -793,6 +848,15 @@ export function proposalBlock(change: ProposalChange): string {
   if (change.kind === 'retitle') {
     return fencedProposal({ retitle: change.unitId, title: change.proposed });
   }
+  if (change.kind === 'move') {
+    const { unitId, after } = change;
+    return fencedProposal({
+      move: unitId,
+      in: change.in,
+      ...(after !== undefined && { after }),
+    });
+  }
+  if (change.kind === 'trash') return fencedProposal({ trash: change.unitId });
   if (change.kind === 'relation') {
     const { from, to, proposed } = change;
     return fencedProposal(
@@ -903,6 +967,8 @@ export type ProposalBasis =
   | RelationBasis
   | AddBasis
   | RetitleBasis
+  | MoveBasis
+  | TrashBasis
   | BeatsBasis;
 
 /**
@@ -912,7 +978,7 @@ export type ProposalBasis =
  */
 export type AddBasis = {
   unit:
-    | { where: 'live'; name: string; prose: boolean }
+    | { where: 'live'; name: string; prose: boolean; unplaced?: true }
     | { where: 'trash' | 'drawer' | 'gone' };
   container: { orphaned: Orphaned; name: string } | null;
 };
@@ -929,6 +995,29 @@ export type RetitleBasis = Target | { refused: string };
  * proposed, as a Scene Missing, Unplaced or in Conflict.
  */
 export type BeatsBasis = RetitleBasis;
+
+/**
+ * A Move's basis: why its unit is out of reach or may not be moved, or
+ * else the container it is in now and what that holds, and what the
+ * destination holds or why it is out of reach, by name.
+ */
+export type MoveBasis =
+  | { orphaned: Orphaned }
+  | { refused: string }
+  | {
+      at: { in: string; holds: string[] };
+      destination: { holds: string[] } | { orphaned: Orphaned; name: string };
+    };
+
+/**
+ * A Put in Trash's basis: why its unit is out of reach, in Trash among
+ * them, or may not be put there; or else what it is now, and whether it
+ * holds Prose.
+ */
+export type TrashBasis =
+  | { orphaned: Orphaned }
+  | { refused: string }
+  | (TrashedBase & { prose: boolean });
 
 /** Why a Proposal can't be accepted or undone now, in words for the Author. */
 export type Refusal = {
@@ -966,6 +1055,8 @@ export function stateOf(
     return relationState(logged, basis as RelationBasis);
   }
   if (logged.kind === 'add') return addState(logged, basis as AddBasis);
+  if (logged.kind === 'move') return moveState(logged, basis as MoveBasis);
+  if (logged.kind === 'trash') return trashState(logged, basis as TrashBasis);
   const { decision } = logged;
   if (decision.kind === 'rejected') return { kind: 'rejected' };
   if (
@@ -1026,6 +1117,31 @@ export function accept(
         outline: unit.outline,
         ...(beats && { beats }),
       },
+    };
+  }
+  if (logged.kind === 'move' || logged.kind === 'trash') {
+    if ('orphaned' in state) {
+      return {
+        refused: 'orphaned',
+        text: orphanedText(logged, state.orphaned, state.of),
+      };
+    }
+    if ('refused' in state) return { refused: 'refused', text: state.refused };
+    if (state.stale && !anyway) {
+      return {
+        refused: 'stale',
+        text:
+          logged.kind === 'move'
+            ? 'Its place has changed since this was proposed'
+            : `${logged.name} has changed since this was proposed`,
+      };
+    }
+    // Where it goes; or the title it had when put in Trash.
+    return {
+      wrote:
+        logged.kind === 'move'
+          ? placeValue(logged)
+          : (basis as TrashedBase).title,
     };
   }
   if (append && !canAppend(logged)) {
@@ -1155,8 +1271,11 @@ export function undo(
   return { restore: decision.replaced ?? null };
 }
 
-/** A Proposal as decided, of a field, a new Entry, an Outline or a title: not a Relation nor an Add. */
-type TargetProposal = Exclude<DecidedProposal, { kind: 'relation' | 'add' }>;
+/** A Proposal as decided, of a field, a new Entry, an Outline or a title: not a Relation, an Add, a Move nor a Put in Trash. */
+type TargetProposal = Exclude<
+  DecidedProposal,
+  { kind: 'relation' | 'add' | 'move' | 'trash' }
+>;
 
 /** Where a Proposal the log says is accepted stands, as `stateOf`. */
 function acceptedState(
@@ -1191,7 +1310,9 @@ function acceptedState(
   }
   const { current } = target;
   if (sameValue(current, wrote)) return accepted(null);
-  if (sameValue(current, decision.replaced)) {
+  // A title back as it was is a synced project.json that won over the
+  // accept (spec: Outline planner §11), not an undo: it stays accepted.
+  if (sameValue(current, decision.replaced) && logged.kind !== 'retitle') {
     return undecidedState(logged, wrote, target);
   }
   return accepted(`${targetLabel(logged)} has changed since it was accepted.`);
@@ -1347,7 +1468,9 @@ function heldIn(basis: ProposalBasis): Target {
     'relations' in basis ||
     'name' in basis ||
     'unit' in basis ||
-    'refused' in basis
+    'refused' in basis ||
+    'at' in basis ||
+    'prose' in basis
   ) {
     throw new Error('A basis of a field or an Outline is what it holds');
   }
@@ -1379,9 +1502,11 @@ function addState(
     const edited = !sameValue(decision.wrote as NewUnit, logged.proposed);
     const undoBlocked =
       unit.where === 'live'
-        ? unit.prose
-          ? `${unit.name} holds Prose.`
-          : null
+        ? unit.unplaced
+          ? `${unit.name} is Unplaced.`
+          : unit.prose
+            ? `${unit.name} holds Prose.`
+            : null
         : unit.where === 'trash'
           ? `${logged.name} is in Trash.`
           : unit.where === 'drawer'
@@ -1401,6 +1526,132 @@ function addState(
     };
   }
   return { kind: 'pending', current: null, stale: false };
+}
+
+/**
+ * A place as a Move's accept logs where it went and where it was: its
+ * container, then the unit it is after there, if any.
+ */
+export function placeValue(place: UnitPlace): string[] {
+  return place.after === undefined ? [place.in] : [place.in, place.after];
+}
+
+/** A place a Move's accept logged, as `placeValue` wrote it; null when it isn't one. */
+export function asPlace(value: unknown): UnitPlace | null {
+  if (!Array.isArray(value) || value.length < 1 || value.length > 2) {
+    return null;
+  }
+  if (!value.every((v) => typeof v === 'string')) return null;
+  const [within, after] = value as string[];
+  return after === undefined ? { in: within } : { in: within, after };
+}
+
+/** Whether a unit stands in `holds` where a Move puts it: right after its anchor, or first. */
+export function isPlaced(
+  { unitId, after }: { unitId: string; after?: string },
+  holds: readonly string[],
+): boolean {
+  const at = holds.indexOf(unitId);
+  return after === undefined ? at === 0 : at > 0 && holds[at - 1] === after;
+}
+
+/**
+ * Where a Move stands, as `stateOf`. Pending, it is stale once its unit has
+ * left the container it was in, or its anchor has left the destination or
+ * is gone; a reorder within a container never counts. Its unit found where
+ * it would go counts as applied. Accepted, it can be undone while its unit
+ * is still in the container it was moved to, and when it was moved within
+ * its container, while it is still where it went.
+ */
+function moveState(
+  logged: DecidedProposal & UnitMove,
+  basis: MoveBasis,
+): ProposalState {
+  const { decision } = logged;
+  if (decision.kind === 'rejected') return { kind: 'rejected' };
+  if (decision.kind === 'accepted') {
+    const undoBlocked =
+      'orphaned' in basis
+        ? orphanedText(logged, basis.orphaned)
+        : 'refused' in basis
+          ? `${basis.refused}.`
+          : basis.at.in !== logged.in ||
+              // Moved within its container, it must be where it went.
+              (logged.from === logged.in &&
+                !isPlaced(
+                  { unitId: logged.unitId, ...asPlace(decision.wrote) },
+                  basis.at.holds,
+                ))
+            ? `${logged.name} has moved since it was accepted.`
+            : null;
+    return {
+      kind: 'accepted',
+      edited: false,
+      ...(undoBlocked && { undoBlocked }),
+    };
+  }
+  if ('orphaned' in basis) return { kind: 'pending', orphaned: basis.orphaned };
+  if ('refused' in basis) return { kind: 'pending', refused: basis.refused };
+  const { at, destination } = basis;
+  if ('orphaned' in destination) {
+    return {
+      kind: 'pending',
+      orphaned: destination.orphaned,
+      of: destination.name,
+    };
+  }
+  if (at.in === logged.in && isPlaced(logged, at.holds)) {
+    return { kind: 'accepted', edited: false, undoBlocked: NOT_LOGGED };
+  }
+  const left = at.in !== logged.from;
+  const anchorAway =
+    logged.after !== undefined && !destination.holds.includes(logged.after);
+  return {
+    kind: 'pending',
+    current: null,
+    stale: left || anchorAway,
+    ...(anchorAway && !left && { anchorAway: true as const }),
+  };
+}
+
+/**
+ * Where a Put in Trash stands, as `stateOf`. Pending, it is stale once its
+ * unit's title or Outline has changed, or a unit has been added into it;
+ * units leaving it don't count. Once its unit holds Prose it can only be
+ * rejected. Accepted, it can be undone while its unit is still in Trash.
+ */
+function trashState(
+  logged: DecidedProposal & UnitTrashing,
+  basis: TrashBasis,
+): ProposalState {
+  const { decision } = logged;
+  if (decision.kind === 'rejected') return { kind: 'rejected' };
+  if (decision.kind === 'accepted') {
+    const undoBlocked =
+      'orphaned' in basis
+        ? basis.orphaned === 'trashed'
+          ? null
+          : orphanedText(logged, basis.orphaned)
+        : 'refused' in basis
+          ? `${basis.refused}.`
+          : `${logged.name} is no longer in Trash.`;
+    return {
+      kind: 'accepted',
+      edited: false,
+      ...(undoBlocked && { undoBlocked }),
+    };
+  }
+  if ('orphaned' in basis) return { kind: 'pending', orphaned: basis.orphaned };
+  if ('refused' in basis) return { kind: 'pending', refused: basis.refused };
+  if (basis.prose) {
+    return { kind: 'pending', refused: `${logged.name} holds Prose` };
+  }
+  const { base } = logged;
+  const stale =
+    basis.title !== base.title ||
+    basis.outline !== base.outline ||
+    basis.holds.some((id) => !base.holds.includes(id));
+  return { kind: 'pending', current: null, stale };
 }
 
 /**

@@ -360,6 +360,336 @@ describe('Retitle', () => {
   });
 });
 
+describe('Move', () => {
+  /** Moves Harbour into Chapter `to`, after `after`, or first there. */
+  function moveHarbour(ids: Ids, to: string, after?: string): Proposal {
+    return {
+      kind: 'move',
+      id: 'm1',
+      unit: 'scene',
+      unitId: ids.harbour,
+      from: ids.chapter,
+      in: to,
+      ...(after !== undefined && { after }),
+    };
+  }
+
+  /** The planned Project with a second Chapter “Departure” holding Scene “Pier”. */
+  async function withDeparture(proposals: (ids: Ids & More) => Proposal[]) {
+    const made = await planned(() => []);
+    const { store, conversationId } = made;
+    const { id: departure } = await store.createChapter(1, 'Departure');
+    const { id: pier } = await store.createScene(departure, 0, 'Pier');
+    const ids = { ...made, departure, pier };
+    await append(store, conversationId, proposals(ids));
+    return ids;
+  }
+  type More = { departure: string; pier: string };
+
+  const titles = (store: ProjectStore) =>
+    store.manuscript().chapters.map((c) => c.scenes.map((s) => s.title));
+
+  it('accepted, moves its unit after the anchor in its destination; undone, back after its old anchor', async () => {
+    const { store, conversationId } = await withDeparture((ids) => [
+      moveHarbour(ids, ids.departure, ids.pier),
+    ]);
+
+    await store.conversations.acceptProposal(conversationId, 'm1');
+    expect(titles(store)).toEqual([['Market'], ['Pier', 'Harbour']]);
+
+    await store.conversations.undoProposal(conversationId, 'm1');
+    expect(titles(store)).toEqual([['Harbour', 'Market'], ['Pier']]);
+    expect((await cardOf(store, conversationId, 'm1'))?.state.kind).toBe(
+      'pending',
+    );
+  });
+
+  it('is never stale for a reorder within its container', async () => {
+    const { store, conversationId, harbour, chapter } = await withDeparture(
+      (ids) => [moveHarbour(ids, ids.departure, ids.pier)],
+    );
+    await store.moveScene(harbour, chapter, 1);
+
+    expect((await cardOf(store, conversationId, 'm1'))?.state).toEqual({
+      kind: 'pending',
+      current: null,
+      stale: false,
+    });
+  });
+
+  it('is stale once its unit has left its container', async () => {
+    const { store, conversationId, harbour, departure } = await withDeparture(
+      (ids) => [moveHarbour(ids, ids.departure, ids.pier)],
+    );
+    await store.moveScene(harbour, departure, 0);
+
+    expect((await cardOf(store, conversationId, 'm1'))?.state).toEqual({
+      kind: 'pending',
+      current: null,
+      stale: true,
+    });
+  });
+
+  it('is stale once its anchor has left the destination, and accepted anyway goes to the end there', async () => {
+    const { store, conversationId, pier, chapter, departure } =
+      await withDeparture((ids) => [moveHarbour(ids, ids.departure, ids.pier)]);
+    await store.createScene(departure, 1, 'Quay');
+    await store.moveScene(pier, chapter, 2);
+
+    expect((await cardOf(store, conversationId, 'm1'))?.state).toMatchObject({
+      stale: true,
+    });
+    await expect(
+      store.conversations.acceptProposal(conversationId, 'm1'),
+    ).rejects.toThrow('Its place has changed since this was proposed');
+    await store.conversations.acceptProposal(conversationId, 'm1', {
+      anyway: true,
+    });
+
+    expect(titles(store)).toEqual([
+      ['Market', 'Pier'],
+      ['Quay', 'Harbour'],
+    ]);
+  });
+
+  it('can’t be undone once its unit has left the container it was moved to', async () => {
+    const { store, conversationId, harbour, chapter } = await withDeparture(
+      (ids) => [moveHarbour(ids, ids.departure)],
+    );
+    await store.conversations.acceptProposal(conversationId, 'm1');
+    expect(titles(store)).toEqual([['Market'], ['Harbour', 'Pier']]);
+    await store.moveScene(harbour, chapter, 0);
+
+    await expect(
+      store.conversations.undoProposal(conversationId, 'm1'),
+    ).rejects.toThrow('Scene “Harbour” has moved since it was accepted.');
+  });
+
+  it('moves a Chapter into a Part, and back on undo', async () => {
+    const { store, conversationId, departure } = await withDeparture(() => []);
+    const { id: act } = await store.createPart(0, 'Act I');
+    await append(store, conversationId, [
+      {
+        kind: 'move',
+        id: 'c',
+        unit: 'chapter',
+        unitId: departure,
+        from: 'project',
+        in: act,
+      },
+    ]);
+
+    await store.conversations.acceptProposal(conversationId, 'c');
+    expect(store.manuscript().parts?.[0].chapters).toEqual([departure]);
+
+    await store.conversations.undoProposal(conversationId, 'c');
+    expect(store.manuscript().parts?.[0].chapters).toEqual([]);
+    expect(store.manuscript().top?.at(-1)).toBe(departure);
+  });
+});
+
+describe('Put in Trash', () => {
+  function trashChapter(ids: Ids): Proposal {
+    return {
+      kind: 'trash',
+      id: 't1',
+      unit: 'chapter',
+      unitId: ids.chapter,
+      base: { title: 'Arrival', outline: '', holds: [ids.harbour, ids.market] },
+    };
+  }
+
+  /** The planned Project with a second Chapter, so “Arrival” isn’t the last. */
+  async function withSpare(proposals: (ids: Ids) => Proposal[]) {
+    const made = await planned(proposals);
+    await made.store.createChapter(1, 'Spare');
+    return made;
+  }
+
+  it('accepted, puts its unit in Trash; undone while there, restores it to its place', async () => {
+    const { store, conversationId, chapter } = await withSpare((ids) => [
+      trashChapter(ids),
+    ]);
+
+    await store.conversations.acceptProposal(conversationId, 't1');
+    expect(store.manuscript().chapters.map((c) => c.title)).toEqual(['Spare']);
+    expect(store.listTrash().map((t) => t.id)).toEqual([chapter]);
+
+    await store.conversations.undoProposal(conversationId, 't1');
+    expect(store.manuscript().chapters.map((c) => c.title)).toEqual([
+      'Arrival',
+      'Spare',
+    ]);
+    expect((await cardOf(store, conversationId, 't1'))?.state.kind).toBe(
+      'pending',
+    );
+  });
+
+  it('is stale once its title or Outline has changed, or a unit was added into it; not when one leaves', async () => {
+    const { store, conversationId, chapter, market } = await withSpare(
+      (ids) => [trashChapter(ids)],
+    );
+    const state = async () =>
+      (await cardOf(store, conversationId, 't1'))?.state;
+
+    await store.trashScene(market);
+    expect(await state()).toEqual({
+      kind: 'pending',
+      current: null,
+      stale: false,
+    });
+
+    await store.createScene(chapter, 0, 'Dock');
+    expect(await state()).toMatchObject({ stale: true });
+  });
+
+  it('is stale once its Outline changed, and can be accepted anyway', async () => {
+    const { store, conversationId, chapter } = await withSpare((ids) => [
+      trashChapter(ids),
+    ]);
+    await store.write(
+      { kind: 'outline', id: chapter },
+      { id: chapter, body: '- Anna lands.', meta: {} },
+    );
+    await store.flush();
+
+    await expect(
+      store.conversations.acceptProposal(conversationId, 't1'),
+    ).rejects.toThrow('Chapter “Arrival” has changed since this was proposed');
+    await store.conversations.acceptProposal(conversationId, 't1', {
+      anyway: true,
+    });
+    expect(store.listTrash().map((t) => t.id)).toEqual([chapter]);
+  });
+
+  it('is never acceptable once its unit holds Prose, anyway or not', async () => {
+    const { store, conversationId, market } = await withSpare((ids) => [
+      trashChapter(ids),
+    ]);
+    await store.write(
+      { kind: 'scene', id: market },
+      { id: market, markdown: 'She ran.' },
+    );
+    await store.flush();
+
+    expect((await cardOf(store, conversationId, 't1'))?.state).toEqual({
+      kind: 'pending',
+      refused: 'Chapter “Arrival” holds Prose',
+    });
+    await expect(
+      store.conversations.acceptProposal(conversationId, 't1', {
+        anyway: true,
+      }),
+    ).rejects.toThrow('Chapter “Arrival” holds Prose');
+    await store.conversations.rejectProposal(conversationId, 't1');
+  });
+
+  it('can’t be undone once its unit is out of Trash', async () => {
+    const { store, conversationId, chapter } = await withSpare((ids) => [
+      trashChapter(ids),
+    ]);
+    await store.conversations.acceptProposal(conversationId, 't1');
+    await store.restore(chapter);
+
+    expect((await cardOf(store, conversationId, 't1'))?.state).toEqual({
+      kind: 'accepted',
+      edited: false,
+      undoBlocked: 'Chapter “Arrival” is no longer in Trash.',
+    });
+  });
+});
+
+describe('A synced save of project.json winning over an accept', () => {
+  it('leaves the card Accepted with no undo, and an added Scene Unplaced with its Outline', async () => {
+    const { store, conversationId } = await planned((ids) => [
+      addFerry(ids, ids.harbour),
+      {
+        kind: 'move',
+        id: 'm1',
+        unit: 'scene',
+        unitId: ids.market,
+        from: ids.chapter,
+        in: ids.chapter,
+      },
+      {
+        kind: 'retitle',
+        id: 'r1',
+        unitId: ids.harbour,
+        base: 'Harbour',
+        proposed: 'Port',
+      },
+    ]);
+    const manifest = path.join(projectPath, 'project.json');
+    const theirs = await readFile(manifest, 'utf8');
+    for (const id of ['a1', 'm1', 'r1']) {
+      await store.conversations.acceptProposal(conversationId, id);
+    }
+    expect(sceneTitles(store)).toEqual(['Market', 'Port', 'Ferry']);
+
+    await writeFile(manifest, theirs);
+    await store.checkForChanges();
+
+    expect(sceneTitles(store)).toEqual(['Harbour', 'Market']);
+    expect(store.manuscript().unplaced.map((s) => s.id)).toEqual([ferry]);
+    expect((await store.read({ kind: 'outline', id: ferry })).body).toBe(
+      '- Anna takes the last ferry.',
+    );
+    for (const id of ['a1', 'm1', 'r1']) {
+      const { state } = (await cardOf(store, conversationId, id))!;
+      expect(state).toMatchObject({ kind: 'accepted' });
+      expect(state, id).toHaveProperty('undoBlocked');
+      await expect(
+        store.conversations.undoProposal(conversationId, id),
+      ).rejects.toThrow();
+    }
+  });
+
+  it('keeps an added Scene’s Beats, and leaves a Move between Chapters and a Put in Trash Accepted with no undo', async () => {
+    const { store, conversationId, harbour } = await planned((ids) => [
+      addFerry(ids),
+    ]);
+    const { id: spare } = await store.createChapter(1, 'Spare');
+    const { id: empty } = await store.createChapter(2, 'Empty');
+    await append(store, conversationId, [
+      {
+        kind: 'move',
+        id: 'm1',
+        unit: 'scene',
+        unitId: harbour,
+        from: store.manuscript().chapters[0].id,
+        in: spare,
+      },
+      {
+        kind: 'trash',
+        id: 't1',
+        unit: 'chapter',
+        unitId: empty,
+        base: { title: 'Empty', outline: '', holds: [] },
+      },
+    ]);
+    const manifest = path.join(projectPath, 'project.json');
+    const theirs = await readFile(manifest, 'utf8');
+    for (const id of ['a1', 'm1', 't1']) {
+      await store.conversations.acceptProposal(conversationId, id);
+    }
+    await store.setBeat(ferry, 'save-the-cat/catalyst', true);
+
+    await writeFile(manifest, theirs);
+    await store.checkForChanges();
+
+    const [stray] = store.manuscript().unplaced;
+    expect(stray).toMatchObject({
+      id: ferry,
+      beats: ['save-the-cat/catalyst'],
+    });
+    for (const id of ['a1', 'm1', 't1']) {
+      const { state } = (await cardOf(store, conversationId, id))!;
+      expect(state, id).toMatchObject({ kind: 'accepted' });
+      expect(state, id).toHaveProperty('undoBlocked');
+    }
+  });
+});
+
 describe('Needs', () => {
   const deck = randomUUID();
   const cabin = randomUUID();
@@ -405,6 +735,84 @@ describe('Needs', () => {
 
     const chapter = store.manuscript().chapters.find((c) => c.id === deck);
     expect(chapter?.scenes.map((s) => s.title)).toEqual(['Cabin']);
+  });
+
+  it('a Move into a Chapter only proposed waits for it, then moves there', async () => {
+    const { store, conversationId, harbour } = await planned((ids) => [
+      chapterAndScene()[1],
+      {
+        kind: 'move',
+        id: 'm1',
+        unit: 'scene',
+        unitId: ids.harbour,
+        from: ids.chapter,
+        in: deck,
+        needs: ['chapter'],
+      },
+    ]);
+
+    expect((await cardOf(store, conversationId, 'm1'))?.state).toEqual({
+      kind: 'pending',
+      current: null,
+      stale: false,
+      needs: ['Chapter “Deck”'],
+    });
+    await store.conversations.acceptProposals(conversationId, [
+      'm1',
+      'chapter',
+    ]);
+
+    const chapter = store.manuscript().chapters.find((c) => c.id === deck);
+    expect(chapter?.scenes.map((s) => s.id)).toEqual([harbour]);
+  });
+
+  it('a Move placed after a unit another Move brings is not stale while it waits', async () => {
+    const { store, conversationId, chapter, harbour, market } = await planned(
+      () => [],
+    );
+    const { id: spare } = await store.createChapter(1, 'Spare');
+    await append(store, conversationId, [
+      {
+        kind: 'move',
+        id: 'first',
+        unit: 'scene',
+        unitId: market,
+        from: chapter,
+        in: spare,
+      },
+      {
+        kind: 'move',
+        id: 'then',
+        unit: 'scene',
+        unitId: harbour,
+        from: chapter,
+        in: spare,
+        after: market,
+        needs: ['first'],
+      },
+    ]);
+
+    expect((await cardOf(store, conversationId, 'then'))?.state).toEqual({
+      kind: 'pending',
+      current: null,
+      stale: false,
+      needs: ['Scene “Market”'],
+    });
+    // Its own unit leaving its container still counts while it waits.
+    await store.moveScene(harbour, spare, 0);
+    expect((await cardOf(store, conversationId, 'then'))?.state).toMatchObject({
+      stale: true,
+    });
+    await store.moveScene(harbour, chapter, 0);
+
+    await store.conversations.acceptProposals(conversationId, [
+      'then',
+      'first',
+    ]);
+    expect(store.manuscript().chapters[1].scenes.map((s) => s.title)).toEqual([
+      'Market',
+      'Harbour',
+    ]);
   });
 
   it('rejecting one rejects those that need it', async () => {

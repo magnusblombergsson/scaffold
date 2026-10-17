@@ -49,6 +49,8 @@ function conversationsOver() {
     addUnit: unsupported,
     retitleUnit: unsupported,
     trashUnit: unsupported,
+    restoreUnit: unsupported,
+    moveUnit: unsupported,
     holdsProse: unsupported,
     conflicted: () => false,
   };

@@ -46,7 +46,12 @@ import {
   type RelationWritten,
 } from '../../shared/relation-proposal';
 import type { Relations } from './relations';
-import { bookIds } from '../../shared/manuscript-order';
+import {
+  bookIds,
+  heldBy,
+  placeOfUnit,
+  unitsWithin,
+} from '../../shared/manuscript-order';
 import {
   accept,
   customFieldId,
@@ -82,6 +87,15 @@ import {
   type Retitle,
   type RetitleBasis,
   type UnitAddition,
+  asPlace,
+  isStructural,
+  placeValue,
+  type MoveBasis,
+  type StructuralChange,
+  type TrashBasis,
+  type UnitMove,
+  type UnitPlace,
+  type UnitTrashing,
 } from '../../shared/proposal';
 import { capitalized, unitName } from '../../shared/unit-name';
 import {
@@ -194,8 +208,15 @@ export type ConversationsDeps = {
   addUnit: (addition: UnitAddition, title: string) => Promise<void>;
   /** Gives a Scene, Chapter or Part `title`. */
   retitleUnit: (id: string, title: string) => Promise<void>;
-  /** Moves a Scene, Chapter or Part to Trash, as undoing its Add. */
+  /** Moves a Scene, Chapter or Part to Trash, as undoing its Add or accepting a Put in Trash. */
   trashUnit: (kind: PlanUnit, id: string) => Promise<void>;
+  /** Restores a Scene, Chapter or Part from Trash to its place, as undoing a Put in Trash. */
+  restoreUnit: (id: string) => Promise<void>;
+  /**
+   * Moves a Scene, Chapter or Part into the container `place.in`, right
+   * after `place.after`, at the end when that isn't there, or first with none.
+   */
+  moveUnit: (kind: PlanUnit, id: string, place: UnitPlace) => Promise<void>;
   /** Whether a Scene, or one in a Chapter or Part, holds Prose. */
   holdsProse: (id: string) => Promise<boolean>;
   /** Whether a Scene's Prose is in Conflict. */
@@ -654,7 +675,12 @@ ${text}`);
       const proposal = await this.decidedProposal(conversationId, proposalId);
       const { proposals } = await this.readLogged(conversationId);
       this.refuseWaiting(proposal, proposals);
-      const value = edited === undefined ? proposal.proposed : edited;
+      const value =
+        edited !== undefined
+          ? edited
+          : 'proposed' in proposal
+            ? proposal.proposed
+            : null;
       const how = { anyway, append };
       if (fromBook && this.evolvesFrom(proposal) === undefined) {
         throw new ProjectError(
@@ -673,11 +699,15 @@ ${text}`);
         this.deps.emit({ type: 'proposalsChanged' });
         return;
       }
-      if (proposal.kind === 'add' || proposal.kind === 'retitle') {
+      if (isStructural(proposal)) {
         const { replaced, wrote } =
           proposal.kind === 'add'
             ? await this.acceptAdd(proposal, value)
-            : await this.acceptRetitle(proposal, value, how);
+            : proposal.kind === 'retitle'
+              ? await this.acceptRetitle(proposal, value, how)
+              : proposal.kind === 'move'
+                ? await this.acceptMove(proposal, how)
+                : await this.acceptTrash(proposal, how);
         await this.appendEvent(
           conversationId,
           acceptedEvent(proposal, replaced, wrote, this.deps.clock.now()),
@@ -891,10 +921,47 @@ ${text}`);
     value: ProposedValue,
     how: AcceptHow,
   ): Promise<Accepted> {
-    const basis = this.retitleBasis(proposal);
+    const basis = this.unitTitle(proposal.unitId);
     const { wrote } = granted(accept(proposal, basis, value, how));
     await this.deps.retitleUnit(proposal.unitId, wrote as string);
     return { replaced: (basis as { current: string }).current, wrote };
+  }
+
+  /**
+   * Moves a unit where a Move proposed, after its anchor or, accepted
+   * anyway, at the end of its destination when the anchor isn't there; as
+   * `acceptProposal`. Logs where it was, to go back to on undo, and where
+   * it landed.
+   */
+  private async acceptMove(
+    proposal: DecidedProposal & UnitMove,
+    how: AcceptHow,
+  ): Promise<Accepted> {
+    const basis = this.moveBasis(proposal);
+    const { wrote } = granted(accept(proposal, basis, null, how));
+    const replaced = this.placeNow(proposal.unitId)!;
+    await this.deps.moveUnit(proposal.unit, proposal.unitId, asPlace(wrote)!);
+    return { replaced, wrote: this.placeNow(proposal.unitId) ?? wrote };
+  }
+
+  /** Where a unit is placed now, as a Move's accept logs it: its container and the unit before it there. */
+  private placeNow(unitId: string): string[] | null {
+    const at = placeOfUnit(this.deps.manuscript(), unitId);
+    if (!at) return null;
+    const i = at.holds.indexOf(unitId);
+    return placeValue({ in: at.in, ...(i > 0 && { after: at.holds[i - 1] }) });
+  }
+
+  /** Puts a unit in Trash as a Put in Trash proposed, never once it holds Prose; as `acceptProposal`. */
+  private async acceptTrash(
+    proposal: DecidedProposal & UnitTrashing,
+    how: AcceptHow,
+  ): Promise<Accepted> {
+    const { wrote } = granted(
+      accept(proposal, await this.trashBasis(proposal), null, how),
+    );
+    await this.deps.trashUnit(proposal.unit, proposal.unitId);
+    return { wrote };
   }
 
   /**
@@ -1077,7 +1144,7 @@ ${text}`);
               ? await this.undoBookDetail(proposal)
               : proposal.kind === 'beats'
                 ? await this.undoBeats(proposal)
-                : proposal.kind === 'add' || proposal.kind === 'retitle'
+                : isStructural(proposal)
                   ? await this.undoStructure(proposal)
                   : await this.undoChange(proposal);
       await this.appendEvent(conversationId, {
@@ -1140,18 +1207,33 @@ ${text}`);
   }
 
   /**
-   * Puts a unit an Add made in Trash, while it holds no Prose, or gives a
-   * retitled one back its title, while it still has the accepted one, as
-   * `undoProposal`.
+   * Puts a unit an Add made in Trash, while it holds no Prose; gives a
+   * retitled one back its title, while it still has the accepted one;
+   * moves a moved one back after its old anchor, or to the end of its old
+   * container, while it is still where it was moved to; or restores one put
+   * in Trash to its place, while it is still there; as `undoProposal`.
    */
   private async undoStructure(
-    proposal: DecidedProposal & (UnitAddition | Retitle),
+    proposal: DecidedProposal & StructuralChange,
   ): Promise<undefined> {
     if (proposal.kind === 'add') {
       granted(undo(proposal, await this.addBasis(proposal)));
       await this.deps.trashUnit(proposal.unit, proposal.unitId);
+    } else if (proposal.kind === 'move') {
+      const undone = granted(undo(proposal, this.moveBasis(proposal)));
+      const back = asPlace((undone as { restore: FieldValue }).restore)!;
+      if (heldBy(this.deps.manuscript(), back.in) === null) {
+        throw new ProjectError(
+          'changed',
+          `Where ${this.proposalName(proposal)} was is no longer in the plan.`,
+        );
+      }
+      await this.deps.moveUnit(proposal.unit, proposal.unitId, back);
+    } else if (proposal.kind === 'trash') {
+      granted(undo(proposal, await this.trashBasis(proposal)));
+      await this.deps.restoreUnit(proposal.unitId);
     } else {
-      const undone = granted(undo(proposal, this.retitleBasis(proposal)));
+      const undone = granted(undo(proposal, this.unitTitle(proposal.unitId)));
       const { restore } = undone as { restore: string };
       await this.deps.retitleUnit(proposal.unitId, restore);
     }
@@ -1262,7 +1344,9 @@ ${text}`);
     if (proposal.kind === 'book-detail') return this.bookDetailTarget(proposal);
     if (proposal.kind === 'beats') return this.beatsBasis(proposal);
     if (proposal.kind === 'add') return this.addBasis(proposal);
-    if (proposal.kind === 'retitle') return this.retitleBasis(proposal);
+    if (proposal.kind === 'retitle') return this.unitTitle(proposal.unitId);
+    if (proposal.kind === 'move') return this.moveBasis(proposal);
+    if (proposal.kind === 'trash') return this.trashBasis(proposal);
     return proposal.kind === 'new-entry'
       ? this.newEntryPlace(proposal.entryId)
       : this.target(proposal);
@@ -1282,6 +1366,10 @@ ${text}`);
             where: 'live',
             name: this.outlineName(unitId),
             prose: await this.deps.holdsProse(unitId),
+            // Placed only by a project.json a synced one won over.
+            ...(placeOfUnit(this.deps.manuscript(), unitId) === null && {
+              unplaced: true as const,
+            }),
           }
         : {
             where:
@@ -1305,10 +1393,11 @@ ${text}`);
   }
 
   /**
-   * A Retitle's basis: its unit's title now; refused for a Scene Missing,
-   * Unplaced or in Conflict, and an Unplaced Chapter.
+   * A unit's title now, a Retitle's basis, or why Plan can't reach it: out
+   * of reach, or refused for a Scene Missing, Unplaced or in Conflict, and
+   * an Unplaced Chapter. A Move and a Put in Trash are refused alike.
    */
-  private retitleBasis({ unitId }: Retitle): RetitleBasis {
+  private unitTitle(unitId: string): RetitleBasis {
     const orphaned = this.deps.outlineOrphaned(unitId);
     if (orphaned) return { orphaned };
     const { parts = [], chapters, unplaced } = this.deps.manuscript();
@@ -1334,6 +1423,42 @@ ${text}`);
       return { refused: `${name} is in Conflict` };
     }
     return { current: scene.title };
+  }
+
+  /**
+   * A Move's basis: where its unit is now and what its destination holds;
+   * refused, as a Retitle, for a Scene Missing, Unplaced or in Conflict.
+   */
+  private moveBasis({ unitId, in: to }: UnitMove): MoveBasis {
+    const reach = this.unitTitle(unitId);
+    if (!('current' in reach)) return reach;
+    const manuscript = this.deps.manuscript();
+    const at = placeOfUnit(manuscript, unitId);
+    if (!at) return { refused: `${this.outlineName(unitId)} is Unplaced` };
+    const holds = heldBy(manuscript, to);
+    if (holds) return { at, destination: { holds } };
+    const orphaned =
+      to === PROJECT_OUTLINE && manuscript.books
+        ? 'gone'
+        : (this.deps.outlineOrphaned(to) ?? 'gone');
+    return { at, destination: { orphaned, name: this.outlineName(to) } };
+  }
+
+  /**
+   * A Put in Trash's basis: its unit's title and Outline now, the units it
+   * holds and whether one holds Prose; or why it is out of reach, in Trash
+   * among that, or refused as a Retitle.
+   */
+  private async trashBasis({ unitId }: UnitTrashing): Promise<TrashBasis> {
+    const reach = this.unitTitle(unitId);
+    if (!('current' in reach)) return reach;
+    const { body } = await this.deps.read(outlineRef(unitId));
+    return {
+      title: reach.current as string,
+      outline: body,
+      holds: unitsWithin(this.deps.manuscript(), unitId),
+      prose: await this.deps.holdsProse(unitId),
+    };
   }
 
   /**
@@ -1464,7 +1589,7 @@ ${text}`);
         ? `${PLAN_UNIT_LABELS[proposal.unit]} “${proposal.proposed.title}”`
         : name;
     }
-    if (proposal.kind === 'retitle') return this.outlineName(proposal.unitId);
+    if (isStructural(proposal)) return this.outlineName(proposal.unitId);
     if (proposal.kind === 'beats') return this.outlineName(proposal.sceneId);
     return this.outlineName(proposal.outlineId);
   }
@@ -1696,9 +1821,19 @@ function withNeeds(
       .filter((p) => p && p.state.kind !== 'accepted')
       .map((p) => p!.name);
     if (needs.length === 0) return view;
-    if ('current' in state) return { ...view, state: { ...state, needs } };
-    // An Add, or marks on the Scene it adds, waits on what it needs.
-    return view.kind === 'add' || view.kind === 'beats'
+    // A Move's anchor is judged where the Move it needs puts it.
+    if ('current' in state) {
+      const { anchorAway, ...rest } = state;
+      return {
+        ...view,
+        state: { ...rest, stale: state.stale && !anchorAway, needs },
+      };
+    }
+    // An Add, marks on the Scene it adds, or a Move into a container only
+    // proposed waits for it.
+    return view.kind === 'add' ||
+      view.kind === 'beats' ||
+      (view.kind === 'move' && 'of' in state)
       ? {
           ...view,
           state: { kind: 'pending', current: null, stale: false, needs },

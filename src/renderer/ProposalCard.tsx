@@ -56,6 +56,8 @@ export function proposalTitle(proposal: ProposalView): string {
   }
   if (proposal.kind === 'add') return `Add ${proposal.name}`;
   if (proposal.kind === 'retitle') return `${proposal.name} › Title`;
+  if (proposal.kind === 'move') return `Move ${proposal.name}`;
+  if (proposal.kind === 'trash') return `Put ${proposal.name} in Trash`;
   if (proposal.kind === 'beats') return `${proposal.name} › Beats`;
   return `${proposal.name} › Outline`;
 }
@@ -224,11 +226,15 @@ export function ProposalCard({
 
   const orphaned = 'orphaned' in state ? state.orphaned : null;
   const refused = 'refused' in state ? state.refused : null;
-  // A Book's detail or a Scene's Beats is accepted or rejected as proposed.
+  // A Move, Put in Trash, Book's detail or Scene's Beats is accepted or
+  // rejected only.
   const editable =
     proposal.kind === 'relation'
       ? proposal.proposed.kind === 'label'
-      : proposal.kind !== 'book-detail' && proposal.kind !== 'beats';
+      : proposal.kind !== 'move' &&
+        proposal.kind !== 'trash' &&
+        proposal.kind !== 'book-detail' &&
+        proposal.kind !== 'beats';
   const current = 'current' in state ? state.current : null;
   const stale = 'stale' in state && state.stale;
   // Until those it needs are accepted, it can only be rejected.
@@ -298,9 +304,13 @@ export function ProposalCard({
                   ? BOOK_DETAIL_LABELS[proposal.detail]
                   : proposal.kind === 'retitle'
                     ? 'The title'
-                    : proposal.kind === 'beats'
-                      ? 'The list of Beats'
-                      : 'The Outline'}{' '}
+                    : proposal.kind === 'move'
+                      ? 'Its place'
+                      : proposal.kind === 'trash'
+                        ? 'It'
+                        : proposal.kind === 'beats'
+                          ? 'The list of Beats'
+                          : 'The Outline'}{' '}
               has changed since this was proposed.
             </p>
           )}
@@ -406,6 +416,20 @@ function Change({
   stale: boolean;
 }) {
   if (proposal.kind === 'relation') return null;
+  if (proposal.kind === 'move') {
+    return (
+      <p className="proposal-diff" aria-label="Change">
+        Moves here from where it is marked moving.
+      </p>
+    );
+  }
+  if (proposal.kind === 'trash') {
+    return (
+      <p className="proposal-diff" aria-label="Change">
+        <del>{proposal.base.title}</del> to Trash
+      </p>
+    );
+  }
   if (proposal.kind === 'book-detail') {
     const { detail, base, proposed } = proposal;
     return (
@@ -577,6 +601,7 @@ function draftOf(proposal: ProposalView): Draft {
   // Never edited: accepted or rejected as proposed.
   if (proposal.kind === 'book-detail' || proposal.kind === 'beats') return '';
   if (proposal.kind === 'add') return { ...proposal.proposed };
+  if (proposal.kind === 'move' || proposal.kind === 'trash') return '';
   if (proposal.kind !== 'field') return proposal.proposed;
   const { field, proposed } = proposal;
   if (field === 'role') return proposed === null ? ROLES[0] : String(proposed);

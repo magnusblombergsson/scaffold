@@ -22,6 +22,7 @@ import {
 import {
   asNewEntry,
   asNewUnit,
+  asPlace,
   isBeatsValue,
   decided,
   isAppending,
@@ -181,6 +182,40 @@ export type AddEvent = {
   at: number;
 };
 
+/**
+ * A move of a Scene, Chapter or Part Plan proposed: the container it was
+ * in, the one it goes in, and the unit it goes after there, if any; as
+ * `AddEvent`. Its accept logs, under `place`, where it was and where it
+ * went.
+ */
+export type MoveEvent = {
+  type: 'proposal.move';
+  id: string;
+  unit: PlanUnit;
+  unitId: string;
+  from: string;
+  in: string;
+  after?: string;
+  needs?: string[];
+  at: number;
+};
+
+/**
+ * A Scene, Chapter or Part Plan proposed to put in Trash, with its title,
+ * Outline and the units it held then; as `AddEvent`.
+ */
+export type TrashEvent = {
+  type: 'proposal.trash';
+  id: string;
+  unit: PlanUnit;
+  unitId: string;
+  title: string;
+  outline: string;
+  holds: string[];
+  needs?: string[];
+  at: number;
+};
+
 /** A new title for a Scene, Chapter or Part Plan proposed, with the one it had; as `AddEvent`. */
 export type RetitleEvent = {
   type: 'proposal.retitle';
@@ -331,6 +366,8 @@ export type ConversationEvent =
   | BeatsEvent
   | AddEvent
   | RetitleEvent
+  | MoveEvent
+  | TrashEvent
   | AcceptedEvent
   | RejectedEvent
   | UndoneEvent
@@ -477,7 +514,9 @@ export function parseLog(log: string): LoggedConversation | null {
       event.type === 'proposal.bookDetail' ||
       event.type === 'proposal.beats' ||
       event.type === 'proposal.add' ||
-      event.type === 'proposal.retitle'
+      event.type === 'proposal.retitle' ||
+      event.type === 'proposal.move' ||
+      event.type === 'proposal.trash'
     ) {
       const proposal =
         event.type === 'proposal.proposed'
@@ -589,6 +628,8 @@ export function proposedEvent(
   | RelatedEvent
   | AddEvent
   | RetitleEvent
+  | MoveEvent
+  | TrashEvent
   | BookDetailEvent
   | BeatsEvent {
   const { id } = proposal;
@@ -601,6 +642,34 @@ export function proposedEvent(
       scene: sceneId,
       base,
       proposed,
+      ...needs,
+      at,
+    };
+  }
+  if (proposal.kind === 'move') {
+    const { unit, unitId, from, after } = proposal;
+    return {
+      type: 'proposal.move',
+      id,
+      unit,
+      unitId,
+      from,
+      in: proposal.in,
+      ...(after !== undefined && { after }),
+      ...needs,
+      at,
+    };
+  }
+  if (proposal.kind === 'trash') {
+    const { unit, unitId, base } = proposal;
+    return {
+      type: 'proposal.trash',
+      id,
+      unit,
+      unitId,
+      title: base.title,
+      outline: base.outline,
+      holds: base.holds,
       ...needs,
       at,
     };
@@ -733,6 +802,22 @@ export function acceptedEvent(
   landed: Landing = {},
 ): AcceptedEvent {
   const { id } = proposal;
+  if (proposal.kind === 'move') {
+    return {
+      type: 'proposal.accepted',
+      id,
+      fields: { place: { replaced: replaced!, wrote: wrote as string[] } },
+      at,
+    };
+  }
+  if (proposal.kind === 'trash') {
+    return {
+      type: 'proposal.accepted',
+      id,
+      fields: { title: { wrote: wrote as string } },
+      at,
+    };
+  }
   if (proposal.kind === 'add') {
     const { title, outline, beats } = wrote as NewUnit;
     return {
@@ -838,12 +923,19 @@ function loggedProposal(event: Partial<ProposedEvent>): Proposal | null {
 }
 
 /**
- * The Add or Retitle an event logs, if this app can take it: an Add of a
- * Scene, Chapter or Part with its id, container and title; a Retitle with
- * the title it had and a new one. Its needs are kept if readable.
+ * The Add, Retitle, Move or Put in Trash an event logs, if this app can
+ * take it: an Add of a Scene, Chapter or Part with its id, container and
+ * title; a Retitle with the title it had and a new one; a Move with the
+ * container it was in and the one it goes in; a Put in Trash with the
+ * unit as it was. Its needs are kept if readable.
  */
 function loggedStructure(
-  event: Partial<Omit<AddEvent, 'type'> & Omit<RetitleEvent, 'type'>> & {
+  event: Partial<
+    Omit<AddEvent, 'type'> &
+      Omit<RetitleEvent, 'type'> &
+      Omit<MoveEvent, 'type'> &
+      Omit<TrashEvent, 'type'>
+  > & {
     type?: unknown;
   },
 ): Proposal | null {
@@ -856,7 +948,30 @@ function loggedStructure(
     return { kind: 'retitle', id, unitId, base, proposed, ...waits };
   }
   const { unit, after, title, outline, beats } = event;
-  if (!PLAN_UNITS.includes(unit!) || typeof event.in !== 'string') return null;
+  if (!PLAN_UNITS.includes(unit!)) return null;
+  if (event.type === 'proposal.trash') {
+    const { holds } = event;
+    if (typeof title !== 'string' || typeof outline !== 'string') return null;
+    if (!Array.isArray(holds) || !holds.every((h) => typeof h === 'string')) {
+      return null;
+    }
+    const base = { title, outline, holds };
+    return { kind: 'trash', id, unit: unit!, unitId, base, ...waits };
+  }
+  if (typeof event.in !== 'string') return null;
+  if (event.type === 'proposal.move') {
+    if (typeof event.from !== 'string') return null;
+    return {
+      kind: 'move',
+      id,
+      unit: unit!,
+      unitId,
+      from: event.from,
+      in: event.in,
+      ...(typeof after === 'string' && { after }),
+      ...waits,
+    };
+  }
   if (typeof title !== 'string' || typeof outline !== 'string') return null;
   const brings = unit === 'scene' && isBeatsValue(beats) && beats?.length;
   return {
@@ -1065,6 +1180,15 @@ function acceptedOf(
   }
   const { fields } = event;
   if (!fields) return null;
+  if (proposal.kind === 'move') {
+    const { replaced, wrote } = fields.place ?? {};
+    if (!asPlace(replaced) || !asPlace(wrote)) return null;
+    return { kind: 'accepted', replaced, wrote };
+  }
+  if (proposal.kind === 'trash') {
+    const { wrote } = fields.title ?? {};
+    return typeof wrote === 'string' ? { kind: 'accepted', wrote } : null;
+  }
   if (proposal.kind === 'add') {
     const wrote = asNewUnit({
       title: fields.title?.wrote,
