@@ -1,6 +1,8 @@
 import {
   isInterviewFocus,
   MODES,
+  PLAN_ASKS,
+  type PlanAsk,
   type Compaction,
   type Conversation,
   type ConversationMessage,
@@ -174,7 +176,7 @@ export type ModelChosenEvent = {
 };
 
 /**
- * In a Series, the Book a Brainstorm or Interview is about, by id, from its
+ * In a Series, the Book a Brainstorm, Interview or Plan is about, by id, from its
  * next message on. An app from before Books skips it (ADR 0006).
  */
 export type BookChosenEvent = {
@@ -183,7 +185,7 @@ export type BookChosenEvent = {
   at: number;
 };
 
-/** The Author set an Interview's focus. */
+/** The Author set an Interview's or Plan's focus. */
 export type FocusChangedEvent = {
   type: 'focusChanged';
   focus: InterviewFocus;
@@ -823,11 +825,12 @@ function acceptedOf(
 function messageOf(event: MessageEvent): ConversationMessage {
   const { role, text, command, focus, at, model, usage, interrupted, saw } =
     event;
-  const { provider, cost, cutShort, unreadable, findings } = event;
+  const { provider, cost, cutShort, unreadable, findings, ask } = event;
   return {
     role,
     text,
     ...(REVIEW_COMMANDS.includes(command as ReviewCommand) && { command }),
+    ...(PLAN_ASKS.includes(ask as PlanAsk) && { ask }),
     focus,
     at,
     ...(typeof model === 'string' && { model }),

@@ -64,6 +64,7 @@ import type {
   Conversation,
   ConversationSummary,
   InterviewFocus,
+  PlanAsk,
   Mode,
 } from './conversation';
 
@@ -1165,8 +1166,9 @@ export interface AssistantApi {
    */
   trashConversation(conversationId: string): Promise<Changed | null>;
   /**
-   * Sets an Interview's focus from its next message on, logged as an event.
-   * Refused for a Conversation of another Mode.
+   * Sets an Interview's or Plan's focus from its next message on, logged as
+   * an event. Refused for a Conversation of another Mode, and in a Plan,
+   * for a focus other than its Book, a Part or a Chapter.
    */
   setInterviewFocus(
     conversationId: string,
@@ -1192,6 +1194,16 @@ export interface AssistantApi {
     conversationId: string,
     command: ReviewCommand,
     sceneId: string | null,
+    onText: (text: string) => void,
+  ): Promise<AskResult>;
+  /**
+   * Asks in a Plan Conversation what one of its start buttons asks, as
+   * `ask` does: the Author's message is the button's label. Refused in
+   * another Mode.
+   */
+  planAsk(
+    conversationId: string,
+    planAsk: PlanAsk,
     onText: (text: string) => void,
   ): Promise<AskResult>;
   /**
@@ -1360,6 +1372,7 @@ export const assistantMethods = {
   setInterviewFocus: 'invoke',
   ask: 'stream',
   review: 'stream',
+  planAsk: 'stream',
   retry: 'stream',
   acceptProposal: 'invoke',
   rejectProposal: 'invoke',

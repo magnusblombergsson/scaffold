@@ -22,7 +22,7 @@ export const ALL_DOCKED: DockedPanes = { left: true, assistant: true };
 /**
  * What the Author asked for from the menu bar or a shortcut, sent to the
  * window in front. `byKey` is set when a menu's shortcut sent it rather than
- * a click: shortcuts other than Ctrl+1/2/3/4 and Ctrl+E do nothing outside
+ * a click: shortcuts other than Ctrl+1 to 5 and Ctrl+E do nothing outside
  * Writing, and Ctrl+T outside Writing and the Story Bible.
  */
 export type Command = (
@@ -89,6 +89,7 @@ export const SHORTCUTS = {
   brainstorm: 'CmdOrCtrl+2',
   interview: 'CmdOrCtrl+3',
   storyBible: 'CmdOrCtrl+4',
+  plan: 'CmdOrCtrl+5',
   newScene: 'CmdOrCtrl+Enter',
   newSceneAbove: 'CmdOrCtrl+Alt+Enter',
   newChapter: 'CmdOrCtrl+Shift+Enter',
@@ -133,6 +134,7 @@ const ROOM_DIGITS: Record<string, Room> = {
   '2': 'brainstorm',
   '3': 'interview',
   '4': 'storyBible',
+  '5': 'plan',
 };
 
 type KeyPress = {
@@ -145,7 +147,7 @@ type KeyPress = {
 
 /**
  * The command a key press in a window asks for, if any: the create chords,
- * Ctrl+E, Ctrl+T, the split keys, Ctrl+1/2/3/4, zen, the pane keys, the
+ * Ctrl+E, Ctrl+T, the split keys, Ctrl+1 to 5, zen, the pane keys, the
  * width key and the typewriter key, which apply where a Project is shown,
  * and Ctrl+/.
  * Ctrl is ⌘ on macOS. The menus take the others.
@@ -308,6 +310,7 @@ export const CHEAT_SHEET: {
       { keys: [SHORTCUTS.brainstorm], action: 'Brainstorm' },
       { keys: [SHORTCUTS.interview], action: 'Interview' },
       { keys: [SHORTCUTS.storyBible], action: 'Story Bible' },
+      { keys: [SHORTCUTS.plan], action: 'Plan' },
       {
         keys: ['F6', 'Shift+F6'],
         action: 'Next or previous pane: left pane, editor, Assistant',

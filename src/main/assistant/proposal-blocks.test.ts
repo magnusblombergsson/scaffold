@@ -55,3 +55,77 @@ describe('A Relation Proposal in a Series', () => {
     expect(proposals[0]).not.toHaveProperty('book');
   });
 });
+
+describe('Proposals in Plan', () => {
+  it('are Outlines of its own Book, what it holds and the Series only; anything else is unreadable', async () => {
+    const store = await createProject(path.join(dir, 'My Novel'), {
+      fs: nodeFileSystem,
+      clock: instantClock(1_000),
+    });
+    const [first] = store.manuscript().chapters;
+    const { id: mara } = await store.createEntry('character', 'Mara');
+    const { id: two } = await store.createBook();
+    const one = store.manuscript().books![0].id;
+    const { id: away } = await store.createChapter(0, 'Away', undefined, two);
+    const view = store.assistantView();
+
+    const { proposals, unreadable } = await readProposals(
+      view,
+      [
+        { outline: 'project', value: '- The whole Series' },
+        { outline: one, value: '- Book one' },
+        { outline: first.id, append: '- More' },
+        { outline: first.scenes[0].id, value: '- A Scene' },
+        // Another Book, and what it holds.
+        { outline: two, value: '- Book two' },
+        { outline: away, value: '- Away' },
+        // The Story Bible.
+        { entry: mara, field: 'description', append: 'Tall.' },
+        { create: 'character', name: 'Tobin', description: 'Her son.' },
+      ],
+      storyBibleOf(view, one),
+      'plan',
+    );
+
+    expect(
+      proposals.map((p) => (p.kind === 'outline' ? p.outlineId : p.kind)),
+    ).toEqual(['project', one, first.id, first.scenes[0].id]);
+    expect(unreadable).toBe(4);
+  });
+});
+
+describe('Proposals in Plan, on a Missing Scene', () => {
+  it('are unreadable', async () => {
+    const store = await createProject(path.join(dir, 'My Novel'), {
+      fs: nodeFileSystem,
+      clock: instantClock(1_000),
+    });
+    const real = store.assistantView();
+    const [chapter] = real.manuscript().chapters;
+    const scene = chapter.scenes[0].id;
+    // As when its file hasn't reached this computer yet.
+    const view = {
+      ...real,
+      manuscript: () => {
+        const manuscript = real.manuscript();
+        return {
+          ...manuscript,
+          chapters: manuscript.chapters.map((c) => ({
+            ...c,
+            scenes: c.scenes.map((s) => ({ ...s, missing: true as const })),
+          })),
+        };
+      },
+    };
+
+    const { proposals, unreadable } = await readProposals(
+      view,
+      [{ outline: scene, value: '- Gone' }],
+      storyBibleOf(view, undefined),
+      'plan',
+    );
+
+    expect(proposals).toEqual([]);
+    expect(unreadable).toBe(1);
+  });
+});

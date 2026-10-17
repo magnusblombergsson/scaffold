@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   OPEN_FOCUS as OPEN,
   type ConversationMessage,
+  type PlanFocus,
 } from '../../shared/conversation';
 import { findingBlock } from '../../shared/finding';
 import { PROJECT_OUTLINE } from '../../shared/project-types';
@@ -1879,5 +1880,162 @@ describe('Relations', () => {
     const text = await brainstorm(view, 'Anna opens the kista.');
 
     expect(text).not.toContain('How the Author has said');
+  });
+});
+
+describe('Plan', () => {
+  /** The fixture with an empty Scene “Shore” in Chapter “Storm” and a Status on “Arrival”. */
+  async function planned() {
+    const project = await fixture();
+    const { store, chapters } = project;
+    const { id: shore } = await store.createScene(chapters.storm, 1, 'Shore');
+    await store.write(
+      { kind: 'outline', id: shore },
+      { id: shore, body: '- She walks home', meta: {} },
+    );
+    await store.setStatus(chapters.arrival, 'outlined');
+    await store.setTags(chapters.arrival, ['Mara']);
+    return { ...project, shore };
+  }
+  const plan = (
+    view: Awaited<ReturnType<typeof fixture>>['view'],
+    focus: PlanFocus,
+    text = 'Go on.',
+    book?: string,
+  ) =>
+    buildContext(view, {
+      mode: 'plan',
+      focus,
+      messages: [message('author', text)],
+      ...(book && { book }),
+    });
+  const skeletonOf = (context: Awaited<ReturnType<typeof buildContext>>) =>
+    context.system.find((b) => b.text.startsWith('The plan:'))?.text ?? '';
+
+  it('is asked with the Plan prompt, which holds no Story Bible Proposals', async () => {
+    const { view } = await planned();
+
+    const context = await plan(view, { kind: 'open' });
+
+    expect(context.system[0].text).toContain('In Plan');
+    expect(context.system[0].text).not.toContain('"create": "character"');
+  });
+
+  it('with the Book in focus: every unit’s Outline, Notes and Status, and whether each Scene holds Prose; never Prose', async () => {
+    const { view, chapters, scenes, shore } = await planned();
+
+    const context = await plan(view, { kind: 'open' });
+
+    const skeleton = skeletonOf(context);
+    expect(skeleton).toContain(
+      `## The story\nId: ${PROJECT_OUTLINE}\n- A woman leaves an island`,
+    );
+    expect(skeleton).toContain(
+      `## Chapter “Arrival”\nId: ${chapters.arrival}\nStatus: Outlined\nHolds Prose\n- She arrives\nNotes:\nKeep it short.`,
+    );
+    expect(skeleton).toContain(
+      `### Scene “Harbour”\nId: ${scenes.harbour}\nHolds Prose\n- She waits for the ferry\nNotes:\nCold morning.`,
+    );
+    expect(skeleton).toContain(
+      `### Scene “Shore”\nId: ${shore}\nNo Prose yet\n- She walks home`,
+    );
+    const text = sent(context);
+    expect(text).not.toContain('Annie waited on the quay.');
+    expect(text).not.toContain('Nothing was left of the boat.');
+    expect(text).not.toContain('Mara');
+    expect(context.saw.units).toContainEqual({
+      kind: 'notes',
+      id: scenes.harbour,
+    });
+  });
+
+  it('with a Chapter in focus: its own and its Scenes’ Notes and details, and only titles and Outlines for the rest of the Book', async () => {
+    const { view, chapters, scenes, shore } = await planned();
+
+    const context = await plan(view, { kind: 'chapter', id: chapters.storm });
+
+    const skeleton = skeletonOf(context);
+    expect(skeleton).toContain(
+      `## Chapter “Storm”\nId: ${chapters.storm}\nHolds Prose\n- The storm breaks\nNotes:\nNight.`,
+    );
+    expect(skeleton).toContain(
+      `## Chapter “Arrival”\nId: ${chapters.arrival}\n- She arrives`,
+    );
+    expect(skeleton).toContain(
+      `### Scene “Harbour”\nId: ${scenes.harbour}\n- She waits for the ferry`,
+    );
+    expect(skeleton).not.toContain('Cold morning.');
+    expect(skeleton).not.toContain('Status: Outlined');
+    expect(context.saw.units).toEqual([
+      { kind: 'notes', id: chapters.storm },
+      { kind: 'notes', id: scenes.wreck },
+      { kind: 'notes', id: shore },
+    ]);
+    const focus = context.system.find((b) =>
+      b.text.startsWith('The Plan’s focus'),
+    )?.text;
+    expect(focus).toContain(`the Chapter “Storm”, Id: ${chapters.storm}`);
+  });
+
+  it('with a Part in focus: the Part, its Chapters and their Scenes in full', async () => {
+    const project = await planned();
+    const { store, view, chapters, scenes } = project;
+    const { id: sea } = await store.createPart(1, 'The Sea');
+    await store.moveChapter(chapters.storm, 0, sea);
+    await store.write({ kind: 'notes', id: sea }, { id: sea, body: 'Grey.' });
+
+    const skeleton = skeletonOf(await plan(view, { kind: 'part', id: sea }));
+
+    expect(skeleton).toContain('Notes:\nGrey.');
+    expect(skeleton).toContain('Notes:\nThe kistan floats.');
+    expect(skeleton).not.toContain('Keep it short.');
+    expect(skeleton).toContain(`Id: ${scenes.letter}\n- The letter`);
+  });
+
+  it('names a focus no longer in the Book as gone, and sends no unit in full', async () => {
+    const { store, view, chapters } = await planned();
+    await store.trashChapter(chapters.storm);
+
+    const context = await plan(view, { kind: 'chapter', id: chapters.storm });
+
+    const focus = context.system.find((b) =>
+      b.text.startsWith('The Plan’s focus'),
+    )?.text;
+    expect(focus).toMatch(/no longer in this Book/);
+    expect(skeletonOf(context)).not.toContain('Notes:');
+  });
+
+  it('sends what a start button asks for after the Author’s message', async () => {
+    const { view } = await planned();
+
+    const context = await buildContext(view, {
+      mode: 'plan',
+      focus: { kind: 'open' },
+      messages: [
+        { ...message('author', 'Check my plan'), ask: 'check-plan' as const },
+      ],
+    });
+
+    expect(context.messages[0].content).toMatch(/^Check my plan\n\n\S/);
+  });
+
+  it('in a Series: the Series Outline and every Book’s Outline, and the units of its own Book only', async () => {
+    const project = await planned();
+    const { store, view, chapters } = project;
+    const { id: two } = await store.createBook();
+    const one = store.manuscript().books![0].id;
+    await store.moveChapter(chapters.storm, 0, undefined, two);
+    await store.write({ kind: 'notes', id: one }, { id: one, body: 'Bleak.' });
+
+    const skeleton = skeletonOf(
+      await plan(view, { kind: 'open' }, 'Go on.', one),
+    );
+
+    expect(skeleton).toContain(`## The Series\nId: ${PROJECT_OUTLINE}`);
+    expect(skeleton).toContain(`## Book “Book 1”\nId: ${one}\nHolds Prose\n`);
+    expect(skeleton).toContain('Notes:\nBleak.');
+    expect(skeleton).toContain(`## Book “Book 2”\nId: ${two}\n`);
+    expect(skeleton).toContain('Chapter “Arrival”');
+    expect(skeleton).not.toContain('Storm');
   });
 });

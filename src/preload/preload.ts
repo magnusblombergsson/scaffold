@@ -65,6 +65,10 @@ const assistant: AssistantApi = {
     streamReply(onText, (askId) =>
       invoke('assistant', 'review', [askId, conversationId, command, sceneId]),
     ),
+  planAsk: (conversationId, planAsk, onText) =>
+    streamReply(onText, (askId) =>
+      invoke('assistant', 'planAsk', [askId, conversationId, planAsk]),
+    ),
   retry: (conversationId, onText) =>
     streamReply(onText, (askId) =>
       invoke('assistant', 'retry', [askId, conversationId]),

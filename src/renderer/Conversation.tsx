@@ -7,9 +7,11 @@ import {
   useRef,
   useState,
   type KeyboardEvent,
+  type ReactNode,
 } from 'react';
 import {
   OPEN_FOCUS,
+  PLAN_ASK_LABELS,
   type AskResult,
   type AssistantFailure,
   type Conversation,
@@ -17,6 +19,7 @@ import {
   type ConversationSummary,
   type InterviewFocus,
   type Mode,
+  type PlanAsk,
 } from '../shared/conversation';
 import {
   FINDING_LABELS,
@@ -49,6 +52,8 @@ import {
   type Total,
 } from '../shared/usage';
 import { focusLabel } from './interview-focus';
+import { planFocusLabel } from './plan-focus';
+import type { ProposalView } from '../shared/proposal';
 import { proposalCardId, ProposalCard } from './ProposalCard';
 import { modelName } from './model-listing';
 import { emptyReplyNote } from './empty-reply-note';
@@ -73,6 +78,7 @@ export const WINDOW_MODES = [
   'writing',
   'brainstorm',
   'interview',
+  'plan',
 ] as const satisfies Mode[];
 
 /** The Project as it is now, which names what the Assistant saw. */
@@ -116,7 +122,7 @@ function sceneOf(
  * The Conversations of the Project, one of them open, and asking the
  * Assistant in it. A new one starts in `mode` when its first message is
  * sent, which is about the Scene `sceneId`, if any, or a new Interview
- * about `focus`. `show` opens one at a Proposal the Author asked to see. A
+ * or Plan about `focus`. `show` opens one at a Proposal the Author asked to see. A
  * decision made anywhere shows at once, and so does a Conversation renamed,
  * moved to Trash or restored, or forked on another computer. A failed call
  * is kept as `failure`, with the Model it asked, for Retry; it isn't in the
@@ -296,8 +302,21 @@ export function useConversation({
   }
 
   /**
-   * Sets the open Interview's focus from its next message on; a new one
-   * starts with the `focus` given.
+   * Sends what a Plan start button asks, its label as the Author's message;
+   * a new Plan starts with it.
+   */
+  async function planAsk(ask: PlanAsk) {
+    if (streaming !== null) return;
+    const text = PLAN_ASK_LABELS[ask];
+    await asking(async () => {
+      const asked = await showAsked({ text, ask });
+      await showResult(asked, window.assistant.planAsk(asked, ask, onText));
+    });
+  }
+
+  /**
+   * Sets the open Interview's or Plan's focus from its next message on; a
+   * new one starts with the `focus` given.
    */
   async function changeFocus(next: InterviewFocus) {
     const conversation = current;
@@ -319,11 +338,11 @@ export function useConversation({
   /**
    * Shows the Author's message in the Conversation it is asked in, which
    * starts with it if new, while the Assistant answers; resolves with the
-   * Conversation's id. A new Interview starts with its focus set, and in a
-   * Series, a new Brainstorm or Interview on its Book.
+   * Conversation's id. A new Interview or Plan starts with its focus set,
+   * and in a Series, a new Brainstorm, Interview or Plan on its Book.
    */
   async function showAsked(
-    message: Pick<ConversationMessage, 'text' | 'command'>,
+    message: Pick<ConversationMessage, 'text' | 'command' | 'ask'>,
   ): Promise<string> {
     let conversation = current;
     if (!conversation) {
@@ -340,7 +359,7 @@ export function useConversation({
         await window.assistant.chooseBook(started.id, book);
         conversation = { ...conversation, book };
       }
-      if (mode === 'interview') {
+      if (mode === 'interview' || mode === 'plan') {
         await window.assistant.setInterviewFocus(started.id, focus);
         conversation = {
           ...conversation,
@@ -519,6 +538,7 @@ export function useConversation({
     resume,
     send,
     review,
+    planAsk,
     retry,
     changeFocus,
     rename,
@@ -574,15 +594,18 @@ export function MessageLog({
   onOpenSettings,
   onQuote,
   onAddTodo,
+  proposals: showProposals,
 }: {
   conversation: ConversationState;
   names: Names;
   /** Said while there is no message to show. */
-  empty?: string;
+  empty?: ReactNode;
   onOpenSettings(): void;
   onQuote?(sceneId: string, quote: string): void;
   /** Starts a Todo from a Finding: its text, linked to the unit reviewed. */
   onAddTodo?(text: string, link: TodoLink | null): void;
+  /** How a reply's Proposals show, if not as cards in it. */
+  proposals?(proposals: ProposalView[]): ReactNode;
 }) {
   const readOnly = useContext(ReadOnlyContext);
   const providers = useProviders();
@@ -604,7 +627,13 @@ export function MessageLog({
 
   return (
     <div className="messages" role="log" aria-label="Messages">
-      {empty && !current && <p className="assistant-empty">{empty}</p>}
+      {empty &&
+        !current &&
+        (typeof empty === 'string' ? (
+          <p className="assistant-empty">{empty}</p>
+        ) : (
+          empty
+        ))}
       {current?.messages.map((m, i) => (
         <Fragment key={i}>
           <EmptyReplies conversation={current} before={i} named={named} />
@@ -616,6 +645,7 @@ export function MessageLog({
             conversationId={current.id}
             shown={shown}
             onQuote={onQuote}
+            showProposals={showProposals}
             onAddTodo={
               onAddTodo &&
               ((text) =>
@@ -718,9 +748,9 @@ function EmptyReplies({
   ));
 }
 
-/** Where an Interview's focus was set, before the message `before`. */
+/** Where an Interview's or Plan's focus was set, before the message `before`. */
 function FocusChanges({
-  conversation: { focusChanges = [] },
+  conversation: { focusChanges = [], mode, book },
   before,
   names,
 }: {
@@ -728,11 +758,16 @@ function FocusChanges({
   before: number;
   names: Names;
 }) {
+  const { manuscript } = names;
+  const label = (focus: InterviewFocus) =>
+    mode === 'plan'
+      ? planFocusLabel(focus, manuscript, conversationBook(manuscript, book))
+      : focusLabel(focus, names);
   return focusChanges
     .filter((change) => change.before === before)
     .map((change, i) => (
       <p key={i} className="focus-change" role="note">
-        Focus: {focusLabel(change.focus, names)}
+        Focus: {label(change.focus)}
       </p>
     ));
 }
@@ -969,6 +1004,7 @@ function Message({
   shown,
   onQuote,
   onAddTodo,
+  showProposals,
 }: {
   message: Pick<ConversationMessage, 'role' | 'text'> &
     Partial<ConversationMessage>;
@@ -980,6 +1016,8 @@ function Message({
   onQuote?(sceneId: string, quote: string): void;
   /** Starts a Todo of a Finding's text, linked to the unit reviewed. */
   onAddTodo?(text: string): void;
+  /** How its Proposals show, if not as cards. */
+  showProposals?(proposals: ProposalView[]): ReactNode;
 }) {
   const { role, text, model, provider, interrupted, unreadable } = message;
   const { cutShort, saw, findings, proposals } = message;
@@ -1016,6 +1054,12 @@ function Message({
         </ol>
       )}
       {conversationId &&
+        showProposals &&
+        proposals &&
+        proposals.length > 0 &&
+        showProposals(proposals)}
+      {conversationId &&
+        !showProposals &&
         proposals?.map((proposal) => (
           <ProposalCard
             key={proposal.id}

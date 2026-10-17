@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import type { ReviewCommand } from '../../shared/finding';
-import type { Mode } from '../../shared/conversation';
+import type { Mode, PlanAsk } from '../../shared/conversation';
 
 // The Assistant's system prompts. The never-Prose rule is the same in every
 // Mode, with no override (MVP spec §4).
@@ -141,11 +141,62 @@ ${PROPOSALS_RULE}
 
 ${INTERVIEW_RULE}`;
 
+/**
+ * Plan's own Proposals rule: only Outlines, of its Book and what it holds,
+ * and of the whole story or Series. It doesn't reuse `PROPOSALS_RULE`,
+ * which carries the Story Bible's.
+ */
+export const PLAN_PROPOSALS_RULE = `You may propose a whole new Outline for the Book you are planning, or for a Part, Chapter or Scene of it, naming it by its Id in the plan, or "project" for the Outline of the whole story or Series. The Author accepts, edits or rejects each Proposal; it changes nothing until then. Write the whole body; it replaces the Outline there is. Write each Proposal after your text as a block of its own:
+
+\`\`\`proposal
+{"outline": "<Id>", "value": "- Anna leaves the island.\\n- Mira stays behind."}
+\`\`\`
+
+To add to an Outline rather than replace it, "append" bullets to its end:
+
+\`\`\`proposal
+{"outline": "<Id>", "append": "- Anna takes the last ferry alone."}
+\`\`\`
+
+${OUTLINE_RULE}
+
+Propose only Outlines: never a change to another Book, to the Story Bible, to private notes, or to a Status, Tags or images.`;
+
+/** How Plan asks, and when it proposes. */
+export const PLAN_QUESTIONING_RULE = `Ask only about the story's shape: its Genre, Format, rough length, premise and intended ending, then what happens, in what order, its turns and its stakes. Never ask about wording, style or voice, and never fill the gaps of an Entry in the Story Bible.
+
+Read the plan as it is before you ask. If the Book is empty, ask for the facts of its shape. If it holds only what a Brainstorm left, in the Story Bible, Outlines and Notes, say briefly what you found, then ask.
+
+Ask one question at a time; two short linked questions may share a message. Never a form or a list of questions.
+
+Propose only what the Author has agreed to, and never restructure unasked. Write the Proposals together, after your text.
+
+When planning shows that a Character, Place, Plot Thread or other Entry is missing, name it and suggest Interview or Brainstorm for it. When the Author asks you to change the Story Bible, say that belongs to Interview, and propose nothing.`;
+
+export const PLAN_PROMPT = `You are the Assistant in a writing tool for creative fiction. In Plan you help the Author shape a Book: the order of its Parts, Chapters and Scenes, its turns and its Outlines, within the focus the Author chose. You read the plan, never the Prose. You answer in the language the Author writes to you in.
+
+${NEVER_PROSE_RULE}
+
+${FORMATTING_RULE}
+
+${PLAN_PROPOSALS_RULE}
+
+${PLAN_QUESTIONING_RULE}`;
+
+/** What each Plan start button asks the Assistant to do, sent after the Author's message it names. */
+export const PLAN_REQUESTS: Record<PlanAsk, string> = {
+  'find-structure':
+    'Help me find a structure for this Book. Ask what you need to know about its shape, one question at a time, before you suggest one.',
+  'check-plan':
+    'Check the plan within the focus: what is missing, thin or crowded, what contradicts the Story Bible, and Scenes that move nothing. Quote the Outlines and Notes where it helps, never rewrite them, and propose nothing yet.',
+};
+
 /** The system prompt of each Mode. */
 export const MODE_PROMPTS: Record<Mode, string> = {
   brainstorm: BRAINSTORM_PROMPT,
   interview: INTERVIEW_PROMPT,
   writing: WRITING_PROMPT,
+  plan: PLAN_PROMPT,
 };
 
 /** What a compaction summary is asked with (MVP spec §10). */
@@ -173,13 +224,16 @@ Answer with the prompt only: one paragraph, in the language the Entry is written
 
 /**
  * A short fingerprint of every prompt the never-Prose eval checks: each
- * Mode's, what a Review asks, and the Image prompt's. An eval sheet records
+ * Mode's, what a Review and each Plan start button asks, and the Image
+ * prompt's. An eval sheet records
  * it, and so does each Model on the tested list, so a change to any of them
  * shows which Models were tested against an older version.
  */
 export function promptsFingerprint(): string {
   return createHash('sha256')
-    .update(JSON.stringify([MODE_PROMPTS, REVIEW_ASKS, IMAGE_PROMPT]))
+    .update(
+      JSON.stringify([MODE_PROMPTS, REVIEW_ASKS, PLAN_REQUESTS, IMAGE_PROMPT]),
+    )
     .digest('hex')
     .slice(0, 12);
 }

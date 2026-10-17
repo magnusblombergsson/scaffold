@@ -581,6 +581,48 @@ describe('Interviews', () => {
   });
 });
 
+describe('Plan', () => {
+  it('asks about the Plan’s focus and logs it in each message; a start button logs its label and sends its request', async () => {
+    const { store, engine, provider, chapterId } = await setUp(() => ['Hm.']);
+    const { id } = await store.startConversation('plan', 'Shape');
+
+    await engine.planAsk(id, 'check-plan', () => {});
+    await store.setInterviewFocus(id, { kind: 'chapter', id: chapterId });
+    await engine.askAssistant(id, 'And?', { sceneId: null }, () => {});
+
+    const system = provider.requests.map((r) =>
+      r.system.map((b) => b.text).join('\n'),
+    );
+    expect(system[0]).toMatch(
+      /Plan’s focus, as the Author set it: the whole story/,
+    );
+    expect(system[1]).toContain(`the Chapter “Chapter 1”, Id: ${chapterId}`);
+    expect(provider.requests[0].messages[0].content).toMatch(
+      /^Check my plan\n\nCheck the plan within the focus/,
+    );
+    const { messages } = await store.readConversation(id);
+    expect(messages[0]).toMatchObject({
+      text: 'Check my plan',
+      ask: 'check-plan',
+    });
+    expect(messages.map((m) => m.focus)).toEqual([
+      [],
+      [],
+      [chapterId],
+      [chapterId],
+    ]);
+  });
+
+  it('refuses a start button outside Plan', async () => {
+    const { store, engine } = await setUp(() => ['Hm.']);
+    const { id } = await store.startConversation('brainstorm', 'Ideas');
+
+    await expect(
+      engine.planAsk(id, 'find-structure', () => {}),
+    ).rejects.toThrow(/Plan/);
+  });
+});
+
 describe('retry', () => {
   it('answers the Author’s last message again after a failure, about the Scene then in focus', async () => {
     const { store, sceneId, engine, provider } = await setUp((n) =>

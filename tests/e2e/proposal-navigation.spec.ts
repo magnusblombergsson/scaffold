@@ -91,7 +91,7 @@ test('in Writing, a Proposal’s title goes to its target, focused, its ghost hi
   // Its Mode select lists only Modes, not the Story Bible.
   await expect(
     assistant.getByRole('combobox', { name: 'Mode' }).getByRole('option'),
-  ).toHaveText(['Writing', 'Brainstorm', 'Interview']);
+  ).toHaveText(['Writing', 'Brainstorm', 'Interview', 'Plan']);
 
   // Start elsewhere: the Scene.
   await roomButton(page, 'Writing').click();

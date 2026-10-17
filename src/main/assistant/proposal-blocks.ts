@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Mode } from '../../shared/conversation';
-import { PROJECT_OUTLINE } from '../../shared/project-types';
+import { bookManuscript } from '../../shared/manuscript-order';
+import { PROJECT_OUTLINE, type Manuscript } from '../../shared/project-types';
 import {
   mayPropose,
   newEntryOf,
@@ -21,7 +22,10 @@ import type { AssistantView } from '../project-store/project-store';
  * holds already is left out. In a Series, a change to a field is against
  * the Entry as the `lens` of the Book the turn was about sees it, and made
  * on that Book, and a Relation is checked as of it. A block of a kind its
- * `mode` may not propose, such as a Relation in Writing, is unreadable.
+ * `mode` may not propose, such as a Relation in Writing, is unreadable. In
+ * Plan, an Outline is of the lens's Book, what it holds or the whole story
+ * or Series: one of another Book, of what is Unplaced or of a Missing Scene
+ * is unreadable.
  */
 export async function readProposals(
   view: AssistantView,
@@ -34,7 +38,7 @@ export async function readProposals(
   for (const block of blocks) {
     const kind = kindOf(block);
     const change = mayPropose(mode, kind)
-      ? await changeOf(view, block, kind, lens)
+      ? await changeOf(view, block, kind, lens, mode)
       : null;
     if (change === null) unreadable++;
     else if (change !== 'unchanged') {
@@ -58,7 +62,8 @@ function kindOf(block: unknown): ProposalChange['kind'] {
 
 /**
  * What a block of `kind` proposes: a new Entry, under the id it will get; a
- * whole Outline of a Part, Chapter or Scene in the Project, or of the story;
+ * whole Outline of a Part, Chapter or Scene in the Project, or of the story,
+ * in Plan only those `outlinesIn` its Book allows;
  * a change to a field of an Entry in the Story Bible, as `lens` sees it,
  * never one first appearing after its Book; or a Relation between two such
  * Entries. `'unchanged'` when it proposes what its target holds; null when
@@ -69,6 +74,7 @@ async function changeOf(
   block: unknown,
   kind: ProposalChange['kind'],
   lens: StoryBibleLens,
+  mode: Mode,
 ): Promise<ProposalChange | 'unchanged' | null> {
   const { entry: entryId, outline: outlineId } = (block ?? {}) as Record<
     string,
@@ -79,15 +85,18 @@ async function changeOf(
     return proposed && { kind, entryId: randomUUID(), proposed };
   }
   if (kind === 'outline' && typeof outlineId === 'string') {
-    const { parts = [], chapters, unplaced } = view.manuscript();
+    const manuscript = view.manuscript();
+    const { parts = [], chapters, unplaced } = manuscript;
     const known =
       outlineId === PROJECT_OUTLINE ||
-      [
-        ...parts,
-        ...chapters,
-        ...chapters.flatMap((c) => c.scenes),
-        ...unplaced,
-      ].some((unit) => unit.id === outlineId);
+      (mode === 'plan'
+        ? outlinesIn(manuscript, lens.book).has(outlineId)
+        : [
+            ...parts,
+            ...chapters,
+            ...chapters.flatMap((c) => c.scenes),
+            ...unplaced,
+          ].some((unit) => unit.id === outlineId));
     if (!known) return null;
     const outline = await view.read({ kind: 'outline', id: outlineId });
     return outlineChangeOf(block, outline);
@@ -97,6 +106,28 @@ async function changeOf(
   const entry = await view.read({ kind: 'entry', id: entryId });
   const change = proposalOf(block, lens.read(entry).entry, view.customFields());
   return withBook(change, lens);
+}
+
+/**
+ * The Outlines Plan may propose in `book`, by id, besides the whole story's
+ * or Series': the Book's own, and those of its Parts, Chapters and Scenes;
+ * in a Project of one Book, those of all that is placed. Never a Missing
+ * Scene's.
+ */
+function outlinesIn(
+  manuscript: Manuscript,
+  book: string | undefined,
+): Set<string> {
+  const { parts = [], chapters } = bookManuscript(manuscript, book);
+  const placed = chapters.filter((c) => !c.unplaced);
+  return new Set([
+    ...(book !== undefined ? [book] : []),
+    ...parts.map((p) => p.id),
+    ...placed.flatMap((c) => [
+      c.id,
+      ...c.scenes.filter((s) => !s.missing).map((s) => s.id),
+    ]),
+  ]);
 }
 
 /** A change made as of the lens's Book, saying so; none for the whole Project. */

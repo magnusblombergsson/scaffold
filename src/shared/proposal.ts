@@ -158,6 +158,7 @@ const PROPOSAL_KINDS: Record<Mode, readonly ProposalChange['kind'][]> = {
   brainstorm: ['field', 'new-entry', 'outline', 'relation'],
   interview: ['field', 'new-entry', 'outline', 'relation'],
   writing: ['field', 'new-entry', 'outline'],
+  plan: ['outline'],
 };
 
 /** Whether a Conversation in `mode` may propose a change of `kind`. */

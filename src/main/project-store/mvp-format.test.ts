@@ -475,3 +475,28 @@ it('reads a Proposal the MVP logged as a Replace', async () => {
   expect(reply.proposals?.[0]).not.toHaveProperty('operation');
   await reopened.close();
 });
+
+it('an MVP app never lists a Plan Conversation, and the Project keeps format 1', async () => {
+  const store = await createProject(projectPath, deps());
+  const { id } = await store.startConversation('plan', 'The shape');
+  await store.appendMessage(id, {
+    role: 'author',
+    text: 'Check my plan',
+    ask: 'check-plan',
+    focus: [],
+    at: 1,
+  });
+  await store.close();
+
+  const log = await readFile(
+    path.join(projectPath, 'conversations', `${id}.jsonl`),
+    'utf8',
+  );
+  expect(log).toContain('"mode":"plan"');
+  expect(mvpParseLog(log)).toBeNull();
+  const manifest = JSON.parse(
+    await readFile(path.join(projectPath, 'project.json'), 'utf8'),
+  ) as { format: number };
+  expect(manifest.format).toBe(1);
+  expect(FORMAT).toBe(1);
+});

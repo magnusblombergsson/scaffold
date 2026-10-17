@@ -26,7 +26,7 @@ test('the Story Bible is a Room of its own, beside Writing, which has no Story B
   try {
     await expect(
       page.getByRole('group', { name: 'Room' }).getByRole('button'),
-    ).toHaveText(['Writing', 'Story Bible', 'Brainstorm', 'Interview']);
+    ).toHaveText(['Writing', 'Story Bible', 'Brainstorm', 'Interview', 'Plan']);
     await expect(page.getByRole('tab', { name: 'Story Bible' })).toHaveCount(0);
 
     await page.keyboard.press('Control+4');

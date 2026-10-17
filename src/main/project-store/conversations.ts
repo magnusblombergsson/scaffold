@@ -66,6 +66,7 @@ import {
   type ConversationMessage,
   type ConversationSummary,
   type EmptyReply,
+  isPlanFocus,
   type InterviewFocus,
   type Mode,
   type UnusedSummary,
@@ -207,7 +208,7 @@ export class Conversations {
   }
 
   /**
-   * In a Series, puts a Brainstorm or Interview on the Book `book` from its
+   * In a Series, puts a Brainstorm, Interview or Plan on the Book `book` from its
    * next message on, logged as chosen; never a Writing Conversation, whose
    * Book is that of the Scene in focus.
    */
@@ -216,7 +217,7 @@ export class Conversations {
       const { mode } = await this.readLogged(id);
       if (mode === 'writing') {
         throw new Error(
-          'Only a Brainstorm or Interview Conversation is on a Book',
+          'Only a Brainstorm, Interview or Plan Conversation is on a Book',
         );
       }
       await this.appendEvent(id, {
@@ -485,12 +486,18 @@ ${text}`);
     });
   }
 
-  /** Sets an Interview's focus from now on, logged as an event; only an Interview has one. */
+  /**
+   * Sets an Interview's or Plan's focus from now on, logged as an event;
+   * only those have one, and a Plan's is its Book, a Part or a Chapter.
+   */
   setInterviewFocus(id: string, focus: InterviewFocus): Promise<void> {
     return this.inLog(id, async () => {
       const { mode } = await this.readLogged(id);
-      if (mode !== 'interview') {
-        throw new Error('Only an Interview Conversation has a focus');
+      if (mode !== 'interview' && mode !== 'plan') {
+        throw new Error('Only an Interview or Plan Conversation has a focus');
+      }
+      if (mode === 'plan' && !isPlanFocus(focus)) {
+        throw new Error('A Plan’s focus is its Book, a Part or a Chapter');
       }
       await this.appendEvent(id, {
         type: 'focusChanged',
@@ -1014,14 +1021,21 @@ ${text}`);
       return this.entryName(proposal.entryId) ?? 'An Entry';
     }
     const { outlineId } = proposal;
-    if (outlineId === PROJECT_OUTLINE) return 'The story';
     const {
       chapters,
       unplaced,
       parts = [],
       partLabel,
+      books,
     } = this.deps.manuscript();
+    if (outlineId === PROJECT_OUTLINE) {
+      return books ? 'The Series' : 'The story';
+    }
     const trashed = [...this.deps.trash.values()];
+    const book =
+      books?.find((b) => b.id === outlineId) ??
+      trashed.find((t) => t.kind === 'book' && t.id === outlineId);
+    if (book && 'title' in book) return `Book “${book.title}”`;
     const part =
       parts.find((p) => p.id === outlineId) ??
       trashed.find((t) => t.kind === 'part' && t.id === outlineId);
