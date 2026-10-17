@@ -106,6 +106,7 @@ const SAMPLES: Record<
     store.setBookDetail(idOf(ref), 'structure', 'three-act'),
   genreConventions: (store, ref) =>
     store.setBookDetail(idOf(ref), 'genreConventions', ['mystery']),
+  beats: (store, ref) => store.setBeat(idOf(ref), 'mystery/reveal', true),
 };
 
 /** The Project's Book 1, by id. */

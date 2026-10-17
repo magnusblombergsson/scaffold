@@ -142,6 +142,8 @@ const projectHandlers: Handlers<
     store.setWordTarget(unitId, words),
   setBookDetail: ({ store }, bookId, key, value) =>
     store.setBookDetail(bookId, key, value),
+  setBeat: ({ store }, sceneId, beat, carries) =>
+    store.setBeat(sceneId, beat, carries),
   editStatus: ({ store, sender }, edit) =>
     saveProjectSetting(
       sender,

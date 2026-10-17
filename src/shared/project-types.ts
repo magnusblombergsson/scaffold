@@ -459,6 +459,11 @@ export type ManuscriptScene = SceneNode & {
   tags?: string[];
   image?: string;
   wordTarget?: number;
+  /**
+   * The Beats it carries, qualified as in `save-the-cat/midpoint`, those of
+   * what its Book no longer follows among them, set aside; absent for none.
+   */
+  beats?: string[];
 };
 
 /**

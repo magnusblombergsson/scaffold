@@ -9,6 +9,14 @@ import {
   type PlanAsk,
   type PlanFocus,
 } from '../shared/conversation';
+import {
+  carriers,
+  followedBeats,
+  sceneFalls,
+  type FollowedBeat,
+  type Measure,
+  type Span,
+} from '../shared/beat-measure';
 import { bookManuscript, topLevel } from '../shared/manuscript-order';
 import { proposalTarget, type ProposalView } from '../shared/proposal';
 import {
@@ -19,6 +27,7 @@ import {
   type ManuscriptScene,
   type ProseLanguage,
 } from '../shared/project-types';
+import { BeatChips, BeatRail, SceneBeats } from './Beats';
 import { BookDetailsStrip, StructureGuide } from './BookDetails';
 import { BookPicker } from './BookPicker';
 import {
@@ -106,6 +115,23 @@ export function PlanRoom({
   const plannedBook = manuscript.books?.find((b) => b.id === planned);
   const bookId = plannedBook?.id ?? PROJECT_OUTLINE;
   const bookDetails = plannedBook ?? manuscript;
+  const { structure, genreConventions } = bookDetails;
+  /** The Beats of what the Book follows; a Scene's other marks are set aside. */
+  const followed = useMemo(
+    () => followedBeats({ structure, genreConventions }),
+    [structure, genreConventions],
+  );
+  /** The Book's Scenes in reading order, and where each falls. */
+  const scenes = useMemo(
+    () =>
+      allNodes(tree)
+        .filter((n) => n.kind === 'scene')
+        .map((n) => n.scenes[0]),
+    [tree],
+  );
+  const { measure, falls } = useMemo(() => sceneFalls(scenes), [scenes]);
+  /** The titles of the Scenes carrying a Beat, by its qualified id. */
+  const carrying = (beat: string) => carriers(scenes, beat).map((s) => s.title);
   /** Each unit's Outline Proposals made in the Conversation open. */
   const proposals = useMemo(() => {
     const byUnit = new Map<string, ProposalView[]>();
@@ -191,11 +217,30 @@ export function PlanRoom({
             proposals={proposals}
             selected={selected}
             lit={lit}
+            followed={followed}
             onSelect={setSelected}
           />
+          <BeatRail
+            scenes={scenes}
+            falls={falls}
+            measure={measure}
+            followed={followed}
+            onChoose={(id) => {
+              setSelected(id);
+              point(id);
+            }}
+          />
           <aside className="plan-details" aria-label="Details">
-            <UnitDetails node={findNode(tree, selected)} language={language} />
-            <StructureGuide bookId={bookId} book={bookDetails} />
+            <UnitDetails
+              node={findNode(tree, selected)}
+              language={language}
+              beats={{ falls, measure, followed }}
+            />
+            <StructureGuide
+              bookId={bookId}
+              book={bookDetails}
+              carrying={carrying}
+            />
           </aside>
         </div>
       </main>
@@ -456,6 +501,7 @@ function PlanTree({
   proposals,
   selected,
   lit,
+  followed,
   onSelect,
 }: {
   nodes: PlanNode[];
@@ -464,6 +510,7 @@ function PlanTree({
   proposals: Map<string, ProposalView[]>;
   selected: string | null;
   lit: string | null;
+  followed: readonly FollowedBeat[];
   onSelect(id: string): void;
 }) {
   const every = allNodes(nodes);
@@ -505,6 +552,9 @@ function PlanTree({
             </span>
           )}
         </button>
+        {node.kind === 'scene' && (
+          <BeatChips scene={node.scenes[0]} followed={followed} />
+        )}
         {body ? (
           <p className="plan-outline">{body}</p>
         ) : (
@@ -529,13 +579,22 @@ function PlanTree({
   );
 }
 
-/** The chosen unit's title, Outline and Notes, to edit in place. */
+/**
+ * The chosen unit's title, Outline and Notes, to edit in place; for a
+ * Scene, where it falls and the Beats it carries, to mark with a click.
+ */
 function UnitDetails({
   node,
   language,
+  beats,
 }: {
   node: PlanNode | null;
   language: ProseLanguage;
+  beats: {
+    falls: Map<string, Span>;
+    measure: Measure;
+    followed: readonly FollowedBeat[];
+  };
 }) {
   if (!node) {
     return (
@@ -553,6 +612,14 @@ function UnitDetails({
         language={language}
         withNotes={node.id !== PROJECT_OUTLINE}
       />
+      {node.kind === 'scene' && (
+        <SceneBeats
+          scene={node.scenes[0]}
+          falls={beats.falls.get(node.id)}
+          measure={beats.measure}
+          followed={beats.followed}
+        />
+      )}
     </section>
   );
 }

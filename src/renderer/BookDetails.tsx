@@ -11,14 +11,15 @@ import {
   GENRES,
   guideStructures,
   NO_STRUCTURE,
+  qualifiedBeatId,
   shownIds,
   STRUCTURES,
   structureOf,
-  type Beat,
   type Format,
   type GenreConvention,
   type Structure,
 } from '../shared/structure-catalogue';
+import { beatWhere } from './Beats';
 import { ReadOnlyContext } from './read-only';
 import { useRun } from './use-project';
 import { WordTargetForm } from './WordTarget';
@@ -227,9 +228,12 @@ function Chips({
 export function StructureGuide({
   bookId,
   book,
+  carrying,
 }: {
   bookId: string;
   book: PlannedBook;
+  /** The titles of the Scenes carrying a Beat, by its qualified id. */
+  carrying(beat: string): string[];
 }) {
   const readOnly = useContext(ReadOnlyContext);
   const set = useSetBookDetail(bookId);
@@ -265,13 +269,13 @@ export function StructureGuide({
       {followed && (
         <article className="guide-entry" aria-label={followed.name} data-open>
           <h4>{followed.name}</h4>
-          <StructureBody structure={followed} book={book} marks />
+          <StructureBody structure={followed} book={book} carrying={carrying} />
         </article>
       )}
       {conventions.map((c) => (
         <article className="guide-entry" key={c.id} aria-label={c.name}>
           <h4>{c.name}</h4>
-          <ConventionBody convention={c} marks />
+          <ConventionBody convention={c} carrying={carrying} />
           <button disabled={readOnly} onClick={() => followToo(c)}>
             Stop following
           </button>
@@ -357,12 +361,12 @@ function FoldedStructure({
 function StructureBody({
   structure,
   book,
-  marks = false,
+  carrying,
 }: {
   structure: Structure;
   book: PlannedBook;
-  /** Whether to say which Scenes carry each Beat: for what the Book follows. */
-  marks?: boolean;
+  /** The Scenes carrying each Beat, to say: for what the Book follows. */
+  carrying?(beat: string): string[];
 }) {
   const { fits } = structure;
   return (
@@ -391,7 +395,7 @@ function StructureBody({
             ? 'across a Series'
             : 'per Book or across a Series'}
       </p>
-      <Beats beats={structure.beats} marks={marks} />
+      <Beats source={structure} carrying={carrying} />
     </>
   );
 }
@@ -408,17 +412,17 @@ function Fit({ matches, children }: { matches: boolean; children: string }) {
 /** A Genre convention's credit, description, required Scenes and rules. */
 function ConventionBody({
   convention,
-  marks = false,
+  carrying,
 }: {
   convention: GenreConvention;
-  marks?: boolean;
+  carrying?(beat: string): string[];
 }) {
   return (
     <>
       <p className="guide-credit">{convention.credit}</p>
       <p className="guide-description">{convention.description}</p>
       <p className="guide-subheading">Required Scenes</p>
-      <Beats beats={convention.beats} marks={marks} />
+      <Beats source={convention} carrying={carrying} />
       <p className="guide-subheading">Rules</p>
       <ul className="guide-rules">
         {convention.rules.map((rule) => (
@@ -430,29 +434,45 @@ function ConventionBody({
 }
 
 /**
- * Each Beat's purpose, position, span, and whether it opens a Part; with
- * `marks`, the Scenes carrying it. No Scene carries a Beat yet.
+ * Each Beat of a Structure or Genre convention: its purpose, position,
+ * span, and whether it opens a Part; with `carrying`, the Scenes marked
+ * with it.
  */
-function Beats({ beats, marks }: { beats: readonly Beat[]; marks: boolean }) {
+function Beats({
+  source,
+  carrying,
+}: {
+  source: Structure | GenreConvention;
+  carrying?(beat: string): string[];
+}) {
   return (
     <ol className="guide-beats">
-      {beats.map((beat) => (
+      {source.beats.map((beat) => (
         <li key={beat.id}>
           <span className="guide-beat-name">{beat.name}</span>{' '}
           <span className="guide-beat-where">
-            {beat.at
-              ? beat.at.from === beat.at.to
-                ? `${beat.at.from}%`
-                : `${beat.at.from}–${beat.at.to}%`
-              : 'by order'}
+            {beatWhere(beat)}
             {' · '}
             {beat.span === 'scene' ? 'one Scene' : 'a run of Scenes'}
             {beat.opensPart && ' · opens a Part'}
           </span>
           <span className="guide-beat-purpose">{beat.purpose}</span>
-          {marks && <span className="guide-beat-marked">Not marked</span>}
+          {carrying && (
+            <Carriers titles={carrying(qualifiedBeatId(source, beat))} />
+          )}
         </li>
       ))}
     </ol>
+  );
+}
+
+/** The Scenes marked with a Beat, by title, or that none is. */
+function Carriers({ titles }: { titles: string[] }) {
+  return (
+    <span className="guide-beat-marked">
+      {titles.length === 0
+        ? 'Not marked'
+        : `Marked on ${titles.map((t) => `“${t}”`).join(', ')}`}
+    </span>
   );
 }
