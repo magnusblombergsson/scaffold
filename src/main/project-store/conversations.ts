@@ -48,6 +48,7 @@ import {
 import type { Relations } from './relations';
 import {
   bookIds,
+  conversationBook,
   heldBy,
   placeOfUnit,
   unitsWithin,
@@ -99,6 +100,10 @@ import {
 } from '../../shared/proposal';
 import { capitalized, unitName } from '../../shared/unit-name';
 import {
+  broughtInNow,
+  type BringIn,
+  type Bringing,
+  type BroughtIn,
   type Compaction,
   type Conversation,
   type ConversationMessage,
@@ -107,6 +112,7 @@ import {
   isPlanFocus,
   type InterviewFocus,
   type Mode,
+  type NotSent,
   type UnusedSummary,
 } from '../../shared/conversation';
 import { type Model } from '../../shared/models';
@@ -487,11 +493,16 @@ ${text}`);
    * reply with the Proposals made in it and where they stand now.
    */
   async readConversation(id: string): Promise<Conversation> {
-    const {
-      proposals,
-      trashedAt: _,
-      ...conversation
-    } = await this.readLogged(id);
+    const logged = await this.readLogged(id);
+    return this.conversationOf(logged, await this.bringInsOf(logged));
+  }
+
+  /** A Conversation as its log holds it, its Proposals in their replies, and its `bringIns` as given. */
+  private async conversationOf(
+    logged: LoggedConversation,
+    bringIns = logged.bringIns,
+  ): Promise<Conversation> {
+    const { proposals, trashedAt: _, ...conversation } = logged;
     const messages = conversation.messages.map((m) => ({ ...m }));
     const views = new Map<string, ProposalView>();
     for (const proposal of proposals) {
@@ -504,7 +515,157 @@ ${text}`);
         withNeeds(views.get(proposal.id)!, views),
       ];
     }
-    return { ...conversation, messages };
+    return {
+      ...conversation,
+      messages,
+      ...(bringIns && { bringIns }),
+    };
+  }
+
+  /**
+   * A Plan's bring-ins, each titled as its Brainstorm is now, and the latest
+   * of each still brought in saying why it isn't sent, if it isn't.
+   */
+  private async bringInsOf(
+    plan: LoggedConversation,
+  ): Promise<BringIn[] | undefined> {
+    const { bringIns } = plan;
+    if (!bringIns) return undefined;
+    const now = new Set<BringIn>(broughtInNow(bringIns));
+    const found = new Map<string, LoggedConversation | NotSent>();
+    for (const { conversation } of bringIns) {
+      if (!found.has(conversation)) {
+        found.set(conversation, await this.brainstormFor(plan, conversation));
+      }
+    }
+    return bringIns.map((bringIn) => {
+      const brainstorm = found.get(bringIn.conversation)!;
+      const kept = this.deps.trash.get(bringIn.conversation);
+      const title =
+        typeof brainstorm === 'object'
+          ? brainstorm.title
+          : kept?.kind === 'conversation'
+            ? kept.title
+            : bringIn.title;
+      return {
+        ...bringIn,
+        title,
+        ...(now.has(bringIn) &&
+          typeof brainstorm === 'string' && { notSent: brainstorm }),
+      };
+    });
+  }
+
+  /**
+   * The Brainstorm `id` as a Plan may see it now, or why it can't: it is in
+   * Trash or the Drawer, about another Book than the Plan, or gone.
+   */
+  private async brainstormFor(
+    plan: LoggedConversation,
+    id: string,
+  ): Promise<LoggedConversation | NotSent> {
+    const kept = this.deps.trash.get(id);
+    if (kept?.kind === 'conversation') return placeOf(kept);
+    const file = conversationPath(this.deps.path, id);
+    if (!ID.test(id) || !(await this.deps.fs.exists(file))) return 'gone';
+    const brainstorm = parseLog(await this.deps.fs.readFile(file));
+    if (brainstorm?.mode !== 'brainstorm') return 'gone';
+    const manuscript = this.deps.manuscript();
+    return conversationBook(manuscript, brainstorm.book) ===
+      conversationBook(manuscript, plan.book)
+      ? brainstorm
+      : 'other-book';
+  }
+
+  /** The Plan `id`, refusing any other Conversation. */
+  private async readPlan(id: string): Promise<LoggedConversation> {
+    const plan = await this.readLogged(id);
+    if (plan.mode !== 'plan') {
+      throw new Error('Only a Plan Conversation brings in Brainstorms');
+    }
+    return plan;
+  }
+
+  /**
+   * The Brainstorms a Plan on the Book `on` may bring in now: those of that
+   * Book with anything said, never in Trash or the Drawer, read as shown.
+   */
+  async bringInCandidates(on: string | undefined): Promise<Conversation[]> {
+    const manuscript = this.deps.manuscript();
+    const book = conversationBook(manuscript, on);
+    const candidates: Conversation[] = [];
+    for (const log of await this.readLogs()) {
+      if (log.mode !== 'brainstorm' || log.messages.length === 0) continue;
+      if (conversationBook(manuscript, log.book) !== book) continue;
+      candidates.push(await this.conversationOf(log));
+    }
+    return candidates;
+  }
+
+  /**
+   * The Brainstorms brought into the Plan `planId` that are sent now, each
+   * read as shown, with how many of its messages were brought in.
+   */
+  async broughtInBrainstorms(planId: string): Promise<BroughtIn[]> {
+    const plan = await this.readPlan(planId);
+    const sent: BroughtIn[] = [];
+    for (const { conversation, messages } of broughtInNow(plan.bringIns)) {
+      const brainstorm = await this.brainstormFor(plan, conversation);
+      if (typeof brainstorm === 'string') continue;
+      sent.push({
+        conversation: await this.conversationOf(brainstorm),
+        upTo: messages,
+      });
+    }
+    return sent;
+  }
+
+  /**
+   * Brings the Brainstorm `brought.conversation` into the Plan `planId` as
+   * far as its first `messages` go, logged with its title and rough size.
+   * Refuses one it may not bring in, and one brought in that far already.
+   */
+  bringIn(planId: string, brought: Bringing): Promise<void> {
+    return this.inLog(planId, async () => {
+      const plan = await this.readPlan(planId);
+      const brainstorm = await this.brainstormFor(plan, brought.conversation);
+      if (typeof brainstorm === 'string' || brainstorm.messages.length === 0) {
+        throw new Error('That Brainstorm can’t be brought into this Plan');
+      }
+      const already = broughtInNow(plan.bringIns).find(
+        (b) => b.conversation === brought.conversation,
+      );
+      if (already && already.messages >= brought.messages) {
+        throw new Error('That Brainstorm is brought in as far as it goes');
+      }
+      await this.appendEvent(planId, {
+        type: 'brainstorm.broughtIn',
+        conversation: brought.conversation,
+        title: brainstorm.title,
+        messages: Math.min(brought.messages, brainstorm.messages.length),
+        size: brought.size,
+        at: this.deps.clock.now(),
+      });
+    });
+  }
+
+  /** Removes a Brainstorm brought into the Plan `planId`: it is sent no more. */
+  removeBroughtIn(planId: string, brainstormId: string): Promise<void> {
+    return this.inLog(planId, async () => {
+      const plan = await this.readPlan(planId);
+      if (
+        !broughtInNow(plan.bringIns).some(
+          (b) => b.conversation === brainstormId,
+        )
+      ) {
+        throw new Error('That Brainstorm isn’t brought into this Plan');
+      }
+      await this.appendEvent(planId, {
+        type: 'brainstorm.removed',
+        conversation: brainstormId,
+        at: this.deps.clock.now(),
+      });
+    });
   }
 
   /**

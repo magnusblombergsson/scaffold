@@ -14,6 +14,8 @@ import {
   PLAN_ASK_LABELS,
   type AskResult,
   type AssistantFailure,
+  type BringIn,
+  broughtInNow,
   type Conversation,
   type ConversationMessage,
   type ConversationSummary,
@@ -48,6 +50,7 @@ import { streamingText } from '../shared/reply';
 import {
   describeTotal,
   describeUsage,
+  roughTokens,
   type MeteredTurn,
   type Total,
 } from '../shared/usage';
@@ -354,32 +357,7 @@ export function useConversation({
   async function showAsked(
     message: Pick<ConversationMessage, 'text' | 'command' | 'ask'>,
   ): Promise<string> {
-    let conversation = current;
-    if (!conversation) {
-      if (!model) throw new Error('There is no Model to ask');
-      const started = await window.assistant.startConversation(
-        mode,
-        titleOf(message.text),
-        model,
-      );
-      setNewModel(undefined);
-      setNewBook(undefined);
-      conversation = { ...started, model, messages: [] };
-      if (book !== undefined) {
-        await window.assistant.chooseBook(started.id, book);
-        conversation = { ...conversation, book };
-      }
-      if (mode === 'interview' || mode === 'plan') {
-        await window.assistant.setInterviewFocus(started.id, focus);
-        conversation = {
-          ...conversation,
-          focus,
-          focusChanges: [{ focus, at: Date.now(), before: 0 }],
-        };
-      }
-      const listed = conversation;
-      setList((list) => [listed, ...list]);
-    }
+    const conversation = current ?? (await start(titleOf(message.text)));
     const authored: ConversationMessage = {
       role: 'author',
       ...message,
@@ -389,6 +367,73 @@ export function useConversation({
     const { messages } = conversation;
     setCurrent({ ...conversation, messages: [...messages, authored] });
     return conversation.id;
+  }
+
+  /**
+   * Starts the new Conversation shown, titled `title`, on its Model: an
+   * Interview or Plan with its focus set, and in a Series, a Brainstorm,
+   * Interview or Plan on its Book.
+   */
+  async function start(title: string): Promise<Conversation> {
+    if (!model) throw new Error('There is no Model to ask');
+    const started = await window.assistant.startConversation(
+      mode,
+      title,
+      model,
+    );
+    setNewModel(undefined);
+    setNewBook(undefined);
+    let conversation: Conversation = { ...started, model, messages: [] };
+    if (book !== undefined) {
+      await window.assistant.chooseBook(started.id, book);
+      conversation = { ...conversation, book };
+    }
+    if (mode === 'interview' || mode === 'plan') {
+      await window.assistant.setInterviewFocus(started.id, focus);
+      conversation = {
+        ...conversation,
+        focus,
+        focusChanges: [{ focus, at: Date.now(), before: 0 }],
+      };
+    }
+    const listed = conversation;
+    setList((list) => [listed, ...list]);
+    return conversation;
+  }
+
+  /**
+   * Brings a Brainstorm into the open Plan, or the rest of it; a new Plan
+   * starts with it, titled after it.
+   */
+  async function bringIn(brainstorm: { id: string; title: string }) {
+    if (streaming !== null) return;
+    setError(null);
+    await run(
+      async () => {
+        const plan =
+          current ?? (await start(`Plan from “${brainstorm.title}”`));
+        await window.assistant.bringIn(plan.id, brainstorm.id);
+        setCurrent(await window.assistant.readConversation(plan.id));
+      },
+      { what: 'bring in the Brainstorm' },
+    );
+  }
+
+  /** Removes a Brainstorm brought into the open Plan: it is sent no more. */
+  async function removeBroughtIn(brainstormId: string) {
+    const conversation = current;
+    if (!conversation || streaming !== null) return;
+    setError(null);
+    await run(
+      async () => {
+        await window.assistant.removeBroughtIn(conversation.id, brainstormId);
+        const changed = await window.assistant.readConversation(
+          conversation.id,
+        );
+        if (currentId.current === changed.id) setCurrent(changed);
+      },
+      { what: 'remove the Brainstorm' },
+    );
   }
 
   async function retry() {
@@ -552,6 +597,8 @@ export function useConversation({
     planAsk,
     retry,
     changeFocus,
+    bringIn,
+    removeBroughtIn,
     rename,
     star,
     trash,
@@ -599,7 +646,15 @@ export function conversationActions(
  * where the Author decides them.
  */
 export function MessageLog({
-  conversation: { current, streaming, failure, shown, retry, setPicking },
+  conversation: {
+    current,
+    streaming,
+    failure,
+    shown,
+    retry,
+    setPicking,
+    removeBroughtIn,
+  },
   names,
   empty,
   onOpenSettings,
@@ -624,6 +679,9 @@ export function MessageLog({
   /** What names a Model in this log: its shortlist, as it is now. */
   const named = (model: string, provider?: Model['provider']) =>
     modelName(loggedModel(model, provider), shortlists ?? NO_SHORTLISTS);
+  /** Removes a Brainstorm brought in, but not while a reply streams in. */
+  const remove =
+    streaming === null ? (id: string) => void removeBroughtIn(id) : undefined;
   const messagesEnd = useRef<HTMLDivElement>(null);
   useEffect(() => {
     messagesEnd.current?.scrollIntoView?.({ block: 'end' });
@@ -639,7 +697,7 @@ export function MessageLog({
   return (
     <div className="messages" role="log" aria-label="Messages">
       {empty &&
-        !current &&
+        !current?.messages.length &&
         (typeof empty === 'string' ? (
           <p className="assistant-empty">{empty}</p>
         ) : (
@@ -649,6 +707,7 @@ export function MessageLog({
         <Fragment key={i}>
           <EmptyReplies conversation={current} before={i} named={named} />
           <FocusChanges conversation={current} before={i} names={names} />
+          <BringIns conversation={current} before={i} onRemove={remove} />
           <Message
             message={m}
             names={names}
@@ -682,6 +741,11 @@ export function MessageLog({
             conversation={current}
             before={current.messages.length}
             names={names}
+          />
+          <BringIns
+            conversation={current}
+            before={current.messages.length}
+            onRemove={remove}
           />
         </>
       )}
@@ -779,6 +843,64 @@ function FocusChanges({
     .map((change, i) => (
       <p key={i} className="focus-change" role="note">
         Focus: {label(change.focus)}
+      </p>
+    ));
+}
+
+/** Why a Brainstorm brought in isn't sent, as its marker says. */
+const NOT_SENT: Record<NonNullable<BringIn['notSent']>, string> = {
+  trash: 'it is in Trash',
+  drawer: 'it is in the Drawer',
+  'other-book': 'it is about another Book',
+  gone: 'it is no longer in the Project',
+};
+
+/**
+ * Where a Plan brought a Brainstorm in, with the size it brought and, with
+ * others in, the total, or removed one, before the message `before`. The
+ * latest of one still brought in says why it isn't sent, if it isn't, and
+ * offers `onRemove` when given.
+ */
+function BringIns({
+  conversation: { bringIns = [] },
+  before,
+  onRemove,
+}: {
+  conversation: Conversation;
+  before: number;
+  onRemove?(brainstormId: string): void;
+}) {
+  const readOnly = useContext(ReadOnlyContext);
+  const now = new Set<BringIn>(broughtInNow(bringIns));
+  return bringIns
+    .filter((bringIn) => bringIn.before === before)
+    .map((bringIn, i) => (
+      <p key={i} className="focus-change bring-in" role="note">
+        {bringIn.removed ? 'Removed: ' : 'Brought in: '}
+        <em>{bringIn.title}</em>
+        {!bringIn.removed && (
+          <>
+            {' · '}
+            {roughTokens(bringIn.size)}
+            {bringIn.total > bringIn.size &&
+              ` (${roughTokens(bringIn.total)} in all)`}
+          </>
+        )}
+        {bringIn.notSent && (
+          <span className="bring-in-unsent">
+            {' · Not sent: '}
+            {NOT_SENT[bringIn.notSent]}
+          </span>
+        )}
+        {onRemove && now.has(bringIn) && (
+          <button
+            className="bring-in-remove"
+            onClick={() => onRemove(bringIn.conversation)}
+            disabled={readOnly}
+          >
+            Remove
+          </button>
+        )}
       </p>
     ));
 }

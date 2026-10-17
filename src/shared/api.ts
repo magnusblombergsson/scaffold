@@ -63,6 +63,7 @@ export type AcceptOptions = {
 import type {
   AskResult,
   AssistantFailure,
+  BringInChoice,
   Conversation,
   ConversationSummary,
   InterviewFocus,
@@ -1195,6 +1196,23 @@ export interface AssistantApi {
     focus: InterviewFocus,
   ): Promise<void>;
   /**
+   * The Brainstorms a Plan may bring in (spec: Outline planner §6), or a
+   * new one, with no id yet, on the Book `book`: those of its Book, never
+   * in Trash or the Drawer, Starred first, then newest, each with its
+   * rough size. Refused for another Mode.
+   */
+  bringInChoices(
+    planId: string | null,
+    book?: string,
+  ): Promise<BringInChoice[]>;
+  /**
+   * Brings a Brainstorm into a Plan as far as it goes now, or the rest of
+   * it, logged as an event; refused for one the Plan may not bring in.
+   */
+  bringIn(planId: string, brainstormId: string): Promise<void>;
+  /** Removes a Brainstorm brought into a Plan: it is sent no more. */
+  removeBroughtIn(planId: string, brainstormId: string): Promise<void>;
+  /**
    * Sends the Author's message with the Scene open in the editor, if any:
    * calls `onText` with each piece of the reply as it streams, and resolves
    * with how it went once the reply, if any, is in the log.
@@ -1399,6 +1417,9 @@ export const assistantMethods = {
   starConversation: 'invoke',
   trashConversation: 'invoke',
   setInterviewFocus: 'invoke',
+  bringInChoices: 'invoke',
+  bringIn: 'invoke',
+  removeBroughtIn: 'invoke',
   ask: 'stream',
   review: 'stream',
   planAsk: 'stream',

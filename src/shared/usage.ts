@@ -57,6 +57,11 @@ function tokens(count: number): string {
   return `${Math.round(count / 1_000)}k`;
 }
 
+/** A rough size in tokens, as an estimate is read: "≈ 1.2k tokens". */
+export function roughTokens(count: number): string {
+  return `≈ ${tokens(count)} tokens`;
+}
+
 function dollars(cost: number): string {
   return cost < 0.005 ? '< $0.01' : `≈ $${cost.toFixed(2)}`;
 }

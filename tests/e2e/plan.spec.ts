@@ -645,3 +645,83 @@ for (const theme of ['light', 'dark'] as const) {
     }
   });
 }
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`a Brainstorm of the Book is brought into a new Plan from the picker, marked in the thread with its size, sent with each request, and removed, ${theme}`, async () => {
+    const { app, page } = await newProject(theme);
+    try {
+      await roomButton(page, 'Brainstorm').click();
+      const brainstormRoom = page.getByRole('main', { name: 'Brainstorm' });
+      anthropic.calls.push({ reply: ['Rob the lighthouse at low tide.'] });
+      await brainstormRoom
+        .getByRole('textbox', { name: 'Message' })
+        .fill('A heist on the island?');
+      await brainstormRoom
+        .getByRole('textbox', { name: 'Message' })
+        .press('Enter');
+      await expect(
+        brainstormRoom.getByRole('article', { name: 'Assistant' }),
+      ).toHaveCount(1);
+
+      await roomButton(page, 'Plan').click();
+      const panel = page.getByRole('complementary', {
+        name: 'Plan Conversation',
+      });
+      await panel
+        .getByRole('button', { name: /Bring in a Brainstorm/ })
+        .click();
+      const choice = panel
+        .getByRole('menu', { name: 'Brainstorms' })
+        .getByRole('menuitem', { name: /A heist on the island\?/ });
+      await expect(choice).toContainText(/≈ \d+ tokens/);
+      await choice.click();
+
+      const marker = panel.getByRole('note').filter({ hasText: 'Brought in' });
+      await expect(marker).toContainText(
+        /Brought in: A heist on the island\? · ≈ \d+ tokens/,
+      );
+      await expect(
+        page
+          .getByRole('navigation', { name: 'Plan Conversations' })
+          .getByRole('button', {
+            name: /^Plan from “A heist on the island\?”/,
+          }),
+      ).toBeVisible();
+      // Brought in all the way, it is offered no more until it goes on.
+      await panel
+        .getByRole('button', { name: /Bring in a Brainstorm/ })
+        .click();
+      await expect(choice).toBeDisabled();
+      await expect(choice).toContainText('Brought in');
+      await page.keyboard.press('Escape');
+      await expect(page).toHaveScreenshot(`plan-bring-in-${theme}.png`, {
+        mask: [page.locator('.save-status'), page.locator('.toasts')],
+      });
+
+      anthropic.calls.push({ reply: ['The heist could be the midpoint.'] });
+      await panel.getByRole('button', { name: 'Check my plan' }).click();
+      await expect(
+        panel.getByRole('article', { name: 'Assistant' }),
+      ).toHaveCount(1);
+      const sent = JSON.stringify(anthropic.sent.at(-1)!.system);
+      expect(sent).toContain('## Brainstorm “A heist on the island?”');
+      expect(sent).toContain('Rob the lighthouse at low tide.');
+
+      await marker.getByRole('button', { name: 'Remove' }).click();
+      await expect(
+        panel.getByRole('note').filter({ hasText: 'Removed' }),
+      ).toContainText('Removed: A heist on the island?');
+      anthropic.calls.push({ reply: ['Fine.'] });
+      await panel.getByRole('textbox', { name: 'Message' }).fill('And now?');
+      await panel.getByRole('textbox', { name: 'Message' }).press('Enter');
+      await expect(
+        panel.getByRole('article', { name: 'Assistant' }),
+      ).toHaveCount(2);
+      expect(JSON.stringify(anthropic.sent.at(-1)!.system)).not.toContain(
+        'Rob the lighthouse',
+      );
+    } finally {
+      await app.close();
+    }
+  });
+}

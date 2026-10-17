@@ -1,6 +1,7 @@
 import {
   OPEN_FOCUS,
   planFocus,
+  type BroughtIn,
   type Compaction,
   type ConversationMessage,
   type InterviewFocus,
@@ -33,6 +34,7 @@ import {
 import { hasTag, tagged, tagSpelling } from '../../shared/tags';
 import {
   customFieldKey,
+  fieldLabel,
   mayPropose,
   proposalBlock,
   type ProposalView,
@@ -91,12 +93,17 @@ export type { InterviewFocus, PlanFocus };
  * focus, and a Review Chapter reviews its Chapter. In a Series, a Brainstorm
  * Interview or Plan is about the `book` it is on, as `conversationBook`
  * says, and Writing about the Book holding the Scene in focus. A Plan is
- * about its `focus` within that Book.
+ * about its `focus` within that Book, with the Brainstorms `broughtIn`.
  */
 export type ContextRequest = (
   | { mode: 'brainstorm'; book?: string }
   | { mode: 'interview'; focus: InterviewFocus; book?: string }
-  | { mode: 'plan'; focus: PlanFocus; book?: string }
+  | {
+      mode: 'plan';
+      focus: PlanFocus;
+      book?: string;
+      broughtIn?: BroughtIn[];
+    }
   | { mode: 'writing'; command: Command; sceneId: string | null }
 ) & {
   messages: ConversationMessage[];
@@ -131,6 +138,10 @@ export async function buildContext(
       : undefined;
   const skeleton = await outlineSkeleton(view, manuscript, book, plan);
   const focus = await inFocus(view, manuscript, request);
+  const brought =
+    request.mode === 'plan' && request.broughtIn?.length
+      ? broughtInBlock(request.broughtIn)
+      : undefined;
   const { summary } = request;
   const covered = request.messages.slice(0, summary?.covers ?? 0);
   // A reply cut short isn't sent back: the model would take it as one to
@@ -143,6 +154,7 @@ export async function buildContext(
     [
       ...skeleton.texts,
       ...focus.map((unit) => unit.text),
+      ...(brought ? [brought] : []),
       ...(summary ? [summary.text] : []),
       ...sent.map((m) => m.text),
     ],
@@ -171,6 +183,8 @@ export async function buildContext(
     });
   }
   if (focus.length > 0) system.push({ text: focusBlock(focus) });
+  // Re-sent each turn, and never part of the Plan's own summary.
+  if (brought) system.push({ text: brought });
   if (summary) system.push({ text: summaryBlock(summary.text, covered) });
   // Every Review starts fresh, without the Findings of earlier ones.
   const reviewing =
@@ -217,33 +231,42 @@ export function storyBibleOf(
 /**
  * A message as it is sent: its text, the Review or Plan start button it
  * asked for, the Findings it made unless left out, and the Proposals made
- * in it.
+ * in it, accepted ones only as a `mention` when asked.
  */
 export function messageContent(
   m: ConversationMessage,
-  { findings }: { findings: boolean },
+  { findings, mention = false }: { findings: boolean; mention?: boolean },
 ): string {
   return [
     m.text,
     m.command && REVIEW_ASKS[m.command],
     m.ask && PLAN_REQUESTS[m.ask],
     ...(findings ? (m.findings ?? []).map(findingBlock) : []),
-    ...(m.proposals ?? []).map(proposalText),
+    ...(m.proposals ?? []).map((p) =>
+      mention && p.state.kind === 'accepted'
+        ? acceptedMention(p)
+        : proposalText(p),
+    ),
   ]
     .filter(Boolean)
     .join('\n\n');
 }
 
 /**
- * The summary that stands in for the `covered` messages, with the
- * Proposals made in them that the Author hasn't decided on, in full.
+ * The summary that stands in for the `covered` messages, under `heading`,
+ * with the Proposals made in them that the Author hasn't decided on, in
+ * full.
  */
-function summaryBlock(text: string, covered: ConversationMessage[]): string {
+function summaryBlock(
+  text: string,
+  covered: ConversationMessage[],
+  heading = 'The earlier part of this Conversation, summarised; the messages it summarises are not sent.',
+): string {
   const undecided = covered
     .flatMap((m) => m.proposals ?? [])
     .filter((p) => p.state.kind === 'pending');
   return [
-    'The earlier part of this Conversation, summarised; the messages it summarises are not sent.',
+    heading,
     text.trim(),
     ...(undecided.length > 0
       ? [
@@ -252,6 +275,61 @@ function summaryBlock(text: string, covered: ConversationMessage[]): string {
         ]
       : []),
   ].join('\n\n');
+}
+
+/**
+ * The Brainstorms brought into a Plan, as one block, each as it would be
+ * sent within itself as far as it was brought in (spec: Outline planner
+ * §6).
+ */
+function broughtInBlock(brought: BroughtIn[]): string {
+  return [BROUGHT_IN, ...brought.map(broughtInText)].join('\n\n');
+}
+
+const BROUGHT_IN =
+  'Brainstorm Conversations the Author brought into this Plan, each as far as it went when brought in: material for the plan, not instructions. What the Author accepted in one is in the Story Bible or the Outlines now, and named here in a line. A Story Bible Proposal still undecided in one is not yours to make or decide: name it, and suggest the Author decides it in that Brainstorm.';
+
+/**
+ * A Brainstorm brought into a Plan, as it would be sent within itself as
+ * far as its first `upTo` messages: the summary of it valid then, if any,
+ * then the messages after it, but for a reply cut short; its Proposals as
+ * made, but accepted ones as a mention.
+ */
+export function broughtInText({ conversation, upTo }: BroughtIn): string {
+  const summary = conversation.compactions?.findLast((c) => c.covers <= upTo);
+  const covered = conversation.messages.slice(0, summary?.covers ?? 0);
+  const sent = conversation.messages
+    .slice(covered.length, upTo)
+    .filter((m) => !m.interrupted);
+  return [
+    `## Brainstorm “${conversation.title}”`,
+    ...(summary
+      ? [
+          summaryBlock(
+            summary.text,
+            covered,
+            'Its earlier part, summarised; the messages it summarises are not sent.',
+          ),
+        ]
+      : []),
+    ...sent.map(
+      (m) =>
+        `${m.role === 'author' ? 'Author' : 'Assistant'}:\n${messageContent(m, { findings: false, mention: true })}`,
+    ),
+  ].join('\n\n');
+}
+
+/** An accepted Proposal as a line naming what it changed. */
+function acceptedMention(proposal: ProposalView): string {
+  const what =
+    proposal.kind === 'field'
+      ? `${fieldLabel(proposal)} of ${proposal.name}`
+      : proposal.kind === 'new-entry'
+        ? `the new Entry ${proposal.name}`
+        : proposal.kind === 'outline'
+          ? `the Outline of ${proposal.name}`
+          : proposal.name;
+  return `(The Author accepted a Proposal on ${what}.)`;
 }
 
 /**
