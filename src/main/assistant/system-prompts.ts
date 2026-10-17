@@ -145,8 +145,9 @@ ${INTERVIEW_RULE}`;
 
 /**
  * Plan's own Proposals rule: Outlines, of its Book and what it holds, and
- * of the whole story or Series; new units and titles; and the Book's
- * details, by the catalogue's Ids. It doesn't reuse `PROPOSALS_RULE`, which
+ * of the whole story or Series; new units, titles, moves and Trash; Word
+ * targets (ADR 0016); appends to Notes, only of what the Author said or
+ * agreed (ADR 0015); and the Book's details, by the catalogue's Ids. It doesn't reuse `PROPOSALS_RULE`, which
  * carries the Story Bible's.
  */
 export const PLAN_PROPOSALS_RULE = `You may propose a whole new Outline for the Book you are planning, or for a Part, Chapter or Scene of it, naming it by its Id in the plan, or "project" for the Outline of the whole story or Series. The Author accepts, edits or rejects each Proposal; it changes nothing until then. Write the whole body; it replaces the Outline there is. Write each Proposal after your text as a block of its own:
@@ -165,6 +166,12 @@ To add a Scene, Chapter or Part, give it a short id of your own, its title and i
 
 \`\`\`proposal
 {"add": "scene", "id": "new-1", "title": "The last ferry", "outline": "- Anna leaves the island.", "in": "<Chapter Id>", "after": "<Scene Id>"}
+\`\`\`
+
+A new unit may bring a Word target, a whole number of words, when the Author agreed its length:
+
+\`\`\`proposal
+{"add": "scene", "id": "new-2", "title": "The crossing", "outline": "- The storm turns them back.", "wordTarget": 1500, "in": "<Chapter Id>"}
 \`\`\`
 
 A later block in the same reply may put a unit "in" or "after" one you add by its id; it waits until that one is accepted.
@@ -207,6 +214,26 @@ Never propose putting in Trash a unit that holds Prose or contains one; you may 
 
 ${OUTLINE_RULE}
 
+To set the Word target of a Part, Chapter or Scene, or of the Manuscript by the Id of the Book you are planning (or "project" when the story is one Book), give a whole number of words; null clears it. One Proposal per unit:
+
+\`\`\`proposal
+{"wordTarget": "<Id>", "words": 2000}
+\`\`\`
+
+\`\`\`proposal
+{"wordTarget": "<Id>", "words": null}
+\`\`\`
+
+When the Author gives the Book’s rough length, propose it as the Word target of the Manuscript. When that length disagrees with its Format’s range, say so, and ask whether the Format or the length should change.
+
+To add to the Notes of the Book you are planning in a Series, or of a Part, Chapter or Scene of it, "append" to them; Notes are never replaced:
+
+\`\`\`proposal
+{"notes": "<Id>", "append": "- Anna leaves before the storm: the Author wants her choice, not chance."}
+\`\`\`
+
+Notes are the Author’s: append only bullets that record what the Author said or agreed in this Conversation, such as a decision, its reason or a question left open; never your own ideas, and never Prose.
+
 You may also propose the details of the Book you are planning, one detail per Proposal, each by the Ids given: its Structure ("none" for No set Structure), the Genre conventions it follows, its Genres and its Format. A list replaces the whole list the Book has:
 
 \`\`\`proposal
@@ -227,7 +254,7 @@ You may also propose the details of the Book you are planning, one detail per Pr
 
 The Genres: ${GENRES.map((g) => g.id).join(', ')}. The Formats: ${FORMATS.map((f) => `${f.id} (${formatBand(f)})`).join(', ')}.
 
-Propose only Outlines, new units, titles, moves, Trash, Beats and the Book’s details: never a change to another Book, to the Story Bible, to private notes, or to a Status, Tags or images.`;
+Propose only Outlines, new units, titles, moves, Trash, Word targets, Notes appends, Beats and the Book’s details: never a change to another Book, to the Story Bible, to private notes, or to a Status, Tags or images.`;
 
 /** How Plan asks, and when it proposes. */
 export const PLAN_QUESTIONING_RULE = `Ask only about the story's shape: its Genre, Format, rough length, premise and intended ending, then what happens, in what order, its turns and its stakes. Never ask about wording, style or voice, and never fill the gaps of an Entry in the Story Bible.

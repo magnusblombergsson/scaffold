@@ -19,6 +19,7 @@ import {
   proposalTarget,
   textValue,
   type FieldValue,
+  type HeldValue,
   type NewEntry,
   type NewUnit,
   type ProposalField,
@@ -30,6 +31,7 @@ import { relationVerb } from '../shared/relation-proposal';
 import { BOOK_DETAIL_LABELS, detailText } from '../shared/book-details';
 import { beatName } from '../shared/structure-catalogue';
 import { fieldDiff, textDiff, type DiffPart } from '../shared/diff';
+import { wordTargetText } from '../shared/word-target';
 import { ReadOnlyContext } from './read-only';
 import { useRun } from './use-project';
 
@@ -54,6 +56,8 @@ export function proposalTitle(proposal: ProposalView): string {
   if (proposal.kind === 'new-entry') {
     return `New ${ENTRY_TYPE_LABELS[proposal.proposed.type]} · ${proposal.name}`;
   }
+  if (proposal.kind === 'word-target') return `${proposal.name} › Word target`;
+  if (proposal.kind === 'notes') return `${proposal.name} › Notes`;
   if (proposal.kind === 'add') return `Add ${proposal.name}`;
   if (proposal.kind === 'retitle') return `${proposal.name} › Title`;
   if (proposal.kind === 'move') return `Move ${proposal.name}`;
@@ -226,14 +230,15 @@ export function ProposalCard({
 
   const orphaned = 'orphaned' in state ? state.orphaned : null;
   const refused = 'refused' in state ? state.refused : null;
-  // A Move, Put in Trash, Book's detail or Scene's Beats is accepted or
-  // rejected only.
+  // A Move, Put in Trash, Book's detail, Word target or Scene's Beats is
+  // accepted or rejected only.
   const editable =
     proposal.kind === 'relation'
       ? proposal.proposed.kind === 'label'
       : proposal.kind !== 'move' &&
         proposal.kind !== 'trash' &&
         proposal.kind !== 'book-detail' &&
+        proposal.kind !== 'word-target' &&
         proposal.kind !== 'beats';
   const current = 'current' in state ? state.current : null;
   const stale = 'stale' in state && state.stale;
@@ -302,15 +307,17 @@ export function ProposalCard({
                 ? fieldLabel(proposal)
                 : proposal.kind === 'book-detail'
                   ? BOOK_DETAIL_LABELS[proposal.detail]
-                  : proposal.kind === 'retitle'
-                    ? 'The title'
-                    : proposal.kind === 'move'
-                      ? 'Its place'
-                      : proposal.kind === 'trash'
-                        ? 'It'
-                        : proposal.kind === 'beats'
-                          ? 'The list of Beats'
-                          : 'The Outline'}{' '}
+                  : proposal.kind === 'word-target'
+                    ? 'The Word target'
+                    : proposal.kind === 'retitle'
+                      ? 'The title'
+                      : proposal.kind === 'move'
+                        ? 'Its place'
+                        : proposal.kind === 'trash'
+                          ? 'It'
+                          : proposal.kind === 'beats'
+                            ? 'The list of Beats'
+                            : 'The Outline'}{' '}
               has changed since this was proposed.
             </p>
           )}
@@ -412,10 +419,23 @@ function Change({
   stale,
 }: {
   proposal: ProposalView;
-  current: FieldValue;
+  current: HeldValue;
   stale: boolean;
 }) {
   if (proposal.kind === 'relation') return null;
+  if (proposal.kind === 'word-target') {
+    return (
+      <p className="proposal-diff" aria-label="Change">
+        {stale && (
+          <span className="proposal-now">
+            Now {wordTargetText(current as number | null)} ·{' '}
+          </span>
+        )}
+        <del>{wordTargetText(proposal.base)}</del>{' '}
+        <ins>{wordTargetText(proposal.proposed)}</ins>
+      </p>
+    );
+  }
   if (proposal.kind === 'move') {
     return (
       <p className="proposal-diff" aria-label="Change">
@@ -437,7 +457,7 @@ function Change({
         {stale && (
           <>
             <dt>Now</dt>
-            <dd>{detailText(detail, current)}</dd>
+            <dd>{detailText(detail, current as FieldValue)}</dd>
           </>
         )}
         <dt>{stale ? 'Proposed against' : 'Before'}</dt>
@@ -477,6 +497,12 @@ function Change({
     return (
       <div className="proposal-diff" aria-label="Change">
         <ins className="proposal-unit-title">{proposal.proposed.title}</ins>
+        {proposal.proposed.wordTarget !== undefined && (
+          <span className="proposal-now">
+            {' '}
+            · {wordTargetText(proposal.proposed.wordTarget)}
+          </span>
+        )}
         {proposal.proposed.outline && (
           <p className="proposal-unit-outline">
             <ins>{proposal.proposed.outline}</ins>
@@ -508,13 +534,15 @@ function Change({
     );
   }
   if (isAppending(proposal)) {
-    const after = appendedOnto(proposal, current);
+    // Only text and lists are appended to.
+    const held = current as FieldValue;
+    const after = appendedOnto(proposal, held);
     return (
       <Diff
         parts={
           proposal.kind === 'field'
-            ? fieldDiff(proposal.field, current, after)
-            : textDiff(String(current), String(after))
+            ? fieldDiff(proposal.field, held, after)
+            : textDiff(String(held), String(after))
         }
       />
     );
@@ -553,7 +581,7 @@ function Change({
     return (
       <dl className="proposal-values">
         <dt>Now</dt>
-        <dd>{shown(field, current)}</dd>
+        <dd>{shown(field, current as FieldValue)}</dd>
         <dt>Proposed against</dt>
         <dd>
           <del>{shown(field, base)}</del>
@@ -599,7 +627,13 @@ function draftOf(proposal: ProposalView): Draft {
     return proposal.proposed.kind === 'label' ? proposal.proposed.label : '';
   }
   // Never edited: accepted or rejected as proposed.
-  if (proposal.kind === 'book-detail' || proposal.kind === 'beats') return '';
+  if (
+    proposal.kind === 'book-detail' ||
+    proposal.kind === 'word-target' ||
+    proposal.kind === 'beats'
+  ) {
+    return '';
+  }
   if (proposal.kind === 'add') return { ...proposal.proposed };
   if (proposal.kind === 'move' || proposal.kind === 'trash') return '';
   if (proposal.kind !== 'field') return proposal.proposed;

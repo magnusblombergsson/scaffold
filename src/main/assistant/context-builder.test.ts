@@ -2039,6 +2039,55 @@ describe('Plan', () => {
     expect(skeleton).not.toContain('Storm');
   });
 
+  describe('Word targets', () => {
+    it('are sent within the focus, under each unit’s Status, and the Manuscript’s with the Book’s details', async () => {
+      const { store, view, chapters, scenes } = await planned();
+      await store.setWordTarget(PROJECT_OUTLINE, 80_000);
+      await store.setWordTarget(chapters.storm, 6_000);
+      await store.setWordTarget(scenes.harbour, 2_500);
+
+      const context = await plan(view, { kind: 'chapter', id: chapters.storm });
+
+      expect(skeletonOf(context)).toContain(
+        `## Chapter “Storm”
+Id: ${chapters.storm}
+Word target: 6,000 words
+Holds Prose`,
+      );
+      // Outside the focus, only the title and Outline.
+      expect(skeletonOf(context)).not.toContain('2,500');
+      expect(
+        context.system.find((b) => b.text.startsWith('The Book’s details'))
+          ?.text,
+      ).toContain('Word target of the Manuscript: 80,000 words');
+    });
+
+    it('say when the Manuscript has none', async () => {
+      const { view } = await planned();
+
+      const context = await plan(view, { kind: 'open' });
+
+      expect(
+        context.system.find((b) => b.text.startsWith('The Book’s details'))
+          ?.text,
+      ).toContain('Word target of the Manuscript: none.');
+    });
+
+    it('in a Series, are those of the Book planned', async () => {
+      const { store, view } = await planned();
+      await store.createBook();
+      const [one, two] = store.manuscript().books!;
+      await store.setWordTarget(one.id, 90_000);
+      await store.setWordTarget(two.id, 70_000);
+
+      const context = await plan(view, { kind: 'open' }, 'Go on.', one.id);
+
+      const text = sent(context);
+      expect(text).toContain('Word target of the Manuscript: 90,000 words');
+      expect(text).not.toContain('70,000');
+    });
+  });
+
   describe('the Book’s details and the structure catalogue', () => {
     const detailsOf = (context: Awaited<ReturnType<typeof buildContext>>) =>
       context.system.find((b) => b.text.startsWith('The Book’s details'))
