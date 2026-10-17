@@ -101,3 +101,14 @@ export function carriers<S extends { beats?: string[] }>(
 ): S[] {
   return scenes.filter((s) => s.beats?.includes(beat));
 }
+
+/** A share of the Book in whole %, as in “10–40%”, or “50%” when it starts where it ends. */
+export function spanText({ from, to }: Span): string {
+  const [a, b] = [Math.round(from), Math.round(to)];
+  return a === b ? `${a}%` : `${a}–${b}%`;
+}
+
+/** Where a Beat should fall, as in “10–20%”, or “by order” when only its order counts. */
+export function beatWhere({ at }: Pick<Beat, 'at'>): string {
+  return at ? spanText(at) : 'by order';
+}

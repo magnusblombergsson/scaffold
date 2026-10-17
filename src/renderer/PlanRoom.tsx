@@ -137,6 +137,26 @@ export function PlanRoom({
   const { measure, falls } = useMemo(() => sceneFalls(scenes), [scenes]);
   /** The titles of the Scenes carrying a Beat, by its qualified id. */
   const carrying = (beat: string) => carriers(scenes, beat).map((s) => s.title);
+  /** The Book's details proposed in the Conversation open, still to decide: ghosts in the strip. */
+  const proposedDetails = useMemo(
+    () =>
+      (current?.messages ?? [])
+        .flatMap((m) => m.proposals ?? [])
+        .filter(
+          (p) =>
+            p.kind === 'book-detail' &&
+            p.bookId === bookId &&
+            p.state.kind === 'pending' &&
+            !('orphaned' in p.state),
+        ),
+    [current, bookId],
+  );
+  /** Asks Plan about an entry of the catalogue, which is then sent in full. */
+  const askAbout =
+    readOnly || streaming !== null || !providers || !anyAdded(providers)
+      ? undefined
+      : (name: string) =>
+          void conversation.send(`Tell me about ${name} for this Book.`);
   /**
    * Each unit's Proposals made in the Conversation open, an Add once its
    * unit is there; and the Adds and Moves still pending, drawn where they
@@ -227,7 +247,11 @@ export function PlanRoom({
           </label>
           <BookPicker conversation={conversation} names={names} />
         </div>
-        <BookDetailsStrip bookId={bookId} book={bookDetails} />
+        <BookDetailsStrip
+          bookId={bookId}
+          book={bookDetails}
+          proposed={proposedDetails}
+        />
         <div className="plan-body">
           <PlanTree
             nodes={tree}
@@ -261,6 +285,7 @@ export function PlanRoom({
               bookId={bookId}
               book={bookDetails}
               carrying={carrying}
+              onAsk={askAbout}
             />
           </aside>
         </div>
@@ -294,7 +319,7 @@ export function PlanRoom({
                 }
                 onOpenSettings={onAddProvider}
                 proposals={(made) => (
-                  <ProposalLinks
+                  <PlanProposals
                     conversationId={current?.id ?? null}
                     proposals={made}
                     lit={lit}
@@ -353,12 +378,12 @@ function PlanStart({
 }
 
 /**
- * A reply's Proposals as one line each, linking to the unit it changes,
- * which it highlights in the tree; it is decided there. With more than
- * one still pending, Accept all takes them in the order they need each
- * other, leaving stale ones and those needing them.
+ * A reply's Proposals: those on the Book's details as cards, decided here;
+ * the rest as links to the unit each changes in the tree, decided there.
+ * With more than one still pending, Accept all takes them all, in the
+ * order they need each other, leaving stale ones and those needing them.
  */
-function ProposalLinks({
+function PlanProposals({
   conversationId,
   proposals,
   lit,
@@ -373,6 +398,8 @@ function ProposalLinks({
   const run = useRun();
   const [busy, setBusy] = useState(false);
   const pending = proposals.filter((p) => p.state.kind === 'pending');
+  const details = proposals.filter((p) => p.kind === 'book-detail');
+  const others = proposals.filter((p) => p.kind !== 'book-detail');
 
   async function acceptAll() {
     if (!conversationId) return;
@@ -399,6 +426,36 @@ function ProposalLinks({
           Accept all
         </button>
       )}
+      {others.length > 0 && (
+        <ProposalLinks proposals={others} lit={lit} onPoint={onPoint} />
+      )}
+      {conversationId &&
+        details.map((p) => (
+          <ProposalCard
+            key={p.id}
+            conversationId={conversationId}
+            proposal={p}
+          />
+        ))}
+    </>
+  );
+}
+
+/**
+ * A reply's Proposals as one line each, linking to the unit it changes,
+ * which it highlights in the tree; it is decided there.
+ */
+function ProposalLinks({
+  proposals,
+  lit,
+  onPoint,
+}: {
+  proposals: ProposalView[];
+  lit: string | null;
+  onPoint(unitId: string): void;
+}) {
+  return (
+    <>
       <ul className="plan-proposal-links" aria-label="Proposals">
         {proposals.map((p) => {
           const target = proposalTarget(p);

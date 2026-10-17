@@ -48,6 +48,7 @@ import {
   unitText,
   type EntrySummary,
   type EntryType,
+  type BookDetails,
   type EntryValue,
   type Manuscript,
   type ManuscriptBook,
@@ -58,6 +59,20 @@ import {
 import type { AssistantView } from '../project-store/project-store';
 import type { PromptBlock, PromptMessage } from './provider';
 import { MODE_PROMPTS, PLAN_REQUESTS, REVIEW_ASKS } from './system-prompts';
+import { spanText } from '../../shared/beat-measure';
+import { formatBand } from '../../shared/book-details';
+import {
+  conventionOf,
+  CONVENTIONS,
+  FORMATS,
+  GENRES,
+  NO_STRUCTURE,
+  qualifiedBeatId,
+  shortlist,
+  shownIds,
+  structureOf,
+  type Beat,
+} from '../../shared/structure-catalogue';
 
 // The context builder (MVP spec §10): what the Assistant is sent for one
 // turn, built afresh every turn from the Project as it is now. It reads
@@ -147,6 +162,12 @@ export async function buildContext(
   }
   if (request.mode === 'plan') {
     system.push({ text: planFocusText(manuscript, book, request.focus) });
+    system.push({
+      text: bookDetailsText(
+        view.bookDetails(book),
+        request.messages.filter((m) => m.role === 'author').map((m) => m.text),
+      ),
+    });
   }
   if (focus.length > 0) system.push({ text: focusBlock(focus) });
   if (summary) system.push({ text: summaryBlock(summary.text, covered) });
@@ -665,6 +686,101 @@ function planFocusText(
       return `${heading} the Chapter “${chapter.title}”, Id: ${chapter.id}. Plan its shape; the rest of the Book is there for reference.`;
     }
   }
+}
+
+/**
+ * The Book's details as Plan is sent them, and the catalogue shortlisted
+ * for it (spec: Outline planner §2, §12): the Structures and Genre
+ * conventions that fit, those it follows and those the Author `asked`
+ * about by name in full, the rest by name only. Whether a Structure is
+ * chosen says whether to offer to find one; one this version doesn't know
+ * is said to be so. Ids the catalogue doesn't know are left out otherwise.
+ */
+function bookDetailsText(details: BookDetails, asked: string[]): string {
+  const named = (entry: { id: string; name: string }) =>
+    `${entry.name} (${entry.id})`;
+  const genres = shownIds(details.genres, GENRES).map(
+    (id) => GENRES.find((g) => g.id === id)!,
+  );
+  const format = FORMATS.find((f) => f.id === details.bookFormat);
+  const conventions = shownIds(details.genreConventions, CONVENTIONS).map(
+    (id) => conventionOf(id)!,
+  );
+  const { structures, conventions: shortlisted } = shortlist(details, asked);
+  return [
+    'The Book’s details, as the Author set or accepted them, and the structure catalogue this app knows. Name a Structure, Genre convention, Genre or Format by its Id when you propose one.',
+    `Genres: ${genres.length > 0 ? genres.map(named).join(', ') : 'none chosen.'}`,
+    `Format: ${
+      format
+        ? `${format.name}, ${formatBand(format)} (${format.id})`
+        : details.bookFormat !== undefined
+          ? 'one this version of the app doesn’t know.'
+          : 'none chosen.'
+    }`,
+    `Structure: ${structureText(details.structure)}`,
+    `Genre conventions: ${conventions.length > 0 ? conventions.map(named).join(', ') : 'none.'}`,
+    '## Structures in full: those fitting the Book’s Genres and Format, the one it follows, and any the Author asked about',
+    ...structures.full.map((s) =>
+      [
+        `### ${s.name}`,
+        `Id: ${s.id}`,
+        s.credit,
+        s.description,
+        `Fits: ${GENRES.filter((g) => s.fits.genres.includes(g.id))
+          .map((g) => g.name)
+          .join(', ')}; ${FORMATS.filter((f) => s.fits.formats.includes(f.id))
+          .map((f) => f.name)
+          .join(', ')}`,
+        'Beats, in order, each under the Id a Scene’s marks name it by:',
+        ...s.beats.map((b) => beatLine(s, b)),
+      ].join('\n'),
+    ),
+    ...(structures.byName.length > 0
+      ? [
+          `Other Structures, less usual for this Book, by name only: ${structures.byName.map(named).join(', ')}.`,
+        ]
+      : []),
+    '## Genre conventions in full: those of the Book’s Genres, those it follows, and any the Author asked about',
+    ...shortlisted.full.map((c) =>
+      [
+        `### ${c.name}`,
+        `Id: ${c.id}`,
+        c.credit,
+        c.description,
+        'Required Scenes, each under the Id a Scene’s marks name it by:',
+        ...c.beats.map((b) => beatLine(c, b)),
+        'Rules:',
+        ...c.rules.map((rule) => `- ${rule}`),
+      ].join('\n'),
+    ),
+    ...(shortlisted.byName.length > 0
+      ? [
+          `Other Genre conventions, by name only: ${shortlisted.byName.map(named).join(', ')}.`,
+        ]
+      : []),
+  ].join('\n\n');
+}
+
+/** What Plan is told of the Book's Structure, and so whether to offer to find one. */
+function structureText(structure: string | undefined): string {
+  if (structure === undefined) {
+    return 'none chosen yet. When it would help, offer to find one.';
+  }
+  if (structure === NO_STRUCTURE) {
+    return 'No set Structure. Read any pattern the Author wrote in the Outlines or Notes as their intent, and judge against it in words. Never nudge toward a Structure; you may name the nearest without pressing it.';
+  }
+  const known = structureOf(structure);
+  return known
+    ? `${known.name} (${known.id})`
+    : `one this version of the app doesn’t know (${structure}). Tell the Author so, and check no Beats.`;
+}
+
+/** A Beat of a Structure or Genre convention, as in the catalogue sent. */
+function beatLine(source: { id: string }, beat: Beat): string {
+  const where = beat.at ? `At ${spanText(beat.at)}` : 'By order only';
+  return `- ${beat.name}, Id: ${qualifiedBeatId(source, beat)}: ${beat.purpose} ${where}; ${
+    beat.span === 'scene' ? 'one Scene' : 'a run of Scenes'
+  }${beat.opensPart ? '; opens a Part' : ''}.`;
 }
 
 /** One unit's text in focus, under a heading that names it. */
