@@ -275,6 +275,16 @@ export function useConversation({
     }
   }
 
+  /**
+   * Shows a new Conversation, not yet started, about the Book `book` in a
+   * Series; none while a reply streams in.
+   */
+  function startNew(book?: string) {
+    if (answering.current) return;
+    void resume('');
+    setNewBook(book);
+  }
+
   /** Sends the draft, or `text` the Author asked to send instead. */
   async function send(text?: string) {
     const message = (text ?? draft).trim();
@@ -536,6 +546,7 @@ export function useConversation({
     picking,
     setPicking,
     resume,
+    startNew,
     send,
     review,
     planAsk,

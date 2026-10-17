@@ -1,4 +1,4 @@
-import type { BookDetails } from './project-types';
+import type { BookDetails, Manuscript } from './project-types';
 import {
   conventionOf,
   CONVENTIONS,
@@ -122,6 +122,31 @@ export function withSetAside(
   );
   const all = [...new Set([...(value ?? []), ...aside])];
   return all.length > 0 ? all : null;
+}
+
+/**
+ * A Scene's Beats as Writing shows them (spec: Outline planner §8): those
+ * it carries of what its Book follows, with the Chapter holding it and, in
+ * a Series, that Book, which Plan opens on; null for a Scene in no Book,
+ * Unplaced or in an Unplaced Chapter, which Plan can't open on.
+ */
+export function sceneBeatsInWriting(
+  manuscript: Manuscript,
+  sceneId: string,
+): { beats: FollowedBeat[]; chapterId: string; book?: string } | null {
+  const chapter = manuscript.chapters.find((c) =>
+    c.scenes.some((s) => s.id === sceneId),
+  );
+  if (!chapter || chapter.unplaced) return null;
+  const scene = chapter.scenes.find((s) => s.id === sceneId)!;
+  const book = manuscript.books
+    ? manuscript.books.find((b) => b.id === chapter.book)
+    : manuscript;
+  return {
+    beats: book ? shownBeats(scene.beats, followedBeats(book)) : [],
+    chapterId: chapter.id,
+    ...(chapter.book !== undefined && { book: chapter.book }),
+  };
 }
 
 /** Those of `scenes` marked with the Beat `beat`, qualified, set aside or not. */

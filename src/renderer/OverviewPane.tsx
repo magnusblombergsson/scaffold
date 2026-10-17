@@ -8,6 +8,7 @@ import {
   type ManuscriptScene,
   type ProseLanguage,
 } from '../shared/project-types';
+import { WritingBeatChips } from './Beats';
 import { OutlineNotes } from './OutlineNotes';
 import { useOutlines } from './use-project';
 import { StatusAndTagsEditor, UnitStatusDot } from './StatusAndTags';
@@ -266,6 +267,7 @@ function Rows({
           )}
           {unit && <UnitThumbnail unit={unit} />}
         </div>
+        {kind === 'scene' && !missing && <WritingBeatChips sceneId={id} />}
         {isOpen && (
           <div className="overview-row-body">
             {unit && <StatusAndTagsEditor unit={unit} />}
