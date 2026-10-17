@@ -77,6 +77,7 @@ import {
   type Orphaned,
   type PendingProposal,
   type Proposal,
+  type UnitAddition,
 } from '../../shared/proposal';
 import { joinProse, type Cut } from '../../shared/prose-split';
 import {
@@ -234,6 +235,7 @@ import {
   sceneIds,
   settled,
   structureOf,
+  landing,
   takeFromBook,
   tryFindScene,
   unplace,
@@ -339,6 +341,8 @@ export interface AssistantView {
   /** Every Relation held; `relationsView` hides those it may not see. */
   listRelations(): Relation[];
   read<R extends AssistantRef>(ref: R): Promise<ValueOf<R>>;
+  /** Whether a Scene's Prose is in Conflict, which Plan never proposes on. */
+  conflicted?(sceneId: string): boolean;
 }
 
 /** A Chapter of Prose to create a Project with, as when it is imported. */
@@ -1201,6 +1205,14 @@ export class ProjectStore {
       passFormatGate: () => this.passFormatGate(),
       relations: () => this.records.relations.list(),
       changeRelations: (change) => this.changeRecords('relations', change),
+      addUnit: (addition, title) => this.addUnit(addition, title),
+      retitleUnit: (id, title) => this.retitleUnit(id, title),
+      trashUnit: (kind, id) =>
+        this.byProposal(async () => {
+          await this.trash.move(kind, id);
+        }),
+      holdsProse: (id) => this.holdsProse(id),
+      conflicted: (id) => this.conflicts.has(unitKey(sceneRef(id))),
     });
     this.sessions = new Sessions(
       {
@@ -3983,6 +3995,117 @@ export class ProjectStore {
   }
 
   /**
+   * Runs a change to the structure an accepted Proposal or its undo makes:
+   * past the format gate, and never a Binder step, whose undo it would undo
+   * too, so that one can no longer be undone. Then tells the window.
+   */
+  private byProposal(change: () => Promise<void>): Promise<void> {
+    return this.enqueueWrite(async () => {
+      this.latest = null;
+      await change();
+      this.emit({ type: 'structureChanged', manuscript: this.manuscript() });
+    });
+  }
+
+  /**
+   * Adds the unit an accepted Add proposed, titled `title`, in its
+   * container: right after its anchor, at the end when the anchor is no
+   * longer there, or first with none. One an undo put in Trash comes back
+   * from there first, and is placed so.
+   */
+  private addUnit(addition: UnitAddition, title: string): Promise<void> {
+    const { unit, unitId: id, in: container, after } = addition;
+    return this.byProposal(async () => {
+      if (this.trash.where(id) === 'trash') await this.trash.restore(id);
+      if (unit === 'scene') {
+        if (!this.files.has(id)) {
+          await safeWrite(
+            this.deps.fs,
+            this.deps.clock,
+            scenePath(this.path, id),
+            sceneFile({ id, markdown: '' }),
+          );
+          this.files.add(id);
+        }
+        await this.restructure((tree) => {
+          const found = tryFindScene(tree, id);
+          found?.chapter.scenes.splice(
+            found.chapter.scenes.indexOf(found.scene),
+            1,
+          );
+          const scenes = findChapter(tree, container).scenes;
+          scenes.splice(
+            landing(
+              scenes.map((s) => s.id),
+              after,
+            ),
+            0,
+            {
+              ...found?.scene,
+              id,
+              title,
+            },
+          );
+        });
+        return;
+      }
+      await this.restructureParts((tree) => {
+        const top =
+          container === PROJECT_OUTLINE ||
+          tree.books.some((b) => b.id === container);
+        const list = top
+          ? bookTop(tree, container === PROJECT_OUTLINE ? undefined : container)
+          : findPart(tree, container).chapters;
+        if (unit === 'part') {
+          const part = tree.parts.find((p) => p.id === id);
+          if (part) {
+            takeFromBook(tree, id);
+            part.title = title;
+          } else tree.parts.push({ id, title, chapters: [] });
+        } else {
+          const chapter = tree.chapters.find((c) => c.id === id);
+          if (chapter) {
+            unplace(tree, id);
+            chapter.title = title;
+          } else tree.chapters.push({ id, title, scenes: [] });
+        }
+        list.splice(landing(list, after), 0, id);
+      });
+    });
+  }
+
+  /** Gives a Scene, Chapter or Part the title an accepted Retitle, or its undo, wrote. */
+  private retitleUnit(id: string, title: string): Promise<void> {
+    return this.byProposal(() =>
+      this.restructure((tree) => {
+        const scene = tryFindScene(tree, id)?.scene;
+        const unit =
+          scene ?? tree.chapters.find((c) => c.id === id) ?? findPart(tree, id);
+        unit.title = title;
+      }),
+    );
+  }
+
+  /** Whether a Scene, or a Scene in a Chapter, Part or Book, holds Prose; read only to tell. */
+  private async holdsProse(id: string): Promise<boolean> {
+    const { chapters, unplaced } = this.manuscript();
+    const scenes = [
+      ...unplaced.filter((s) => s.id === id),
+      ...chapters.flatMap((c) =>
+        c.id === id || c.part === id || c.book === id
+          ? c.scenes
+          : c.scenes.filter((s) => s.id === id),
+      ),
+    ];
+    for (const { id: sceneId } of scenes) {
+      if (!this.files.has(sceneId)) continue;
+      const { markdown } = await this.read(sceneRef(sceneId));
+      if (markdown.trim() !== '') return true;
+    }
+    return false;
+  }
+
+  /**
    * Moves a Scene, Chapter, Part, Entry or Conversation to the Drawer, as
    * Trash would take it, with what goes with it there.
    */
@@ -4371,6 +4494,7 @@ export class ProjectStore {
       listEntries: () => this.listEntries().map(forAssistant),
       customFields: () => this.records.customFields.list(),
       listRelations: () => this.listRelations(),
+      conflicted: (sceneId) => this.conflicts.has(unitKey(sceneRef(sceneId))),
       read: async (ref) => {
         // Refused at run time too, whatever a caller's types say.
         if ((ref as UnitRef).kind === 'private') {
@@ -4583,7 +4707,15 @@ export class ProjectStore {
     );
   }
 
-  /** Rejects a pending Proposal, stale or orphaned too; its target is left alone. */
+  /** Accepts Proposals of one reply in the order they need each other, leaving those it can't. */
+  acceptProposals(
+    conversationId: string,
+    proposalIds: string[],
+  ): Promise<void> {
+    return this.conversations.acceptProposals(conversationId, proposalIds);
+  }
+
+  /** Rejects a pending Proposal, stale or orphaned too, and those that need it; targets are left alone. */
   rejectProposal(conversationId: string, proposalId: string): Promise<void> {
     return this.conversations.rejectProposal(conversationId, proposalId);
   }

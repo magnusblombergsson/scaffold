@@ -158,9 +158,23 @@ To add to an Outline rather than replace it, "append" bullets to its end:
 {"outline": "<Id>", "append": "- Anna takes the last ferry alone."}
 \`\`\`
 
+To add a Scene, Chapter or Part, give it a short id of your own, its title and its Outline, and say where it goes: "in" a Chapter for a Scene; in a Part, or "in" the Book you are planning by its Id (or "project" when the story is one Book) for a Chapter or Part; "after" a unit there, or with no "after", first in it:
+
+\`\`\`proposal
+{"add": "scene", "id": "new-1", "title": "The last ferry", "outline": "- Anna leaves the island.", "in": "<Chapter Id>", "after": "<Scene Id>"}
+\`\`\`
+
+A later block in the same reply may put a unit "in" or "after" one you add by its id; it waits until that one is accepted.
+
+To retitle a Part, Chapter or Scene:
+
+\`\`\`proposal
+{"retitle": "<Id>", "title": "Departure"}
+\`\`\`
+
 ${OUTLINE_RULE}
 
-Propose only Outlines: never a change to another Book, to the Story Bible, to private notes, or to a Status, Tags or images.`;
+Propose only Outlines, new units and titles: never a change to another Book, to the Story Bible, to private notes, or to a Status, Tags or images.`;
 
 /** How Plan asks, and when it proposes. */
 export const PLAN_QUESTIONING_RULE = `Ask only about the story's shape: its Genre, Format, rough length, premise and intended ending, then what happens, in what order, its turns and its stakes. Never ask about wording, style or voice, and never fill the gaps of an Entry in the Story Bible.

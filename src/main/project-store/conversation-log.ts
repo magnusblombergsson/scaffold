@@ -21,6 +21,7 @@ import {
 } from '../../shared/finding';
 import {
   asNewEntry,
+  asNewUnit,
   decided,
   isAppending,
   isChoiceField,
@@ -31,6 +32,9 @@ import {
   type DecisionEvent,
   type FieldValue,
   type NewEntry,
+  type NewUnit,
+  PLAN_UNITS,
+  type PlanUnit,
   type Proposal,
   type ProposedValue,
 } from '../../shared/proposal';
@@ -113,6 +117,36 @@ export type RelatedEvent = {
   relation: Relation['kind'];
   label?: string;
   book?: string;
+  at: number;
+};
+
+/**
+ * A new Scene, Chapter or Part Plan proposed: the id it gets, its
+ * container and the unit it goes after, if any, its title and Outline,
+ * and the Proposals it `needs` accepted first. Apps from before Plan skip
+ * it, and so its accept, reject and undo (ADR 0006).
+ */
+export type AddEvent = {
+  type: 'proposal.add';
+  id: string;
+  unit: PlanUnit;
+  unitId: string;
+  in: string;
+  after?: string;
+  title: string;
+  outline: string;
+  needs?: string[];
+  at: number;
+};
+
+/** A new title for a Scene, Chapter or Part Plan proposed, with the one it had; as `AddEvent`. */
+export type RetitleEvent = {
+  type: 'proposal.retitle';
+  id: string;
+  unitId: string;
+  base: string;
+  proposed: string;
+  needs?: string[];
   at: number;
 };
 
@@ -251,6 +285,8 @@ export type ConversationEvent =
   | ProposedEvent
   | OfferedEvent
   | RelatedEvent
+  | AddEvent
+  | RetitleEvent
   | AcceptedEvent
   | RejectedEvent
   | UndoneEvent
@@ -393,14 +429,18 @@ export function parseLog(log: string): LoggedConversation | null {
     if (
       event.type === 'proposal.proposed' ||
       event.type === 'proposal.offered' ||
-      event.type === 'proposal.related'
+      event.type === 'proposal.related' ||
+      event.type === 'proposal.add' ||
+      event.type === 'proposal.retitle'
     ) {
       const proposal =
         event.type === 'proposal.proposed'
           ? loggedProposal(event as Partial<ProposedEvent>)
           : event.type === 'proposal.offered'
             ? loggedOffer(event as Partial<OfferedEvent>)
-            : loggedRelation(event as Partial<RelatedEvent>);
+            : event.type === 'proposal.related'
+              ? loggedRelation(event as Partial<RelatedEvent>)
+              : loggedStructure(event as Parameters<typeof loggedStructure>[0]);
       if (proposal && !known && messages.length > 0) {
         proposals.set(proposal.id, {
           ...proposal,
@@ -491,8 +531,36 @@ function combine(
 export function proposedEvent(
   proposal: Proposal,
   at: number,
-): ProposedEvent | OfferedEvent | RelatedEvent {
+): ProposedEvent | OfferedEvent | RelatedEvent | AddEvent | RetitleEvent {
   const { id } = proposal;
+  const needs = proposal.needs?.length ? { needs: proposal.needs } : {};
+  if (proposal.kind === 'add') {
+    const { unit, unitId, after, proposed } = proposal;
+    return {
+      type: 'proposal.add',
+      id,
+      unit,
+      unitId,
+      in: proposal.in,
+      ...(after !== undefined && { after }),
+      title: proposed.title,
+      outline: proposed.outline,
+      ...needs,
+      at,
+    };
+  }
+  if (proposal.kind === 'retitle') {
+    const { unitId, base, proposed } = proposal;
+    return {
+      type: 'proposal.retitle',
+      id,
+      unitId,
+      base,
+      proposed,
+      ...needs,
+      at,
+    };
+  }
   if (proposal.kind === 'relation') {
     const { from, to, proposed, book } = proposal;
     return {
@@ -581,6 +649,15 @@ export function acceptedEvent(
   landed: Landing = {},
 ): AcceptedEvent {
   const { id } = proposal;
+  if (proposal.kind === 'add') {
+    const { title, outline } = wrote as NewUnit;
+    return {
+      type: 'proposal.accepted',
+      id,
+      fields: { title: { wrote: title }, outline: { wrote: outline } },
+      at,
+    };
+  }
   if (proposal.kind === 'new-entry') {
     const { type, name, description } = wrote as NewEntry;
     return {
@@ -594,7 +671,9 @@ export function acceptedEvent(
       at,
     };
   }
-  const field = proposal.kind === 'field' ? proposal.field : 'body';
+  const field = fieldOfChange(
+    proposal as Extract<Proposal, { kind: 'field' | 'outline' | 'retitle' }>,
+  );
   return {
     type: 'proposal.accepted',
     id,
@@ -665,6 +744,50 @@ function loggedProposal(event: Partial<ProposedEvent>): Proposal | null {
     base,
     proposed,
   };
+}
+
+/**
+ * The Add or Retitle an event logs, if this app can take it: an Add of a
+ * Scene, Chapter or Part with its id, container and title; a Retitle with
+ * the title it had and a new one. Its needs are kept if readable.
+ */
+function loggedStructure(
+  event: Partial<Omit<AddEvent, 'type'> & Omit<RetitleEvent, 'type'>> & {
+    type?: unknown;
+  },
+): Proposal | null {
+  const { id, unitId, needs } = event;
+  if (typeof id !== 'string' || typeof unitId !== 'string') return null;
+  const waits =
+    Array.isArray(needs) && needs.every((n) => typeof n === 'string')
+      ? needs.length > 0 && { needs }
+      : false;
+  if (event.type === 'proposal.retitle') {
+    const { base, proposed } = event;
+    if (typeof base !== 'string' || typeof proposed !== 'string') return null;
+    return { kind: 'retitle', id, unitId, base, proposed, ...waits };
+  }
+  const { unit, after, title, outline } = event;
+  if (!PLAN_UNITS.includes(unit!) || typeof event.in !== 'string') return null;
+  if (typeof title !== 'string' || typeof outline !== 'string') return null;
+  return {
+    kind: 'add',
+    id,
+    unit: unit!,
+    unitId,
+    in: event.in,
+    ...(typeof after === 'string' && { after }),
+    proposed: { title, outline },
+    ...waits,
+  };
+}
+
+/** The field an accept of a change logs what it replaced and wrote under. */
+function fieldOfChange(
+  proposal: Extract<Proposal, { kind: 'field' | 'outline' | 'retitle' }>,
+): string {
+  if (proposal.kind === 'field') return proposal.field;
+  return proposal.kind === 'retitle' ? 'title' : 'body';
 }
 
 /** The Book an event says its change to a field was made on, if it says one. */
@@ -791,6 +914,13 @@ function acceptedOf(
   }
   const { fields } = event;
   if (!fields) return null;
+  if (proposal.kind === 'add') {
+    const wrote = asNewUnit({
+      title: fields.title?.wrote,
+      outline: fields.outline?.wrote,
+    });
+    return wrote && { kind: 'accepted', wrote };
+  }
   if (proposal.kind === 'new-entry') {
     const wrote = asNewEntry({
       type: fields.type?.wrote,
@@ -799,7 +929,7 @@ function acceptedOf(
     });
     return wrote && { kind: 'accepted', wrote };
   }
-  const field = proposal.kind === 'field' ? proposal.field : 'body';
+  const field = fieldOfChange(proposal);
   const { replaced, wrote } = fields[field] ?? {};
   const holds = (value: unknown): value is FieldValue =>
     proposal.kind === 'field'
