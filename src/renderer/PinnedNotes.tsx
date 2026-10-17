@@ -1,13 +1,14 @@
-import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { useRef, type ReactNode } from 'react';
 import type { PinnedNote } from '../shared/api';
 import { entryTitle } from '../shared/entry';
-import type { EntrySummary, EntryValue } from '../shared/project-types';
+import type { EntrySummary } from '../shared/project-types';
+import type { StoryBibleLens } from '../shared/story-bible-as-of';
 import { entryImageRef, useUnitImage } from './UnitImage';
 import { ViewableImage } from './ImageView';
 import { PeekCard } from './PeekCard';
-import { onEntryWritten } from './entry-written';
 import { useDrag, useElementSize, useWindowSize } from './floating-panel';
 import { placeInside, type NoteChange, type Size } from './pinned-notes';
+import { useUnit } from './use-project';
 
 const NOTE_WIDTH = 320;
 
@@ -20,18 +21,15 @@ const NOTE_WIDTH = 320;
  */
 export function PinnedNotes({
   notes,
-  entries,
-  asWritten = (entry) => entry,
+  lens,
   foldedImage,
   onChange,
   onOpen,
   children,
 }: {
   notes: PinnedNote[];
-  /** In a Series, as of the Book being written. */
-  entries: EntrySummary[];
-  /** An Entry as a note shows it: in a Series, as of the Book being written. */
-  asWritten?(entry: EntryValue): EntryValue;
+  /** The Story Bible the notes show their Entries through: in a Series, as of the Book being written. */
+  lens: StoryBibleLens;
   /** Whether a folded note shows its Entry's image. */
   foldedImage: boolean;
   /** `save` once the change is done, not while a note is dragged. */
@@ -46,7 +44,7 @@ export function PinnedNotes({
   return (
     <div className="pinned-notes">
       {placed.map((note) => {
-        const summary = entries.find((entry) => entry.id === note.entryId);
+        const summary = lens.summary(note.entryId);
         return (
           summary && (
             <Note
@@ -56,7 +54,7 @@ export function PinnedNotes({
               summary={summary}
               room={room}
               foldedImage={foldedImage}
-              asWritten={asWritten}
+              lens={lens}
               onChange={(change, save) => onChange(note.entryId, change, save)}
               onOpen={onOpen}
             />
@@ -74,7 +72,7 @@ function Note({
   summary,
   room,
   foldedImage,
-  asWritten,
+  lens,
   onChange,
   onOpen,
 }: {
@@ -84,12 +82,11 @@ function Note({
   summary: EntrySummary;
   room: Size;
   foldedImage: boolean;
-  asWritten(entry: EntryValue): EntryValue;
+  lens: StoryBibleLens;
   onChange(change: NoteChange, save: boolean): void;
   onOpen(entryId: string): void;
 }) {
-  const read = useEntry(summary);
-  const entry = read && asWritten(read);
+  const entry = useUnit({ kind: 'entry', id: summary.id });
   const image = useUnitImage(
     entryImageRef(summary.id, summary.image),
     summary.image,
@@ -177,49 +174,10 @@ function Note({
         ) : (
           entry && (
             <div className="pinned-note-body">
-              <PeekCard entry={entry} inNote />
+              <PeekCard entry={entry} lens={lens} inNote />
             </div>
           )
         ))}
     </section>
   );
-}
-
-/**
- * The Entry as it is now: read again when its summary changes, when another
- * computer or a Proposal changes it, and as the Entry view writes it.
- */
-function useEntry(summary: EntrySummary): EntryValue | null {
-  const [entry, setEntry] = useState<EntryValue | null>(null);
-  const { id } = summary;
-  /** Changes when the Entry's summary does, not when another Entry's does. */
-  const summaryKey = JSON.stringify(summary);
-  useEffect(() => {
-    let current = true;
-    void window.project
-      .read({ kind: 'entry', id })
-      .then((read) => {
-        if (current) setEntry(read);
-      })
-      // Trashed meanwhile: its note is about to go.
-      .catch(() => undefined);
-    const unsubscribe = window.project.subscribe((event) => {
-      if (
-        event.type === 'unitReloaded' &&
-        event.ref.kind === 'entry' &&
-        event.ref.id === id
-      ) {
-        setEntry(event.value as EntryValue);
-      }
-    });
-    const unlisten = onEntryWritten((written) => {
-      if (written.id === id) setEntry(written);
-    });
-    return () => {
-      current = false;
-      unsubscribe();
-      unlisten();
-    };
-  }, [id, summaryKey]);
-  return entry;
 }

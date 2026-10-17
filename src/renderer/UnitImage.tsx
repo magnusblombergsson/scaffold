@@ -144,7 +144,7 @@ export function EntryImageSection({
             type="button"
             disabled={readOnly}
             onClick={() =>
-              void window.project.chooseImage({
+              void imagePicker.chooseFile({
                 kind: 'entry',
                 id: entry.id,
                 book: changes.id,
@@ -280,7 +280,7 @@ function imageItems(
           {
             label: 'Remove image',
             disabled: readOnly,
-            run: () => window.project.removeImage(ref),
+            run: () => imagePicker.remove(ref),
           },
         ]
       : []),
@@ -302,7 +302,7 @@ function imageAddItems(
     {
       label: image ? 'Replace image…' : 'Add image…',
       disabled: readOnly,
-      run: () => window.project.chooseImage(ref),
+      run: () => imagePicker.chooseFile(ref),
     },
     ...(image && imagePicker.shares(ref)
       ? [

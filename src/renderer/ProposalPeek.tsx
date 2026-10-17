@@ -3,6 +3,7 @@ import type { ProposalTarget } from '../shared/proposal';
 import type { EntryValue } from '../shared/project-types';
 import { PeekFrame } from './MentionPeek';
 import { PeekCard } from './PeekCard';
+import { useStoryBibleAsOf } from './story-bible-lens';
 
 /** A Proposal's target to Peek at, from its title at `anchor`. */
 export type TargetPeek = {
@@ -10,6 +11,8 @@ export type TargetPeek = {
   proposalId: string;
   /** What the target is called now, as the Proposal's card says. */
   name: string;
+  /** In a Series, the Book the Proposal was made as of. */
+  book?: string;
   anchor: DOMRect;
 };
 
@@ -17,7 +20,7 @@ export type TargetPeek = {
  * The Peek a Proposal's title opens in Brainstorm and Interview: its Entry,
  * shortened, or its Outline, and a link to go to it: an Entry in the Story
  * Bible, an Outline in Writing. Nothing is pinned from it: Pinned notes are
- * for Writing.
+ * for Writing. In a Series, an Entry is as of the Proposal's Book.
  */
 export function ProposalPeek({
   peek,
@@ -28,7 +31,7 @@ export function ProposalPeek({
   onOpen(): void;
   onClose(): void;
 }) {
-  const { target, name, anchor } = peek;
+  const { target, name, anchor, book } = peek;
   return (
     <PeekFrame
       label={target.kind === 'entry' ? 'Story Bible peek' : 'Outline peek'}
@@ -36,7 +39,7 @@ export function ProposalPeek({
       onClose={onClose}
     >
       {target.kind === 'entry' ? (
-        <EntryPeek entryId={target.entryId} />
+        <EntryPeek entryId={target.entryId} book={book} />
       ) : (
         <OutlinePeek outlineId={target.outlineId} name={name} />
       )}
@@ -49,8 +52,9 @@ export function ProposalPeek({
   );
 }
 
-/** An Entry, shortened, as it is now; a word that it is gone once trashed. */
-function EntryPeek({ entryId }: { entryId: string }) {
+/** An Entry, shortened, as it is now as of `book`; a word that it is gone once trashed. */
+function EntryPeek({ entryId, book }: { entryId: string; book?: string }) {
+  const lens = useStoryBibleAsOf(book);
   const [entry, setEntry] = useState<EntryValue | null>();
   useEffect(() => {
     let current = true;
@@ -68,7 +72,7 @@ function EntryPeek({ entryId }: { entryId: string }) {
   if (entry === null) {
     return <p className="peek-gone">This Entry is no longer there.</p>;
   }
-  return <PeekCard entry={entry} />;
+  return <PeekCard entry={entry} lens={lens} />;
 }
 
 /** An Outline, cut to three lines until Read more unfolds it. */

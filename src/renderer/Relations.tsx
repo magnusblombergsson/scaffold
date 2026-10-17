@@ -1,5 +1,4 @@
 import { useContext, useEffect, useRef, useState, type ReactNode } from 'react';
-import type { CallFailure } from '../shared/api';
 import { entryTitle } from '../shared/entry';
 import type { TitledBook } from '../shared/evolution';
 import {
@@ -18,6 +17,7 @@ import {
   type RelationsView,
 } from '../shared/relation';
 import { ReadOnlyContext } from './read-only';
+import { useRun } from './use-project';
 import { ShowInPeek } from './ShowInPeek';
 
 /**
@@ -46,21 +46,8 @@ export function RelationsSection({
 }) {
   const readOnly = useContext(ReadOnlyContext);
   const [adding, setAdding] = useState(false);
-  const [error, setError] = useState<string | null>(null);
   const lines = entryRelations(view, entryId);
   const warnings = view.warnings.get(entryId) ?? [];
-
-  /** Runs a change to the Relations, saying why main refused it. */
-  async function run(command: () => Promise<unknown>): Promise<boolean> {
-    try {
-      await command();
-      setError(null);
-      return true;
-    } catch (failure) {
-      setError((failure as CallFailure).message);
-      return false;
-    }
-  }
 
   /** An Entry's name: this one's plain, another's opening it. */
   const name = (id: string) => {
@@ -109,7 +96,6 @@ export function RelationsSection({
               name={name}
               books={books}
               readOnly={readOnly}
-              run={run}
             />
           ))}
         </ul>
@@ -118,7 +104,6 @@ export function RelationsSection({
         <AddRelation
           entryId={entryId}
           view={view}
-          run={run}
           onDone={() => setAdding(false)}
         />
       ) : (
@@ -129,11 +114,6 @@ export function RelationsSection({
         >
           + Add a Relation
         </button>
-      )}
-      {error && (
-        <p className="field-error" role="alert">
-          {error}
-        </p>
       )}
     </section>
   );
@@ -146,15 +126,14 @@ function RelationLine({
   name,
   books,
   readOnly,
-  run,
 }: {
   line: EntryRelation;
   entryId: string;
   name(id: string): ReactNode;
   books: readonly TitledBook[];
   readOnly: boolean;
-  run(command: () => Promise<unknown>): Promise<boolean>;
 }) {
+  const run = useRun();
   const [relabelling, setRelabelling] = useState(false);
   const id = line.kind === 'pair' ? line.relation.id : line.id;
   const holdsFrom = books.length > 1 && (
@@ -163,7 +142,9 @@ function RelationLine({
       book={relationBook(line)}
       disabled={readOnly}
       onChange={(book) =>
-        void run(() => window.project.setRelationBook(id, book))
+        void run((project) => project.setRelationBook(id, book), {
+          what: 'set the Book the Relation holds from',
+        })
       }
     />
   );
@@ -179,7 +160,11 @@ function RelationLine({
           type="button"
           className="link-button"
           disabled={readOnly}
-          onClick={() => void run(() => window.project.leaveSameAs(entryId))}
+          onClick={() =>
+            void run((project) => project.leaveSameAs(entryId), {
+              what: 'say they aren’t the same',
+            })
+          }
         >
           Not the same
         </button>
@@ -194,8 +179,11 @@ function RelationLine({
         {relabelling && relation.kind === 'label' ? (
           <RelabelInput
             initial={relation.label}
-            save={(label) =>
-              run(() => window.project.relabelRelation(relation.id, label))
+            save={async (label) =>
+              !!(await run(
+                (project) => project.relabelRelation(relation.id, label),
+                { what: 'relabel the Relation' },
+              ))
             }
             onDone={() => setRelabelling(false)}
           />
@@ -220,7 +208,9 @@ function RelationLine({
         className="link-button"
         disabled={readOnly}
         onClick={() =>
-          void run(() => window.project.removeRelation(relation.id))
+          void run((project) => project.removeRelation(relation.id), {
+            what: 'remove the Relation',
+          })
         }
       >
         Remove
@@ -314,14 +304,13 @@ const KIND_LABELS: Record<RelationKind, string> = {
 function AddRelation({
   entryId,
   view,
-  run,
   onDone,
 }: {
   entryId: string;
   view: RelationsView;
-  run(command: () => Promise<unknown>): Promise<boolean>;
   onDone(): void;
 }) {
+  const run = useRun();
   const entry = view.entries.get(entryId);
   const [kind, setKind] = useState<RelationKind>(
     entry && NESTING_TYPES.includes(entry.type) ? 'part-of' : 'label',
@@ -345,7 +334,11 @@ function AddRelation({
   async function add() {
     if (!other || refusal) return;
     setBusy(true);
-    if (await run(() => window.project.addRelation(from, to, choice))) {
+    if (
+      await run((project) => project.addRelation(from, to, choice), {
+        what: 'add the Relation',
+      })
+    ) {
       onDone();
     } else {
       setBusy(false);

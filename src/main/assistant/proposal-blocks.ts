@@ -1,7 +1,5 @@
 import { randomUUID } from 'node:crypto';
 import type { Mode } from '../../shared/conversation';
-import { appearsAfter, entryAsOf, summaryAsOf } from '../../shared/evolution';
-import { bookIds } from '../../shared/manuscript-order';
 import { PROJECT_OUTLINE } from '../../shared/project-types';
 import {
   mayPropose,
@@ -11,8 +9,8 @@ import {
   type Proposal,
   type ProposalChange,
 } from '../../shared/proposal';
-import { relationsView } from '../../shared/relation';
 import { relationAdditionOf } from '../../shared/relation-proposal';
+import type { StoryBibleLens } from '../../shared/story-bible-as-of';
 import type { AssistantView } from '../project-store/project-store';
 
 /**
@@ -21,14 +19,14 @@ import type { AssistantView } from '../project-store/project-store';
  * that proposes nothing this app takes, such as a change to Prose, Notes or
  * a Voice's example lines, is unreadable; one that proposes what its target
  * holds already is left out. In a Series, a change to a field is against
- * the Entry as of the `book` the turn was about, and made on it, and a
- * Relation is checked as of it. A block of a kind its `mode` may not
- * propose, such as a Relation in Writing, is unreadable.
+ * the Entry as the `lens` of the Book the turn was about sees it, and made
+ * on that Book, and a Relation is checked as of it. A block of a kind its
+ * `mode` may not propose, such as a Relation in Writing, is unreadable.
  */
 export async function readProposals(
   view: AssistantView,
   blocks: unknown[],
-  book?: string,
+  lens: StoryBibleLens,
   mode: Mode = 'brainstorm',
 ): Promise<{ proposals: Proposal[]; unreadable: number }> {
   const proposals: Proposal[] = [];
@@ -36,7 +34,7 @@ export async function readProposals(
   for (const block of blocks) {
     const kind = kindOf(block);
     const change = mayPropose(mode, kind)
-      ? await changeOf(view, block, kind, book)
+      ? await changeOf(view, block, kind, lens)
       : null;
     if (change === null) unreadable++;
     else if (change !== 'unchanged') {
@@ -61,16 +59,16 @@ function kindOf(block: unknown): ProposalChange['kind'] {
 /**
  * What a block of `kind` proposes: a new Entry, under the id it will get; a
  * whole Outline of a Part, Chapter or Scene in the Project, or of the story;
- * a change to a field of an Entry in the Story Bible, as of `book`, never
- * one first appearing after it; or a Relation between two such Entries.
- * `'unchanged'` when it proposes what its target holds; null when it can't
- * be read as one.
+ * a change to a field of an Entry in the Story Bible, as `lens` sees it,
+ * never one first appearing after its Book; or a Relation between two such
+ * Entries. `'unchanged'` when it proposes what its target holds; null when
+ * it can't be read as one.
  */
 async function changeOf(
   view: AssistantView,
   block: unknown,
   kind: ProposalChange['kind'],
-  book: string | undefined,
+  lens: StoryBibleLens,
 ): Promise<ProposalChange | 'unchanged' | null> {
   const { entry: entryId, outline: outlineId } = (block ?? {}) as Record<
     string,
@@ -80,7 +78,7 @@ async function changeOf(
     const proposed = newEntryOf(block);
     return proposed && { kind, entryId: randomUUID(), proposed };
   }
-  if (kind === 'outline') {
+  if (kind === 'outline' && typeof outlineId === 'string') {
     const { parts = [], chapters, unplaced } = view.manuscript();
     const known =
       outlineId === PROJECT_OUTLINE ||
@@ -91,22 +89,21 @@ async function changeOf(
         ...unplaced,
       ].some((unit) => unit.id === outlineId);
     if (!known) return null;
-    const outline = await view.read({
-      kind: 'outline',
-      id: outlineId as string,
-    });
+    const outline = await view.read({ kind: 'outline', id: outlineId });
     return outlineChangeOf(block, outline);
   }
-  const books = bookIds(view.manuscript());
-  if (kind === 'relation') return relationOf(view, block, books, book);
-  const summary = view.listEntries().find((e) => e.id === entryId);
-  if (!summary || appearsAfter(summary, books, book)) return null;
-  const entry = await view.read({ kind: 'entry', id: entryId as string });
-  const change = proposalOf(
-    block,
-    entryAsOf(entry, books, book).entry,
-    view.customFields(),
-  );
+  if (kind === 'relation') return relationOf(block, lens);
+  if (typeof entryId !== 'string' || !lens.visible(entryId)) return null;
+  const entry = await view.read({ kind: 'entry', id: entryId });
+  const change = proposalOf(block, lens.read(entry).entry, view.customFields());
+  return withBook(change, lens);
+}
+
+/** A change made as of the lens's Book, saying so; none for the whole Project. */
+function withBook<C extends ProposalChange>(
+  change: C | 'unchanged' | null,
+  { book }: StoryBibleLens,
+): C | 'unchanged' | null {
   return change && change !== 'unchanged' && book !== undefined
     ? { ...change, book }
     : change;
@@ -114,31 +111,15 @@ async function changeOf(
 
 /**
  * The Relation a block proposes adding between two Entries in the Story
- * Bible, as the Relations are as of `book`; never to one first appearing
- * after it.
+ * Bible, as `lens` holds the Relations; never to one first appearing after
+ * its Book.
  */
 function relationOf(
-  view: AssistantView,
   block: unknown,
-  books: readonly string[],
-  book: string | undefined,
+  lens: StoryBibleLens,
 ): ProposalChange | 'unchanged' | null {
-  const entries = view.listEntries();
   const { from, to } = block as Record<string, unknown>;
-  const late = entries.some(
-    (e) => (e.id === from || e.id === to) && appearsAfter(e, books, book),
-  );
-  if (late) return null;
-  const relations =
-    book === undefined
-      ? relationsView(view.listRelations(), entries)
-      : relationsView(
-          view.listRelations(),
-          entries.map((e) => summaryAsOf(e, books, book)),
-          { books, book },
-        );
-  const change = relationAdditionOf(block, relations);
-  return change && change !== 'unchanged' && book !== undefined
-    ? { ...change, book }
-    : change;
+  const there = (id: unknown) => typeof id === 'string' && lens.visible(id);
+  if (!there(from) || !there(to)) return null;
+  return withBook(relationAdditionOf(block, lens.relations), lens);
 }

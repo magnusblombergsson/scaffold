@@ -1,15 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
-import type {
-  NotesValue,
-  OutlineValue,
-  ProseLanguage,
-} from '../shared/project-types';
+import { useRef } from 'react';
+import type { ProseLanguage } from '../shared/project-types';
 import { MentionHighlight } from './mention-highlight';
 import { useReveal, type Reveal } from './reveal';
 import { docToText, plainTextExtensions, textToDoc } from './plain-text-editor';
 import { UnitEditor } from './UnitEditor';
-
-type Loaded = { outline: OutlineValue; notes: NotesValue | null };
+import { useMirror, useUnitToEdit } from './use-project';
 
 /**
  * The Outline and Notes of a Chapter or Scene, or the Project Outline,
@@ -28,43 +23,20 @@ export function OutlineNotes({
   /** Set to go to the Outline, as a Proposal's title asks. */
   reveal?: Reveal;
 }) {
-  const [loaded, setLoaded] = useState<Loaded | null>(null);
+  const mirror = useMirror();
+  const outlineRef = { kind: 'outline', id: unitId } as const;
+  const notesRef = { kind: 'notes', id: unitId } as const;
+  const outline = useUnitToEdit(outlineRef);
+  // The Project Outline has no Notes.
+  const notes = useUnitToEdit(withNotes ? notesRef : null);
   const fields = useRef<HTMLDivElement>(null);
-  /** The Outline's metadata, which the Outline editor doesn't show, as main last had it. */
-  const meta = useRef<OutlineValue['meta']>({});
-
-  useEffect(() => {
-    let current = true;
-    void Promise.all([
-      window.project.read({ kind: 'outline', id: unitId }),
-      withNotes ? window.project.read({ kind: 'notes', id: unitId }) : null,
-    ]).then(([outline, notes]) => {
-      if (!current) return;
-      meta.current = outline.meta;
-      setLoaded({ outline, notes });
-    });
-    const unsubscribe = window.project.subscribe((event) => {
-      // Changed on another computer: a save from here keeps its metadata.
-      if (
-        event.type === 'unitReloaded' &&
-        event.ref.kind === 'outline' &&
-        event.ref.id === unitId
-      ) {
-        meta.current = (event.value as OutlineValue).meta;
-      }
-    });
-    return () => {
-      current = false;
-      unsubscribe();
-    };
-  }, [unitId, withNotes]);
+  const loaded = !!outline && (!withNotes || !!notes);
 
   // The Outline is the first field.
-  useReveal(fields, reveal, loaded !== null, '.plain-text-field');
+  useReveal(fields, reveal, loaded, '.plain-text-field');
 
-  if (!loaded)
+  if (!outline || (withNotes && !notes))
     return <div className="outline-notes-fields loading" aria-busy="true" />;
-  const { outline, notes } = loaded;
   return (
     <div className="outline-notes-fields" ref={fields}>
       <PlainTextField
@@ -74,10 +46,12 @@ export function OutlineNotes({
         bullets
         language={language}
         save={(body) =>
-          window.project.write(
-            { kind: 'outline', id: unitId },
-            { id: unitId, body, meta: meta.current },
-          )
+          mirror.write(outlineRef, {
+            id: unitId,
+            body,
+            // What else it holds, which the editor doesn't show, as main last had it.
+            meta: mirror.unit(outlineRef)?.meta ?? outline.meta,
+          })
         }
       />
       {notes && (
@@ -87,12 +61,7 @@ export function OutlineNotes({
           text={notes.body}
           bullets={false}
           language={language}
-          save={(body) =>
-            window.project.write(
-              { kind: 'notes', id: unitId },
-              { id: unitId, body },
-            )
-          }
+          save={(body) => mirror.write(notesRef, { id: unitId, body })}
         />
       )}
     </div>

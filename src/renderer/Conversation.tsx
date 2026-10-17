@@ -33,7 +33,7 @@ import type {
   Manuscript,
   ManuscriptScene,
 } from '../shared/project-types';
-import type { CallFailure, Changed } from '../shared/api';
+import type { CallFailure } from '../shared/api';
 import {
   atMentionAt,
   atMentionOptions,
@@ -50,7 +50,6 @@ import {
 } from '../shared/usage';
 import { focusLabel } from './interview-focus';
 import { proposalCardId, ProposalCard } from './ProposalCard';
-import { flushPendingEdits } from './pending-edits';
 import { modelName } from './model-listing';
 import { emptyReplyNote } from './empty-reply-note';
 import { failureMessage } from './provider-messages';
@@ -64,6 +63,7 @@ import {
   useComposerMeasures,
 } from './composer-height';
 import { PanelResizer } from './PanelResizer';
+import { useMirror, useRun } from './use-project';
 
 // A Conversation with the Assistant, wherever it is shown: in the Assistant
 // panel beside the editor, or in a Mode's room.
@@ -77,12 +77,6 @@ export const WINDOW_MODES = [
 
 /** The Project as it is now, which names what the Assistant saw. */
 export type Names = { manuscript: Manuscript; entries: EntrySummary[] };
-
-/** Runs a structure operation and offers to undo it, as the window does; null when cancelled. */
-export type OnChange = (
-  operation: () => Promise<Changed | null>,
-  message: string,
-) => Promise<void>;
 
 /**
  * A Proposal the Author asked to see in its Conversation, from an Entry;
@@ -139,7 +133,6 @@ export function useConversation({
   show,
   focus = OPEN_FOCUS,
   book: startingBook,
-  onChange,
 }: {
   mode: Mode;
   sceneId: string | null;
@@ -147,8 +140,6 @@ export function useConversation({
   /** In a Series, the Book a new Brainstorm or Interview is about, by id. */
   book?: string;
   names: Names;
-  /** Runs moving a Conversation to Trash, offering to undo it. */
-  onChange: OnChange;
   /** Whether it is shown; it lists the Conversations anew each time it is. */
   active: boolean;
   show?: ShowProposal | null;
@@ -236,21 +227,21 @@ export function useConversation({
     [],
   );
 
+  const mirror = useMirror();
+  const run = useRun();
   useEffect(
     () =>
-      window.project.subscribe((event) => {
+      mirror.onEvent((event) => {
         // A Proposal was decided, or its Entry changed: show where each stands now.
-        const changed =
-          event.type === 'proposalsChanged' ||
-          event.type === 'entriesChanged' ||
-          (event.type === 'unitReloaded' && event.ref.kind === 'entry');
         const id = currentId.current;
-        if (!changed || !id || answering.current) return;
+        if (event.type !== 'proposalsChanged' || !id || answering.current) {
+          return;
+        }
         void window.assistant.readConversation(id).then((conversation) => {
           if (currentId.current === conversation.id) setCurrent(conversation);
         });
       }),
-    [],
+    [mirror],
   );
 
   useEffect(() => {
@@ -312,14 +303,17 @@ export function useConversation({
     const conversation = current;
     if (!conversation || streaming !== null) return;
     setError(null);
-    try {
-      await window.assistant.setInterviewFocus(conversation.id, next);
-      const changed = await window.assistant.readConversation(conversation.id);
-      if (currentId.current === changed.id) setCurrent(changed);
-      setList(await window.assistant.listConversations());
-    } catch (error) {
-      setError(`Can't change the focus: ${(error as CallFailure).message}`);
-    }
+    await run(
+      async () => {
+        await window.assistant.setInterviewFocus(conversation.id, next);
+        const changed = await window.assistant.readConversation(
+          conversation.id,
+        );
+        if (currentId.current === changed.id) setCurrent(changed);
+        setList(await window.assistant.listConversations());
+      },
+      { what: 'change the focus' },
+    );
   }
 
   /**
@@ -391,13 +385,16 @@ export function useConversation({
       setNewModel(next);
       return;
     }
-    try {
-      await window.assistant.chooseModel(conversation.id, next);
-      const changed = await window.assistant.readConversation(conversation.id);
-      if (currentId.current === changed.id) setCurrent(changed);
-    } catch (error) {
-      setError(`Can't change the Model: ${(error as CallFailure).message}`);
-    }
+    await run(
+      async () => {
+        await window.assistant.chooseModel(conversation.id, next);
+        const changed = await window.assistant.readConversation(
+          conversation.id,
+        );
+        if (currentId.current === changed.id) setCurrent(changed);
+      },
+      { what: 'change the Model' },
+    );
   }
 
   /**
@@ -412,38 +409,33 @@ export function useConversation({
       setNewBook(next);
       return;
     }
-    try {
-      await window.assistant.chooseBook(conversation.id, next);
-      const changed = await window.assistant.readConversation(conversation.id);
-      if (currentId.current === changed.id) setCurrent(changed);
-      setList(await window.assistant.listConversations());
-    } catch (error) {
-      setError(`Can't change the Book: ${(error as CallFailure).message}`);
-    }
+    await run(
+      async () => {
+        await window.assistant.chooseBook(conversation.id, next);
+        const changed = await window.assistant.readConversation(
+          conversation.id,
+        );
+        if (currentId.current === changed.id) setCurrent(changed);
+        setList(await window.assistant.listConversations());
+      },
+      { what: 'change the Book' },
+    );
   }
 
   /** Gives a Conversation a new title; the list shows it once main says so. */
   async function rename(id: string, title: string) {
     setError(null);
-    try {
-      await window.assistant.renameConversation(id, title);
-    } catch (error) {
-      setError(
-        `Can't rename the Conversation: ${(error as CallFailure).message}`,
-      );
-    }
+    await run(() => window.assistant.renameConversation(id, title), {
+      what: 'rename the Conversation',
+    });
   }
 
   /** Stars or unstars a Conversation; the list shows it once main says so. */
   async function star(id: string, starred: boolean) {
     setError(null);
-    try {
-      await window.assistant.starConversation(id, starred);
-    } catch (error) {
-      setError(
-        `Can't ${starred ? 'star' : 'unstar'} the Conversation: ${(error as CallFailure).message}`,
-      );
-    }
+    await run(() => window.assistant.starConversation(id, starred), {
+      what: `${starred ? 'star' : 'unstar'} the Conversation`,
+    });
   }
 
   /**
@@ -453,38 +445,28 @@ export function useConversation({
   async function trash(id: string) {
     const title = list.find((c) => c.id === id)?.title ?? 'Conversation';
     setError(null);
-    await onChange(
-      () => window.assistant.trashConversation(id),
-      `“${title}” moved to Trash`,
-    );
+    await run(() => window.assistant.trashConversation(id), {
+      undo: `“${title}” moved to Trash`,
+    });
   }
 
   /** Moves a whole Conversation to the Drawer, its pending Proposals with it, with Undo offered. */
   async function toDrawer(id: string) {
     const title = list.find((c) => c.id === id)?.title ?? 'Conversation';
     setError(null);
-    await onChange(
-      () => window.project.moveToDrawer('conversation', id),
-      `“${title}” moved to the Drawer`,
-    );
+    await run((project) => project.moveToDrawer('conversation', id), {
+      undo: `“${title}” moved to the Drawer`,
+    });
   }
 
   /** Runs `ask` while the Assistant answers, its reply streaming in meanwhile. */
   async function asking(ask: () => Promise<void>) {
-    // What the Author typed last reaches main before the request is built.
-    flushPendingEdits();
     setError(null);
     setFailure(null);
     setStreaming('');
-    try {
-      await ask();
-    } catch (error) {
-      setError(
-        `The Assistant couldn't answer: ${(error as CallFailure).message}`,
-      );
-    } finally {
-      setStreaming(null);
-    }
+    // What the Author typed last reaches main before the request is built.
+    await run(ask, { what: 'ask the Assistant' });
+    setStreaming(null);
   }
 
   function onText(text: string) {

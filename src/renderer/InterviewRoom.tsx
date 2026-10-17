@@ -11,12 +11,10 @@ import {
   fieldOf,
   fieldText,
   PROPOSAL_FIELDS,
-  type PendingProposal,
   type ProposalField,
 } from '../shared/proposal';
 import {
   ENTRY_TYPE_LABELS,
-  type EntryValue,
   type Manuscript,
   type ManuscriptScene,
 } from '../shared/project-types';
@@ -27,7 +25,6 @@ import {
   MessageLog,
   useConversation,
   type Names,
-  type OnChange,
   type ShowProposal,
 } from './Conversation';
 import { EntryCard } from './EntryCard';
@@ -44,6 +41,15 @@ import { PanelResizer, type PaneSize } from './PanelResizer';
 import { ReadOnlyContext } from './read-only';
 import { RoomList } from './RoomList';
 import { useCustomFields } from './StatusAndTags';
+import { useStoryBibleAsOf } from './story-bible-lens';
+import type { StoryBibleLens } from '../shared/story-bible-as-of';
+import {
+  useMirror,
+  useOutlines,
+  usePending,
+  useUnit,
+  useUnits,
+} from './use-project';
 
 /**
  * The Interview room: its Conversations with their focus on the left, the
@@ -59,7 +65,6 @@ export function InterviewRoom({
   pane,
   onAddProvider,
   onOpenEntry,
-  onChange,
 }: {
   /** Whether the room is shown, its Mode the window's. */
   active: boolean;
@@ -71,7 +76,6 @@ export function InterviewRoom({
   onAddProvider(): void;
   /** Opens an Entry in the Story Bible Room. */
   onOpenEntry(entryId: string): void;
-  onChange: OnChange;
 }) {
   const providers = useProviders();
   const readOnly = useContext(ReadOnlyContext);
@@ -88,7 +92,6 @@ export function InterviewRoom({
     book,
     active,
     show,
-    onChange,
   });
   const { list, current, error, streaming, total, send, changeFocus } =
     conversation;
@@ -210,6 +213,7 @@ export function InterviewRoom({
           <InFocus
             focus={focus}
             names={names}
+            book={conversation.book}
             onOpenEntry={onOpenEntry}
             showable={(id) => listed.some((c) => c.id === id)}
             onShow={(conversationId, proposalId) =>
@@ -222,43 +226,23 @@ export function InterviewRoom({
   );
 }
 
-/**
- * Counts what may have changed a unit in focus, to read it anew: a
- * Proposal made, decided or undone, or a unit changed on disk.
- */
-function useChanges(): number {
-  const [changes, setChanges] = useState(0);
-  useEffect(
-    () =>
-      window.project.subscribe((event) => {
-        if (
-          event.type === 'proposalsChanged' ||
-          event.type === 'unitReloaded' ||
-          event.type === 'entriesChanged'
-        ) {
-          setChanges((n) => n + 1);
-        }
-      }),
-    [],
-  );
-  return changes;
-}
-
-/** The unit in focus, read-only, as it is now. */
+/** The unit in focus, read-only, as it is now; in a Series, an Entry as of the Conversation's `book`. */
 function InFocus({
   focus,
   names,
+  book,
   onOpenEntry,
   showable,
   onShow,
 }: {
   focus: InterviewFocus;
   names: Names;
+  book: string | undefined;
   onOpenEntry(entryId: string): void;
   showable(conversationId: string): boolean;
   onShow(conversationId: string, proposalId: string): void;
 }) {
-  const changes = useChanges();
+  const lens = useStoryBibleAsOf(book);
   switch (focus.kind) {
     case 'open':
       return (
@@ -272,7 +256,8 @@ function InFocus({
         <FocusEntry
           key={focus.id}
           entryId={focus.id}
-          changes={changes}
+          lens={lens}
+          books={names.manuscript.books}
           onOpen={onOpenEntry}
           showable={showable}
           onShow={onShow}
@@ -281,11 +266,11 @@ function InFocus({
     case 'entry-type':
       return (
         <EntriesInFocus
-          ids={names.entries
+          ids={lens.entries
             .filter((e) => e.type === focus.type)
             .map((e) => e.id)}
+          lens={lens}
           none="No Entries of this type yet."
-          changes={changes}
           onOpen={onOpenEntry}
         />
       );
@@ -294,7 +279,7 @@ function InFocus({
         <TagFocus
           tag={focus.tag}
           names={names}
-          changes={changes}
+          lens={lens}
           onOpenEntry={onOpenEntry}
         />
       );
@@ -302,55 +287,50 @@ function InFocus({
     case 'part':
     case 'chapter':
     case 'scene':
-      return (
-        <FocusUnit
-          focus={focus}
-          manuscript={names.manuscript}
-          changes={changes}
-        />
-      );
+      return <FocusUnit focus={focus} manuscript={names.manuscript} />;
   }
 }
 
 /**
  * An Entry in focus: each field its type has, its Custom fields last, with
- * what it holds and the values Proposals pending on it would give it.
+ * what it holds and the values Proposals pending on it would give it. In a
+ * Series, as `lens` sees it as of the Conversation's Book; one first
+ * appearing in a later Book shows only which.
  */
 function FocusEntry({
   entryId,
-  changes,
+  lens,
+  books,
   onOpen,
   showable,
   onShow,
 }: {
   entryId: string;
-  changes: number;
+  lens: StoryBibleLens;
+  /** In a Series, the Books, to name the one it first appears in. */
+  books: readonly { id: string; title: string }[] | undefined;
   onOpen(entryId: string): void;
   showable(conversationId: string): boolean;
   onShow(conversationId: string, proposalId: string): void;
 }) {
-  const [entry, setEntry] = useState<EntryValue | null | undefined>();
-  const [pending, setPending] = useState<PendingProposal[]>([]);
+  // Not there once trashed.
+  const stored = useUnit({ kind: 'entry', id: entryId });
+  const pending = usePending(entryId);
   const customFields = useCustomFields();
-  useEffect(() => {
-    let current = true;
-    void Promise.all([
-      // Not there once trashed.
-      window.project.read({ kind: 'entry', id: entryId }).catch(() => null),
-      window.assistant.pendingProposals(entryId).catch(() => []),
-    ]).then(([read, proposals]) => {
-      if (!current) return;
-      setEntry(read);
-      setPending(proposals);
-    });
-    return () => {
-      current = false;
-    };
-  }, [entryId, changes]);
-  if (entry === undefined) return null;
-  if (entry === null) {
+  if (stored === undefined) return null;
+  if (stored === null) {
     return <p className="reference-empty">This Entry is no longer there.</p>;
   }
+  const later = lens.visible(entryId) ? undefined : lens.summary(entryId);
+  if (later) {
+    const first = books?.find((b) => b.id === later.firstAppears);
+    return (
+      <p className="reference-empty">
+        First appears in {first?.title ?? 'a later Book'}
+      </p>
+    );
+  }
+  const entry = lens.read(stored).entry;
   const fields = PROPOSAL_FIELDS.filter(
     (field) => fieldOf(entry, field) !== undefined,
   ).map((field) => ({ field, label: FIELD_LABELS[field] }));
@@ -420,38 +400,31 @@ function FocusEntry({
 /** The Entries in focus, of a type or with a Tag, at a glance; `none` when there are none. */
 function EntriesInFocus({
   ids,
+  lens,
   none,
-  changes,
   onOpen,
 }: {
   ids: string[];
+  /** The Story Bible they are seen through. */
+  lens: StoryBibleLens;
   none: string;
-  changes: number;
   onOpen(entryId: string): void;
 }) {
-  const [values, setValues] = useState<EntryValue[] | null>(null);
-  const key = ids.join(',');
-  useEffect(() => {
-    let current = true;
-    void Promise.all(
-      ids.map((id) =>
-        window.project.read({ kind: 'entry', id }).catch(() => null),
-      ),
-    ).then((read) => {
-      if (current) setValues(read.filter((entry) => entry !== null));
-    });
-    return () => {
-      current = false;
-    };
-  }, [key, changes]);
-  if (!values) return null;
+  const read = useUnits(ids.map((id) => ({ kind: 'entry', id }) as const));
+  // One trashed since it was listed is left out.
+  const values = read.filter((entry) => !!entry);
   if (values.length === 0) {
-    return <p className="reference-empty">{none}</p>;
+    const allRead = read.every((entry) => entry !== undefined);
+    return allRead ? <p className="reference-empty">{none}</p> : null;
   }
   return (
     <div className="reference-entries">
       {values.map((entry) => (
-        <EntryCard key={entry.id} entry={entry} onOpen={onOpen} />
+        <EntryCard
+          key={entry.id}
+          entry={lens.read(entry).entry}
+          onOpen={onOpen}
+        />
       ))}
     </div>
   );
@@ -464,42 +437,25 @@ function EntriesInFocus({
 function TagFocus({
   tag,
   names,
-  changes,
+  lens,
   onOpenEntry,
 }: {
   tag: string;
   names: Names;
-  changes: number;
+  lens: StoryBibleLens;
   onOpenEntry(entryId: string): void;
 }) {
   const units = tagged(names.manuscript, tag);
-  const [outlines, setOutlines] = useState<Map<string, string> | null>(null);
-  const ids = units.map(({ unit }) => unit.id).join(',');
-  useEffect(() => {
-    let current = true;
-    void Promise.all(
-      units.map(({ unit }) =>
-        window.project
-          .read({ kind: 'outline', id: unit.id })
-          .then(({ body }) => [unit.id, body] as const)
-          .catch(() => [unit.id, ''] as const),
-      ),
-    ).then((read) => {
-      if (current) setOutlines(new Map(read));
-    });
-    return () => {
-      current = false;
-    };
-  }, [ids, changes]);
+  const { outlines, allRead } = useOutlines(units.map(({ unit }) => unit.id));
   return (
     <>
       <EntriesInFocus
-        ids={names.entries.filter((e) => hasTag(e.tags, tag)).map((e) => e.id)}
+        ids={lens.entries.filter((e) => hasTag(e.tags, tag)).map((e) => e.id)}
+        lens={lens}
         none="No Entries with this Tag."
-        changes={changes}
         onOpen={onOpenEntry}
       />
-      {outlines && (
+      {allRead && (
         <div className="reference-skeleton">
           {units.length === 0 ? (
             <p className="reference-empty">
@@ -536,11 +492,9 @@ function TagFocus({
 function FocusUnit({
   focus,
   manuscript,
-  changes,
 }: {
   focus: { kind: 'book' | 'part' | 'chapter' | 'scene'; id: string };
   manuscript: Manuscript;
-  changes: number;
 }) {
   const book =
     focus.kind === 'book'
@@ -571,42 +525,17 @@ function FocusUnit({
           (id) => manuscript.chapters.find((c) => c.id === id) ?? [],
         )
       : (chapter?.scenes ?? []);
-  const [read, setRead] = useState<{
-    outlines: Map<string, string>;
-    prose: string | null;
-  } | null>(null);
-  const key = [focus.id, ...held.map((s) => s.id)].join(',');
-  useEffect(() => {
-    let current = true;
-    const ids = [focus.id, ...held.map((s) => s.id)];
-    void Promise.all([
-      Promise.all(
-        ids.map((id) =>
-          window.project
-            .read({ kind: 'outline', id })
-            .then(({ body }) => [id, body] as const)
-            .catch(() => [id, ''] as const),
-        ),
-      ),
-      focus.kind === 'scene' && scene && !scene.missing
-        ? window.project
-            .read({ kind: 'scene', id: focus.id })
-            .then(({ markdown }) => markdown)
-            .catch(() => null)
-        : Promise.resolve(null),
-    ]).then(([outlines, prose]) => {
-      if (current) setRead({ outlines: new Map(outlines), prose });
-    });
-    return () => {
-      current = false;
-    };
-  }, [key, changes, scene?.missing]);
+  const { outlines, allRead } = useOutlines([
+    focus.id,
+    ...held.map((s) => s.id),
+  ]);
+  const prose = useProse(scene && !scene.missing ? scene.id : null);
   if (!book && !part && !chapter && !scene) {
     return <p className="reference-empty">This is no longer in the Project.</p>;
   }
-  if (!read) return null;
+  if (!allRead || prose === undefined) return null;
   const outline = (id: string) => {
-    const body = read.outlines.get(id)?.trim();
+    const body = outlines.get(id)?.trim();
     return body ? (
       <p className="reference-outline">{body}</p>
     ) : (
@@ -628,8 +557,8 @@ function FocusUnit({
       {scene && (
         <section aria-label="Prose">
           <h4>Prose</h4>
-          {read.prose?.trim() ? (
-            <p className="focus-prose">{read.prose}</p>
+          {prose?.trim() ? (
+            <p className="focus-prose">{prose}</p>
           ) : (
             <p className="reference-empty">
               {scene.missing ? 'Missing on this computer.' : 'No Prose yet.'}
@@ -639,4 +568,33 @@ function FocusUnit({
       )}
     </div>
   );
+}
+
+/**
+ * A Scene's Prose as main has it, kept as another computer changes it:
+ * undefined until read, null with no Scene or one that can't be read. The
+ * mirror doesn't hold it: the Prose stays with its editor.
+ */
+function useProse(sceneId: string | null): string | null | undefined {
+  const mirror = useMirror();
+  const [prose, setProse] = useState<{ id: string; markdown: string | null }>();
+  useEffect(() => {
+    if (!sceneId) return;
+    let current = true;
+    window.project.read({ kind: 'scene', id: sceneId }).then(
+      ({ markdown }) => current && setProse({ id: sceneId, markdown }),
+      () => current && setProse({ id: sceneId, markdown: null }),
+    );
+    const stop = mirror.onUnitChanged(({ ref, value }) => {
+      if (ref.kind === 'scene' && ref.id === sceneId && 'markdown' in value) {
+        setProse({ id: sceneId, markdown: value.markdown });
+      }
+    });
+    return () => {
+      current = false;
+      stop();
+    };
+  }, [mirror, sceneId]);
+  if (!sceneId) return null;
+  return prose?.id === sceneId ? prose.markdown : undefined;
 }

@@ -414,4 +414,27 @@ describe('Relation Proposals', () => {
       related: { book: two },
     });
   });
+  it('in a Series, is judged against the whole Project once its Book is out of the order', async () => {
+    const proposal = await proposing(
+      'Mara',
+      'Tobin',
+      { kind: 'label', label: 'mother of' },
+      { series: true },
+    );
+    const { store, ids, conversationId } = proposal;
+    const [, two] = proposal.books;
+    const { id: three } = await store.createBook();
+    const held = await store.addRelation(ids.Mara!, ids.Tobin!, {
+      kind: 'label',
+      label: 'mother of',
+    });
+    await store.setRelationBook(held, three);
+    await store.trashBook(two!);
+
+    // As of Book 3, or of the whole Project, Mara is mother of Tobin already.
+    expect((await cardOf(store, conversationId)).state).toMatchObject({
+      kind: 'pending',
+      refused: expect.stringContaining('already'),
+    });
+  });
 });

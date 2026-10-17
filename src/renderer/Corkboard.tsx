@@ -16,7 +16,6 @@ import {
   type ManuscriptChapter,
   type ManuscriptPart,
   type ManuscriptScene,
-  type OutlineValue,
   type ProseLanguage,
 } from '../shared/project-types';
 import type { TodoLink } from '../shared/todo';
@@ -29,6 +28,7 @@ import {
 } from '../shared/manuscript-order';
 import { outlineBeginning } from './outline-beginning';
 import { OutlineNotes } from './OutlineNotes';
+import { useUnit } from './use-project';
 import { ReadOnlyContext } from './read-only';
 import type { Reveal } from './reveal';
 import { UNPLACED } from './overview';
@@ -793,30 +793,9 @@ function ImageCard({
   );
 }
 
-/** A unit's Outline, read again as another computer or a Proposal changes it. */
+/** A unit's Outline, as it is now. */
 function useOutline(unitId: string): string {
-  const [body, setBody] = useState('');
-  useEffect(() => {
-    let current = true;
-    window.project.read({ kind: 'outline', id: unitId }).then(
-      (outline) => current && setBody(outline.body),
-      () => {},
-    );
-    const unsubscribe = window.project.subscribe((event) => {
-      if (
-        event.type === 'unitReloaded' &&
-        event.ref.kind === 'outline' &&
-        event.ref.id === unitId
-      ) {
-        setBody((event.value as OutlineValue).body);
-      }
-    });
-    return () => {
-      current = false;
-      unsubscribe();
-    };
-  }, [unitId]);
-  return body;
+  return useUnit({ kind: 'outline', id: unitId })?.body ?? '';
 }
 
 /**

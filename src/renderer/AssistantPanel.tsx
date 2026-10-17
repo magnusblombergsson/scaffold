@@ -12,7 +12,6 @@ import {
   useConversation,
   WINDOW_MODES,
   type Names,
-  type OnChange,
   type ShowProposal,
 } from './Conversation';
 import { Menu, TitleInput } from './Binder';
@@ -36,7 +35,6 @@ export function AssistantPanel({
   show,
   onQuote,
   onAddTodo,
-  onChange,
 }: {
   /** Whether the panel is shown, its Mode the window's. */
   active: boolean;
@@ -54,7 +52,6 @@ export function AssistantPanel({
   onQuote(sceneId: string, quote: string): void;
   /** Starts a Todo from a Finding: its text, linked to the unit reviewed. */
   onAddTodo(text: string, link: TodoLink | null): void;
-  onChange: OnChange;
 }) {
   const providers = useProviders();
   return (
@@ -89,7 +86,6 @@ export function AssistantPanel({
             onOpenSettings={onAddProvider}
             onQuote={onQuote}
             onAddTodo={onAddTodo}
-            onChange={onChange}
           />
         ) : (
           <NoProviderState onAddProvider={onAddProvider} />
@@ -114,7 +110,6 @@ function Conversations({
   onOpenSettings,
   onQuote,
   onAddTodo,
-  onChange,
 }: {
   active: boolean;
   sceneId: string | null;
@@ -123,7 +118,6 @@ function Conversations({
   onOpenSettings(): void;
   onQuote(sceneId: string, quote: string): void;
   onAddTodo(text: string, link: TodoLink | null): void;
-  onChange: OnChange;
 }) {
   const readOnly = useContext(ReadOnlyContext);
   const conversation = useConversation({
@@ -132,7 +126,6 @@ function Conversations({
     names,
     active,
     show,
-    onChange,
   });
   const { list, current, error, streaming, total, resume, review, rename } =
     conversation;

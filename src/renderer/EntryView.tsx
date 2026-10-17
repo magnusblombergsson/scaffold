@@ -1,8 +1,8 @@
 import type { Node } from '@tiptap/pm/model';
 import {
   Fragment,
-  useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -10,13 +10,13 @@ import {
 import { customValue, fieldsOfType } from '../shared/custom-field';
 import {
   editAsOf,
-  entryAsOf,
   evolveFrom,
   removeEvolution,
   type Sources,
   type TitledBook,
 } from '../shared/evolution';
 import { entryCollisions, entryTitle } from '../shared/entry';
+import type { StoryBibleLens } from '../shared/story-bible-as-of';
 import {
   customFieldKey,
   fieldLabel,
@@ -41,14 +41,12 @@ import {
   type EntryType,
   type EntryValue,
   type EvolvingField,
-  type PrivateValue,
   type ProseLanguage,
   type Senses,
   type UnitValue,
   type Visibility,
   type Voice,
 } from '../shared/project-types';
-import type { RelationsView } from '../shared/relation';
 import { AddCustomField, CustomFieldHeading } from './CustomFields';
 import { CustomFieldSuggestions } from './CustomFieldSuggestions';
 import { useCustomFields } from './StatusAndTags';
@@ -65,7 +63,7 @@ import {
 } from './plain-text-editor';
 import { TagInput } from './TagsDialog';
 import { UnitEditor } from './UnitEditor';
-import { tellEntryWritten } from './entry-written';
+import { useMirror, usePending, useUnitToEdit } from './use-project';
 
 /** One item per line; blank lines and surrounding spaces don't count. */
 export function textToLines(text: string): string[] {
@@ -160,8 +158,6 @@ const TEXT_FIELDS: Record<TextBodyField, TextField> = {
   'senses.touch': sense('touch', 'Touch'),
 };
 
-type Loaded = { entry: EntryValue; privateNotes: PrivateValue };
-
 /**
  * An Entry in the centre: its type, name, aliases, visibility, description
  * and its type's fields, and its private notes, which the Assistant never
@@ -186,12 +182,10 @@ type Loaded = { entry: EntryValue; privateNotes: PrivateValue };
  */
 export function EntryView({
   entry: summary,
-  entries,
-  relations,
+  lens,
   onOpenEntry,
   language,
   books = [],
-  asOf,
   focusName,
   reveal,
   onType,
@@ -202,17 +196,16 @@ export function EntryView({
 }: {
   /** As of the Book it is seen as of, if any. */
   entry: EntrySummary;
-  /** Every Entry in the Story Bible, to warn of names they share. */
-  entries: EntrySummary[];
-  /** The Relations among the Entries in the Story Bible. */
-  relations: RelationsView;
+  /**
+   * The Story Bible it is seen through, as of the Book it is seen as of, if
+   * any: every Entry, to warn of names they share, and their Relations.
+   */
+  lens: StoryBibleLens;
   /** Opens another Entry, as from its name in a Relation. */
   onOpenEntry(id: string): void;
   language: ProseLanguage;
-  /** In a Series, the Books in reading order; none otherwise. */
+  /** In a Series, the Books in reading order, by title; none otherwise. */
   books?: readonly TitledBook[];
-  /** The id of the Book it is seen as of, in a Series. */
-  asOf?: string;
   /**
    * Puts focus in the Name with it selected, as for an Entry just made; each
    * new number asks again.
@@ -230,23 +223,23 @@ export function EntryView({
   onShowProposal(conversationId: string, proposalId: string): void;
 }) {
   const { id: entryId, visibility } = summary;
-  const [loaded, setLoaded] = useState<Loaded | null>(null);
+  const mirror = useMirror();
+  /** The Entry as main has it, once read. */
+  const stored = useUnitToEdit({ kind: 'entry', id: entryId });
+  const privateNotes = useUnitToEdit({ kind: 'private', id: entryId });
   /** The Entry as last written or reloaded; each field's save changes its own part. */
   const value = useRef<EntryValue | null>(null);
+  /** The values this view wrote, which the mirror shows once main has them. */
+  const written = useRef(new WeakSet<EntryValue>());
   /** A Character's Role and a Plot Thread's Status, as last saved or reloaded. */
   const [choices, setChoices] = useState<EntryFields>({});
-  const [pending, setPending] = useState<PendingProposal[]>([]);
+  const pending = usePending(entryId);
   /** Which values come from an Evolution, as last written or reloaded. */
   const [sources, setSources] = useState<Sources>({});
   const customFields = useCustomFields();
-  const order = books.map((book) => book.id);
-  const orderKey = order.join();
+  const { books: order, book: asOf, all: entries, relations } = lens;
   /** The Entry as of the Book it is seen as of. */
-  const shownOf = useCallback(
-    (stored: UnitValue) =>
-      entryAsOf(stored as EntryValue, orderKey.split(','), asOf),
-    [orderKey, asOf],
-  );
+  const shownOf = (stored: UnitValue) => lens.read(stored as EntryValue);
   const asOfBook = books.find((book) => book.id === asOf);
   /** Whether a value may change from the Book it is seen as of: one after the first. */
   const evolves = asOfBook !== undefined && order.indexOf(asOfBook.id) > 0;
@@ -258,22 +251,6 @@ export function EntryView({
     [focusName],
   );
 
-  useEffect(() => {
-    let current = true;
-    const refresh = () =>
-      void window.assistant.pendingProposals(entryId).then((pending) => {
-        if (current) setPending(pending);
-      });
-    refresh();
-    const unsubscribe = window.project.subscribe((event) => {
-      if (event.type === 'proposalsChanged') refresh();
-    });
-    return () => {
-      current = false;
-      unsubscribe();
-    };
-  }, [entryId]);
-
   /** The ghost values of the Proposals pending on `field`. */
   const ghosts = (field: ProposalField) => (
     <Ghosts
@@ -284,42 +261,23 @@ export function EntryView({
     />
   );
 
-  useEffect(() => {
-    let current = true;
-    void Promise.all([
-      window.project.read({ kind: 'entry', id: entryId }),
-      window.project.read({ kind: 'private', id: entryId }),
-    ]).then(([entry, privateNotes]) => {
-      if (!current) return;
-      value.current = entry;
-      setLoaded({ entry, privateNotes });
-      showAnew();
-    });
-    const unsubscribe = window.project.subscribe((event) => {
-      // Changed on another computer: a save from here keeps the other fields.
-      if (
-        event.type === 'unitReloaded' &&
-        event.ref.kind === 'entry' &&
-        event.ref.id === entryId
-      ) {
-        value.current = event.value as EntryValue;
-        showAnew();
-      }
-    });
-    return () => {
-      current = false;
-      unsubscribe();
-    };
-  }, [entryId]);
+  // Read, or changed elsewhere, as on another computer: a save from here
+  // keeps the other fields. Before it is painted, so that its Role shows.
+  useLayoutEffect(() => {
+    if (!stored || written.current.has(stored)) return;
+    value.current = stored;
+    showAnew();
+  }, [stored]);
 
   useEffect(() => {
     if (value.current) value.current = { ...value.current, visibility };
   }, [visibility]);
 
+  const loaded = !!stored && !!privateNotes;
   useReveal(
     view,
     reveal,
-    loaded !== null,
+    loaded,
     reveal?.field ? `[data-field="${reveal.field}"]` : '.entry-name',
   );
 
@@ -334,8 +292,8 @@ export function EntryView({
   /** Writes the Entry as it is now; resolves once main has it. */
   async function write(): Promise<void> {
     if (!value.current) return;
-    tellEntryWritten(value.current);
-    return window.project.write({ kind: 'entry', id: entryId }, value.current);
+    written.current.add(value.current);
+    return mirror.write({ kind: 'entry', id: entryId }, value.current);
   }
 
   /** Saves `field` where the value shown comes from; resolves once main has it. */
@@ -419,10 +377,11 @@ export function EntryView({
 
   const collisions = entryCollisions(summary, entries);
 
-  if (!loaded) return <main className="centre loading" aria-busy="true" />;
-  const { privateNotes } = loaded;
+  if (!stored || !privateNotes) {
+    return <main className="centre loading" aria-busy="true" />;
+  }
   /** As of the Book it is seen as of, as last written or reloaded. */
-  const entry = shownOf(value.current ?? loaded.entry).entry;
+  const entry = shownOf(value.current ?? stored).entry;
   /** A field's text, in a value of the Entry as stored, as of that Book. */
   const shownText =
     (text: (value: UnitValue) => string) =>
@@ -741,7 +700,7 @@ export function EntryView({
             toDoc={textToDoc}
             toText={docToText}
             save={(body) =>
-              window.project.write(
+              mirror.write(
                 { kind: 'private', id: entryId },
                 { id: entryId, body },
               )

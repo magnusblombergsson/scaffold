@@ -7,6 +7,7 @@ import { proseExtensions } from './prose-editor';
 import { TypewriterScrolling } from './typewriter-scrolling';
 import { docToMarkdown, markdownToDoc } from '../shared/prose-markdown';
 import { UnitEditor } from './UnitEditor';
+import { useMirror } from './use-project';
 
 /**
  * A quote of the Prose to select, as a Finding's; `count` tells one ask
@@ -46,6 +47,7 @@ export function SceneEditor({
   splittable?: boolean;
   splitsToNext?: boolean;
 }) {
+  const mirror = useMirror();
   const [markdown, setMarkdown] = useState<string | null>(null);
   const select = useMemo(
     () => quote && ((doc: Node) => findQuote(doc, quote.text)),
@@ -82,10 +84,7 @@ export function SceneEditor({
       toDoc={markdownToDoc}
       toText={docToMarkdown}
       save={(markdown) =>
-        window.project.write(
-          { kind: 'scene', id: sceneId },
-          { id: sceneId, markdown },
-        )
+        mirror.write({ kind: 'scene', id: sceneId }, { id: sceneId, markdown })
       }
       attributes={{
         class: 'prose',

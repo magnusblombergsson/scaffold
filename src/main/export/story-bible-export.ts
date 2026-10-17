@@ -5,12 +5,7 @@ import {
   type CustomField,
 } from '../../shared/custom-field';
 import { entryTitle } from '../../shared/entry';
-import {
-  appearsAfter,
-  entryAsOf,
-  summaryAsOf,
-  type TitledBook,
-} from '../../shared/evolution';
+import { entryAsOf, type TitledBook } from '../../shared/evolution';
 import { ALL_BOOKS, type StoryBibleChoice } from '../../shared/export-choice';
 import { matchesFilter } from '../../shared/filter';
 import {
@@ -36,10 +31,10 @@ import {
   entryRelations,
   relationBook,
   relationSentence,
-  relationsView,
   type Relation,
   type RelationsView,
 } from '../../shared/relation';
+import { storyBibleAsOf } from '../../shared/story-bible-as-of';
 import { imageSize } from '../entry-image';
 import {
   commonMarkHeading,
@@ -120,19 +115,14 @@ function seriesView(
 }
 
 /**
- * The Entries the choice's Filter matches, as of its Book, by type in the
- * Story Bible's order and by name within each. As of a Book, those that
- * first appear in a later one are left out.
+ * The Entries the choice's Filter matches among `entries`, by type in the
+ * Story Bible's order and by name within each.
  */
 function includedEntries(
   entries: readonly EntrySummary[],
   choice: StoryBibleChoice,
-  { books, asOf }: SeriesView,
 ): EntrySummary[] {
-  const ids = books.map((b) => b.id);
   return entries
-    .filter((entry) => !appearsAfter(entry, ids, asOf))
-    .map((entry) => summaryAsOf(entry, ids, asOf))
     .filter((entry) => matchesFilter(choice.filter, entry))
     .sort(
       (a, b) =>
@@ -152,19 +142,27 @@ export async function exportStoryBible(
   const customFields = source.listCustomFields();
   const series = seriesView(source.manuscript(), choice);
   const ids = series.books.map((b) => b.id);
-  const all = source.listEntries();
+  // As of its Book, those first appearing later left out; with every
+  // Evolution, the whole Project, and no Relation from a Book out of the
+  // order, as none of its Evolutions are.
+  const lens = storyBibleAsOf(
+    {
+      manuscript: source.manuscript(),
+      entries: source.listEntries(),
+      relations: source
+        .listRelations()
+        .filter((r) => r.book === undefined || ids.includes(r.book)),
+    },
+    series.asOf,
+  );
   // Among all the Entries in the Story Bible, ticked or not, so that each
   // names the other Entry; with every Evolution, by their own names.
-  const relations = relationsView(
-    source.listRelations(),
-    all.map((entry) => summaryAsOf(entry, ids, series.asOf)),
-    { books: ids, book: series.asOf },
-  );
+  const { relations } = lens;
   const entries = await Promise.all(
-    includedEntries(all, choice, series).map(
+    includedEntries(lens.entries, choice).map(
       async ({ id }): Promise<[EntryValue, ExportedEntry]> => {
         const value = await source.read({ kind: 'entry', id });
-        const { entry: shown, from } = entryAsOf(value, ids, series.asOf);
+        const { entry: shown, from } = lens.read(value);
         const privateNotes = choice.privateNotes
           ? (await source.read({ kind: 'private', id })).body
           : '';
@@ -436,7 +434,11 @@ export function conflictedEntries(
       )
       .map(({ ref }) => ref.id),
   );
-  return includedEntries(entries, choice, seriesView(manuscript, choice))
+  const lens = storyBibleAsOf(
+    { manuscript, entries, relations: [] },
+    seriesView(manuscript, choice).asOf,
+  );
+  return includedEntries(lens.entries, choice)
     .filter((entry) => ids.has(entry.id))
     .map(entryTitle);
 }

@@ -5,7 +5,7 @@ import {
   type Manuscript,
 } from '../shared/project-types';
 import { unitName } from '../shared/unit-name';
-import { flushPendingEdits } from './pending-edits';
+import type { ProjectMirror } from './project-mirror';
 import {
   NO_SAVE_STATUSES,
   overallSaveState,
@@ -22,7 +22,7 @@ const CONFIRM_MS = 2000;
  * Ctrl+S has just saved everything. Ctrl+S hands main the pending edits and
  * waits until it has written them.
  */
-export function useSaveStatus(): {
+export function useSaveStatus(mirror: ProjectMirror): {
   statuses: SaveStatuses;
   confirmed: boolean;
 } {
@@ -56,13 +56,14 @@ export function useSaveStatus(): {
       if (!mod || event.shiftKey || event.altKey) return;
       if (event.key.toLowerCase() !== 's') return;
       event.preventDefault();
-      flushPendingEdits();
-      await window.project.flush();
-      setConfirmedAt(Date.now());
+      // Edits the editors hold reach main first.
+      if (await mirror.run((project) => project.flush(), { what: 'save' })) {
+        setConfirmedAt(Date.now());
+      }
     }
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
-  }, []);
+  }, [mirror]);
 
   useEffect(() => {
     if (confirmedAt === null) return;

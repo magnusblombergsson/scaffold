@@ -14,6 +14,10 @@ import { ImagePickerProvider } from './ImagePicker';
 import { ReadOnlyContext } from './read-only';
 import { ComposerHeightContext, type ComposerHeight } from './composer-height';
 import { TagInput } from './TagsDialog';
+import { StoryBibleContext } from './story-bible-lens';
+import type { ProjectMirror } from './project-mirror';
+import { MirrorContext } from './use-project';
+import type { LensSource } from '../shared/story-bible-as-of';
 
 /**
  * The Project's Status list, and how to give a Scene, Chapter or Part a Status or
@@ -46,14 +50,18 @@ const KeyFieldsContext = createContext<KeyFieldChoices>(NO_KEY_FIELDS);
  * images to choose from.
  */
 export function ProjectContexts({
+  mirror,
   readOnly,
   partLabel,
   statusAndTags,
   customFields,
   keyFields,
   composerHeight,
+  storyBible,
   children,
 }: {
+  /** The window's Project mirror, which holds the units' values. */
+  mirror: ProjectMirror;
   readOnly: boolean;
   /** What the Project calls a Part. */
   partLabel?: PartLabel;
@@ -61,22 +69,28 @@ export function ProjectContexts({
   customFields: CustomField[];
   keyFields: KeyFieldChoices;
   composerHeight: ComposerHeight;
+  /** What every reader's lens on the Story Bible is made from. */
+  storyBible: LensSource;
   children: ReactNode;
 }) {
   return (
-    <ReadOnlyContext.Provider value={readOnly}>
-      <StatusAndTagsContext.Provider value={statusAndTags}>
-        <CustomFieldsContext.Provider value={customFields}>
-          <KeyFieldsContext.Provider value={keyFields}>
-            <ComposerHeightContext.Provider value={composerHeight}>
-              <ImagePickerProvider partLabel={partLabel}>
-                {children}
-              </ImagePickerProvider>
-            </ComposerHeightContext.Provider>
-          </KeyFieldsContext.Provider>
-        </CustomFieldsContext.Provider>
-      </StatusAndTagsContext.Provider>
-    </ReadOnlyContext.Provider>
+    <MirrorContext.Provider value={mirror}>
+      <ReadOnlyContext.Provider value={readOnly}>
+        <StatusAndTagsContext.Provider value={statusAndTags}>
+          <CustomFieldsContext.Provider value={customFields}>
+            <KeyFieldsContext.Provider value={keyFields}>
+              <ComposerHeightContext.Provider value={composerHeight}>
+                <StoryBibleContext.Provider value={storyBible}>
+                  <ImagePickerProvider partLabel={partLabel}>
+                    {children}
+                  </ImagePickerProvider>
+                </StoryBibleContext.Provider>
+              </ComposerHeightContext.Provider>
+            </KeyFieldsContext.Provider>
+          </CustomFieldsContext.Provider>
+        </StatusAndTagsContext.Provider>
+      </ReadOnlyContext.Provider>
+    </MirrorContext.Provider>
   );
 }
 

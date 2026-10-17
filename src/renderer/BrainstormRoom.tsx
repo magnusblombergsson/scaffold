@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useMemo, useState, type ReactNode } from 'react';
 import type { PanelWidths } from '../shared/api';
 import {
   filterManuscript,
@@ -10,7 +10,6 @@ import { topLevel } from '../shared/manuscript-order';
 import {
   partName,
   PROJECT_OUTLINE,
-  type EntryValue,
   type Manuscript,
   type ManuscriptChapter,
   type ManuscriptPart,
@@ -24,7 +23,6 @@ import {
   MessageLog,
   useConversation,
   type Names,
-  type OnChange,
 } from './Conversation';
 import { EntryCard } from './EntryCard';
 import { FilterControl, useFilter } from './Filter';
@@ -34,6 +32,8 @@ import { PanelResizer, type PaneSize } from './PanelResizer';
 import { RoomList } from './RoomList';
 import { TagChips } from './TagsDialog';
 import { UnitStatusDot, useStatuses } from './StatusAndTags';
+import { useStoryBibleAsOf } from './story-bible-lens';
+import { useOutlines, useUnits } from './use-project';
 
 /**
  * The Brainstorm room: its Conversations on the left, the one open in the
@@ -48,7 +48,6 @@ export function BrainstormRoom({
   pane,
   onAddProvider,
   onOpenEntry,
-  onChange,
   todos,
 }: {
   /** Whether the room is shown, its Mode the window's. */
@@ -61,7 +60,6 @@ export function BrainstormRoom({
   onAddProvider(): void;
   /** Opens an Entry in the Story Bible Room. */
   onOpenEntry(entryId: string): void;
-  onChange: OnChange;
   /** The Todos tab of the Reference pane. */
   todos: ReactNode;
 }) {
@@ -72,7 +70,6 @@ export function BrainstormRoom({
     names,
     book,
     active,
-    onChange,
   });
   const { list, current, error, total } = conversation;
   const listed = list.filter((c) => c.mode === 'brainstorm');
@@ -131,7 +128,7 @@ export function BrainstormRoom({
       <Reference
         width={referencePane.size}
         manuscript={names.manuscript}
-        entries={names.entries}
+        book={conversation.book}
         onOpenEntry={onOpenEntry}
         todos={todos}
       />
@@ -142,36 +139,23 @@ export function BrainstormRoom({
 /**
  * The Story Bible and the Outline skeleton, read-only, kept up to date as
  * Proposals are accepted, and the Todos. Each Entry says whether the
- * Assistant sees it.
+ * Assistant sees it. In a Series, the Story Bible is as of the
+ * Conversation's `book`.
  */
 function Reference({
   width,
   manuscript,
-  entries,
+  book,
   onOpenEntry,
   todos,
 }: {
   width: number;
   manuscript: Manuscript;
-  entries: Names['entries'];
+  book: string | undefined;
   onOpenEntry(entryId: string): void;
   todos: ReactNode;
 }) {
   const [tab, setTab] = useState<'bible' | 'outlines' | 'todos'>('bible');
-  /** Counts what may have changed what the reference shows, to read it anew. */
-  const [changes, setChanges] = useState(0);
-  useEffect(
-    () =>
-      window.project.subscribe((event) => {
-        if (
-          event.type === 'proposalsChanged' ||
-          event.type === 'unitReloaded'
-        ) {
-          setChanges((n) => n + 1);
-        }
-      }),
-    [],
-  );
   return (
     <aside className="reference" aria-label="Reference" style={{ width }}>
       <div role="tablist" className="tabs">
@@ -202,13 +186,9 @@ function Reference({
       </div>
       <div role="tabpanel" aria-labelledby={`reference-${tab}-tab`}>
         {tab === 'bible' ? (
-          <BibleReference
-            entries={entries}
-            changes={changes}
-            onOpenEntry={onOpenEntry}
-          />
+          <BibleReference book={book} onOpenEntry={onOpenEntry} />
         ) : tab === 'outlines' ? (
-          <OutlineSkeleton manuscript={manuscript} changes={changes} />
+          <OutlineSkeleton manuscript={manuscript} />
         ) : (
           todos
         )}
@@ -217,36 +197,31 @@ function Reference({
   );
 }
 
-/** Every Entry of the Story Bible, its fields at a glance, narrowed by a Filter. */
+/**
+ * Every Entry of the Story Bible, its fields at a glance, narrowed by a
+ * Filter. In a Series, as of `book`, as the Assistant sees them: none first
+ * appearing in a later Book.
+ */
 function BibleReference({
-  entries,
-  changes,
+  book,
   onOpenEntry,
 }: {
-  entries: Names['entries'];
-  changes: number;
+  book: string | undefined;
   onOpenEntry(entryId: string): void;
 }) {
+  const lens = useStoryBibleAsOf(book);
+  const { entries } = lens;
   const { filter, setFilter, inUse } = useFilter('brainstorm-bible');
   const shown = useMemo(
     () => entries.filter((e) => matchesFilter(filter, e)),
     [entries, filter],
   );
-  const [values, setValues] = useState<EntryValue[] | null>(null);
-  useEffect(() => {
-    let current = true;
-    void Promise.all(
-      shown.map((e) =>
-        // One trashed since it was listed is left out.
-        window.project.read({ kind: 'entry', id: e.id }).catch(() => null),
-      ),
-    ).then((read) => {
-      if (current) setValues(read.filter((entry) => entry !== null));
-    });
-    return () => {
-      current = false;
-    };
-  }, [shown, changes]);
+  const read = useUnits(
+    shown.map((e) => ({ kind: 'entry', id: e.id }) as const),
+  );
+  // One trashed since it was listed is left out.
+  const values = read.filter((entry) => !!entry);
+  const allRead = read.every((entry) => entry !== undefined);
   if (entries.length === 0) {
     return <p className="reference-empty">No Entries yet.</p>;
   }
@@ -259,12 +234,16 @@ function BibleReference({
         shown={shown.length}
         total={entries.length}
       />
-      {values && values.length === 0 && filterOn(filter) && (
+      {allRead && values.length === 0 && filterOn(filter) && (
         <p className="reference-empty">No Entries match the Filter.</p>
       )}
       <div className="reference-entries">
-        {values?.map((entry) => (
-          <EntryCard key={entry.id} entry={entry} onOpen={onOpenEntry} />
+        {values.map((entry) => (
+          <EntryCard
+            key={entry.id}
+            entry={lens.read(entry).entry}
+            onOpen={onOpenEntry}
+          />
         ))}
       </div>
     </>
@@ -279,45 +258,19 @@ function BibleReference({
  * others under their dimmed headings; a Part shows when it matches, and
  * dimmed over its Chapters that show.
  */
-function OutlineSkeleton({
-  manuscript,
-  changes,
-}: {
-  manuscript: Manuscript;
-  changes: number;
-}) {
+function OutlineSkeleton({ manuscript }: { manuscript: Manuscript }) {
   const { filter, setFilter, inUse } = useFilter('outline-skeleton');
   const statuses = useStatuses();
   const shown = useMemo(
     () => filterManuscript(filter, manuscript, statuses),
     [filter, manuscript, statuses],
   );
-  const [outlines, setOutlines] = useState<Map<string, string> | null>(null);
-  useEffect(() => {
-    let current = true;
-    const ids = [
-      PROJECT_OUTLINE,
-      ...(manuscript.parts ?? []).map((p) => p.id),
-      ...manuscript.chapters.flatMap((c) => [
-        c.id,
-        ...c.scenes.map((s) => s.id),
-      ]),
-    ];
-    void Promise.all(
-      ids.map((id) =>
-        window.project
-          .read({ kind: 'outline', id })
-          .then(({ body }) => [id, body] as const)
-          .catch(() => [id, ''] as const),
-      ),
-    ).then((read) => {
-      if (current) setOutlines(new Map(read));
-    });
-    return () => {
-      current = false;
-    };
-  }, [manuscript, changes]);
-  if (!outlines) return null;
+  const { outlines, allRead } = useOutlines([
+    PROJECT_OUTLINE,
+    ...(manuscript.parts ?? []).map((p) => p.id),
+    ...manuscript.chapters.flatMap((c) => [c.id, ...c.scenes.map((s) => s.id)]),
+  ]);
+  if (!allRead) return null;
   const outline = (id: string) => {
     const body = outlines.get(id)?.trim();
     return body ? (
