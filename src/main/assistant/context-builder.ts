@@ -60,7 +60,8 @@ import type { AssistantView } from '../project-store/project-store';
 import type { PromptBlock, PromptMessage } from './provider';
 import { MODE_PROMPTS, PLAN_REQUESTS, REVIEW_ASKS } from './system-prompts';
 import { spanText } from '../../shared/beat-measure';
-import { formatBand } from '../../shared/book-details';
+import { bookDetailsId, formatBand } from '../../shared/book-details';
+import { wordTargetText } from '../../shared/word-target';
 import {
   conventionOf,
   CONVENTIONS,
@@ -162,9 +163,12 @@ export async function buildContext(
   }
   if (request.mode === 'plan') {
     system.push({ text: planFocusText(manuscript, book, request.focus) });
+    // In a Series, the Book planned holds it; none while none is.
+    const planned = bookDetailsId(manuscript, book);
     system.push({
       text: bookDetailsText(
         view.bookDetails(book),
+        planned === undefined ? undefined : view.wordTarget(planned),
         request.messages.filter((m) => m.role === 'author').map((m) => m.text),
       ),
     });
@@ -510,12 +514,16 @@ async function outlineSkeleton(
       return [heading, `Id: ${node.id}`, await outline(node.id)].join('\n');
     }
     const status = statusOf(statuses, node.status);
+    const target = view.wordTarget(node.id);
     const { body: notes } = await view.read({ kind: 'notes', id: node.id });
     texts.push(notes);
     return [
       heading,
       `Id: ${node.id}`,
       ...(status ? [`Status: ${status.name}`] : []),
+      ...(target !== undefined
+        ? [`Word target: ${wordTargetText(target)}`]
+        : []),
       prose.has(node.id) ? 'Holds Prose' : 'No Prose yet',
       await outline(node.id),
       ...(notes.trim() ? [`Notes:\n${notes.trim()}`] : []),
@@ -648,7 +656,7 @@ async function planDetail(
  */
 function planHeading(listed: string, book: string | null | undefined): string {
   const full =
-    'Within the focus, each is sent in full: its Status, if the Author gave one, whether it holds Prose, and its Notes, the Author’s own. Outside it, only its title and Outline. It holds no Prose.';
+    'Within the focus, each is sent in full: its Status and Word target, if the Author gave them, whether it holds Prose, and its Notes, the Author’s own. Outside it, only its title and Outline. It holds no Prose.';
   if (book === undefined) {
     return `The plan: the Outline of the whole story, then ${listed}, each under its Id. ${full}`;
   }
@@ -689,14 +697,19 @@ function planFocusText(
 }
 
 /**
- * The Book's details as Plan is sent them, and the catalogue shortlisted
+ * The Book's details as Plan is sent them, the Manuscript's `wordTarget`
+ * among them (ADR 0016), and the catalogue shortlisted
  * for it (spec: Outline planner §2, §12): the Structures and Genre
  * conventions that fit, those it follows and those the Author `asked`
  * about by name in full, the rest by name only. Whether a Structure is
  * chosen says whether to offer to find one; one this version doesn't know
  * is said to be so. Ids the catalogue doesn't know are left out otherwise.
  */
-function bookDetailsText(details: BookDetails, asked: string[]): string {
+function bookDetailsText(
+  details: BookDetails,
+  wordTarget: number | undefined,
+  asked: string[],
+): string {
   const named = (entry: { id: string; name: string }) =>
     `${entry.name} (${entry.id})`;
   const genres = shownIds(details.genres, GENRES).map(
@@ -717,6 +730,7 @@ function bookDetailsText(details: BookDetails, asked: string[]): string {
           ? 'one this version of the app doesn’t know.'
           : 'none chosen.'
     }`,
+    `Word target of the Manuscript: ${wordTarget === undefined ? 'none.' : wordTargetText(wordTarget)}`,
     `Structure: ${structureText(details.structure)}`,
     `Genre conventions: ${conventions.length > 0 ? conventions.map(named).join(', ') : 'none.'}`,
     '## Structures in full: those fitting the Book’s Genres and Format, the one it follows, and any the Author asked about',

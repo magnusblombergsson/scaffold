@@ -1,3 +1,4 @@
+import { wordTargetOf } from '../../shared/word-target';
 import { bookDetailsOf } from '../../shared/book-details';
 import { createHash, randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
@@ -364,6 +365,12 @@ export interface AssistantView {
    * them (spec: Outline planner §12).
    */
   bookDetails(book: string | undefined): BookDetails;
+  /**
+   * The Word target of a Scene, Chapter, Part or Book by its id, or with
+   * `PROJECT_OUTLINE` the Manuscript's: hidden from the Manuscript above, as
+   * Plan alone is sent them (ADR 0016).
+   */
+  wordTarget(unitId: string): number | undefined;
   read<R extends AssistantRef>(ref: R): Promise<ValueOf<R>>;
   /** Whether a Scene's Prose is in Conflict, which Plan never proposes on. */
   conflicted?(sceneId: string): boolean;
@@ -1233,6 +1240,10 @@ export class ProjectStore {
         this.enqueueWrite(async () => {
           await this.setDetail(this.detailRef(bookId), key, change());
         }),
+      changeWordTarget: (unitId, change) =>
+        this.enqueueWrite(async () => {
+          await this.setDetail(this.detailRef(unitId), 'wordTarget', change());
+        }),
       addUnit: (addition, title) => this.addUnit(addition, title),
       retitleUnit: (id, title) => this.retitleUnit(id, title),
       trashUnit: (kind, id) =>
@@ -1902,7 +1913,10 @@ export class ProjectStore {
    */
   setWordTarget(unitId: string, words: number | null): Promise<void> {
     return this.enqueueWrite(async () => {
-      await this.setDetail(this.detailRef(unitId), 'wordTarget', words);
+      if (await this.setDetail(this.detailRef(unitId), 'wordTarget', words)) {
+        // Plan's Proposals on it may be stale, or applied, now.
+        this.emit({ type: 'proposalsChanged' });
+      }
     });
   }
 
@@ -4627,6 +4641,7 @@ export class ProjectStore {
       customFields: () => this.records.customFields.list(),
       listRelations: () => this.listRelations(),
       bookDetails: (book) => bookDetailsOf(this.manuscript(), book),
+      wordTarget: (unitId) => wordTargetOf(this.manuscript(), unitId),
       conflicted: (sceneId) => this.conflicts.has(unitKey(sceneRef(sceneId))),
       read: async (ref) => {
         // Refused at run time too, whatever a caller's types say.

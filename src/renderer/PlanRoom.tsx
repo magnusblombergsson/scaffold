@@ -32,6 +32,7 @@ import {
   type ManuscriptScene,
   type ProseLanguage,
 } from '../shared/project-types';
+import { wordTargetText } from '../shared/word-target';
 import { BeatChips, BeatRail, SceneBeats } from './Beats';
 import { BookDetailsStrip, StructureGuide } from './BookDetails';
 import { BookPicker } from './BookPicker';
@@ -137,15 +138,15 @@ export function PlanRoom({
   const { measure, falls } = useMemo(() => sceneFalls(scenes), [scenes]);
   /** The titles of the Scenes carrying a Beat, by its qualified id. */
   const carrying = (beat: string) => carriers(scenes, beat).map((s) => s.title);
-  /** The Book's details proposed in the Conversation open, still to decide: ghosts in the strip. */
+  /** The Book's details and its Manuscript's Word target proposed in the Conversation open, still to decide: ghosts in the strip. */
   const proposedDetails = useMemo(
     () =>
       (current?.messages ?? [])
         .flatMap((m) => m.proposals ?? [])
         .filter(
           (p) =>
-            p.kind === 'book-detail' &&
-            p.bookId === bookId &&
+            ((p.kind === 'book-detail' && p.bookId === bookId) ||
+              (p.kind === 'word-target' && p.unitId === bookId)) &&
             p.state.kind === 'pending' &&
             !('orphaned' in p.state),
         ),
@@ -497,6 +498,8 @@ type PlanNode = {
   title: string;
   /** Its Scenes, to tell whether it holds Prose; a Scene is its own. */
   scenes: ManuscriptScene[];
+  /** Its Word target; for the story or a Book, the Manuscript's; none for the Series. */
+  wordTarget?: number;
   children: PlanNode[];
   /** The pending Add that would make it, for a unit only proposed. */
   proposed?: AddView;
@@ -513,7 +516,13 @@ type MoveView = Extract<ProposalView, { kind: 'move' }>;
 /** The unit of the tree a Proposal is shown under, if any. */
 function unitOf(proposal: ProposalView): string | null {
   if (proposal.kind === 'outline') return proposal.outlineId;
-  if (isStructural(proposal)) return proposal.unitId;
+  if (
+    isStructural(proposal) ||
+    proposal.kind === 'word-target' ||
+    proposal.kind === 'notes'
+  ) {
+    return proposal.unitId;
+  }
   return null;
 }
 
@@ -567,6 +576,7 @@ function proposedNode(add: AddView): PlanNode {
     title: add.proposed.title,
     scenes: [],
     children: [],
+    wordTarget: add.proposed.wordTarget,
     proposed: add,
   };
 }
@@ -589,12 +599,14 @@ function planTree(
     name: `Chapter “${c.title}”`,
     title: c.title,
     scenes: c.scenes,
+    wordTarget: c.wordTarget,
     children: c.scenes.map((s) => ({
       id: s.id,
       kind: 'scene',
       name: `Scene “${s.title}”`,
       title: s.title,
       scenes: [s],
+      wordTarget: s.wordTarget,
       children: [],
     })),
   });
@@ -608,6 +620,7 @@ function planTree(
               name: `${label} “${item.part.title}”`,
               title: item.part.title,
               scenes: item.chapters.flatMap((c) => c.scenes),
+              wordTarget: item.part.wordTarget,
               children: item.chapters.map(chapter),
             },
           ]
@@ -625,6 +638,7 @@ function planTree(
         name: title,
         title,
         scenes,
+        wordTarget: manuscript.wordTarget,
         children: held,
       },
     ];
@@ -644,6 +658,7 @@ function planTree(
       name: `Book “${planned.title}”`,
       title: planned.title,
       scenes,
+      wordTarget: planned.wordTarget,
       children: held,
     },
   ];
@@ -677,13 +692,15 @@ function unitsInFocus(nodes: PlanNode[], focus: PlanFocus): Set<string> {
 }
 
 /**
- * The Book's Outline tree: each unit's title, Outline and a ¶ when it holds
- * Prose, those in the focus marked; under each, the Proposals of the
+ * The Book's Outline tree: each unit's title, Word target, Outline and a ¶
+ * when it holds Prose, those in the focus marked; under each, the Proposals of the
  * Conversation open still to decide, or accepted and undoable, as cards
  * with Accept, Reject, Edit and Undo. A pending Add is a dashed unit where
  * it would land; a pending Move draws its unit where it would go, with its
  * card, and marks it moving where it is; a pending Put in Trash strikes its
- * unit through, marked to Trash.
+ * unit through, marked to Trash; a pending Word target shows the one it
+ * would replace struck through beside it, and a pending Notes append its
+ * text under the Outline.
  */
 function PlanTree({
   nodes,
@@ -757,6 +774,14 @@ function PlanTree({
     const toTrash = mine.some(
       (p) => p.kind === 'trash' && p.state.kind === 'pending',
     );
+    const target = mine.find(
+      (p): p is Extract<ProposalView, { kind: 'word-target' }> =>
+        p.kind === 'word-target' && p.state.kind === 'pending',
+    );
+    const notes = mine.filter(
+      (p): p is Extract<ProposalView, { kind: 'notes' }> =>
+        p.kind === 'notes' && p.state.kind === 'pending',
+    );
     const movingAway = !moving && moves.some((m) => m.unitId === node.id);
     const children = withLandings(node.children, node.id, landings);
     return (
@@ -799,6 +824,18 @@ function PlanTree({
           ) : (
             <span className="plan-title">{node.title}</span>
           )}
+          {target ? (
+            <span className="plan-words" aria-label="Word target, proposed">
+              <del>{wordTargetText(node.wordTarget)}</del>{' '}
+              <ins>{wordTargetText(target.proposed)}</ins>
+            </span>
+          ) : (
+            node.wordTarget !== undefined && (
+              <span className="plan-words" aria-label="Word target">
+                {wordTargetText(node.wordTarget)}
+              </span>
+            )
+          )}
           {toTrash && <span className="plan-mark">to Trash</span>}
           {movingAway && <span className="plan-mark">moving</span>}
           {holds && (
@@ -819,6 +856,11 @@ function PlanTree({
         ) : (
           <p className="plan-outline reference-empty">No Outline.</p>
         )}
+        {notes.map((p) => (
+          <p key={p.id} className="plan-notes" aria-label="Notes, proposed">
+            <ins>{p.proposed}</ins>
+          </p>
+        ))}
         {conversationId &&
           mine.map((p) => (
             <ProposalCard

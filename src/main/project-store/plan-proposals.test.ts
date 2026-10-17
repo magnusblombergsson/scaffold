@@ -104,7 +104,10 @@ async function cardOf(store: ProjectStore, conversationId: string, id: string) {
 
 const ferry = randomUUID();
 
-function addFerry(ids: Ids, after?: string): Proposal {
+function addFerry(
+  ids: Ids,
+  after?: string,
+): Extract<Proposal, { kind: 'add' }> {
   return {
     kind: 'add',
     id: 'a1',
@@ -179,6 +182,34 @@ describe('Add', () => {
       store.conversations.acceptProposal(conversationId, 'a1'),
     ).rejects.toThrow('Chapter “Arrival” is in Trash.');
     await store.conversations.rejectProposal(conversationId, 'a1');
+  });
+
+  it('may bring a Word target, which it keeps through an edit, and which goes with it on undo', async () => {
+    const { store, conversationId } = await planned((ids) => [
+      {
+        ...addFerry(ids),
+        proposed: { title: 'Ferry', outline: '', wordTarget: 1_500 },
+      },
+    ]);
+    const log = await logLines(conversationId);
+    expect(log.at(-1)).toMatchObject({
+      type: 'proposal.add',
+      wordTarget: 1_500,
+    });
+
+    await store.conversations.acceptProposal(conversationId, 'a1', {
+      edited: { title: 'Last ferry', outline: '', wordTarget: 1_500 },
+    });
+
+    const added = () =>
+      store.manuscript().chapters[0].scenes.find((s) => s.id === ferry);
+    expect(added()).toMatchObject({ title: 'Last ferry', wordTarget: 1_500 });
+    expect((await cardOf(store, conversationId, 'a1'))?.state).toEqual({
+      kind: 'accepted',
+      edited: true,
+    });
+    await store.conversations.undoProposal(conversationId, 'a1');
+    expect(added()).toBeUndefined();
   });
 
   it('brings its title and Outline as the Author edited them', async () => {

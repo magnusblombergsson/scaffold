@@ -410,3 +410,196 @@ describe('A Proposal placed after a unit an unreadable Move moves', () => {
     expect(unreadable).toBe(2);
   });
 });
+
+describe('Word target Proposals', () => {
+  it('in Plan, set or clear one on a Scene, Chapter or the Manuscript of its Book; another Book or a non-number is unreadable', async () => {
+    const store = await createProject(path.join(dir, 'My Novel'), {
+      fs: nodeFileSystem,
+      clock: instantClock(1_000),
+    });
+    const [chapter] = store.manuscript().chapters;
+    const scene = chapter.scenes[0].id;
+    await store.setWordTarget(chapter.id, 5_000);
+    const view = store.assistantView();
+    const read = (blocks: unknown[], mode: 'plan' | 'brainstorm' = 'plan') =>
+      readProposals(view, blocks, storyBibleOf(view, undefined), mode);
+
+    const { proposals, unreadable } = await read([
+      { wordTarget: PROJECT_OUTLINE, words: 80_000 },
+      { wordTarget: scene, words: 2_000 },
+      { wordTarget: chapter.id, words: null },
+      // One per unit: the first is kept.
+      { wordTarget: scene, words: 2_500 },
+    ]);
+
+    expect(proposals).toEqual([
+      expect.objectContaining({
+        kind: 'word-target',
+        unitId: PROJECT_OUTLINE,
+        base: null,
+        proposed: 80_000,
+      }),
+      expect.objectContaining({
+        kind: 'word-target',
+        unitId: scene,
+        base: null,
+        proposed: 2_000,
+      }),
+      expect.objectContaining({
+        kind: 'word-target',
+        unitId: chapter.id,
+        base: 5_000,
+        proposed: null,
+      }),
+    ]);
+    expect(unreadable).toBe(1);
+    // Already so: left out.
+    expect(await read([{ wordTarget: chapter.id, words: 5_000 }])).toEqual({
+      proposals: [],
+      unreadable: 0,
+    });
+    // Not a whole number of words, or no unit of the Book.
+    expect(
+      await read([
+        { wordTarget: scene, words: '2,000' },
+        { wordTarget: chapter.id, words: 0 },
+        { wordTarget: 'ghost', words: 1_000 },
+      ]),
+    ).toEqual({ proposals: [], unreadable: 3 });
+    // No other Mode may make one.
+    expect(
+      await read([{ wordTarget: scene, words: 2_000 }], 'brainstorm'),
+    ).toEqual({ proposals: [], unreadable: 1 });
+  });
+
+  it('in a Series, are of the Book planned and what it holds, never the Series or another Book', async () => {
+    const store = await createProject(path.join(dir, 'My Novel'), {
+      fs: nodeFileSystem,
+      clock: instantClock(1_000),
+    });
+    const { id: two } = await store.createBook();
+    const one = store.manuscript().books![0].id;
+    const { id: away } = await store.createChapter(0, 'Away', undefined, two);
+    const view = store.assistantView();
+
+    const { proposals, unreadable } = await readProposals(
+      view,
+      [
+        { wordTarget: one, words: 90_000 },
+        { wordTarget: PROJECT_OUTLINE, words: 300_000 },
+        { wordTarget: two, words: 90_000 },
+        { wordTarget: away, words: 4_000 },
+      ],
+      storyBibleOf(view, one),
+      'plan',
+    );
+
+    expect(proposals).toEqual([
+      expect.objectContaining({ kind: 'word-target', unitId: one }),
+    ]);
+    expect(unreadable).toBe(3);
+  });
+});
+
+describe('Notes Proposals', () => {
+  it('in Plan, append to the Notes of a Chapter or Scene of its Book; a replace, or the story’s, is unreadable', async () => {
+    const store = await createProject(path.join(dir, 'My Novel'), {
+      fs: nodeFileSystem,
+      clock: instantClock(1_000),
+    });
+    const [chapter] = store.manuscript().chapters;
+    const scene = chapter.scenes[0].id;
+    await store.write(
+      { kind: 'notes', id: scene },
+      { id: scene, body: '- Cold morning' },
+    );
+    const view = store.assistantView();
+    const read = (blocks: unknown[], mode: 'plan' | 'writing' = 'plan') =>
+      readProposals(view, blocks, storyBibleOf(view, undefined), mode);
+
+    const { proposals, unreadable } = await read([
+      { notes: chapter.id, append: '- She chose the ferry' },
+      { notes: scene, append: ' - She leaves at dawn ' },
+      // Ends with it already: left out.
+      { notes: scene, append: '- Cold morning' },
+      // Never replaced, never empty, never the story's.
+      { notes: scene, value: '- Something else' },
+      { notes: scene, append: '  ' },
+      { notes: PROJECT_OUTLINE, append: '- Whole story' },
+      { notes: 'ghost', append: '- Nowhere' },
+    ]);
+
+    expect(proposals).toEqual([
+      expect.objectContaining({
+        kind: 'notes',
+        unitId: chapter.id,
+        operation: 'append',
+        proposed: '- She chose the ferry',
+      }),
+      expect.objectContaining({
+        kind: 'notes',
+        unitId: scene,
+        proposed: '- She leaves at dawn',
+      }),
+    ]);
+    expect(unreadable).toBe(4);
+    // No other Mode may make one.
+    expect(await read([{ notes: scene, append: '- More' }], 'writing')).toEqual(
+      { proposals: [], unreadable: 1 },
+    );
+  });
+
+  it('in a Series, may append to the Notes of the Book planned, never another’s', async () => {
+    const store = await createProject(path.join(dir, 'My Novel'), {
+      fs: nodeFileSystem,
+      clock: instantClock(1_000),
+    });
+    const { id: two } = await store.createBook();
+    const one = store.manuscript().books![0].id;
+    const view = store.assistantView();
+
+    const { proposals, unreadable } = await readProposals(
+      view,
+      [
+        { notes: one, append: '- A slow start' },
+        { notes: two, append: '- A fast start' },
+      ],
+      storyBibleOf(view, one),
+      'plan',
+    );
+
+    expect(proposals).toEqual([
+      expect.objectContaining({ kind: 'notes', unitId: one }),
+    ]);
+    expect(unreadable).toBe(1);
+  });
+});
+
+describe('An Add in Plan', () => {
+  it('may bring a Word target; one that isn’t a whole number of words is unreadable', async () => {
+    const store = await createProject(path.join(dir, 'My Novel'), {
+      fs: nodeFileSystem,
+      clock: instantClock(1_000),
+    });
+    const [chapter] = store.manuscript().chapters;
+    const view = store.assistantView();
+
+    const { proposals, unreadable } = await readProposals(
+      view,
+      [
+        { add: 'scene', title: 'Ferry', in: chapter.id, wordTarget: 1_500 },
+        { add: 'scene', title: 'Pier', in: chapter.id, wordTarget: 'long' },
+      ],
+      storyBibleOf(view, undefined),
+      'plan',
+    );
+
+    expect(proposals).toEqual([
+      expect.objectContaining({
+        kind: 'add',
+        proposed: { title: 'Ferry', outline: '', wordTarget: 1_500 },
+      }),
+    ]);
+    expect(unreadable).toBe(1);
+  });
+});

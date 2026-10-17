@@ -32,6 +32,8 @@ import {
   type Decision,
   type DecisionEvent,
   type FieldValue,
+  type HeldValue,
+  type WordTarget,
   type NewEntry,
   type NewUnit,
   PLAN_UNITS,
@@ -60,6 +62,7 @@ import {
   loggedModel,
   type Model,
 } from '../../shared/models';
+import { isWordTargetOrNone } from '../../shared/word-target';
 import type { Finish } from '../assistant/provider';
 import type { Usage } from '../../shared/usage';
 
@@ -145,10 +148,43 @@ export type BookDetailEvent = {
 };
 
 /**
+ * A Word target Plan proposed setting or clearing (ADR 0016): its unit by
+ * id, a Scene's, Chapter's or Part's, or the Manuscript's by its Book's id,
+ * or `project` in a Project of one Book; and the Word target it had and the
+ * one proposed, in words or null for none. Apps from before Plan's
+ * Proposals skip it, and so its accept, reject and undo (spec §11).
+ */
+export type WordTargetEvent = {
+  type: 'proposal.wordTarget';
+  id: string;
+  unitId: string;
+  base: WordTarget;
+  proposed: WordTarget;
+  at: number;
+};
+
+/**
+ * Text Plan proposed appending to the Notes of a Book, Part, Chapter or
+ * Scene, by its id (ADR 0015), landing on whatever they hold when accepted.
+ * Its accept logs what the Notes `body` held and what it wrote. Apps from
+ * before Plan's Proposals skip it, and so its accept, reject and undo, so
+ * none of them ever writes to Notes (spec §11).
+ */
+export type NotesEvent = {
+  type: 'proposal.notes';
+  id: string;
+  unitId: string;
+  append: string;
+  at: number;
+};
+
+/**
  * A new Scene, Chapter or Part Plan proposed: the id it gets, its
  * container and the unit it goes after, if any, its title and Outline,
- * and the Proposals it `needs` accepted first. Apps from before Plan skip
- * it, and so its accept, reject and undo (ADR 0006).
+ * its Word target if it brings one, and the Proposals it `needs` accepted
+ * first. Apps from before Plan skip it, and so its accept, reject and undo
+ * (ADR 0006); one from before Plan's Word targets accepts it without its
+ * Word target, which leaves the unit without one and corrupts nothing.
  */
 export type AddEvent = {
   type: 'proposal.add';
@@ -159,6 +195,7 @@ export type AddEvent = {
   after?: string;
   title: string;
   outline: string;
+  wordTarget?: number;
   needs?: string[];
   at: number;
 };
@@ -218,7 +255,7 @@ export type RetitleEvent = {
 export type AcceptedEvent = {
   type: 'proposal.accepted';
   id: string;
-  fields: Record<string, { replaced?: FieldValue; wrote: FieldValue }>;
+  fields: Record<string, { replaced?: HeldValue; wrote: HeldValue }>;
   on?: string;
   evolved?: true;
   related?: RelationWritten;
@@ -344,6 +381,8 @@ export type ConversationEvent =
   | OfferedEvent
   | RelatedEvent
   | BookDetailEvent
+  | WordTargetEvent
+  | NotesEvent
   | AddEvent
   | RetitleEvent
   | MoveEvent
@@ -492,6 +531,8 @@ export function parseLog(log: string): LoggedConversation | null {
       event.type === 'proposal.offered' ||
       event.type === 'proposal.related' ||
       event.type === 'proposal.bookDetail' ||
+      event.type === 'proposal.wordTarget' ||
+      event.type === 'proposal.notes' ||
       event.type === 'proposal.add' ||
       event.type === 'proposal.retitle' ||
       event.type === 'proposal.move' ||
@@ -506,9 +547,13 @@ export function parseLog(log: string): LoggedConversation | null {
               ? loggedRelation(event as Partial<RelatedEvent>)
               : event.type === 'proposal.bookDetail'
                 ? loggedBookDetail(event as Partial<BookDetailEvent>)
-                : loggedStructure(
-                    event as Parameters<typeof loggedStructure>[0],
-                  );
+                : event.type === 'proposal.wordTarget'
+                  ? loggedWordTarget(event as Partial<WordTargetEvent>)
+                  : event.type === 'proposal.notes'
+                    ? loggedNotes(event as Partial<NotesEvent>)
+                    : loggedStructure(
+                        event as Parameters<typeof loggedStructure>[0],
+                      );
       if (proposal && !known && messages.length > 0) {
         proposals.set(proposal.id, {
           ...proposal,
@@ -607,7 +652,9 @@ export function proposedEvent(
   | RetitleEvent
   | MoveEvent
   | TrashEvent
-  | BookDetailEvent {
+  | BookDetailEvent
+  | WordTargetEvent
+  | NotesEvent {
   const { id } = proposal;
   const needs = proposal.needs?.length ? { needs: proposal.needs } : {};
   if (proposal.kind === 'move') {
@@ -650,6 +697,14 @@ export function proposedEvent(
       at,
     };
   }
+  if (proposal.kind === 'word-target') {
+    const { unitId, base, proposed } = proposal;
+    return { type: 'proposal.wordTarget', id, unitId, base, proposed, at };
+  }
+  if (proposal.kind === 'notes') {
+    const { unitId, proposed } = proposal;
+    return { type: 'proposal.notes', id, unitId, append: proposed, at };
+  }
   if (proposal.kind === 'add') {
     const { unit, unitId, after, proposed } = proposal;
     return {
@@ -661,6 +716,9 @@ export function proposedEvent(
       ...(after !== undefined && { after }),
       title: proposed.title,
       outline: proposed.outline,
+      ...(proposed.wordTarget !== undefined && {
+        wordTarget: proposed.wordTarget,
+      }),
       ...needs,
       at,
     };
@@ -759,7 +817,7 @@ function onBook(proposal: Proposal): { book?: string } {
  */
 export function acceptedEvent(
   proposal: Proposal,
-  replaced: FieldValue | undefined,
+  replaced: HeldValue | undefined,
   wrote: ProposedValue,
   at: number,
   landed: Landing = {},
@@ -782,11 +840,15 @@ export function acceptedEvent(
     };
   }
   if (proposal.kind === 'add') {
-    const { title, outline } = wrote as NewUnit;
+    const { title, outline, wordTarget } = wrote as NewUnit;
     return {
       type: 'proposal.accepted',
       id,
-      fields: { title: { wrote: title }, outline: { wrote: outline } },
+      fields: {
+        title: { wrote: title },
+        outline: { wrote: outline },
+        ...(wordTarget !== undefined && { wordTarget: { wrote: wordTarget } }),
+      },
       at,
     };
   }
@@ -806,13 +868,21 @@ export function acceptedEvent(
   const field = fieldOfChange(
     proposal as Extract<
       Proposal,
-      { kind: 'field' | 'outline' | 'retitle' | 'book-detail' }
+      {
+        kind:
+          | 'field'
+          | 'outline'
+          | 'retitle'
+          | 'book-detail'
+          | 'word-target'
+          | 'notes';
+      }
     >,
   );
   return {
     type: 'proposal.accepted',
     id,
-    fields: { [field]: { replaced: replaced!, wrote: wrote as FieldValue } },
+    fields: { [field]: { replaced: replaced!, wrote: wrote as HeldValue } },
     ...(landed.on !== undefined && { on: landed.on }),
     ...(landed.evolved && { evolved: true as const }),
     at,
@@ -934,7 +1004,8 @@ function loggedStructure(
       ...waits,
     };
   }
-  if (typeof title !== 'string' || typeof outline !== 'string') return null;
+  const proposed = asNewUnit({ title, outline, wordTarget: event.wordTarget });
+  if (!proposed) return null;
   return {
     kind: 'add',
     id,
@@ -942,22 +1013,32 @@ function loggedStructure(
     unitId,
     in: event.in,
     ...(typeof after === 'string' && { after }),
-    proposed: { title, outline },
+    proposed,
     ...waits,
   };
 }
 
 /**
  * The field an accept of a change logs what it replaced and wrote under:
- * an Entry's field, an Outline's `body`, a `title`, or a Book's detail.
+ * an Entry's field, an Outline's `body`, a `title`, a Book's detail, or a
+ * `wordTarget`.
  */
 function fieldOfChange(
   proposal: Extract<
     Proposal,
-    { kind: 'field' | 'outline' | 'retitle' | 'book-detail' }
+    {
+      kind:
+        | 'field'
+        | 'outline'
+        | 'retitle'
+        | 'book-detail'
+        | 'word-target'
+        | 'notes';
+    }
   >,
 ): string {
   if (proposal.kind === 'field') return proposal.field;
+  if (proposal.kind === 'word-target') return 'wordTarget';
   if (proposal.kind === 'book-detail') return proposal.detail;
   return proposal.kind === 'retitle' ? 'title' : 'body';
 }
@@ -1057,6 +1138,29 @@ function loggedBookDetail(event: Partial<BookDetailEvent>): Proposal | null {
   };
 }
 
+/**
+ * The Word target Proposal an event logs, if this app can take it: a unit,
+ * and Word targets or none.
+ */
+function loggedWordTarget(event: Partial<WordTargetEvent>): Proposal | null {
+  const { id, unitId, base, proposed } = event;
+  if (typeof id !== 'string' || typeof unitId !== 'string' || !unitId) {
+    return null;
+  }
+  if (!isWordTargetOrNone(base) || !isWordTargetOrNone(proposed)) return null;
+  return { kind: 'word-target', id, unitId, base, proposed };
+}
+
+/** The Notes append an event logs, if this app can take it: a unit, and text. */
+function loggedNotes(event: Partial<NotesEvent>): Proposal | null {
+  const { id, unitId, append } = event;
+  if (typeof id !== 'string' || typeof unitId !== 'string' || !unitId) {
+    return null;
+  }
+  if (typeof append !== 'string') return null;
+  return { kind: 'notes', id, unitId, operation: 'append', proposed: append };
+}
+
 /** What an accept of a Relation Proposal logs it wrote, if it can be read. */
 function relationWrittenOf(value: unknown): RelationWritten | null {
   if (typeof value !== 'object' || value === null) return null;
@@ -1123,6 +1227,7 @@ function acceptedOf(
     const wrote = asNewUnit({
       title: fields.title?.wrote,
       outline: fields.outline?.wrote,
+      wordTarget: fields.wordTarget?.wrote,
     });
     return wrote && { kind: 'accepted', wrote };
   }
@@ -1136,12 +1241,14 @@ function acceptedOf(
   }
   const field = fieldOfChange(proposal);
   const { replaced, wrote } = fields[field] ?? {};
-  const holds = (value: unknown): value is FieldValue =>
+  const holds = (value: unknown): value is HeldValue =>
     proposal.kind === 'field'
       ? isFieldValue(proposal.field, value)
       : proposal.kind === 'book-detail'
         ? isLoggedDetailValue(proposal.detail, value)
-        : typeof value === 'string';
+        : proposal.kind === 'word-target'
+          ? isWordTargetOrNone(value)
+          : typeof value === 'string';
   if (!holds(replaced) || !holds(wrote)) return null;
   const { on, evolved } = event;
   return {
