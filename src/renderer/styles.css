@@ -5294,6 +5294,31 @@ button.finding-quote:hover {
   opacity: 0.6;
 }
 
+/* A unit's Word target beside its title; a pending one beside the one it replaces. */
+.plan-words {
+  margin-left: 0.4rem;
+  font-size: 0.8em;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.plan-words ins {
+  color: var(--accent);
+}
+
+/* Text a pending Proposal would append to the unit's Notes. */
+.plan-notes {
+  white-space: pre-wrap;
+  margin: 0 0 0.25rem;
+  padding: 0 0.4rem;
+  font-size: 0.85rem;
+  border-left: 2px dashed var(--accent);
+}
+
+.plan-notes ins {
+  text-decoration: none;
+}
+
 /* “moving” or “to Trash” beside a unit's title. */
 .plan-mark {
   margin-left: 0.4rem;

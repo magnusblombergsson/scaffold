@@ -1,3 +1,4 @@
+import { wordTargetText } from '../shared/word-target';
 import { useContext, useState, type ReactNode } from 'react';
 import { beatWhere } from '../shared/beat-measure';
 import { detailText, formatBand } from '../shared/book-details';
@@ -55,8 +56,8 @@ function toggled(ids: readonly string[] | undefined, id: string): string[] {
 /**
  * The strip above the Outline tree: the Book's Structure, Genre
  * conventions, Genres, Format and Word target, each set with a click, and
- * a link to the structure guide. A detail `proposed` in the Conversation
- * open shows as a ghost value beside it, which goes to its card.
+ * a link to the structure guide. A detail or Word target `proposed` in the
+ * Conversation open shows as a ghost value beside it, which goes to its card.
  */
 export function BookDetailsStrip({
   bookId,
@@ -66,7 +67,7 @@ export function BookDetailsStrip({
   /** The Book's id, or `project` for a Project of one Book. */
   bookId: string;
   book: PlannedBook;
-  /** The Book's details proposed and still to decide. */
+  /** The Book's details and its Manuscript's Word target proposed and still to decide. */
   proposed?: ProposalView[];
 }) {
   const ghost = (key: BookDetailKey) => (
@@ -177,11 +178,10 @@ export function BookDetailsStrip({
             disabled={readOnly}
             onClick={() => setEditingTarget(true)}
           >
-            {wordTarget === undefined
-              ? 'None'
-              : `${wordTarget.toLocaleString('en-US')} words`}
+            {wordTargetText(wordTarget)}
           </button>
         )}
+        <Ghost proposal={proposed.findLast((p) => p.kind === 'word-target')} />
       </div>
       <button
         className="link-button book-details-about"
@@ -202,8 +202,13 @@ export function BookDetailsStrip({
  * the Book has: it goes to its card in the Conversation.
  */
 function Ghost({ proposal }: { proposal: ProposalView | undefined }) {
-  if (proposal?.kind !== 'book-detail') return null;
-  const text = detailText(proposal.detail, proposal.proposed);
+  if (proposal?.kind !== 'book-detail' && proposal?.kind !== 'word-target') {
+    return null;
+  }
+  const text =
+    proposal.kind === 'book-detail'
+      ? detailText(proposal.detail, proposal.proposed)
+      : wordTargetText(proposal.proposed);
   return (
     <button
       className="link-button book-detail-ghost"

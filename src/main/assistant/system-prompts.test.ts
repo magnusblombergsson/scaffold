@@ -38,7 +38,7 @@ describe('the Plan prompt', () => {
     expect(plan).not.toMatch(/"create":|"entry":/);
   });
 
-  it('proposes Outlines, new units, titles, moves, Trash and the Book’s details only, and asks one question at a time about shape', () => {
+  it('proposes Outlines, new units, titles, moves, Trash, Word targets, Notes appends and the Book’s details only, and asks one question at a time about shape', () => {
     const plan = MODE_PROMPTS.plan;
 
     expect(plan).toContain('{"outline": "<Id>", "value":');
@@ -48,11 +48,40 @@ describe('the Plan prompt', () => {
     expect(plan).toContain('{"format": "novel"}');
     expect(plan).toContain('{"move": "<Scene Id>", "in": "<Chapter Id>"');
     expect(plan).toContain('{"trash": "<Id>"}');
+    expect(plan).toContain('{"wordTarget": "<Id>", "words": 2000}');
+    expect(plan).toContain('{"wordTarget": "<Id>", "words": null}');
+    expect(plan).toContain('{"notes": "<Id>", "append":');
+    expect(plan).toMatch(/"wordTarget": 1500, "in"/);
     expect(plan).toMatch(
-      /Propose only Outlines, new units, titles, moves, Trash, Beats and the Book’s details/,
+      /Propose only Outlines, new units, titles, moves, Trash, Word targets, Notes appends, Beats and the Book’s details/,
     );
     expect(plan).toMatch(/one question at a time/);
     expect(plan).toMatch(/that belongs to Interview/);
+  });
+
+  it('says appended Notes are bullets recording only what the Author said or agreed, never the Assistant’s ideas or Prose', () => {
+    const plan = MODE_PROMPTS.plan;
+
+    expect(plan).toMatch(
+      /Notes are the Author’s: append only bullets that record what the Author said or agreed in this Conversation/,
+    );
+    expect(plan).toMatch(/never your own ideas, and never Prose/);
+  });
+
+  it('makes a rough length the Author gives the Manuscript’s Word target, and points out when it disagrees with the Format', () => {
+    const plan = MODE_PROMPTS.plan;
+
+    expect(plan).toMatch(
+      /When the Author gives the Book’s rough length, propose it as the Word target of the Manuscript/,
+    );
+    expect(plan).toMatch(/disagrees with its Format/);
+  });
+
+  it('is the only prompt to mention Word targets or appending to Notes', () => {
+    for (const [mode, prompt] of Object.entries(MODE_PROMPTS)) {
+      if (mode === 'plan') continue;
+      expect(prompt).not.toMatch(/Word target|"wordTarget"|"notes":/);
+    }
   });
 
   it('proposes a Scene’s whole list of Beats, one Proposal per Scene, and an added Scene’s with its Add; marks for a new Structure after a switch', () => {

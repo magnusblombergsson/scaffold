@@ -9,6 +9,8 @@ import {
   type EntrySummary,
   type EntryValue,
   type Manuscript,
+  type NotesRef,
+  type NotesValue,
   type ManuscriptScene,
   type OutlineRef,
   type OutlineValue,
@@ -86,7 +88,7 @@ import {
   type NewUnit,
   type PlanUnit,
   type Retitle,
-  type RetitleBasis,
+  type ReachBasis,
   type UnitAddition,
   asPlace,
   isStructural,
@@ -97,7 +99,12 @@ import {
   type UnitMove,
   type UnitPlace,
   type UnitTrashing,
+  type HeldValue,
+  type WordTarget,
+  type WordTargetChange,
+  type NotesAppend,
 } from '../../shared/proposal';
+import { wordTargetOf } from '../../shared/word-target';
 import { capitalized, unitName } from '../../shared/unit-name';
 import {
   broughtInNow,
@@ -196,6 +203,12 @@ export type ConversationsDeps = {
     key: BookDetailKey,
     change: () => BookDetailValue,
   ) => Promise<void>;
+  /**
+   * Sets the Word target of a Scene, Chapter, Part or Book, or with
+   * `PROJECT_OUTLINE` the Manuscript's, to what `change` makes of the
+   * Manuscript as it is then, as a structure operation; null takes it away.
+   */
+  changeWordTarget: (unitId: string, change: () => WordTarget) => Promise<void>;
   /**
    * Gives a Scene the whole list of Beats `change` makes of the Manuscript
    * as it is then, as a structure operation; null takes them all away.
@@ -888,9 +901,11 @@ ${text}`);
           ? await this.acceptNewEntry(proposal, value, how)
           : proposal.kind === 'book-detail'
             ? await this.acceptBookDetail(proposal, value, how)
-            : proposal.kind === 'beats'
-              ? await this.acceptBeats(proposal, value, how)
-              : await this.acceptChange(proposal, value, how, fromBook);
+            : proposal.kind === 'word-target'
+              ? await this.acceptWordTarget(proposal, value, how)
+              : proposal.kind === 'beats'
+                ? await this.acceptBeats(proposal, value, how)
+                : await this.acceptChange(proposal, value, how, fromBook);
       await this.appendEvent(
         conversationId,
         acceptedEvent(proposal, replaced, wrote, this.deps.clock.now(), landed),
@@ -908,7 +923,7 @@ ${text}`);
    * `fromBook` on.
    */
   private async acceptChange(
-    proposal: DecidedProposal & (EntryFieldChange | OutlineChange),
+    proposal: DecidedProposal & TextChange,
     value: ProposedValue,
     how: AcceptHow,
     fromBook: boolean,
@@ -950,6 +965,52 @@ ${text}`);
       return this.withUnknownIds(proposal, wrote as BookDetailValue);
     });
     return { replaced, wrote };
+  }
+
+  /**
+   * Sets the Word target a Proposal changes, as `acceptProposal`, judged
+   * against what its unit holds just before it is written.
+   */
+  private async acceptWordTarget(
+    proposal: DecidedProposal & WordTargetChange,
+    value: ProposedValue,
+    how: AcceptHow,
+  ): Promise<Accepted> {
+    // Its unit may be out of reach, with nothing to set.
+    granted(accept(proposal, this.wordTargetBasis(proposal), value, how));
+    let replaced: HeldValue | undefined;
+    let wrote = value;
+    await this.deps.changeWordTarget(proposal.unitId, () => {
+      const basis = this.wordTargetBasis(proposal);
+      ({ wrote } = granted(accept(proposal, basis, value, how)));
+      replaced = (basis as { current: HeldValue }).current;
+      return wrote as WordTarget;
+    });
+    return { replaced, wrote };
+  }
+
+  /**
+   * What the Word target a Proposal changes holds now, null for none; or why
+   * Plan can't reach it: its unit is out of reach, or refused as a Retitle's
+   * is, or a Project of one Book it was proposed in is a Series now, whose
+   * Book 1 took the Manuscript's details.
+   */
+  private wordTargetBasis({ unitId }: WordTargetChange): ReachBasis {
+    const manuscript = this.deps.manuscript();
+    const reach =
+      unitId === PROJECT_OUTLINE || this.isBook(unitId)
+        ? {
+            orphaned:
+              unitId === PROJECT_OUTLINE
+                ? manuscript.books && ('gone' as const)
+                : this.deps.outlineOrphaned(unitId),
+          }
+        : this.unitTitle(unitId);
+    if ('refused' in reach) return reach;
+    if ('orphaned' in reach && reach.orphaned) {
+      return { orphaned: reach.orphaned };
+    }
+    return { current: wordTargetOf(manuscript, unitId) ?? null };
   }
 
   /**
@@ -1055,7 +1116,7 @@ ${text}`);
   /**
    * Adds the unit an Add proposed, with its title and Outline as the
    * Author edited them, if they did, as `acceptProposal`: the unit first,
-   * then its Outline.
+   * then its Word target, if it brings one, then its Outline.
    */
   private async acceptAdd(
     proposal: DecidedProposal & UnitAddition,
@@ -1064,8 +1125,11 @@ ${text}`);
     const { wrote } = granted(
       accept(proposal, await this.addBasis(proposal), value),
     );
-    const { title, outline, beats } = wrote as NewUnit;
+    const { title, outline, wordTarget, beats } = wrote as NewUnit;
     await this.deps.addUnit(proposal, title);
+    if (wordTarget !== undefined) {
+      await this.deps.changeWordTarget(proposal.unitId, () => wordTarget);
+    }
     const ref = outlineRef(proposal.unitId);
     const { after } = await this.deps.changeUnit(ref, (unit) => ({
       ...unit,
@@ -1156,8 +1220,8 @@ ${text}`);
    * on an Evolution of that Book, which it makes unless there is one.
    */
   private landingOf(
-    proposal: EntryFieldChange | OutlineChange,
-    unit: EntryValue | OutlineValue,
+    proposal: TextChange,
+    unit: EntryValue | OutlineValue | NotesValue,
     fromBook: boolean,
   ): Landing {
     if (proposal.kind !== 'field' || proposal.book === undefined) return {};
@@ -1237,7 +1301,10 @@ ${text}`);
   }
 
   /** Refuses to go on while a unit written for a Proposal, now `value`, isn't saved. */
-  private refuseUnsaved(ref: EntryRef | OutlineRef, value: UnitValue): void {
+  private refuseUnsaved(
+    ref: EntryRef | OutlineRef | NotesRef,
+    value: UnitValue,
+  ): void {
     if (this.deps.pendingUnit(unitKey(ref))) {
       const name =
         ref.kind === 'entry'
@@ -1303,11 +1370,13 @@ ${text}`);
             ? await this.undoRelation(proposal)
             : proposal.kind === 'book-detail'
               ? await this.undoBookDetail(proposal)
-              : proposal.kind === 'beats'
-                ? await this.undoBeats(proposal)
-                : isStructural(proposal)
-                  ? await this.undoStructure(proposal)
-                  : await this.undoChange(proposal);
+              : proposal.kind === 'word-target'
+                ? await this.undoWordTarget(proposal)
+                : proposal.kind === 'beats'
+                  ? await this.undoBeats(proposal)
+                  : isStructural(proposal)
+                    ? await this.undoStructure(proposal)
+                    : await this.undoChange(proposal);
       await this.appendEvent(conversationId, {
         type: 'proposal.undone',
         id: proposalId,
@@ -1322,7 +1391,7 @@ ${text}`);
 
   /** Writes back what a field or an Outline held before the accept, as `undoProposal`. */
   private async undoChange(
-    proposal: DecidedProposal & (EntryFieldChange | OutlineChange),
+    proposal: DecidedProposal & TextChange,
   ): Promise<Accepted['reloaded']> {
     // Its target may be out of reach, with nothing to read.
     granted(undo(proposal, await this.target(proposal)));
@@ -1350,6 +1419,18 @@ ${text}`);
       const undone = granted(undo(proposal, this.bookDetailTarget(proposal)));
       const { restore } = undone as { restore: BookDetailValue };
       return this.withUnknownIds(proposal, restore);
+    });
+    return undefined;
+  }
+
+  /** Sets back the Word target an accept replaced, while its unit holds what that wrote, as `undoProposal`. */
+  private async undoWordTarget(
+    proposal: DecidedProposal & WordTargetChange,
+  ): Promise<undefined> {
+    granted(undo(proposal, this.wordTargetBasis(proposal)));
+    await this.deps.changeWordTarget(proposal.unitId, () => {
+      const undone = granted(undo(proposal, this.wordTargetBasis(proposal)));
+      return (undone as { restore: WordTarget }).restore;
     });
     return undefined;
   }
@@ -1503,6 +1584,7 @@ ${text}`);
       );
     }
     if (proposal.kind === 'book-detail') return this.bookDetailTarget(proposal);
+    if (proposal.kind === 'word-target') return this.wordTargetBasis(proposal);
     if (proposal.kind === 'beats') return this.beatsBasis(proposal);
     if (proposal.kind === 'add') return this.addBasis(proposal);
     if (proposal.kind === 'retitle') return this.unitTitle(proposal.unitId);
@@ -1558,7 +1640,7 @@ ${text}`);
    * of reach, or refused for a Scene Missing, Unplaced or in Conflict, and
    * an Unplaced Chapter. A Move and a Put in Trash are refused alike.
    */
-  private unitTitle(unitId: string): RetitleBasis {
+  private unitTitle(unitId: string): ReachBasis {
     const orphaned = this.deps.outlineOrphaned(unitId);
     if (orphaned) return { orphaned };
     const { parts = [], chapters, unplaced } = this.deps.manuscript();
@@ -1690,17 +1772,45 @@ ${text}`);
    * Entry without the field.
    */
   private async target(
-    proposal: DecidedProposal & (EntryFieldChange | OutlineChange),
-  ): Promise<Target> {
+    proposal: DecidedProposal & TextChange,
+  ): Promise<ReachBasis> {
+    if (proposal.kind === 'notes') {
+      const reach = this.notesReach(proposal.unitId);
+      if (reach) return reach;
+    }
     const orphaned =
       proposal.kind === 'outline'
         ? this.deps.outlineOrphaned(proposal.outlineId)
-        : this.entryOrphaned(proposal.entryId);
+        : proposal.kind === 'field'
+          ? this.entryOrphaned(proposal.entryId)
+          : null;
     if (orphaned) return { orphaned };
     return this.targetAsSeen(
       proposal,
       await this.deps.read(targetRef(proposal)),
     );
+  }
+
+  /** Whether `unitId` is a Book's, in the Series or in Trash or the Drawer. */
+  private isBook(unitId: string): boolean {
+    return (
+      !!this.deps.manuscript().books?.some((b) => b.id === unitId) ||
+      this.deps.trash.get(unitId)?.kind === 'book'
+    );
+  }
+
+  /**
+   * Why Plan can't reach the Notes of a unit, if it can't: a Book's are out
+   * of reach in Trash, the Drawer or gone; a Part's, Chapter's or Scene's
+   * also refused as a Retitle is. Null while it can.
+   */
+  private notesReach(unitId: string): ReachBasis | null {
+    if (this.isBook(unitId)) {
+      const orphaned = this.deps.outlineOrphaned(unitId);
+      return orphaned && { orphaned };
+    }
+    const reach = this.unitTitle(unitId);
+    return 'current' in reach ? null : reach;
   }
 
   /**
@@ -1711,10 +1821,10 @@ ${text}`);
    * holds again what the Books before give it.
    */
   private targetAsSeen(
-    proposal: DecidedProposal & (EntryFieldChange | OutlineChange),
-    unit: EntryValue | OutlineValue,
+    proposal: DecidedProposal & TextChange,
+    unit: EntryValue | OutlineValue | NotesValue,
   ): Target {
-    if (proposal.kind === 'outline') return targetIn(proposal, unit, []);
+    if (proposal.kind !== 'field') return targetIn(proposal, unit, []);
     const { decision } = proposal;
     const book = decision.kind === 'accepted' ? decision.on : proposal.book;
     const seen = this.storyBible(book).read(unit as EntryValue).entry;
@@ -1750,6 +1860,12 @@ ${text}`);
         ? `${PLAN_UNIT_LABELS[proposal.unit]} “${proposal.proposed.title}”`
         : name;
     }
+    if (proposal.kind === 'word-target') {
+      return proposal.unitId === PROJECT_OUTLINE
+        ? 'The Manuscript'
+        : this.outlineName(proposal.unitId);
+    }
+    if (proposal.kind === 'notes') return this.outlineName(proposal.unitId);
     if (isStructural(proposal)) return this.outlineName(proposal.unitId);
     if (proposal.kind === 'beats') return this.outlineName(proposal.sceneId);
     return this.outlineName(proposal.outlineId);
@@ -1917,7 +2033,7 @@ ${text}`);
  * any, the one it wrote, and the unit it changed, for an open view to show.
  */
 type Accepted = {
-  replaced?: FieldValue;
+  replaced?: HeldValue;
   wrote: ProposedValue;
   reloaded?: { ref: UnitRef; value: UnitValue };
   landed?: Landing;
@@ -2045,26 +2161,28 @@ function granted<T>(result: T | Refusal): T {
   return result as T;
 }
 
-/** The unit holding the field of an Entry or the Outline a Proposal changes. */
-function targetRef(
-  proposal: EntryFieldChange | OutlineChange,
-): EntryRef | OutlineRef {
+/** The unit holding the field of an Entry, the Outline or the Notes a Proposal changes. */
+function targetRef(proposal: TextChange): EntryRef | OutlineRef | NotesRef {
+  if (proposal.kind === 'notes') return { kind: 'notes', id: proposal.unitId };
   return proposal.kind === 'field'
     ? entryRef(proposal.entryId)
     : outlineRef(proposal.outlineId);
 }
+
+/** A change to text a unit holds: a field of an Entry, an Outline, or Notes. */
+type TextChange = EntryFieldChange | OutlineChange | NotesAppend;
 
 /**
  * What the field or the Outline a Proposal changes holds in `unit`; a
  * Custom field must be among `customFields`.
  */
 function targetIn(
-  proposal: EntryFieldChange | OutlineChange,
-  unit: EntryValue | OutlineValue,
+  proposal: TextChange,
+  unit: EntryValue | OutlineValue | NotesValue,
   customFields: readonly CustomField[],
 ): Target {
-  if (proposal.kind === 'outline') {
-    return { current: (unit as OutlineValue).body };
+  if (proposal.kind !== 'field') {
+    return { current: (unit as OutlineValue | NotesValue).body };
   }
   const current = fieldOf(unit as EntryValue, proposal.field, customFields);
   return current === undefined ? { orphaned: 'field' } : { current };
@@ -2075,13 +2193,13 @@ function targetIn(
  * field on the Evolution it `landed` on, or the Entry's own value.
  */
 function withTarget(
-  proposal: EntryFieldChange | OutlineChange,
-  unit: EntryValue | OutlineValue,
+  proposal: TextChange,
+  unit: EntryValue | OutlineValue | NotesValue,
   value: FieldValue,
   landed: Landing = {},
-): EntryValue | OutlineValue {
-  if (proposal.kind === 'outline') {
-    return { ...(unit as OutlineValue), body: value as string };
+): EntryValue | OutlineValue | NotesValue {
+  if (proposal.kind !== 'field') {
+    return { ...(unit as OutlineValue | NotesValue), body: value as string };
   }
   return landed.on === undefined
     ? withField(unit as EntryValue, proposal.field, value)

@@ -18,6 +18,7 @@ import {
   isPlaced,
   mayPropose,
   newEntryOf,
+  notesAppendOf,
   outlineChangeOf,
   PLAN_UNITS,
   proposalOf,
@@ -26,6 +27,7 @@ import {
   type ProposalChange,
 } from '../../shared/proposal';
 import { relationAdditionOf } from '../../shared/relation-proposal';
+import { isWordTarget } from '../../shared/word-target';
 import type { StoryBibleLens } from '../../shared/story-bible-as-of';
 import type { AssistantView } from '../project-store/project-store';
 
@@ -41,7 +43,10 @@ import type { AssistantView } from '../project-store/project-store';
  * Plan, an Outline is of the lens's Book, what it holds or the whole story
  * or Series: one of another Book, of what is Unplaced or of a Missing Scene
  * is unreadable. A Book's detail, in Plan only, is one of the lens's Book,
- * or of the one Book a Project without Books is.
+ * or of the one Book a Project without Books is. A Word target is the
+ * Manuscript's of that Book, or of a unit the Book holds, one per unit in a
+ * reply; Notes appended to are of the Book in a Series, or of a unit it
+ * holds.
  */
 export async function readProposals(
   view: AssistantView,
@@ -57,6 +62,7 @@ export async function readProposals(
     added: addedBy(earlier),
     moves: movesIn(blocks, ids),
     moved: new Set(),
+    targeted: new Set(),
     marked: new Set(),
   };
   for (const [i, block] of blocks.entries()) {
@@ -72,9 +78,13 @@ export async function readProposals(
             ? moveOf(view, block, lens, reply, id)
             : kind === 'trash'
               ? await trashOf(view, block, lens, reply.added)
-              : kind === 'beats'
-                ? beatsOf(view, block, lens, reply)
-                : await changeOf(view, block, kind, lens, mode);
+              : kind === 'word-target'
+                ? wordTargetChangeOf(view, block, lens, reply)
+                : kind === 'notes'
+                  ? await notesOf(view, block, lens, reply.added)
+                  : kind === 'beats'
+                    ? beatsOf(view, block, lens, reply)
+                    : await changeOf(view, block, kind, lens, mode);
     if (change === null) unreadable++;
     else if (change !== 'unchanged') proposals.push({ id, ...change });
   }
@@ -97,13 +107,15 @@ export async function readProposals(
  * What a reply's blocks name as they are read: the units Adds still pending
  * propose, this reply's among them; the first Move of each unit, which a
  * Proposal placed after that unit needs; and the units a block read so far
- * moves, which no later one may move again; and the Scenes a Beats
- * Proposal read so far marks, which no later one may mark again.
+ * moves, which no later one may move again; the units a block read so far
+ * sets the Word target of, which no later one may set again; and the Scenes
+ * a Beats Proposal read so far marks, which no later one may mark again.
  */
 type Reply = {
   added: Map<string, Added>;
   moves: Map<string, { proposal: string; in: string }>;
   moved: Set<string>;
+  targeted: Set<string>;
   marked: Set<string>;
 };
 
@@ -164,7 +176,8 @@ const TAKES: Record<'top' | 'part' | 'chapter', readonly PlanUnit[]> = {
 
 /**
  * The Add a block proposes, made as `proposalId`: a Scene, Chapter or Part
- * of the lens's Book, its `title` and `outline`, in a container that takes
+ * of the lens's Book, its `title` and `outline`, and maybe a `wordTarget`,
+ * a whole number of words, in a container that takes
  * it, `in`: a Chapter, a Part, or the Book's top level by the Book's id or
  * `PROJECT_OUTLINE` in a Project of one Book; first there, or right
  * `after` a unit there. The block names the new unit by an `id` of its
@@ -185,6 +198,7 @@ function addOf(
     id: named,
     title,
     outline = '',
+    wordTarget,
     in: within,
     after,
     beats: brought,
@@ -192,6 +206,7 @@ function addOf(
   if (!PLAN_UNITS.includes(unit as PlanUnit)) return null;
   if (typeof title !== 'string' || !title.trim()) return null;
   if (typeof outline !== 'string') return null;
+  if (wordTarget !== undefined && !isWordTarget(wordTarget)) return null;
   // Only a Scene carries Beats.
   const beats =
     brought === undefined
@@ -225,6 +240,7 @@ function addOf(
     proposed: {
       title: title.trim(),
       outline: outline.trim(),
+      ...(wordTarget !== undefined && { wordTarget }),
       ...(beats && { beats }),
     },
     ...(needs.size > 0 && { needs: [...needs] }),
@@ -388,6 +404,53 @@ async function trashOf(
   };
 }
 
+/**
+ * The Word target a block sets, by its unit's id as `wordTarget`, to a
+ * whole number of `words`, or clears with null: of the lens's Book, by its
+ * id or in a Project of one Book `PROJECT_OUTLINE`, the Manuscript's; or of
+ * a Part, placed Chapter or Scene of it. Never a Scene Missing, Unplaced or
+ * in Conflict, nor a unit only proposed, whose Add brings its own; and only
+ * the first of a unit in a reply. `'unchanged'` when it holds that already.
+ */
+function wordTargetChangeOf(
+  view: AssistantView,
+  block: unknown,
+  { book }: StoryBibleLens,
+  { added, targeted }: Reply,
+): ProposalChange | 'unchanged' | null {
+  const { wordTarget: unitId, words } = block as Record<string, unknown>;
+  if (typeof unitId !== 'string' || added.has(unitId)) return null;
+  const manuscript = view.manuscript();
+  const ofBook = unitId === bookDetailsId(manuscript, book);
+  if (!ofBook && !outlinesIn(manuscript, book).has(unitId)) return null;
+  if (view.conflicted?.(unitId)) return null;
+  if (targeted.has(unitId)) return null;
+  targeted.add(unitId);
+  if (words !== null && !isWordTarget(words)) return null;
+  const base = view.wordTarget(unitId) ?? null;
+  if (base === words) return 'unchanged';
+  return { kind: 'word-target', unitId, base, proposed: words };
+}
+
+/**
+ * The text a block appends to Notes, by its unit's id as `notes`: of the
+ * lens's Book in a Series, or of a Part, placed Chapter or Scene of it.
+ * Never a Scene Missing, Unplaced or in Conflict, nor a unit only proposed.
+ * `'unchanged'` when the Notes end with it already.
+ */
+async function notesOf(
+  view: AssistantView,
+  block: unknown,
+  { book }: StoryBibleLens,
+  added: Map<string, Added>,
+): Promise<ProposalChange | 'unchanged' | null> {
+  const { notes: unitId } = block as Record<string, unknown>;
+  if (typeof unitId !== 'string' || added.has(unitId)) return null;
+  if (!outlinesIn(view.manuscript(), book).has(unitId)) return null;
+  if (view.conflicted?.(unitId)) return null;
+  return notesAppendOf(block, await view.read({ kind: 'notes', id: unitId }));
+}
+
 /** Whether a unit of the Manuscript is a Part, a Chapter, or else a Scene. */
 function unitKind(manuscript: Manuscript, id: string): PlanUnit {
   if (manuscript.parts?.some((p) => p.id === id)) return 'part';
@@ -530,16 +593,29 @@ function retitleOf(
 /**
  * Which kind of change a block is shaped to propose: a new Entry, an
  * Outline, a Relation between two Entries, a new unit or a title in Plan,
- * a Book's detail, or else a field of an Entry.
+ * a Book's detail, a Word target, Notes, or else a field of an Entry.
  */
 function kindOf(block: unknown): ProposalChange['kind'] {
-  const { entry, outline, from, add, retitle, move, trash, scene, beats } =
-    (block ?? {}) as Record<string, unknown>;
+  const {
+    entry,
+    outline,
+    from,
+    add,
+    retitle,
+    move,
+    trash,
+    wordTarget,
+    notes,
+    scene,
+    beats,
+  } = (block ?? {}) as Record<string, unknown>;
   // An item added to a list names its Entry.
   if (typeof add === 'string' && entry === undefined) return 'add';
   if (typeof retitle === 'string') return 'retitle';
   if (typeof move === 'string') return 'move';
   if (typeof trash === 'string') return 'trash';
+  if (typeof wordTarget === 'string') return 'word-target';
+  if (typeof notes === 'string') return 'notes';
   if (scene !== undefined && beats !== undefined) return 'beats';
   if (newEntryOf(block)) return 'new-entry';
   if (typeof outline === 'string') return 'outline';

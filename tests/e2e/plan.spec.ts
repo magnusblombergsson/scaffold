@@ -725,3 +725,99 @@ for (const theme of ['light', 'dark'] as const) {
     }
   });
 }
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`Plan is sent Word targets, and its Word target and Notes Proposals show inline in the tree, decided there, ${theme}`, async () => {
+    const { app, page, projectPath, chapters } = await newProject(theme);
+    try {
+      await page.keyboard.press('ControlOrMeta+5');
+      const room = page.getByRole('main', { name: 'Plan' });
+      const panel = page.getByRole('complementary', {
+        name: 'Plan Conversation',
+      });
+      const tree = room.getByRole('region', { name: 'Outline tree' });
+      const story = tree.getByRole('listitem', { name: 'My Novel' });
+      const storm = tree.getByRole('listitem', { name: 'Chapter “Storm”' });
+
+      anthropic.calls.push({
+        reply: [
+          'About 80,000 words, then; I noted why the storm comes first.\n\n',
+          block({ wordTarget: 'project', words: 80_000 }),
+          '\n\n',
+          block({ wordTarget: chapters.storm, words: 4_000 }),
+          '\n\n',
+          block({
+            notes: chapters.storm,
+            append: '- The storm comes first: the Author wants Anna trapped.',
+          }),
+        ],
+      });
+      await panel
+        .getByRole('textbox', { name: 'Message' })
+        .fill(
+          'About 80,000 words. The storm comes first: I want Anna trapped.',
+        );
+      await panel.getByRole('button', { name: 'Send' }).click();
+      await expect(
+        panel.getByRole('article', { name: 'Assistant' }),
+      ).toBeVisible();
+
+      // Drawn in place: the Word target beside the one it replaces, the Notes under the Outline.
+      await expect(
+        story.locator('> .plan-row').getByLabel('Word target, proposed'),
+      ).toHaveText('None 80,000 words');
+      await expect(
+        room
+          .getByRole('region', { name: 'Book details' })
+          .getByRole('button', { name: 'Proposed: 80,000 words' }),
+      ).toBeVisible();
+      await expect(storm.getByLabel('Notes, proposed')).toHaveText(
+        '- The storm comes first: the Author wants Anna trapped.',
+      );
+      await expect(page).toHaveScreenshot(
+        `plan-word-target-notes-${theme}.png`,
+        { mask: [page.locator('.save-status'), page.locator('.toasts')] },
+      );
+
+      const targetCard = story.getByRole('region', {
+        name: 'Proposal: The Manuscript › Word target',
+      });
+      await targetCard.getByRole('button', { name: 'Accept' }).click();
+      await expect(
+        story.locator('> .plan-row').getByLabel('Word target'),
+      ).toHaveText('80,000 words');
+
+      const notesCard = storm.getByRole('region', {
+        name: 'Proposal: Chapter “Storm” › Notes',
+      });
+      await notesCard.getByRole('button', { name: 'Edit…' }).click();
+      await notesCard
+        .getByLabel('Edited value')
+        .fill('- The storm comes first: Anna is trapped.');
+      await notesCard.getByRole('button', { name: 'Append edited' }).click();
+      await expect(notesCard).toContainText('Appended (edited)');
+      await notesCard.getByRole('button', { name: 'Undo' }).click();
+      await expect(
+        notesCard.getByRole('button', { name: 'Append' }),
+      ).toBeVisible();
+
+      // The next request sends the Word targets now held.
+      anthropic.calls.push({ reply: ['Noted.'] });
+      await panel.getByRole('textbox', { name: 'Message' }).fill('Go on.');
+      await panel.getByRole('button', { name: 'Send' }).click();
+      await expect(
+        panel.getByRole('article', { name: 'Assistant' }),
+      ).toHaveCount(2);
+      expect(JSON.stringify(anthropic.sent[1].system)).toContain(
+        'Word target of the Manuscript: 80,000 words',
+      );
+      const notes = await readFile(
+        path.join(projectPath, 'notes', `${chapters.storm}.md`),
+        'utf8',
+      ).catch(() => '');
+      expect(notes).not.toContain('Anna is trapped');
+    } finally {
+      await app.close();
+    }
+  });
+}
