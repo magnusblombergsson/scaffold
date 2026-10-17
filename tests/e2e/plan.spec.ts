@@ -458,6 +458,80 @@ for (const theme of ['light', 'dark'] as const) {
 }
 
 for (const theme of ['light', 'dark'] as const) {
+  test(`Plan sees a Scene's Beats and proposes its whole list, drawn as dashed chips in the tree and in its details, decided under the Scene, ${theme}`, async () => {
+    const { app, page, projectPath } = await newProject(theme);
+    try {
+      const manifest = JSON.parse(
+        await readFile(path.join(projectPath, 'project.json'), 'utf8'),
+      ) as { tree: { chapters: { scenes: { id: string }[] }[] } };
+      const sceneId = manifest.tree.chapters[0].scenes[0].id;
+      const header = async () =>
+        readFile(path.join(projectPath, 'outlines', `${sceneId}.md`), 'utf8');
+      await roomButton(page, 'Plan').click();
+      const strip = page.getByRole('region', { name: 'Book details' });
+      const tree = page.getByRole('region', { name: 'Outline tree' });
+      const details = page.getByRole('complementary', { name: 'Details' });
+      const panel = page.getByRole('complementary', {
+        name: 'Plan Conversation',
+      });
+      const scene = tree
+        .getByRole('listitem', { name: 'Chapter “Chapter 1”' })
+        .getByRole('listitem', { name: 'Scene “Scene 1”' });
+      await strip
+        .getByRole('combobox', { name: 'Structure' })
+        .selectOption('three-act');
+      await expect(
+        strip.getByRole('combobox', { name: 'Structure' }),
+      ).toHaveValue('three-act');
+
+      anthropic.calls.push({
+        reply: [
+          'Scene 1 sets up Anna’s world.\n\n',
+          block({ scene: sceneId, beats: ['three-act/setup'] }),
+        ],
+      });
+      await panel.getByRole('textbox', { name: 'Message' }).fill('Mark it.');
+      await panel.getByRole('button', { name: 'Send' }).click();
+      const reply = panel.getByRole('article', { name: 'Assistant' });
+      await expect(reply.locator('.message-text')).toContainText('sets up');
+      expect(JSON.stringify(anthropic.sent[0].system)).toContain(
+        'Beats: none marked',
+      );
+
+      const chips = scene.getByRole('list', { name: 'Beats' });
+      await expect(chips.locator('.beat-chip-added')).toHaveText(['Setup']);
+      const card = scene.getByRole('region', {
+        name: 'Proposal: Scene “Scene 1” › Beats',
+      });
+      await expect(card).toContainText('Setup');
+      await scene.locator('.plan-row').click();
+      const beats = details.getByRole('region', { name: 'Beats' });
+      await expect(beats.locator('.scene-beat-proposed')).toHaveText([
+        'Proposed',
+      ]);
+      await expect(page).toHaveScreenshot(`plan-beats-proposal-${theme}.png`, {
+        mask: [page.locator('.save-status'), page.locator('.toasts')],
+      });
+
+      // Accepted, the mark is the Scene's; Undo takes it away again.
+      await card.getByRole('button', { name: 'Accept' }).click();
+      await expect(
+        beats.getByRole('checkbox', { name: /^Setup/ }),
+      ).toBeChecked();
+      await expect(chips.locator('.beat-chip-added')).toHaveCount(0);
+      await expect.poll(header).toContain('three-act/setup');
+      await card.getByRole('button', { name: 'Undo' }).click();
+      await expect(
+        beats.getByRole('checkbox', { name: /^Setup/ }),
+      ).not.toBeChecked();
+      await expect(chips.locator('.beat-chip-added')).toHaveText(['Setup']);
+    } finally {
+      await app.close();
+    }
+  });
+}
+
+for (const theme of ['light', 'dark'] as const) {
   test(`Plan is sent Word targets, and its Word target and Notes Proposals show inline in the tree, decided there, ${theme}`, async () => {
     const { app, page, projectPath, chapters } = await newProject(theme);
     try {

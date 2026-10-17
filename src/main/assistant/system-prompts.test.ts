@@ -53,7 +53,7 @@ describe('the Plan prompt', () => {
     expect(plan).toContain('{"notes": "<Id>", "append":');
     expect(plan).toMatch(/"wordTarget": 1500, "in"/);
     expect(plan).toMatch(
-      /Propose only Outlines, new units, titles, moves, Trash, Word targets, Notes appends and the Book’s details/,
+      /Propose only Outlines, new units, titles, moves, Trash, Word targets, Notes appends, Beats and the Book’s details/,
     );
     expect(plan).toMatch(/one question at a time/);
     expect(plan).toMatch(/that belongs to Interview/);
@@ -81,6 +81,21 @@ describe('the Plan prompt', () => {
     for (const [mode, prompt] of Object.entries(MODE_PROMPTS)) {
       if (mode === 'plan') continue;
       expect(prompt).not.toMatch(/Word target|"wordTarget"|"notes":/);
+    }
+  });
+
+  it('proposes a Scene’s whole list of Beats, one Proposal per Scene, and an added Scene’s with its Add; marks for a new Structure after a switch', () => {
+    const plan = MODE_PROMPTS.plan;
+
+    expect(plan).toContain('{"scene": "<Scene Id>", "beats": ["<Beat Id>"');
+    expect(plan).toMatch(/"add": "scene".*"beats": \[/);
+    expect(plan).toMatch(/one Proposal per Scene/);
+    expect(plan).toMatch(/After the Book switches to another Structure/);
+  });
+
+  it('is the only prompt that tells how to propose Beats', () => {
+    for (const mode of ['brainstorm', 'interview', 'writing'] as const) {
+      expect(MODE_PROMPTS[mode]).not.toMatch(/"beats"/);
     }
   });
 

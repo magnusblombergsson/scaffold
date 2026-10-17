@@ -22,6 +22,7 @@ import {
   type BookDetailValue,
 } from './book-details';
 import type { BookDetailKey } from './project-types';
+import { isBeatId } from './structure-catalogue';
 import { newEntryValue } from './entry';
 import {
   customValue,
@@ -198,6 +199,19 @@ export type WordTargetChange = {
   proposed: WordTarget;
 };
 
+/**
+ * A Scene's whole list of Beats in place of the one it had, its `base`
+ * (spec: Outline planner §4): the qualified ids of what its Book follows,
+ * each once and sorted, null for none. Its marks of what the Book doesn't
+ * follow are set aside, and kept. Only Plan proposes one.
+ */
+export type BeatsChange = {
+  kind: 'beats';
+  sceneId: string;
+  base: string[] | null;
+  proposed: string[] | null;
+};
+
 /** What the Author calls each unit Plan adds. */
 export const PLAN_UNIT_LABELS: Record<PlanUnit, string> = {
   scene: 'Scene',
@@ -210,10 +224,15 @@ export const PLAN_UNITS = ['scene', 'chapter', 'part'] as const;
 export type PlanUnit = (typeof PLAN_UNITS)[number];
 
 /**
- * What an Add brings: its title and Outline, and maybe a Word target; no
- * other Unit details.
+ * What an Add brings: its title and Outline, maybe a Word target, and for a
+ * Scene, the Beats it performs, qualified and sorted; no other Unit details.
  */
-export type NewUnit = { title: string; outline: string; wordTarget?: number };
+export type NewUnit = {
+  title: string;
+  outline: string;
+  wordTarget?: number;
+  beats?: string[];
+};
 
 /**
  * A new Scene, Chapter or Part, proposed in Plan: `unitId` is the id it
@@ -286,7 +305,8 @@ export type ProposalChange =
   | UnitTrashing
   | BookDetailChange
   | WordTargetChange
-  | NotesAppend;
+  | NotesAppend
+  | BeatsChange;
 
 /** The kinds of Proposal a Conversation in each Mode may make. */
 const PROPOSAL_KINDS: Record<Mode, readonly ProposalChange['kind'][]> = {
@@ -302,6 +322,7 @@ const PROPOSAL_KINDS: Record<Mode, readonly ProposalChange['kind'][]> = {
     'book-detail',
     'word-target',
     'notes',
+    'beats',
   ],
 };
 
@@ -438,7 +459,8 @@ export function orphanedText(
     isStructural(proposal) ||
     proposal.kind === 'book-detail' ||
     proposal.kind === 'word-target' ||
-    proposal.kind === 'notes'
+    proposal.kind === 'notes' ||
+    proposal.kind === 'beats'
     ? `${name} is no longer in the Manuscript.`
     : `${name} is no longer in the Story Bible.`;
 }
@@ -703,7 +725,8 @@ export function canAppend(change: ProposalChange): boolean {
     change.kind === 'relation' ||
     isStructural(change) ||
     change.kind === 'book-detail' ||
-    change.kind === 'word-target'
+    change.kind === 'word-target' ||
+    change.kind === 'beats'
   ) {
     return false;
   }
@@ -746,6 +769,9 @@ export function proposalTarget(proposal: ProposalView): ProposalTarget | null {
   // In Plan, the unit in the tree, or where an Add would land.
   if (isStructural(proposal)) {
     return { kind: 'outline', outlineId: proposal.unitId };
+  }
+  if (proposal.kind === 'beats') {
+    return { kind: 'outline', outlineId: proposal.sceneId };
   }
   return { kind: 'entry', entryId: proposal.entryId, field: proposal.field };
 }
@@ -906,6 +932,7 @@ export function proposalBlock(change: ProposalChange): string {
       }),
       in: change.in,
       ...(after !== undefined && { after }),
+      ...(proposed.beats && { beats: proposed.beats }),
     });
   }
   if (change.kind === 'retitle') {
@@ -941,6 +968,12 @@ export function proposalBlock(change: ProposalChange): string {
   }
   if (change.kind === 'notes') {
     return fencedProposal({ notes: change.unitId, append: change.proposed });
+  }
+  if (change.kind === 'beats') {
+    return fencedProposal({
+      scene: change.sceneId,
+      beats: change.proposed ?? [],
+    });
   }
   const target =
     change.kind === 'field'
@@ -1034,7 +1067,8 @@ export type ProposalBasis =
   | AddBasis
   | ReachBasis
   | MoveBasis
-  | TrashBasis;
+  | TrashBasis
+  | BeatsBasis;
 
 /**
  * An Add's basis: where the unit of its id is now, by `name`, and whether
@@ -1054,6 +1088,13 @@ export type AddBasis = {
  * may not reach it, as a Scene Missing, Unplaced or in Conflict.
  */
 export type ReachBasis = Target | { refused: string };
+
+/**
+ * A Beats Proposal's basis: its Scene's marks of what its Book follows now,
+ * as the Proposal compares them, or why it has none, or why they may not be
+ * proposed, as a Scene Missing, Unplaced or in Conflict.
+ */
+export type BeatsBasis = ReachBasis;
 
 /**
  * A Move's basis: why its unit is out of reach or may not be moved, or
@@ -1135,7 +1176,8 @@ export function stateOf(
     'refused' in basis &&
     (logged.kind === 'retitle' ||
       logged.kind === 'word-target' ||
-      logged.kind === 'notes')
+      logged.kind === 'notes' ||
+      logged.kind === 'beats')
   ) {
     return decision.kind === 'accepted'
       ? { kind: 'accepted', edited: false, undoBlocked: basis.refused }
@@ -1183,13 +1225,16 @@ export function accept(
         text: orphanedText(logged, state.orphaned, state.of),
       };
     }
-    // The Author edits its title and Outline only; its Word target stays.
+    // The Author edits its title and Outline only; its Word target and
+    // Beats are accepted as proposed.
     const wordTarget = unit.wordTarget ?? logged.proposed.wordTarget;
+    const { beats } = logged.proposed;
     return {
       wrote: {
         title: unit.title.trim(),
         outline: unit.outline,
         ...(wordTarget !== undefined && { wordTarget }),
+        ...(beats && { beats }),
       },
     };
   }
@@ -1259,9 +1304,11 @@ export function accept(
         ? isBookDetailValue(logged.detail, value)
         : logged.kind === 'word-target'
           ? isWordTargetOrNone(value)
-          : logged.kind === 'retitle' || logged.kind === 'notes'
-            ? typeof value === 'string' && value.trim() !== ''
-            : typeof value === 'string';
+          : logged.kind === 'beats'
+            ? isBeatsValue(value)
+            : logged.kind === 'retitle' || logged.kind === 'notes'
+              ? typeof value === 'string' && value.trim() !== ''
+              : typeof value === 'string';
   if (!holds) {
     return {
       refused: 'cannot-hold',
@@ -1274,20 +1321,23 @@ export function accept(
               ? 'A Word target is a whole number of words'
               : logged.kind === 'notes'
                 ? 'There is nothing to append'
-                : logged.kind === 'retitle'
-                  ? 'A title can’t be empty'
-                  : "An Outline can't hold that value",
+                : logged.kind === 'beats'
+                  ? "A Scene's Beats can't hold that value"
+                  : logged.kind === 'retitle'
+                    ? 'A title can’t be empty'
+                    : "An Outline can't hold that value",
     };
   }
   if ('orphaned' in state) {
     return { refused: 'orphaned', text: orphanedText(logged, state.orphaned) };
   }
   if ('refused' in state) return { refused: 'refused', text: state.refused };
-  // A Book's detail or a Word target can't be appended: `canAppend` refused it above.
+  // A Book's detail, a Word target or Beats can't be appended: `canAppend` refused it above.
   if (
     (append || isAppending(logged)) &&
     logged.kind !== 'book-detail' &&
-    logged.kind !== 'word-target'
+    logged.kind !== 'word-target' &&
+    logged.kind !== 'beats'
   ) {
     return {
       wrote: appended(
@@ -1532,11 +1582,13 @@ function targetLabel(
     | Retitle
     | BookDetailChange
     | WordTargetChange
-    | NotesAppend,
+    | NotesAppend
+    | BeatsChange,
 ): string {
   if (change.kind === 'retitle') return 'The title';
   if (change.kind === 'notes') return 'The Notes';
   if (change.kind === 'word-target') return 'The Word target';
+  if (change.kind === 'beats') return 'The list of Beats';
   if (change.kind === 'book-detail') return BOOK_DETAIL_LABELS[change.detail];
   return change.kind === 'field'
     ? capitalized(fieldLabel(change))
@@ -1757,4 +1809,12 @@ function trashState(
     basis.outline !== base.outline ||
     basis.holds.some((id) => !base.holds.includes(id));
   return { kind: 'pending', current: null, stale };
+}
+
+/**
+ * Whether `value` is one a Beats Proposal may hold or a log may hold for
+ * it: qualified Beat ids, known to this version or not, or null for none.
+ */
+export function isBeatsValue(value: unknown): value is string[] | null {
+  return value === null || (Array.isArray(value) && value.every(isBeatId));
 }

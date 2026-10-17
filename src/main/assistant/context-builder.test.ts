@@ -2200,4 +2200,71 @@ Holds Prose`,
       }
     });
   });
+
+  describe('Beats', () => {
+    /** Harbour marked with the Catalyst, and with a Beat of Three-act the Book no longer follows. */
+    async function marked() {
+      const project = await planned();
+      const { store, scenes } = project;
+      await store.setBookDetail(PROJECT_OUTLINE, 'structure', 'three-act');
+      await store.setBeat(scenes.harbour, 'three-act/inciting-incident', true);
+      await store.setBookDetail(PROJECT_OUTLINE, 'structure', 'save-the-cat');
+      await store.setBeat(scenes.harbour, 'save-the-cat/catalyst', true);
+      return project;
+    }
+
+    it('of what the Book follows are sent with each Scene in focus, set-aside marks never', async () => {
+      const { view, scenes, shore } = await marked();
+
+      const skeleton = skeletonOf(await plan(view, { kind: 'open' }));
+
+      expect(skeleton).toContain(
+        `### Scene “Harbour”\nId: ${scenes.harbour}\nHolds Prose\nBeats: Catalyst (save-the-cat/catalyst)\n- She waits for the ferry`,
+      );
+      expect(skeleton).toContain(
+        `### Scene “Shore”\nId: ${shore}\nNo Prose yet\nBeats: none marked\n- She walks home`,
+      );
+      expect(skeleton).not.toContain('three-act/inciting-incident');
+    });
+
+    it('are not sent for Scenes outside the focus, nor when the Book follows nothing with Beats', async () => {
+      const { store, view, chapters } = await marked();
+
+      let skeleton = skeletonOf(
+        await plan(view, { kind: 'chapter', id: chapters.storm }),
+      );
+      expect(skeleton).not.toContain('save-the-cat/catalyst');
+
+      await store.setBookDetail(PROJECT_OUTLINE, 'structure', 'none');
+      skeleton = skeletonOf(await plan(view, { kind: 'open' }));
+      expect(skeleton).not.toContain('Beats:');
+    });
+
+    it('are never sent in another Mode', async () => {
+      const { view, scenes } = await marked();
+      const asked = [message('author', 'Where is the Catalyst?')];
+      const requests: ContextRequest[] = [
+        { mode: 'brainstorm', messages: asked },
+        { mode: 'interview', focus: OPEN, messages: asked },
+        {
+          mode: 'writing',
+          command: 'question',
+          sceneId: scenes.harbour,
+          messages: asked,
+        },
+        {
+          mode: 'writing',
+          command: 'review-scene',
+          sceneId: scenes.harbour,
+          messages: asked,
+        },
+      ];
+
+      for (const request of requests) {
+        const text = sent(await buildContext(view, request));
+        expect(text).not.toContain('save-the-cat/catalyst');
+        expect(text).not.toContain('Beats:');
+      }
+    });
+  });
 });

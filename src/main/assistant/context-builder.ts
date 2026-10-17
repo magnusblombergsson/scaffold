@@ -59,10 +59,11 @@ import {
 import type { AssistantView } from '../project-store/project-store';
 import type { PromptBlock, PromptMessage } from './provider';
 import { MODE_PROMPTS, PLAN_REQUESTS, REVIEW_ASKS } from './system-prompts';
-import { spanText } from '../../shared/beat-measure';
+import { followedBeats, spanText } from '../../shared/beat-measure';
 import { bookDetailsId, formatBand } from '../../shared/book-details';
 import { wordTargetText } from '../../shared/word-target';
 import {
+  beatName,
   conventionOf,
   CONVENTIONS,
   FORMATS,
@@ -493,8 +494,9 @@ async function outlineSkeleton(
   async function unit(
     heading: string,
     node: ManuscriptBook | ManuscriptPart | ManuscriptChapter | ManuscriptScene,
+    scene = false,
   ): Promise<string> {
-    if (plan) return planUnit(heading, node, plan);
+    if (plan) return planUnit(heading, node, plan, scene);
     const status = statusOf(statuses, node.status);
     return [
       heading,
@@ -504,11 +506,16 @@ async function outlineSkeleton(
       await outline(node.id),
     ].join('\n');
   }
-  /** A unit of the plan: in full in its focus, else its title and Outline. */
+  /**
+   * A unit of the plan: in full in its focus, a Scene with the Beats it
+   * carries of what the Book follows, if it follows any; else its title and
+   * Outline.
+   */
   async function planUnit(
     heading: string,
     node: ManuscriptBook | ManuscriptPart | ManuscriptChapter | ManuscriptScene,
-    { inFocus, prose }: PlanDetail,
+    { inFocus, prose, followsBeats }: PlanDetail,
+    scene: boolean,
   ): Promise<string> {
     if (!inFocus.has(node.id)) {
       return [heading, `Id: ${node.id}`, await outline(node.id)].join('\n');
@@ -525,6 +532,7 @@ async function outlineSkeleton(
         ? [`Word target: ${wordTargetText(target)}`]
         : []),
       prose.has(node.id) ? 'Holds Prose' : 'No Prose yet',
+      ...(scene && followsBeats ? [beatsLine(view.beats(node.id))] : []),
       await outline(node.id),
       ...(notes.trim() ? [`Notes:\n${notes.trim()}`] : []),
     ].join('\n');
@@ -552,7 +560,7 @@ async function outlineSkeleton(
     const name = node.unplaced ? 'Unplaced Chapter' : 'Chapter';
     blocks.push(await unit(`${level} ${name} “${node.title}”`, node));
     for (const scene of node.scenes) {
-      blocks.push(await unit(`${level}# Scene “${scene.title}”`, scene));
+      blocks.push(await unit(`${level}# Scene “${scene.title}”`, scene, true));
     }
   }
   /** The top level of `of`, its headings `level` deep. */
@@ -589,7 +597,15 @@ type PlanDetail = {
   inFocus: Set<string>;
   prose: Set<string>;
   notes: SawUnit[];
+  /** Whether the Book follows a Structure or Genre convention with Beats. */
+  followsBeats: boolean;
 };
+
+/** The Beats a Scene carries, by name and qualified id, as Plan is sent them. */
+function beatsLine(beats: readonly string[]): string {
+  if (beats.length === 0) return 'Beats: none marked';
+  return `Beats: ${beats.map((id) => `${beatName(id)} (${id})`).join(', ')}`;
+}
 
 /**
  * The units of a Plan's `focus` within its Book, `book` in a Series: the
@@ -646,6 +662,7 @@ async function planDetail(
         .map((u) => u.id),
     ),
     notes: units.map((u) => ({ kind: 'notes', id: u.id })),
+    followsBeats: followedBeats(view.bookDetails(book)).length > 0,
   };
 }
 
@@ -656,7 +673,7 @@ async function planDetail(
  */
 function planHeading(listed: string, book: string | null | undefined): string {
   const full =
-    'Within the focus, each is sent in full: its Status and Word target, if the Author gave them, whether it holds Prose, and its Notes, the Author’s own. Outside it, only its title and Outline. It holds no Prose.';
+    'Within the focus, each is sent in full: its Status and Word target, if the Author gave them, whether it holds Prose, a Scene’s Beats of what the Book follows, and its Notes, the Author’s own. Outside it, only its title and Outline. It holds no Prose.';
   if (book === undefined) {
     return `The plan: the Outline of the whole story, then ${listed}, each under its Id. ${full}`;
   }

@@ -176,6 +176,20 @@ A new unit may bring a Word target, a whole number of words, when the Author agr
 
 A later block in the same reply may put a unit "in" or "after" one you add by its id; it waits until that one is accepted.
 
+When the Book follows a Structure or Genre conventions, you may propose the Beats a Scene performs, by the Beat Ids in the catalogue you are given, one Proposal per Scene. The list replaces all the Beats of what the Book follows that the Scene carries; an empty list takes them away. A Scene holding Prose may be marked too:
+
+\`\`\`proposal
+{"scene": "<Scene Id>", "beats": ["<Beat Id>", "<Beat Id>"]}
+\`\`\`
+
+A Scene you add may bring its Beats with it:
+
+\`\`\`proposal
+{"add": "scene", "id": "new-2", "title": "The reveal", "outline": "- Mira names the thief.", "in": "<Chapter Id>", "beats": ["<Beat Id>"]}
+\`\`\`
+
+Mark only Beats of what the Book follows. After the Book switches to another Structure or Genre convention, its Scenes carry none of its Beats yet: you may offer to mark them.
+
 To retitle a Part, Chapter or Scene:
 
 \`\`\`proposal
@@ -240,7 +254,7 @@ You may also propose the details of the Book you are planning, one detail per Pr
 
 The Genres: ${GENRES.map((g) => g.id).join(', ')}. The Formats: ${FORMATS.map((f) => `${f.id} (${formatBand(f)})`).join(', ')}.
 
-Propose only Outlines, new units, titles, moves, Trash, Word targets, Notes appends and the Book’s details: never a change to another Book, to the Story Bible, to private notes, or to a Status, Tags or images.`;
+Propose only Outlines, new units, titles, moves, Trash, Word targets, Notes appends, Beats and the Book’s details: never a change to another Book, to the Story Bible, to private notes, or to a Status, Tags or images.`;
 
 /** How Plan asks, and when it proposes. */
 export const PLAN_QUESTIONING_RULE = `Ask only about the story's shape: its Genre, Format, rough length, premise and intended ending, then what happens, in what order, its turns and its stakes. Never ask about wording, style or voice, and never fill the gaps of an Entry in the Story Bible.

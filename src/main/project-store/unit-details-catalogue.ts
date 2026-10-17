@@ -1,6 +1,10 @@
 import type { DetailRef } from '../../shared/project-types';
 import type { Status } from '../../shared/status';
-import { currentBeatId, currentId } from '../../shared/structure-catalogue';
+import {
+  currentBeatId,
+  currentId,
+  isBeatId,
+} from '../../shared/structure-catalogue';
 import { readTags, spelledTags } from '../../shared/tags';
 import { isWordTarget } from '../../shared/word-target';
 
@@ -174,15 +178,6 @@ function bookIds(name: string, key: DetailKey): Row {
     },
   };
 }
-
-/**
- * A Beat as a Scene's header holds it: qualified by its Structure or Genre
- * convention, as in `save-the-cat/midpoint` (spec: Outline planner §11).
- */
-const BEAT_ID = /^[a-z0-9]+(-[a-z0-9]+)*\/[a-z0-9]+(-[a-z0-9]+)*$/;
-
-const isBeatId = (raw: unknown): raw is string =>
-  typeof raw === 'string' && BEAT_ID.test(raw);
 
 /** A header's Beats, each once, old ones as now called; undefined for none. */
 function readBeats(raw: unknown): string[] | undefined {

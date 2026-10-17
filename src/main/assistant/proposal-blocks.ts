@@ -6,6 +6,7 @@ import {
   detailValue,
   isBookDetailBlock,
 } from '../../shared/book-details';
+import { beatsValue, followedBeats } from '../../shared/beat-measure';
 import {
   bookManuscript,
   placeOfUnit,
@@ -62,6 +63,7 @@ export async function readProposals(
     moves: movesIn(blocks, ids),
     moved: new Set(),
     targeted: new Set(),
+    marked: new Set(),
   };
   for (const [i, block] of blocks.entries()) {
     const kind = kindOf(block);
@@ -80,7 +82,9 @@ export async function readProposals(
                 ? wordTargetChangeOf(view, block, lens, reply)
                 : kind === 'notes'
                   ? await notesOf(view, block, lens, reply.added)
-                  : await changeOf(view, block, kind, lens, mode);
+                  : kind === 'beats'
+                    ? beatsOf(view, block, lens, reply)
+                    : await changeOf(view, block, kind, lens, mode);
     if (change === null) unreadable++;
     else if (change !== 'unchanged') proposals.push({ id, ...change });
   }
@@ -103,14 +107,16 @@ export async function readProposals(
  * What a reply's blocks name as they are read: the units Adds still pending
  * propose, this reply's among them; the first Move of each unit, which a
  * Proposal placed after that unit needs; and the units a block read so far
- * moves, which no later one may move again; and the units a block read so
- * far sets the Word target of, which no later one may set again.
+ * moves, which no later one may move again; the units a block read so far
+ * sets the Word target of, which no later one may set again; and the Scenes
+ * a Beats Proposal read so far marks, which no later one may mark again.
  */
 type Reply = {
   added: Map<string, Added>;
   moves: Map<string, { proposal: string; in: string }>;
   moved: Set<string>;
   targeted: Set<string>;
+  marked: Set<string>;
 };
 
 /** The first Move block of each unit in `blocks`, as made under `ids`: its id and the container it names. */
@@ -129,9 +135,15 @@ function movesIn(
 
 /**
  * A unit an Add proposes, still to be accepted: the Add's id, and the
- * unit's id, kind and container.
+ * unit's id, kind and container, and for a Scene, the Beats it brings.
  */
-type Added = { proposal: string; unitId: string; unit: PlanUnit; in: string };
+type Added = {
+  proposal: string;
+  unitId: string;
+  unit: PlanUnit;
+  in: string;
+  beats?: string[];
+};
 
 /** The units `earlier` Adds still pending propose, by their ids. */
 function addedBy(earlier: readonly Proposal[]): Map<string, Added> {
@@ -141,7 +153,13 @@ function addedBy(earlier: readonly Proposal[]): Map<string, Added> {
         ? [
             [
               p.unitId,
-              { proposal: p.id, unitId: p.unitId, unit: p.unit, in: p.in },
+              {
+                proposal: p.id,
+                unitId: p.unitId,
+                unit: p.unit,
+                in: p.in,
+                ...(p.proposed.beats && { beats: p.proposed.beats }),
+              },
             ],
           ]
         : [],
@@ -183,11 +201,20 @@ function addOf(
     wordTarget,
     in: within,
     after,
+    beats: brought,
   } = block as Record<string, unknown>;
   if (!PLAN_UNITS.includes(unit as PlanUnit)) return null;
   if (typeof title !== 'string' || !title.trim()) return null;
   if (typeof outline !== 'string') return null;
   if (wordTarget !== undefined && !isWordTarget(wordTarget)) return null;
+  // Only a Scene carries Beats.
+  const beats =
+    brought === undefined
+      ? null
+      : unit === 'scene'
+        ? proposedBeats(view, book, brought)
+        : undefined;
+  if (beats === undefined) return null;
   const place = placeIn(view, book, unit as PlanUnit, within, after, reply);
   if (!place) return null;
   const { container, anchor, needs } = place;
@@ -198,6 +225,7 @@ function addOf(
     unitId,
     unit: unit as PlanUnit,
     in: container.id,
+    ...(beats && { beats }),
   };
   added.set(unitId, made);
   if (typeof named === 'string' && named && !isUnitId(view, named)) {
@@ -213,6 +241,7 @@ function addOf(
       title: title.trim(),
       outline: outline.trim(),
       ...(wordTarget !== undefined && { wordTarget }),
+      ...(beats && { beats }),
     },
     ...(needs.size > 0 && { needs: [...needs] }),
   };
@@ -428,6 +457,66 @@ function unitKind(manuscript: Manuscript, id: string): PlanUnit {
   return manuscript.chapters.some((c) => c.id === id) ? 'chapter' : 'scene';
 }
 
+/**
+ * The Beats a block proposes for a Scene of `book`: Beats of what the Book
+ * follows, by qualified id, each once and sorted, or null for none;
+ * undefined when it isn't such a list.
+ */
+function proposedBeats(
+  view: AssistantView,
+  book: string | undefined,
+  raw: unknown,
+): string[] | null | undefined {
+  if (!Array.isArray(raw)) return undefined;
+  const followed = followedBeats(view.bookDetails(book));
+  if (!raw.every((id) => followed.some((b) => b.id === id))) return undefined;
+  return beatsValue(raw as string[], followed);
+}
+
+/**
+ * The Beats Proposal a block makes: a Scene of the lens's Book by its id,
+ * and its whole list of `beats` of what the Book follows, against the marks
+ * it carries of those; never a Scene Missing, Unplaced or in Conflict. On a
+ * Scene an Add still pending proposes, it needs that Add, and is against
+ * the Beats that Add brings. One per Scene in a reply: a Scene already
+ * `marked` by a block read before makes it unreadable.
+ * `'unchanged'` when it carries those marks already.
+ */
+function beatsOf(
+  view: AssistantView,
+  block: unknown,
+  { book }: StoryBibleLens,
+  { added, marked }: Reply,
+): ProposalChange | 'unchanged' | null {
+  const { scene: named, beats } = block as Record<string, unknown>;
+  if (typeof named !== 'string') return null;
+  const proposed = proposedBeats(view, book, beats);
+  if (proposed === undefined) return null;
+  const pending = added.get(named);
+  if (pending && pending.unit !== 'scene') return null;
+  const sceneId = pending?.unitId ?? named;
+  if (marked.has(sceneId)) return null;
+  let base: string[] | null;
+  if (pending) base = pending.beats ?? null;
+  else {
+    const placed = bookManuscript(view.manuscript(), book).chapters.filter(
+      (c) => !c.unplaced,
+    );
+    const scene = placed
+      .flatMap((c) => c.scenes)
+      .find((s) => s.id === sceneId && !s.missing && !view.conflicted?.(s.id));
+    if (!scene) return null;
+    base = beatsValue(
+      view.beats(sceneId),
+      followedBeats(view.bookDetails(book)),
+    );
+  }
+  marked.add(sceneId);
+  if (JSON.stringify(base) === JSON.stringify(proposed)) return 'unchanged';
+  const needs = pending ? { needs: [pending.proposal] } : {};
+  return { kind: 'beats', sceneId, base, proposed, ...needs };
+}
+
 /** Whether `id` is the story's, or a Book's, Part's, Chapter's or Scene's anywhere in the Project. */
 function isUnitId(view: AssistantView, id: string): boolean {
   const { books = [], parts = [], chapters, unplaced } = view.manuscript();
@@ -507,8 +596,19 @@ function retitleOf(
  * a Book's detail, a Word target, Notes, or else a field of an Entry.
  */
 function kindOf(block: unknown): ProposalChange['kind'] {
-  const { entry, outline, from, add, retitle, move, trash, wordTarget, notes } =
-    (block ?? {}) as Record<string, unknown>;
+  const {
+    entry,
+    outline,
+    from,
+    add,
+    retitle,
+    move,
+    trash,
+    wordTarget,
+    notes,
+    scene,
+    beats,
+  } = (block ?? {}) as Record<string, unknown>;
   // An item added to a list names its Entry.
   if (typeof add === 'string' && entry === undefined) return 'add';
   if (typeof retitle === 'string') return 'retitle';
@@ -516,6 +616,7 @@ function kindOf(block: unknown): ProposalChange['kind'] {
   if (typeof trash === 'string') return 'trash';
   if (typeof wordTarget === 'string') return 'word-target';
   if (typeof notes === 'string') return 'notes';
+  if (scene !== undefined && beats !== undefined) return 'beats';
   if (newEntryOf(block)) return 'new-entry';
   if (typeof outline === 'string') return 'outline';
   if (isBookDetailBlock(block)) return 'book-detail';

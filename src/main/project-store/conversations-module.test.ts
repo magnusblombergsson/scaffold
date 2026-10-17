@@ -46,6 +46,7 @@ function conversationsOver() {
     changeRelations: unsupported,
     changeBookDetail: unsupported,
     changeWordTarget: unsupported,
+    changeBeats: unsupported,
     addUnit: unsupported,
     retitleUnit: unsupported,
     trashUnit: unsupported,
