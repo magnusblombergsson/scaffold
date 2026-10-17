@@ -10,6 +10,7 @@ import {
   type PlanFocus,
 } from '../shared/conversation';
 import {
+  carriers,
   followedBeats,
   sceneFalls,
   type FollowedBeat,
@@ -130,8 +131,7 @@ export function PlanRoom({
   );
   const { measure, falls } = useMemo(() => sceneFalls(scenes), [scenes]);
   /** The titles of the Scenes carrying a Beat, by its qualified id. */
-  const carrying = (beat: string) =>
-    scenes.filter((s) => s.beats?.includes(beat)).map((s) => s.title);
+  const carrying = (beat: string) => carriers(scenes, beat).map((s) => s.title);
   /** Each unit's Outline Proposals made in the Conversation open. */
   const proposals = useMemo(() => {
     const byUnit = new Map<string, ProposalView[]>();

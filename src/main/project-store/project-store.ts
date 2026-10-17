@@ -1902,11 +1902,14 @@ export class ProjectStore {
     return this.enqueueWrite(async () => {
       const ref = this.detailRef(sceneId);
       const held = this.heldDetails(ref)?.beats ?? [];
-      const beats = carries
-        ? held.includes(beat)
+      const others = held.filter((id) => id !== beat);
+      // A mark already as asked is saved as it is, still refused on a Chapter.
+      const beats =
+        held.includes(beat) === carries
           ? held
-          : [...held, beat]
-        : held.filter((id) => id !== beat);
+          : carries
+            ? [...others, beat]
+            : others;
       await this.setDetail(ref, 'beats', beats);
     });
   }

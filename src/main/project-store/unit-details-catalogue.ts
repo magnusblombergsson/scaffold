@@ -1,6 +1,6 @@
 import type { DetailRef } from '../../shared/project-types';
 import type { Status } from '../../shared/status';
-import { currentId } from '../../shared/structure-catalogue';
+import { currentBeatId, currentId } from '../../shared/structure-catalogue';
 import { readTags, spelledTags } from '../../shared/tags';
 import { isWordTarget } from '../../shared/word-target';
 
@@ -187,7 +187,7 @@ const isBeatId = (raw: unknown): raw is string =>
 /** A header's Beats, each once, old ones as now called; undefined for none. */
 function readBeats(raw: unknown): string[] | undefined {
   if (!Array.isArray(raw)) return undefined;
-  const ids = [...new Set(raw.filter(isBeatId).map((id) => currentId(id)))];
+  const ids = [...new Set(raw.filter(isBeatId).map((id) => currentBeatId(id)))];
   return ids.length > 0 ? ids : undefined;
 }
 

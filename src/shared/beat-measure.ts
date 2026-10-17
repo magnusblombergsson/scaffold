@@ -2,6 +2,7 @@ import type { BookDetails } from './project-types';
 import {
   conventionOf,
   CONVENTIONS,
+  qualifiedBeatId,
   shownIds,
   structureOf,
   type Beat,
@@ -72,7 +73,7 @@ export function followedBeats(
     (source: { id: string; name: string }, column: FollowedBeat['column']) =>
     (beat: Beat): FollowedBeat => ({
       ...beat,
-      id: `${source.id}/${beat.id}`,
+      id: qualifiedBeatId(source, beat),
       source: source.name,
       column,
     });
@@ -91,4 +92,12 @@ export function shownBeats(
   followed: readonly FollowedBeat[],
 ): FollowedBeat[] {
   return followed.filter((b) => marks?.includes(b.id));
+}
+
+/** Those of `scenes` marked with the Beat `beat`, qualified, set aside or not. */
+export function carriers<S extends { beats?: string[] }>(
+  scenes: readonly S[],
+  beat: string,
+): S[] {
+  return scenes.filter((s) => s.beats?.includes(beat));
 }

@@ -976,6 +976,30 @@ export function currentId(
   return Object.hasOwn(old, id) ? old[id] : id;
 }
 
+/**
+ * A Beat qualified by its Structure or Genre convention, as in
+ * `save-the-cat/midpoint`: the form a Scene's marks hold it in.
+ */
+export function qualifiedBeatId(
+  source: { id: string },
+  beat: { id: string },
+): string {
+  return `${source.id}/${beat.id}`;
+}
+
+/**
+ * A qualified Beat as this catalogue calls it: replaced whole when the map
+ * names it, otherwise with its Structure or convention as now called.
+ */
+export function currentBeatId(
+  id: string,
+  old: Readonly<Record<string, string>> = OLD_IDS,
+): string {
+  if (Object.hasOwn(old, id)) return old[id];
+  const [source, beat] = id.split('/');
+  return qualifiedBeatId({ id: currentId(source, old) }, { id: beat });
+}
+
 /** Those of `ids` that `known` lists, in their order; any other is kept, but not shown. */
 export function shownIds(
   ids: readonly string[] | undefined,

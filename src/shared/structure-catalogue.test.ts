@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   CONVENTIONS,
+  currentBeatId,
   currentId,
   FORMATS,
   GENRES,
@@ -124,6 +125,20 @@ describe('ids as read', () => {
     expect(currentId('save-the-cat-15', old)).toBe('save-the-cat');
     expect(currentId('three-act', old)).toBe('three-act');
     expect(currentId('from-a-newer-app', old)).toBe('from-a-newer-app');
+  });
+
+  it('map a qualified Beat by its whole id, else by its Structure or convention', () => {
+    const old = {
+      'save-the-cat-15': 'save-the-cat',
+      'three-act/turning-point': 'three-act/first-turning-point',
+    };
+    expect(currentBeatId('save-the-cat-15/midpoint', old)).toBe(
+      'save-the-cat/midpoint',
+    );
+    expect(currentBeatId('three-act/turning-point', old)).toBe(
+      'three-act/first-turning-point',
+    );
+    expect(currentBeatId('mystery/reveal', old)).toBe('mystery/reveal');
   });
 
   it('show only those the catalogue knows, keeping their order', () => {

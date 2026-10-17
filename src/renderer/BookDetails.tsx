@@ -11,6 +11,7 @@ import {
   GENRES,
   guideStructures,
   NO_STRUCTURE,
+  qualifiedBeatId,
   shownIds,
   STRUCTURES,
   structureOf,
@@ -457,7 +458,7 @@ function Beats({
           </span>
           <span className="guide-beat-purpose">{beat.purpose}</span>
           {carrying && (
-            <Carriers titles={carrying(`${source.id}/${beat.id}`)} />
+            <Carriers titles={carrying(qualifiedBeatId(source, beat))} />
           )}
         </li>
       ))}
