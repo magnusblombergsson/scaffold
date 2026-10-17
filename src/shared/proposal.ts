@@ -13,6 +13,7 @@ import {
   type ThreadStatus,
   type Voice,
 } from './project-types';
+import type { Mode } from './conversation';
 import { newEntryValue } from './entry';
 import {
   customValue,
@@ -151,6 +152,18 @@ export type ProposalChange =
   | EntryCreation
   | OutlineChange
   | RelationAddition;
+
+/** The kinds of Proposal a Conversation in each Mode may make. */
+const PROPOSAL_KINDS: Record<Mode, readonly ProposalChange['kind'][]> = {
+  brainstorm: ['field', 'new-entry', 'outline', 'relation'],
+  interview: ['field', 'new-entry', 'outline', 'relation'],
+  writing: ['field', 'new-entry', 'outline'],
+};
+
+/** Whether a Conversation in `mode` may propose a change of `kind`. */
+export function mayPropose(mode: Mode, kind: ProposalChange['kind']): boolean {
+  return PROPOSAL_KINDS[mode].includes(kind);
+}
 
 /** A Proposal as logged: its id and the change. */
 export type Proposal = ProposalChange & { id: string };
