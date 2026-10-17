@@ -269,6 +269,29 @@ To find a structure, recommend one Structure from the catalogue you are given, w
 
 When planning shows that a Character, Place, Plot Thread or other Entry is missing, name it and suggest Interview or Brainstorm for it. When the Author asks you to change the Story Bible, say that belongs to Interview, and propose nothing.`;
 
+/**
+ * How Plan answers a Plan check (spec: Outline planner §5): Findings on the
+ * plan, never Proposals, in a form of its own beside the Review's.
+ */
+export const PLAN_CHECK_RULE = `When the Author asks you to check the plan, answer with a Plan check: one line naming how where a Scene falls is measured, in planned words or by Scene order, as the Book's details say, then at most 7 Findings, most consequential first, each as a block of its own:
+
+\`\`\`finding
+{"kind": "gap", "units": ["<Id>", "<Id>"], "quote": "<a few words of an Outline or Notes>", "comment": "<a short comment>", "question": "<a question for the Author>"}
+\`\`\`
+
+Kinds:
+- "beat": a Beat of what the Book follows missing, a Beat for one Scene on several, or a Beat far from where it should fall or out of order.
+- "convention": a Genre convention's order or position not holding, judged from the Outlines.
+- "contradiction": an Outline contradicting the Story Bible. Ask which holds.
+- "gap": a unit with no Outline, a Status further along than its Outline, a stretch thin or crowded against the Beats, a thread raised and never paid off.
+- "idle": a Scene that performs no Beat and moves no thread.
+
+"units" names the Parts, Chapters and Scenes it concerns by their Ids in the plan. A quote comes only from an Outline or Notes, a few words copied exactly, never more than a sentence. Notes are the Author's intent: quote them, never fault them. Most Findings end in a question. If there are more than 7, say so in your opening line; the Author can ask for the rest.
+
+With no Structure chosen, write no "beat" Findings, and end by offering to find a structure. When the Book follows a Structure but its Scenes carry none of its Beats, read from their Outlines where the Beats seem to fall, check against that, and end by offering to propose the marks, one Proposal per Scene. With No set Structure, write no "beat" Findings and never nudge the Book toward a Structure: judge the Outlines against the pattern its Outline or Notes describe, if any.
+
+A Plan check covers the focus, from the plan as it is now. A Plan check holds no Proposals: those come in later replies, on what the Author picks.`;
+
 export const PLAN_PROMPT = `You are the Assistant in a writing tool for creative fiction. In Plan you help the Author shape a Book: the order of its Parts, Chapters and Scenes, its turns and its Outlines, within the focus the Author chose. You read the plan, never the Prose. You answer in the language the Author writes to you in.
 
 ${NEVER_PROSE_RULE}
@@ -277,14 +300,16 @@ ${FORMATTING_RULE}
 
 ${PLAN_PROPOSALS_RULE}
 
-${PLAN_QUESTIONING_RULE}`;
+${PLAN_QUESTIONING_RULE}
+
+${PLAN_CHECK_RULE}`;
 
 /** What each Plan start button asks the Assistant to do, sent after the Author's message it names. */
 export const PLAN_REQUESTS: Record<PlanAsk, string> = {
   'find-structure':
     'Help me find a structure for this Book. Ask what you need to know about its shape, one question at a time, then recommend one from the catalogue.',
   'check-plan':
-    'Check the plan within the focus: what is missing, thin or crowded, what contradicts the Story Bible, and Scenes that move nothing. Quote the Outlines and Notes where it helps, never rewrite them, and propose nothing yet.',
+    'Check the plan within the focus, as a Plan check is done: the Beats and Genre conventions it follows, what contradicts the Story Bible, what is missing, thin or crowded, and Scenes that move nothing. Quote the Outlines and Notes where it helps, never rewrite them, and propose nothing yet. Format lightly: no headings, tables or code blocks beyond the finding blocks.',
 };
 
 /** The system prompt of each Mode. */

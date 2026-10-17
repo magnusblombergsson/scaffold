@@ -2019,6 +2019,29 @@ describe('Plan', () => {
     expect(context.messages[0].content).toMatch(/^Check my plan\n\n\S/);
   });
 
+  it('sends a Plan check’s Findings back with its reply', async () => {
+    const { view, shore } = await planned();
+
+    const context = await buildContext(view, {
+      mode: 'plan',
+      focus: { kind: 'open' },
+      messages: [
+        { ...message('author', 'Check my plan'), ask: 'check-plan' as const },
+        {
+          ...message('assistant', 'By Scene order.'),
+          planFindings: [
+            { kind: 'idle', units: [shore], comment: 'It moves nothing.' },
+          ],
+        },
+        message('author', 'Fix it.'),
+      ],
+    });
+
+    expect(context.messages[1].content).toBe(
+      `By Scene order.\n\n\`\`\`finding\n{"kind":"idle","units":["${shore}"],"comment":"It moves nothing."}\n\`\`\``,
+    );
+  });
+
   it('in a Series: the Series Outline and every Book’s Outline, and the units of its own Book only', async () => {
     const project = await planned();
     const { store, view, chapters } = project;
@@ -2219,12 +2242,37 @@ Holds Prose`,
       const skeleton = skeletonOf(await plan(view, { kind: 'open' }));
 
       expect(skeleton).toContain(
-        `### Scene “Harbour”\nId: ${scenes.harbour}\nHolds Prose\nBeats: Catalyst (save-the-cat/catalyst)\n- She waits for the ferry`,
+        `### Scene “Harbour”\nId: ${scenes.harbour}\nHolds Prose\nFalls at 0–25% of the Book\nBeats: Catalyst (save-the-cat/catalyst)\n- She waits for the ferry`,
       );
       expect(skeleton).toContain(
-        `### Scene “Shore”\nId: ${shore}\nNo Prose yet\nBeats: none marked\n- She walks home`,
+        `### Scene “Shore”\nId: ${shore}\nNo Prose yet\nFalls at 75–100% of the Book\nBeats: none marked\n- She walks home`,
       );
       expect(skeleton).not.toContain('three-act/inciting-incident');
+    });
+
+    it('are measured by Scene order until every Scene of the Book has a Word target, then in planned words, as the Book’s details say', async () => {
+      const { store, view, scenes, shore } = await marked();
+      const details = (context: Awaited<ReturnType<typeof buildContext>>) =>
+        context.system.find((b) => b.text.startsWith('The Book’s details'))
+          ?.text ?? '';
+      await store.setWordTarget(scenes.harbour, 3000);
+      await store.setWordTarget(scenes.letter, 1000);
+      await store.setWordTarget(scenes.wreck, 2000);
+
+      let context = await plan(view, { kind: 'open' });
+      expect(details(context)).toContain(
+        'Where a Scene falls is measured by Scene order, each an equal share: not every Scene has a Word target.',
+      );
+      expect(skeletonOf(context)).toContain('Falls at 0–25% of the Book');
+
+      await store.setWordTarget(shore, 2000);
+      context = await plan(view, { kind: 'open' });
+      expect(details(context)).toContain(
+        'Where a Scene falls is measured in planned words: every Scene has a Word target.',
+      );
+      expect(skeletonOf(context)).toContain(
+        `Id: ${scenes.harbour}\nWord target: 3,000 words\nHolds Prose\nFalls at 0–38% of the Book`,
+      );
     });
 
     it('are not sent for Scenes outside the focus, nor when the Book follows nothing with Beats', async () => {
@@ -2264,6 +2312,8 @@ Holds Prose`,
         const text = sent(await buildContext(view, request));
         expect(text).not.toContain('save-the-cat/catalyst');
         expect(text).not.toContain('Beats:');
+        expect(text).not.toContain('Save the Cat');
+        expect(text).not.toContain('Falls at');
       }
     });
   });

@@ -613,6 +613,109 @@ describe('Plan', () => {
     ]);
   });
 
+  const finding = (json: object) =>
+    `\`\`\`finding\n${JSON.stringify(json)}\n\`\`\``;
+
+  it('logs a Plan check’s Findings as given, naming only units of its Book, and makes no Proposal, counting one written as unreadable', async () => {
+    let ids = { chapterId: '', sceneId: '' };
+    const { store, engine, chapterId, sceneId } = await setUp(() => [
+      'By Scene order; 2 Findings.\n\n',
+      finding({
+        kind: 'idle',
+        units: [ids.sceneId, 'nowhere'],
+        comment: 'It moves no thread.',
+        question: 'What does it change?',
+      }),
+      finding({ kind: 'gap', units: [ids.chapterId], comment: 'No Outline.' }),
+      finding({ type: 'voice', comment: 'A Review’s.' }),
+      `\`\`\`proposal\n${JSON.stringify({ retitle: ids.sceneId, title: 'Wait' })}\n\`\`\``,
+    ]);
+    ids = { chapterId, sceneId };
+    const { id } = await store.startConversation('plan', 'Shape');
+
+    const { reply } = await engine.askAssistant(
+      id,
+      'What’s weak in my plan?',
+      { sceneId: null },
+      () => {},
+    );
+
+    expect(reply?.planFindings).toEqual([
+      {
+        kind: 'idle',
+        units: [sceneId],
+        comment: 'It moves no thread.',
+        question: 'What does it change?',
+      },
+      { kind: 'gap', units: [chapterId], comment: 'No Outline.' },
+    ]);
+    expect(reply?.findings).toBeUndefined();
+    const { messages } = await store.readConversation(id);
+    expect(messages[1].planFindings).toEqual(reply?.planFindings);
+    expect(messages[1].proposals ?? []).toEqual([]);
+    // What it proposed anyway is counted as unreadable, not lost unseen.
+    expect(messages[1].unreadable).toBe(1);
+  });
+
+  it('makes Proposals in a Plan reply with no Findings', async () => {
+    let scene = '';
+    const { store, engine, sceneId } = await setUp(() => [
+      'Done.\n\n',
+      `\`\`\`proposal\n${JSON.stringify({ retitle: scene, title: 'Wait' })}\n\`\`\``,
+    ]);
+    scene = sceneId;
+    const { id } = await store.startConversation('plan', 'Shape');
+
+    const { reply } = await engine.askAssistant(
+      id,
+      'Retitle it Wait.',
+      { sceneId: null },
+      () => {},
+    );
+
+    expect(reply?.planFindings).toBeUndefined();
+    const { messages } = await store.readConversation(id);
+    expect(messages[1].proposals).toHaveLength(1);
+  });
+
+  it('asks for a Plan check with the first message on a Book already outlined, whatever it says', async () => {
+    const { store, engine, provider, sceneId } = await setUp(() => ['Hm.']);
+    await store.write(
+      { kind: 'outline', id: sceneId },
+      { id: sceneId, body: '- Anna waits.', meta: {} },
+    );
+    const { id } = await store.startConversation('plan', 'Shape');
+
+    await engine.askAssistant(id, 'Hello!', { sceneId: null }, () => {});
+    await engine.askAssistant(id, 'And?', { sceneId: null }, () => {});
+
+    const { messages } = await store.readConversation(id);
+    expect(messages[0]).toMatchObject({ text: 'Hello!', ask: 'check-plan' });
+    expect(messages[2].ask).toBeUndefined();
+    expect(provider.requests[0].messages[0].content).toMatch(
+      /^Hello!\n\nCheck the plan within the focus/,
+    );
+  });
+
+  it('asks for no Plan check with the first message on a Book not yet outlined, or a start button’s', async () => {
+    const { store, engine, sceneId } = await setUp(() => ['Hm.']);
+    const { id: empty } = await store.startConversation('plan', 'Shape');
+    await engine.askAssistant(empty, 'Hello!', { sceneId: null }, () => {});
+    await store.write(
+      { kind: 'outline', id: sceneId },
+      { id: sceneId, body: '- Anna waits.', meta: {} },
+    );
+    const { id: finding } = await store.startConversation('plan', 'Find');
+    await engine.planAsk(finding, 'find-structure', () => {});
+
+    expect((await store.readConversation(empty)).messages[0].ask).toBe(
+      undefined,
+    );
+    expect((await store.readConversation(finding)).messages[0].ask).toBe(
+      'find-structure',
+    );
+  });
+
   it('refuses a start button outside Plan', async () => {
     const { store, engine } = await setUp(() => ['Hm.']);
     const { id } = await store.startConversation('brainstorm', 'Ideas');

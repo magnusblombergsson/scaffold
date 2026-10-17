@@ -14,12 +14,15 @@ import {
 import {
   findingOf,
   inOrder,
+  planFindingOf,
   quotedIn,
   reviewText,
   type Finding,
+  type PlanFinding,
   type ReviewCommand,
 } from '../../shared/finding';
 import type { Model } from '../../shared/models';
+import { conversationBook } from '../../shared/manuscript-order';
 import { unitText } from '../../shared/project-types';
 import type { Clock } from '../project-store/clock';
 import type { ProjectStore } from '../project-store/project-store';
@@ -32,6 +35,8 @@ import {
 import {
   buildContext,
   defaultRequest,
+  isOutlined,
+  planUnitIds,
   readableScene,
   storyBibleOf,
 } from './context-builder';
@@ -109,6 +114,22 @@ export function createConversationEngine({
   }
 
   /**
+   * What a Plan's message asks for besides its text: the start button that
+   * sent it, if any; else for the first message of a Plan on a Book already
+   * outlined, a Plan check, whatever it says (spec: Outline planner §1).
+   */
+  async function planAskOf(
+    { mode, messages, book }: Pick<Conversation, 'mode' | 'messages' | 'book'>,
+    asked: PlanAsk | undefined,
+  ): Promise<PlanAsk | undefined> {
+    if (mode !== 'plan' || asked) return asked;
+    if (messages.some((m) => m.role === 'author')) return undefined;
+    const view = store.assistantView();
+    const planned = conversationBook(view.manuscript(), book);
+    return (await isOutlined(view, planned)) ? 'check-plan' : undefined;
+  }
+
+  /**
    * Logs the Author's message, with the Scene in focus and the Review or
    * Plan start button it asks for, if any, and has the Assistant answer it.
    */
@@ -126,11 +147,12 @@ export function createConversationEngine({
     if (message.ask && mode !== 'plan') {
       throw new Error('Only a Plan Conversation has its start buttons');
     }
+    const planAsk = await planAskOf(conversation, message.ask);
     const authored: ConversationMessage = {
       role: 'author',
       text: message.text,
       ...(message.command && { command: message.command }),
-      ...(message.ask && { ask: message.ask }),
+      ...(planAsk && { ask: planAsk }),
       focus: focusOf(conversation, sceneId),
       at: clock.now(),
     };
@@ -155,7 +177,8 @@ export function createConversationEngine({
    * or as empty if nothing is left of it; a call that fails before any reply
    * logs nothing, unless it said what it used, which still counts. Only a
    * complete reply makes Proposals, and a Review's reply holds Findings,
-   * never Proposals.
+   * never Proposals. So does a Plan check: a Plan reply asked for one, or
+   * holding Findings.
    */
   async function answer(
     conversationId: string,
@@ -210,21 +233,37 @@ export function createConversationEngine({
       mode === 'writing'
         ? await findingsIn(finished.findings, context.saw)
         : [];
-    // A Review asks before it proposes.
-    const made = reviewing
-      ? null
-      : await readProposals(
-          view,
-          finished.proposals,
-          storyBibleOf(view, context.book),
-          mode,
-          // An Add may go in or after a unit one still pending proposes.
-          messages.flatMap((m) =>
-            (m.proposals ?? []).filter((p) => p.state.kind === 'pending'),
-          ),
-        );
+    const planFindings =
+      mode === 'plan'
+        ? planFindingsIn(
+            finished.findings,
+            planUnitIds(view.manuscript(), context.book),
+          )
+        : [];
+    const checking =
+      planFindings.length > 0 ||
+      messages.findLast((m) => m.role === 'author')?.ask === 'check-plan';
+    // A Review or a Plan check asks before it proposes.
+    const made =
+      reviewing || checking
+        ? null
+        : await readProposals(
+            view,
+            finished.proposals,
+            storyBibleOf(view, context.book),
+            mode,
+            // An Add may go in or after a unit one still pending proposes.
+            messages.flatMap((m) =>
+              (m.proposals ?? []).filter((p) => p.state.kind === 'pending'),
+            ),
+          );
     const proposals = made?.proposals ?? [];
-    const unreadable = made ? finished.unreadable + made.unreadable : 0;
+    // A Plan check's Proposals can't be taken, so they count as unreadable.
+    const unreadable = made
+      ? finished.unreadable + made.unreadable
+      : checking
+        ? finished.unreadable + finished.proposals.length
+        : 0;
     const reply: ConversationMessage = {
       role: 'assistant',
       text: finished.text,
@@ -238,6 +277,7 @@ export function createConversationEngine({
       ...(unreadable > 0 && { unreadable }),
       saw: context.saw,
       ...(findings.length > 0 && { findings }),
+      ...(planFindings.length > 0 && { planFindings }),
     };
     await store.appendMessage(conversationId, reply);
     for (const proposal of proposals) {
@@ -324,6 +364,23 @@ export function createConversationEngine({
         return { ...finding, ...(sceneId && { sceneId }) };
       }),
     );
+  }
+
+  /**
+   * The Findings of a Plan check a reply's finding blocks make, in the order
+   * given, most consequential first, each naming only those of its units
+   * that are among `units`, the Book's.
+   */
+  function planFindingsIn(
+    blocks: unknown[],
+    units: Set<string>,
+  ): PlanFinding[] {
+    return blocks.flatMap((block) => {
+      const finding = planFindingOf(block);
+      return finding
+        ? [{ ...finding, units: finding.units.filter((id) => units.has(id)) }]
+        : [];
+    });
   }
 
   return {

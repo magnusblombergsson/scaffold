@@ -4,9 +4,13 @@ import {
   findingOf,
   inOrder,
   isFinding,
+  isPlanFinding,
+  planFindingBlock,
+  planFindingOf,
   quotedIn,
   reviewedUnit,
   type Finding,
+  type PlanFinding,
 } from './finding';
 import type { ConversationMessage } from './conversation';
 import type { Manuscript } from './project-types';
@@ -168,5 +172,66 @@ describe('reviewedUnit', () => {
       reviewedUnit([asked('review-chapter', ['s2']), reply], 1, manuscript),
     ).toBeNull();
     expect(reviewedUnit([reply], 0, manuscript)).toBeNull();
+  });
+});
+
+describe('planFindingOf', () => {
+  it('takes a Finding of a Plan check: its kind, units, quote, comment and question', () => {
+    expect(
+      planFindingOf({
+        kind: 'gap',
+        units: ['c1', ' s2 '],
+        quote: ' Mira  waits. ',
+        comment: 'Nothing pays off the letter.',
+        question: 'Where does it come back?',
+      }),
+    ).toEqual({
+      kind: 'gap',
+      units: ['c1', 's2'],
+      quote: 'Mira waits.',
+      comment: 'Nothing pays off the letter.',
+      question: 'Where does it come back?',
+    });
+  });
+
+  it('takes units that aren’t ids as none, and leaves out a quote or question not given', () => {
+    expect(
+      planFindingOf({ kind: 'idle', units: ['s1', 3, ''], comment: 'Hm.' }),
+    ).toEqual({ kind: 'idle', units: ['s1'], comment: 'Hm.' });
+    expect(planFindingOf({ kind: 'beat', comment: 'No Midpoint.' })).toEqual({
+      kind: 'beat',
+      units: [],
+      comment: 'No Midpoint.',
+    });
+  });
+
+  it('takes nothing of a Review’s type, an unknown kind or without a comment', () => {
+    expect(planFindingOf({ type: 'contradiction', comment: 'Hm.' })).toBeNull();
+    expect(planFindingOf({ kind: 'voice', comment: 'Hm.' })).toBeNull();
+    expect(planFindingOf({ kind: 'gap', comment: ' ' })).toBeNull();
+    expect(planFindingOf(null)).toBeNull();
+  });
+});
+
+describe('a Plan check’s Finding in the log and sent back', () => {
+  const finding: PlanFinding = {
+    kind: 'contradiction',
+    units: ['s1'],
+    quote: 'Mira is an only child.',
+    comment: 'The Story Bible gives her a sister.',
+    question: 'Which holds?',
+  };
+
+  it('is read back as it was written', () => {
+    expect(isPlanFinding(finding)).toBe(true);
+    expect(isPlanFinding({ ...finding, units: 's1' })).toBe(false);
+    expect(isPlanFinding({ ...finding, kind: 'voice' })).toBe(false);
+    expect(isPlanFinding({ type: 'missing', comment: 'Hm.' })).toBe(false);
+  });
+
+  it('is sent back as the block the Assistant wrote', () => {
+    expect(planFindingBlock(finding)).toBe(
+      '```finding\n{"kind":"contradiction","units":["s1"],"quote":"Mira is an only child.","comment":"The Story Bible gives her a sister.","question":"Which holds?"}\n```',
+    );
   });
 });

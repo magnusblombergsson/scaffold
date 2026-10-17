@@ -32,6 +32,7 @@ import {
   type ManuscriptScene,
   type ProseLanguage,
 } from '../shared/project-types';
+import type { TodoLink } from '../shared/todo';
 import { wordTargetText } from '../shared/word-target';
 import { BeatChips, BeatRail, SceneBeats } from './Beats';
 import { BookDetailsStrip, StructureGuide } from './BookDetails';
@@ -63,7 +64,8 @@ import { useMirror, useOutlines, useRun } from './use-project';
  * in the centre, the Book's Outline tree, with the Outline Proposals of the
  * Conversation open drawn under their unit and decided there, and the
  * details of the unit chosen beside it; the Conversation on the right,
- * whose replies list their Proposals as links to their unit. The Author
+ * whose replies list their Proposals as links to their unit, and a Plan
+ * check's Findings with links to the units they name. The Author
  * picks the focus, the Book or a Part or Chapter of it, and may change it
  * at any time; an empty Room offers the two start buttons.
  */
@@ -75,6 +77,7 @@ export function PlanRoom({
   language,
   pane,
   onAddProvider,
+  onAddTodo,
 }: {
   /** Whether the room is shown, its Mode the window's. */
   active: boolean;
@@ -87,6 +90,8 @@ export function PlanRoom({
   /** The width of a side pane, and how to resize it. */
   pane(key: keyof PanelWidths): PaneSize;
   onAddProvider(): void;
+  /** Starts a Todo from a Plan check's Finding: its text, linked to the first unit it names. */
+  onAddTodo(text: string, link: TodoLink | null): void;
 }) {
   const providers = useProviders();
   const readOnly = useContext(ReadOnlyContext);
@@ -334,6 +339,11 @@ export function PlanRoom({
                   />
                 }
                 onOpenSettings={onAddProvider}
+                onAddTodo={onAddTodo}
+                onShowUnit={(id) => {
+                  setSelected(id);
+                  point(id);
+                }}
                 proposals={(made) => (
                   <PlanProposals
                     conversationId={current?.id ?? null}

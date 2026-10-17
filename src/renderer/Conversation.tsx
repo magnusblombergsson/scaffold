@@ -23,14 +23,17 @@ import {
 } from '../shared/conversation';
 import {
   FINDING_LABELS,
+  PLAN_FINDING_LABELS,
   reviewedUnit,
   reviewText,
   type Finding,
+  type PlanFinding,
   type ReviewCommand,
 } from '../shared/finding';
 import { conversationBook } from '../shared/manuscript-order';
 import { loggedModel, type Model } from '../shared/models';
 import type { TodoLink } from '../shared/todo';
+import { manuscriptUnit } from '../shared/unit-name';
 import type {
   EntrySummary,
   Manuscript,
@@ -594,6 +597,7 @@ export function MessageLog({
   onOpenSettings,
   onQuote,
   onAddTodo,
+  onShowUnit,
   proposals: showProposals,
 }: {
   conversation: ConversationState;
@@ -602,8 +606,13 @@ export function MessageLog({
   empty?: ReactNode;
   onOpenSettings(): void;
   onQuote?(sceneId: string, quote: string): void;
-  /** Starts a Todo from a Finding: its text, linked to the unit reviewed. */
+  /**
+   * Starts a Todo from a Finding: its text, linked to the unit reviewed, or
+   * the first a Plan check's names.
+   */
   onAddTodo?(text: string, link: TodoLink | null): void;
+  /** Shows a unit a Plan check's Finding names. */
+  onShowUnit?(id: string): void;
   /** How a reply's Proposals show, if not as cards in it. */
   proposals?(proposals: ProposalView[]): ReactNode;
 }) {
@@ -645,14 +654,13 @@ export function MessageLog({
             conversationId={current.id}
             shown={shown}
             onQuote={onQuote}
+            onShowUnit={onShowUnit}
             showProposals={showProposals}
-            onAddTodo={
-              onAddTodo &&
-              ((text) =>
-                onAddTodo(
-                  text,
-                  reviewedUnit(current.messages, i, names.manuscript),
-                ))
+            onAddTodo={onAddTodo}
+            reviewed={
+              m.findings
+                ? reviewedUnit(current.messages, i, names.manuscript)
+                : null
             }
           />
         </Fragment>
@@ -1004,6 +1012,8 @@ function Message({
   shown,
   onQuote,
   onAddTodo,
+  reviewed,
+  onShowUnit,
   showProposals,
 }: {
   message: Pick<ConversationMessage, 'role' | 'text'> &
@@ -1014,13 +1024,17 @@ function Message({
   /** The Proposal the Author came to see, if any. */
   shown?: string | null;
   onQuote?(sceneId: string, quote: string): void;
-  /** Starts a Todo of a Finding's text, linked to the unit reviewed. */
-  onAddTodo?(text: string): void;
+  /** Starts a Todo of a Finding's text, linked to `link`. */
+  onAddTodo?(text: string, link: TodoLink | null): void;
+  /** The unit a Review's Findings link a Todo to, if any. */
+  reviewed?: TodoLink | null;
+  /** Shows a unit a Plan check's Finding names. */
+  onShowUnit?(id: string): void;
   /** How its Proposals show, if not as cards. */
   showProposals?(proposals: ProposalView[]): ReactNode;
 }) {
   const { role, text, model, provider, interrupted, unreadable } = message;
-  const { cutShort, saw, findings, proposals } = message;
+  const { cutShort, saw, findings, planFindings, proposals } = message;
   const used = model && (
     <>
       <span className="message-model" aria-label="Model">
@@ -1048,6 +1062,21 @@ function Message({
               finding={finding}
               manuscript={names.manuscript}
               onQuote={onQuote}
+              onAddTodo={
+                onAddTodo && ((text) => onAddTodo(text, reviewed ?? null))
+              }
+            />
+          ))}
+        </ol>
+      )}
+      {planFindings && planFindings.length > 0 && (
+        <ol className="findings" aria-label="Findings">
+          {planFindings.map((finding, i) => (
+            <PlanFindingItem
+              key={i}
+              finding={finding}
+              manuscript={names.manuscript}
+              onShowUnit={onShowUnit}
               onAddTodo={onAddTodo}
             />
           ))}
@@ -1146,6 +1175,75 @@ function FindingItem({
           className="finding-todo"
           disabled={readOnly}
           onClick={() => onAddTodo(comment)}
+        >
+          Add as Todo
+        </button>
+      )}
+    </li>
+  );
+}
+
+/**
+ * One Finding of a Plan check: its kind, the units it names, its comment,
+ * quote and question. Each unit still in the Manuscript shows it in the
+ * plan. Add as Todo starts a Todo of its comment, linked to the first.
+ */
+function PlanFindingItem({
+  finding: { kind, units, comment, quote, question },
+  manuscript,
+  onShowUnit,
+  onAddTodo,
+}: {
+  finding: PlanFinding;
+  manuscript: Manuscript;
+  onShowUnit?(id: string): void;
+  onAddTodo?(text: string, link: TodoLink | null): void;
+}) {
+  const readOnly = useContext(ReadOnlyContext);
+  const named = units.flatMap((id) => manuscriptUnit(id, manuscript) ?? []);
+  return (
+    <li className={`finding plan-finding-${kind}`}>
+      <span className="finding-type">{PLAN_FINDING_LABELS[kind]}</span>
+      {named.length > 0 && (
+        <ul className="finding-units" aria-label="Units">
+          {named.map((unit) => (
+            <li key={unit.id}>
+              {onShowUnit ? (
+                <button
+                  className="link-button"
+                  title={`Show “${unit.title}” in the plan`}
+                  onClick={() => onShowUnit(unit.id)}
+                >
+                  {unit.title}
+                </button>
+              ) : (
+                unit.title
+              )}
+            </li>
+          ))}
+        </ul>
+      )}
+      <p className="finding-comment">
+        <ReplyInlineText text={comment} />
+      </p>
+      {quote && <q className="finding-quote">{quote}</q>}
+      {question && (
+        <p className="finding-question">
+          <strong>
+            <ReplyInlineText text={question} />
+          </strong>
+        </p>
+      )}
+      {onAddTodo && (
+        <button
+          className="finding-todo"
+          disabled={readOnly}
+          onClick={() =>
+            onAddTodo(
+              comment,
+              named[0] ? { kind: named[0].kind, id: named[0].id } : null,
+            )
+          }
         >
           Add as Todo
         </button>
