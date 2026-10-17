@@ -5282,6 +5282,33 @@ button.finding-quote:hover {
   border-style: dashed;
 }
 
+/* A mark a pending Proposal would add: dashed and unfilled; one it would take away, struck. */
+.beat-chip.beat-chip-added {
+  border-style: dashed;
+  background: transparent;
+}
+
+.beat-chip.beat-chip-removed {
+  border-style: dashed;
+  border-color: var(--muted);
+  background: transparent;
+  color: var(--muted);
+}
+
+.scene-beat-proposed {
+  padding: 0 0.35rem;
+  border: 1px dashed var(--accent);
+  border-radius: 999px;
+  color: var(--accent);
+  font-size: 0.7rem;
+  white-space: nowrap;
+}
+
+.scene-beat-proposed.beat-chip-removed {
+  border-color: var(--muted);
+  color: var(--muted);
+}
+
 .scene-beats {
   margin-top: 0.75rem;
 }

@@ -2,7 +2,6 @@ import { useContext } from 'react';
 import {
   beatWhere,
   carriers,
-  shownBeats,
   spanText,
   type FollowedBeat,
   type Measure,
@@ -22,25 +21,64 @@ const MEASURED: Record<Measure, string> = {
   order: 'by Scene order',
 };
 
-/** The Beats a Scene carries of what the Book follows, as chips on its row in the tree. */
+/**
+ * The Beats a Scene carries of what the Book follows, as chips on its row in
+ * the tree; with a pending Beats Proposal's list, those it would add as
+ * dashed chips and those it would take away struck through.
+ */
 export function BeatChips({
-  scene,
+  marks,
+  proposed,
   followed,
 }: {
-  scene: ManuscriptScene;
+  marks: readonly string[] | undefined;
+  /** The whole list a pending Proposal sets, null for none; undefined with none pending. */
+  proposed?: readonly string[] | null;
   followed: readonly FollowedBeat[];
 }) {
-  const shown = shownBeats(scene.beats, followed);
-  if (shown.length === 0) return null;
+  const chips = followed.flatMap((beat) => {
+    const carried = !!marks?.includes(beat.id);
+    const change = proposedChange(beat.id, carried, proposed);
+    return carried || change ? [{ beat, change }] : [];
+  });
+  if (chips.length === 0) return null;
   return (
     <ul className="beat-chips" aria-label="Beats">
-      {shown.map((b) => (
-        <li key={b.id} className="beat-chip" data-column={b.column}>
-          {b.name}
+      {chips.map(({ beat, change }) => (
+        <li
+          key={beat.id}
+          className={change ? `beat-chip beat-chip-${change}` : 'beat-chip'}
+          data-column={beat.column}
+          title={change ? PROPOSED_LABELS[change] : undefined}
+        >
+          {change === 'removed' ? <del>{beat.name}</del> : beat.name}
         </li>
       ))}
     </ul>
   );
+}
+
+/** What a pending Beats Proposal would do to a mark. */
+type MarkChange = 'added' | 'removed';
+
+const PROPOSED_LABELS: Record<MarkChange, string> = {
+  added: 'Proposed',
+  removed: 'Proposed to take away',
+};
+
+/**
+ * What a pending Beats Proposal setting `proposed` would do to the mark
+ * `beat`, which the Scene has `carried` or not; null for nothing.
+ */
+function proposedChange(
+  beat: string,
+  carried: boolean,
+  proposed: readonly string[] | null | undefined,
+): MarkChange | null {
+  if (proposed === undefined) return null;
+  const marked = !!proposed?.includes(beat);
+  if (marked === carried) return null;
+  return marked ? 'added' : 'removed';
 }
 
 /**
@@ -53,11 +91,14 @@ export function SceneBeats({
   falls,
   measure,
   followed,
+  proposed,
 }: {
   scene: ManuscriptScene;
   falls: Span | undefined;
   measure: Measure;
   followed: readonly FollowedBeat[];
+  /** The whole list a pending Proposal sets, null for none; undefined with none pending. */
+  proposed?: readonly string[] | null;
 }) {
   const readOnly = useContext(ReadOnlyContext);
   const run = useRun();
@@ -83,18 +124,29 @@ export function SceneBeats({
             <legend>{source}</legend>
             {followed
               .filter((b) => b.source === source)
-              .map((b) => (
-                <label key={b.id} className="scene-beat">
-                  <input
-                    type="checkbox"
-                    checked={!!scene.beats?.includes(b.id)}
-                    disabled={readOnly || !!scene.missing}
-                    onChange={(event) => mark(b, event.target.checked)}
-                  />
-                  <span className="scene-beat-name">{b.name}</span>
-                  <span className="scene-beat-where">{beatWhere(b)}</span>
-                </label>
-              ))}
+              .map((b) => {
+                const carried = !!scene.beats?.includes(b.id);
+                const change = proposedChange(b.id, carried, proposed);
+                return (
+                  <label key={b.id} className="scene-beat">
+                    <input
+                      type="checkbox"
+                      checked={carried}
+                      disabled={readOnly || !!scene.missing}
+                      onChange={(event) => mark(b, event.target.checked)}
+                    />
+                    <span className="scene-beat-name">{b.name}</span>
+                    <span className="scene-beat-where">{beatWhere(b)}</span>
+                    {change && (
+                      <span
+                        className={`scene-beat-proposed beat-chip-${change}`}
+                      >
+                        {PROPOSED_LABELS[change]}
+                      </span>
+                    )}
+                  </label>
+                );
+              })}
           </fieldset>
         ))
       )}

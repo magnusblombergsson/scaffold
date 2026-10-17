@@ -23,6 +23,7 @@ import {
   asNewEntry,
   asNewUnit,
   asPlace,
+  isBeatsValue,
   decided,
   isAppending,
   isChoiceField,
@@ -145,9 +146,26 @@ export type BookDetailEvent = {
 };
 
 /**
+ * A Proposal of Plan's on a Scene's whole list of Beats (spec: Outline
+ * planner §4): the `scene` by id, and the list it had and the one proposed,
+ * qualified ids of what its Book follows or null for none, and the
+ * Proposals it `needs` accepted first. Apps from before Beats Proposals
+ * skip it, and so its accept, reject and undo (ADR 0006).
+ */
+export type BeatsEvent = {
+  type: 'proposal.beats';
+  id: string;
+  scene: string;
+  base: string[] | null;
+  proposed: string[] | null;
+  needs?: string[];
+  at: number;
+};
+
+/**
  * A new Scene, Chapter or Part Plan proposed: the id it gets, its
- * container and the unit it goes after, if any, its title and Outline,
- * and the Proposals it `needs` accepted first. Apps from before Plan skip
+ * container and the unit it goes after, if any, its title and Outline, a
+ * Scene's Beats, and the Proposals it `needs` accepted first. Apps from before Plan skip
  * it, and so its accept, reject and undo (ADR 0006).
  */
 export type AddEvent = {
@@ -159,6 +177,7 @@ export type AddEvent = {
   after?: string;
   title: string;
   outline: string;
+  beats?: string[];
   needs?: string[];
   at: number;
 };
@@ -344,6 +363,7 @@ export type ConversationEvent =
   | OfferedEvent
   | RelatedEvent
   | BookDetailEvent
+  | BeatsEvent
   | AddEvent
   | RetitleEvent
   | MoveEvent
@@ -492,6 +512,7 @@ export function parseLog(log: string): LoggedConversation | null {
       event.type === 'proposal.offered' ||
       event.type === 'proposal.related' ||
       event.type === 'proposal.bookDetail' ||
+      event.type === 'proposal.beats' ||
       event.type === 'proposal.add' ||
       event.type === 'proposal.retitle' ||
       event.type === 'proposal.move' ||
@@ -506,9 +527,11 @@ export function parseLog(log: string): LoggedConversation | null {
               ? loggedRelation(event as Partial<RelatedEvent>)
               : event.type === 'proposal.bookDetail'
                 ? loggedBookDetail(event as Partial<BookDetailEvent>)
-                : loggedStructure(
-                    event as Parameters<typeof loggedStructure>[0],
-                  );
+                : event.type === 'proposal.beats'
+                  ? loggedBeats(event as Partial<BeatsEvent>)
+                  : loggedStructure(
+                      event as Parameters<typeof loggedStructure>[0],
+                    );
       if (proposal && !known && messages.length > 0) {
         proposals.set(proposal.id, {
           ...proposal,
@@ -607,9 +630,22 @@ export function proposedEvent(
   | RetitleEvent
   | MoveEvent
   | TrashEvent
-  | BookDetailEvent {
+  | BookDetailEvent
+  | BeatsEvent {
   const { id } = proposal;
   const needs = proposal.needs?.length ? { needs: proposal.needs } : {};
+  if (proposal.kind === 'beats') {
+    const { sceneId, base, proposed } = proposal;
+    return {
+      type: 'proposal.beats',
+      id,
+      scene: sceneId,
+      base,
+      proposed,
+      ...needs,
+      at,
+    };
+  }
   if (proposal.kind === 'move') {
     const { unit, unitId, from, after } = proposal;
     return {
@@ -661,6 +697,7 @@ export function proposedEvent(
       ...(after !== undefined && { after }),
       title: proposed.title,
       outline: proposed.outline,
+      ...(proposed.beats && { beats: proposed.beats }),
       ...needs,
       at,
     };
@@ -782,11 +819,15 @@ export function acceptedEvent(
     };
   }
   if (proposal.kind === 'add') {
-    const { title, outline } = wrote as NewUnit;
+    const { title, outline, beats } = wrote as NewUnit;
     return {
       type: 'proposal.accepted',
       id,
-      fields: { title: { wrote: title }, outline: { wrote: outline } },
+      fields: {
+        title: { wrote: title },
+        outline: { wrote: outline },
+        ...(beats && { beats: { wrote: beats } }),
+      },
       at,
     };
   }
@@ -806,7 +847,7 @@ export function acceptedEvent(
   const field = fieldOfChange(
     proposal as Extract<
       Proposal,
-      { kind: 'field' | 'outline' | 'retitle' | 'book-detail' }
+      { kind: 'field' | 'outline' | 'retitle' | 'book-detail' | 'beats' }
     >,
   );
   return {
@@ -900,16 +941,13 @@ function loggedStructure(
 ): Proposal | null {
   const { id, unitId, needs } = event;
   if (typeof id !== 'string' || typeof unitId !== 'string') return null;
-  const waits =
-    Array.isArray(needs) && needs.every((n) => typeof n === 'string')
-      ? needs.length > 0 && { needs }
-      : false;
+  const waits = neededOf(needs);
   if (event.type === 'proposal.retitle') {
     const { base, proposed } = event;
     if (typeof base !== 'string' || typeof proposed !== 'string') return null;
     return { kind: 'retitle', id, unitId, base, proposed, ...waits };
   }
-  const { unit, after, title, outline } = event;
+  const { unit, after, title, outline, beats } = event;
   if (!PLAN_UNITS.includes(unit!)) return null;
   if (event.type === 'proposal.trash') {
     const { holds } = event;
@@ -935,6 +973,7 @@ function loggedStructure(
     };
   }
   if (typeof title !== 'string' || typeof outline !== 'string') return null;
+  const brings = unit === 'scene' && isBeatsValue(beats) && beats?.length;
   return {
     kind: 'add',
     id,
@@ -942,7 +981,7 @@ function loggedStructure(
     unitId,
     in: event.in,
     ...(typeof after === 'string' && { after }),
-    proposed: { title, outline },
+    proposed: { title, outline, ...(brings && { beats: beats! }) },
     ...waits,
   };
 }
@@ -954,11 +993,12 @@ function loggedStructure(
 function fieldOfChange(
   proposal: Extract<
     Proposal,
-    { kind: 'field' | 'outline' | 'retitle' | 'book-detail' }
+    { kind: 'field' | 'outline' | 'retitle' | 'book-detail' | 'beats' }
   >,
 ): string {
   if (proposal.kind === 'field') return proposal.field;
   if (proposal.kind === 'book-detail') return proposal.detail;
+  if (proposal.kind === 'beats') return 'beats';
   return proposal.kind === 'retitle' ? 'title' : 'body';
 }
 
@@ -1057,6 +1097,36 @@ function loggedBookDetail(event: Partial<BookDetailEvent>): Proposal | null {
   };
 }
 
+/**
+ * The Proposal on a Scene's Beats an event logs, if this app can take it: a
+ * Scene, and lists of qualified Beat ids, known to this version or not. Its
+ * needs are kept if readable.
+ */
+function loggedBeats(event: Partial<BeatsEvent>): Proposal | null {
+  const { id, scene, base, proposed, needs } = event;
+  if (typeof id !== 'string' || typeof scene !== 'string' || !scene) {
+    return null;
+  }
+  if (!isBeatsValue(base) || !isBeatsValue(proposed)) return null;
+  return {
+    kind: 'beats',
+    id,
+    sceneId: scene,
+    base,
+    proposed,
+    ...neededOf(needs),
+  };
+}
+
+/** The Proposals an event says one `needs`, if readable and any. */
+function neededOf(needs: unknown): { needs?: string[] } {
+  return Array.isArray(needs) &&
+    needs.length > 0 &&
+    needs.every((n) => typeof n === 'string')
+    ? { needs }
+    : {};
+}
+
 /** What an accept of a Relation Proposal logs it wrote, if it can be read. */
 function relationWrittenOf(value: unknown): RelationWritten | null {
   if (typeof value !== 'object' || value === null) return null;
@@ -1124,7 +1194,15 @@ function acceptedOf(
       title: fields.title?.wrote,
       outline: fields.outline?.wrote,
     });
-    return wrote && { kind: 'accepted', wrote };
+    const beats = fields.beats?.wrote;
+    const brought =
+      Array.isArray(beats) && beats.length > 0 && isBeatsValue(beats);
+    return (
+      wrote && {
+        kind: 'accepted',
+        wrote: brought ? { ...wrote, beats } : wrote,
+      }
+    );
   }
   if (proposal.kind === 'new-entry') {
     const wrote = asNewEntry({
@@ -1141,7 +1219,9 @@ function acceptedOf(
       ? isFieldValue(proposal.field, value)
       : proposal.kind === 'book-detail'
         ? isLoggedDetailValue(proposal.detail, value)
-        : typeof value === 'string';
+        : proposal.kind === 'beats'
+          ? isBeatsValue(value)
+          : typeof value === 'string';
   if (!holds(replaced) || !holds(wrote)) return null;
   const { on, evolved } = event;
   return {

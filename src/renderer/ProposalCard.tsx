@@ -28,6 +28,7 @@ import {
 } from '../shared/proposal';
 import { relationVerb } from '../shared/relation-proposal';
 import { BOOK_DETAIL_LABELS, detailText } from '../shared/book-details';
+import { beatName } from '../shared/structure-catalogue';
 import { fieldDiff, textDiff, type DiffPart } from '../shared/diff';
 import { ReadOnlyContext } from './read-only';
 import { useRun } from './use-project';
@@ -57,6 +58,7 @@ export function proposalTitle(proposal: ProposalView): string {
   if (proposal.kind === 'retitle') return `${proposal.name} › Title`;
   if (proposal.kind === 'move') return `Move ${proposal.name}`;
   if (proposal.kind === 'trash') return `Put ${proposal.name} in Trash`;
+  if (proposal.kind === 'beats') return `${proposal.name} › Beats`;
   return `${proposal.name} › Outline`;
 }
 
@@ -224,13 +226,15 @@ export function ProposalCard({
 
   const orphaned = 'orphaned' in state ? state.orphaned : null;
   const refused = 'refused' in state ? state.refused : null;
-  // A Move, Put in Trash or Book's detail is accepted or rejected only.
+  // A Move, Put in Trash, Book's detail or Scene's Beats is accepted or
+  // rejected only.
   const editable =
     proposal.kind === 'relation'
       ? proposal.proposed.kind === 'label'
       : proposal.kind !== 'move' &&
         proposal.kind !== 'trash' &&
-        proposal.kind !== 'book-detail';
+        proposal.kind !== 'book-detail' &&
+        proposal.kind !== 'beats';
   const current = 'current' in state ? state.current : null;
   const stale = 'stale' in state && state.stale;
   // Until those it needs are accepted, it can only be rejected.
@@ -304,7 +308,9 @@ export function ProposalCard({
                       ? 'Its place'
                       : proposal.kind === 'trash'
                         ? 'It'
-                        : 'The Outline'}{' '}
+                        : proposal.kind === 'beats'
+                          ? 'The list of Beats'
+                          : 'The Outline'}{' '}
               has changed since this was proposed.
             </p>
           )}
@@ -445,13 +451,40 @@ function Change({
       </dl>
     );
   }
+  if (proposal.kind === 'beats') {
+    const { base, proposed } = proposal;
+    return (
+      <dl className="proposal-values">
+        {stale && (
+          <>
+            <dt>Now</dt>
+            <dd>{beatsText(current as string[] | null)}</dd>
+          </>
+        )}
+        <dt>{stale ? 'Proposed against' : 'Before'}</dt>
+        <dd>
+          <del>{beatsText(base)}</del>
+        </dd>
+        <dt>Proposed</dt>
+        <dd>
+          <ins>{beatsText(proposed)}</ins>
+        </dd>
+      </dl>
+    );
+  }
   if (proposal.kind === 'add') {
+    const { beats } = proposal.proposed;
     return (
       <div className="proposal-diff" aria-label="Change">
         <ins className="proposal-unit-title">{proposal.proposed.title}</ins>
         {proposal.proposed.outline && (
           <p className="proposal-unit-outline">
             <ins>{proposal.proposed.outline}</ins>
+          </p>
+        )}
+        {beats && (
+          <p className="proposal-unit-beats">
+            Beats: <ins>{beatsText(beats)}</ins>
           </p>
         )}
       </div>
@@ -535,6 +568,11 @@ function Change({
   return <Diff parts={fieldDiff(field, base, proposed)} />;
 }
 
+/** A list of Beats in words for the Author, as in “Catalyst, Midpoint”, or None. */
+function beatsText(beats: readonly string[] | null): string {
+  return beats && beats.length > 0 ? beats.map(beatName).join(', ') : 'None';
+}
+
 /** A change shown inline: what goes struck through, what comes underlined. */
 function Diff({ parts }: { parts: DiffPart[] }) {
   return (
@@ -561,7 +599,7 @@ function draftOf(proposal: ProposalView): Draft {
     return proposal.proposed.kind === 'label' ? proposal.proposed.label : '';
   }
   // Never edited: accepted or rejected as proposed.
-  if (proposal.kind === 'book-detail') return '';
+  if (proposal.kind === 'book-detail' || proposal.kind === 'beats') return '';
   if (proposal.kind === 'add') return { ...proposal.proposed };
   if (proposal.kind === 'move' || proposal.kind === 'trash') return '';
   if (proposal.kind !== 'field') return proposal.proposed;

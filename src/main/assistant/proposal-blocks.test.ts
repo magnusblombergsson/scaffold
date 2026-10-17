@@ -410,3 +410,229 @@ describe('A Proposal placed after a unit an unreadable Move moves', () => {
     expect(unreadable).toBe(2);
   });
 });
+
+describe('Beats Proposals', () => {
+  const MIDPOINT = 'save-the-cat/midpoint';
+  const CATALYST = 'save-the-cat/catalyst';
+
+  /** A Project of one Book following Save the Cat; its first Chapter and Scene. */
+  async function project() {
+    const store = await createProject(path.join(dir, 'My Novel'), {
+      fs: nodeFileSystem,
+      clock: instantClock(1_000),
+    });
+    await store.setBookDetail(PROJECT_OUTLINE, 'structure', 'save-the-cat');
+    const [chapter] = store.manuscript().chapters;
+    return { store, chapter: chapter.id, scene: chapter.scenes[0].id };
+  }
+
+  it('in Plan, set a Scene’s whole list of Beats, against the marks of what its Book follows', async () => {
+    const { store, scene } = await project();
+    await store.setBeat(scene, CATALYST, true);
+    // Set aside: the Book doesn't follow Three-act.
+    await store.setBeat(scene, 'three-act/inciting-incident', true);
+    const view = store.assistantView();
+    const reply = async (beats: string[]) =>
+      readProposals(
+        view,
+        [{ scene, beats }],
+        storyBibleOf(view, undefined),
+        'plan',
+      );
+
+    const replies = [
+      await reply([MIDPOINT, CATALYST, MIDPOINT]),
+      // What it carries already, set-aside marks playing no part.
+      await reply([CATALYST]),
+      await reply([]),
+    ];
+
+    expect(replies.map((r) => r.unreadable)).toEqual([0, 0, 0]);
+    expect(replies.flatMap((r) => r.proposals)).toEqual([
+      {
+        id: expect.any(String),
+        kind: 'beats',
+        sceneId: scene,
+        base: [CATALYST],
+        proposed: [CATALYST, MIDPOINT],
+      },
+      expect.objectContaining({ base: [CATALYST], proposed: null }),
+    ]);
+  });
+
+  it('are unreadable with a Beat the Book doesn’t follow, on a Scene of another Book or not a Scene, or outside Plan', async () => {
+    const { store, chapter, scene } = await project();
+    const view = store.assistantView();
+    const lens = storyBibleOf(view, undefined);
+
+    expect(
+      await readProposals(
+        view,
+        [
+          { scene, beats: ['three-act/inciting-incident'] },
+          { scene, beats: ['save-the-cat/from-a-newer-app'] },
+          { scene, beats: MIDPOINT },
+          { scene: chapter, beats: [MIDPOINT] },
+          { scene: 'nowhere', beats: [MIDPOINT] },
+        ],
+        lens,
+        'plan',
+      ),
+    ).toEqual({ proposals: [], unreadable: 5 });
+    for (const mode of ['brainstorm', 'interview', 'writing'] as const) {
+      expect(
+        await readProposals(view, [{ scene, beats: [MIDPOINT] }], lens, mode),
+      ).toEqual({ proposals: [], unreadable: 1 });
+    }
+  });
+
+  it('are unreadable on a Missing Scene', async () => {
+    const { store, scene } = await project();
+    const real = store.assistantView();
+    const view = {
+      ...real,
+      manuscript: () => {
+        const manuscript = real.manuscript();
+        return {
+          ...manuscript,
+          chapters: manuscript.chapters.map((c) => ({
+            ...c,
+            scenes: c.scenes.map((s) => ({ ...s, missing: true as const })),
+          })),
+        };
+      },
+    };
+
+    expect(
+      await readProposals(
+        view,
+        [{ scene, beats: [MIDPOINT] }],
+        storyBibleOf(view, undefined),
+        'plan',
+      ),
+    ).toEqual({ proposals: [], unreadable: 1 });
+  });
+
+  it('on a Scene an Add in the same reply proposes, need that Add', async () => {
+    const { store, chapter } = await project();
+    const view = store.assistantView();
+
+    const { proposals, unreadable } = await readProposals(
+      view,
+      [
+        { add: 'scene', id: 'new-1', title: 'Ferry', in: chapter },
+        { scene: 'new-1', beats: [MIDPOINT] },
+      ],
+      storyBibleOf(view, undefined),
+      'plan',
+    );
+
+    expect(unreadable).toBe(0);
+    const [add, marks] = proposals as [
+      Extract<(typeof proposals)[number], { kind: 'add' }>,
+      Extract<(typeof proposals)[number], { kind: 'beats' }>,
+    ];
+    expect(marks).toEqual({
+      id: expect.any(String),
+      kind: 'beats',
+      sceneId: add.unitId,
+      base: null,
+      proposed: [MIDPOINT],
+      needs: [add.id],
+    });
+  });
+
+  it('are one per Scene per reply: a further one on the same Scene is unreadable', async () => {
+    const { store, scene } = await project();
+    const view = store.assistantView();
+
+    const { proposals, unreadable } = await readProposals(
+      view,
+      [
+        { scene, beats: [MIDPOINT] },
+        { scene, beats: [CATALYST] },
+      ],
+      storyBibleOf(view, undefined),
+      'plan',
+    );
+
+    expect(unreadable).toBe(1);
+    expect(proposals).toEqual([
+      expect.objectContaining({ proposed: [MIDPOINT] }),
+    ]);
+  });
+
+  it('on a Scene an Add brings Beats with, are judged against those', async () => {
+    const { store, chapter } = await project();
+    const view = store.assistantView();
+
+    const { proposals } = await readProposals(
+      view,
+      [
+        {
+          add: 'scene',
+          id: 'new-1',
+          title: 'Ferry',
+          in: chapter,
+          beats: [CATALYST],
+        },
+        { scene: 'new-1', beats: [CATALYST, MIDPOINT] },
+        {
+          add: 'scene',
+          id: 'new-2',
+          title: 'Dock',
+          in: chapter,
+          beats: [MIDPOINT],
+        },
+        { scene: 'new-2', beats: [MIDPOINT] },
+      ],
+      storyBibleOf(view, undefined),
+      'plan',
+    );
+
+    expect(proposals.filter((p) => p.kind === 'beats')).toEqual([
+      expect.objectContaining({
+        base: [CATALYST],
+        proposed: [CATALYST, MIDPOINT],
+      }),
+    ]);
+  });
+
+  it('may come with an Add of a Scene, of what the Book follows; never with a Chapter or Part', async () => {
+    const { store, chapter } = await project();
+    const view = store.assistantView();
+
+    const { proposals, unreadable } = await readProposals(
+      view,
+      [
+        {
+          add: 'scene',
+          title: 'Ferry',
+          in: chapter,
+          beats: [MIDPOINT, CATALYST],
+        },
+        { add: 'scene', title: 'Dock', in: chapter, beats: [] },
+        {
+          add: 'scene',
+          title: 'Quay',
+          in: chapter,
+          beats: ['three-act/inciting-incident'],
+        },
+        {
+          add: 'chapter',
+          title: 'Away',
+          in: PROJECT_OUTLINE,
+          beats: [MIDPOINT],
+        },
+      ],
+      storyBibleOf(view, undefined),
+      'plan',
+    );
+
+    expect(unreadable).toBe(2);
+    expect(proposals.map((p) => p.kind === 'add' && p.proposed)).toEqual([
+      { title: 'Ferry', outline: '', beats: [CATALYST, MIDPOINT] },
+      { title: 'Dock', outline: '' },
+    ]);
+  });
+});

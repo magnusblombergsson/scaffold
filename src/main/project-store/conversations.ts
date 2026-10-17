@@ -9,6 +9,7 @@ import {
   type EntrySummary,
   type EntryValue,
   type Manuscript,
+  type ManuscriptScene,
   type OutlineRef,
   type OutlineValue,
   type BookDetailKey,
@@ -17,6 +18,12 @@ import {
   type ValueOf,
 } from '../../shared/project-types';
 import { type AcceptOptions, type ProjectEvent } from '../../shared/api';
+import {
+  beatsValue,
+  followedBeats,
+  withSetAside,
+  type FollowedBeat,
+} from '../../shared/beat-measure';
 import {
   bookDetailsOf,
   detailValue,
@@ -53,6 +60,8 @@ import {
   stateOf,
   undo,
   withField,
+  type BeatsBasis,
+  type BeatsChange,
   type BookDetailChange,
   type DecidedProposal,
   type Decision,
@@ -180,6 +189,14 @@ export type ConversationsDeps = {
     bookId: string,
     key: BookDetailKey,
     change: () => BookDetailValue,
+  ) => Promise<void>;
+  /**
+   * Gives a Scene the whole list of Beats `change` makes of the Manuscript
+   * as it is then, as a structure operation; null takes them all away.
+   */
+  changeBeats: (
+    sceneId: string,
+    change: () => string[] | null,
   ) => Promise<void>;
   /** Every Relation held, as last read or written. */
   relations: () => Relation[];
@@ -710,7 +727,9 @@ ${text}`);
           ? await this.acceptNewEntry(proposal, value, how)
           : proposal.kind === 'book-detail'
             ? await this.acceptBookDetail(proposal, value, how)
-            : await this.acceptChange(proposal, value, how, fromBook);
+            : proposal.kind === 'beats'
+              ? await this.acceptBeats(proposal, value, how)
+              : await this.acceptChange(proposal, value, how, fromBook);
       await this.appendEvent(
         conversationId,
         acceptedEvent(proposal, replaced, wrote, this.deps.clock.now(), landed),
@@ -803,6 +822,76 @@ ${text}`);
   }
 
   /**
+   * Gives a Scene the list of Beats a Proposal proposed, as
+   * `acceptProposal`, judged against the marks it holds just before they
+   * are written; its set-aside marks are kept.
+   */
+  private async acceptBeats(
+    proposal: DecidedProposal & BeatsChange,
+    value: ProposedValue,
+    how: AcceptHow,
+  ): Promise<Accepted> {
+    // Its Scene may be out of reach, with nothing to mark.
+    granted(accept(proposal, this.beatsBasis(proposal), value, how));
+    let replaced: FieldValue | undefined;
+    let wrote = value;
+    await this.deps.changeBeats(proposal.sceneId, () => {
+      const target = this.beatsBasis(proposal);
+      ({ wrote } = granted(accept(proposal, target, value, how)));
+      replaced = (target as { current: FieldValue }).current;
+      return this.keepingSetAside(proposal.sceneId, wrote as string[] | null);
+    });
+    return { replaced, wrote };
+  }
+
+  /**
+   * What a Scene is given for `value` of a Beats Proposal: it, with the
+   * Scene's marks of what its Book doesn't follow, kept unseen.
+   */
+  private keepingSetAside(
+    sceneId: string,
+    value: string[] | null,
+  ): string[] | null {
+    const marked = this.markedScene(sceneId);
+    return withSetAside(value, marked?.scene.beats, marked?.followed ?? []);
+  }
+
+  /**
+   * A placed Scene and the Beats of what its Book follows; none for a Scene
+   * Unplaced, in an Unplaced Chapter, or not in the Manuscript.
+   */
+  private markedScene(
+    sceneId: string,
+  ): { scene: ManuscriptScene; followed: FollowedBeat[] } | null {
+    const manuscript = this.deps.manuscript();
+    for (const chapter of manuscript.chapters) {
+      const scene = chapter.scenes.find((s) => s.id === sceneId);
+      if (!scene || chapter.unplaced) continue;
+      const book = bookDetailsOf(manuscript, chapter.book);
+      return { scene, followed: followedBeats(book) };
+    }
+    return null;
+  }
+
+  /**
+   * A Beats Proposal's basis: its Scene's marks of what its Book follows
+   * now, as a Proposal compares them; refused for a Scene Missing,
+   * Unplaced or in Conflict.
+   */
+  private beatsBasis({ sceneId }: BeatsChange): BeatsBasis {
+    const orphaned = this.deps.outlineOrphaned(sceneId);
+    if (orphaned) return { orphaned };
+    const name = this.outlineName(sceneId);
+    const marked = this.markedScene(sceneId);
+    if (!marked) return { refused: `${name} is Unplaced` };
+    if (marked.scene.missing) return { refused: `${name} is Missing` };
+    if (this.deps.conflicted(sceneId)) {
+      return { refused: `${name} is in Conflict` };
+    }
+    return { current: beatsValue(marked.scene.beats, marked.followed) };
+  }
+
+  /**
    * Adds the unit an Add proposed, with its title and Outline as the
    * Author edited them, if they did, as `acceptProposal`: the unit first,
    * then its Outline.
@@ -814,7 +903,7 @@ ${text}`);
     const { wrote } = granted(
       accept(proposal, await this.addBasis(proposal), value),
     );
-    const { title, outline } = wrote as NewUnit;
+    const { title, outline, beats } = wrote as NewUnit;
     await this.deps.addUnit(proposal, title);
     const ref = outlineRef(proposal.unitId);
     const { after } = await this.deps.changeUnit(ref, (unit) => ({
@@ -822,6 +911,7 @@ ${text}`);
       body: outline,
     }));
     this.refuseUnsaved(ref, after);
+    if (beats) await this.deps.changeBeats(proposal.unitId, () => beats);
     return { wrote, reloaded: { ref, value: after } };
   }
 
@@ -1052,9 +1142,11 @@ ${text}`);
             ? await this.undoRelation(proposal)
             : proposal.kind === 'book-detail'
               ? await this.undoBookDetail(proposal)
-              : isStructural(proposal)
-                ? await this.undoStructure(proposal)
-                : await this.undoChange(proposal);
+              : proposal.kind === 'beats'
+                ? await this.undoBeats(proposal)
+                : isStructural(proposal)
+                  ? await this.undoStructure(proposal)
+                  : await this.undoChange(proposal);
       await this.appendEvent(conversationId, {
         type: 'proposal.undone',
         id: proposalId,
@@ -1097,6 +1189,19 @@ ${text}`);
       const undone = granted(undo(proposal, this.bookDetailTarget(proposal)));
       const { restore } = undone as { restore: BookDetailValue };
       return this.withUnknownIds(proposal, restore);
+    });
+    return undefined;
+  }
+
+  /** Gives a Scene back the Beats an accept replaced, while it holds what that wrote, as `undoProposal`. */
+  private async undoBeats(
+    proposal: DecidedProposal & BeatsChange,
+  ): Promise<undefined> {
+    granted(undo(proposal, this.beatsBasis(proposal)));
+    await this.deps.changeBeats(proposal.sceneId, () => {
+      const undone = granted(undo(proposal, this.beatsBasis(proposal)));
+      const { restore } = undone as { restore: string[] | null };
+      return this.keepingSetAside(proposal.sceneId, restore);
     });
     return undefined;
   }
@@ -1237,6 +1342,7 @@ ${text}`);
       );
     }
     if (proposal.kind === 'book-detail') return this.bookDetailTarget(proposal);
+    if (proposal.kind === 'beats') return this.beatsBasis(proposal);
     if (proposal.kind === 'add') return this.addBasis(proposal);
     if (proposal.kind === 'retitle') return this.unitTitle(proposal.unitId);
     if (proposal.kind === 'move') return this.moveBasis(proposal);
@@ -1484,6 +1590,7 @@ ${text}`);
         : name;
     }
     if (isStructural(proposal)) return this.outlineName(proposal.unitId);
+    if (proposal.kind === 'beats') return this.outlineName(proposal.sceneId);
     return this.outlineName(proposal.outlineId);
   }
 
@@ -1722,8 +1829,11 @@ function withNeeds(
         state: { ...rest, stale: state.stale && !anchorAway, needs },
       };
     }
-    // An Add or a Move into a container only proposed waits for it.
-    return view.kind === 'add' || (view.kind === 'move' && 'of' in state)
+    // An Add, marks on the Scene it adds, or a Move into a container only
+    // proposed waits for it.
+    return view.kind === 'add' ||
+      view.kind === 'beats' ||
+      (view.kind === 'move' && 'of' in state)
       ? {
           ...view,
           state: { kind: 'pending', current: null, stale: false, needs },

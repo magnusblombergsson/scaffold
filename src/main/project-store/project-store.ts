@@ -1,3 +1,4 @@
+import { followedBeats, shownBeats } from '../../shared/beat-measure';
 import { bookDetailsOf } from '../../shared/book-details';
 import { createHash, randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
@@ -364,6 +365,13 @@ export interface AssistantView {
    * them (spec: Outline planner §12).
    */
   bookDetails(book: string | undefined): BookDetails;
+  /**
+   * The Beats a placed Scene carries of what its Book follows, in the
+   * order the Book lists them; hidden from the Manuscript above, as Plan
+   * alone is sent them, and set-aside marks never (spec: Outline planner
+   * §12).
+   */
+  beats(sceneId: string): string[];
   read<R extends AssistantRef>(ref: R): Promise<ValueOf<R>>;
   /** Whether a Scene's Prose is in Conflict, which Plan never proposes on. */
   conflicted?(sceneId: string): boolean;
@@ -1233,6 +1241,10 @@ export class ProjectStore {
         this.enqueueWrite(async () => {
           await this.setDetail(this.detailRef(bookId), key, change());
         }),
+      changeBeats: (sceneId, change) =>
+        this.enqueueWrite(async () => {
+          await this.setDetail(this.detailRef(sceneId), 'beats', change());
+        }),
       addUnit: (addition, title) => this.addUnit(addition, title),
       retitleUnit: (id, title) => this.retitleUnit(id, title),
       trashUnit: (kind, id) =>
@@ -1945,7 +1957,10 @@ export class ProjectStore {
           : carries
             ? [...others, beat]
             : others;
-      await this.setDetail(ref, 'beats', beats);
+      if (await this.setDetail(ref, 'beats', beats)) {
+        // Plan's Proposals on its Beats may be stale, or applied, now.
+        this.emit({ type: 'proposalsChanged' });
+      }
     });
   }
 
@@ -4627,6 +4642,16 @@ export class ProjectStore {
       customFields: () => this.records.customFields.list(),
       listRelations: () => this.listRelations(),
       bookDetails: (book) => bookDetailsOf(this.manuscript(), book),
+      beats: (sceneId) => {
+        const manuscript = this.manuscript();
+        const chapter = manuscript.chapters.find((c) =>
+          c.scenes.some((s) => s.id === sceneId),
+        );
+        if (!chapter || chapter.unplaced) return [];
+        const scene = chapter.scenes.find((s) => s.id === sceneId)!;
+        const book = bookDetailsOf(manuscript, chapter.book);
+        return shownBeats(scene.beats, followedBeats(book)).map((b) => b.id);
+      },
       conflicted: (sceneId) => this.conflicts.has(unitKey(sceneRef(sceneId))),
       read: async (ref) => {
         // Refused at run time too, whatever a caller's types say.
