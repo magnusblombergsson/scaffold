@@ -36,6 +36,7 @@ import { wordTargetText } from '../shared/word-target';
 import { BeatChips, BeatRail, SceneBeats } from './Beats';
 import { BookDetailsStrip, StructureGuide } from './BookDetails';
 import { BookPicker } from './BookPicker';
+import { BringInPicker } from './BringInPicker';
 import {
   Composer,
   ConversationUsage,
@@ -362,7 +363,10 @@ export function PlanRoom({
         {providers &&
           (anyAdded(providers) ? (
             <div className="conversations">
-              <ModelPicker conversation={conversation} />
+              <div className="plan-conversation-tools">
+                <ModelPicker conversation={conversation} />
+                <BringInPicker conversation={conversation} />
+              </div>
               <ConversationUsage total={total} />
               <MessageLog
                 conversation={conversation}

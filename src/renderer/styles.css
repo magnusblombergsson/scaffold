@@ -4962,6 +4962,73 @@ button.finding-quote:hover {
   align-self: flex-start;
 }
 
+.plan-conversation-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  align-items: baseline;
+}
+
+.bring-in-items [role='menuitem'] {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  width: 100%;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  font-size: 0.85rem;
+  text-align: left;
+  padding: 0.3rem 0.5rem;
+  cursor: pointer;
+}
+
+.bring-in-items [role='menuitem']:hover:not(:disabled),
+.bring-in-items [role='menuitem']:focus-visible {
+  background: var(--hover);
+  outline: none;
+}
+
+.bring-in-items [role='menuitem']:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
+.bring-in-items {
+  min-width: 22rem;
+}
+
+.bring-in-title {
+  flex: 1;
+}
+
+.bring-in-detail {
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.bring-in-unsent {
+  color: var(--warning);
+}
+
+.bring-in-remove {
+  margin-left: 0.5rem;
+  font: inherit;
+  font-size: 0.85rem;
+  color: var(--accent);
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  text-decoration: underline;
+}
+
+.bring-in-remove:disabled {
+  color: var(--muted);
+  cursor: default;
+}
+
 .model-picker-button {
   font: inherit;
   font-size: 0.85rem;

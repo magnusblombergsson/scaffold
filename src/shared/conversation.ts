@@ -102,6 +102,69 @@ export const PLAN_ASK_LABELS: Record<PlanAsk, string> = {
 export type FocusChange = { focus: InterviewFocus; at: number; before: number };
 
 /**
+ * Why a Brainstorm brought into a Plan isn't sent now (spec: Outline
+ * planner §6): it is in Trash or the Drawer, about another Book than the
+ * Plan, or gone from the Project. It is sent again once it is eligible.
+ */
+export type NotSent = 'trash' | 'drawer' | 'other-book' | 'gone';
+
+/**
+ * The Author brought a Brainstorm into a Plan, as far as its first
+ * `messages` went, or `removed` it, before the message `before`. A bring-in
+ * says the rough `size` it brought, in tokens, and the `total` of all
+ * brought in once it was. The latest of a Brainstorm still brought in says
+ * why it isn't sent, if it isn't. Its `title` is the Brainstorm's now, or
+ * as logged once it is gone.
+ */
+export type BringIn = {
+  conversation: string;
+  title: string;
+  at: number;
+  before: number;
+} & (
+  | { removed?: undefined; messages: number; size: number; total: number }
+  | { removed: true }
+) & { notSent?: NotSent };
+
+/** The bring-ins of the Brainstorms brought in now: the latest of each, unless it was removed. */
+export function broughtInNow(
+  bringIns: readonly BringIn[] = [],
+): Extract<BringIn, { messages: number }>[] {
+  const latest = new Map<string, BringIn>();
+  for (const bringIn of bringIns) latest.set(bringIn.conversation, bringIn);
+  return [...latest.values()].filter(
+    (b): b is Extract<BringIn, { messages: number }> => !b.removed,
+  );
+}
+
+/**
+ * A Brainstorm brought into a Plan, as it is sent: the Conversation as
+ * shown now, and how many of its messages were brought in.
+ */
+export type BroughtIn = { conversation: Conversation; upTo: number };
+
+/**
+ * What a bring-in logs of a Brainstorm, by id: how many of its messages
+ * came in, and the rough size, in tokens, of what that sends.
+ */
+export type Bringing = { conversation: string; messages: number; size: number };
+
+/**
+ * A Brainstorm the Author may bring into a Plan, as the picker lists it:
+ * how many messages it has, its rough size in tokens, and how far it is
+ * brought in already, if it is.
+ */
+export type BringInChoice = {
+  id: string;
+  title: string;
+  created: number;
+  starred: boolean;
+  messages: number;
+  size: number;
+  broughtIn?: number;
+};
+
+/**
  * A Conversation as the picker lists it; an Interview or Plan has the
  * `focus` it was last set to, if any. In a Series, a Brainstorm, Interview
  * or Plan has the `book`
@@ -255,7 +318,8 @@ export type UnusedSummary = {
 
 /**
  * A Conversation's messages, the replies that came back empty between them,
- * and in an Interview, each time its focus was set; once it is long, the
+ * and in an Interview, each time its focus was set; in a Plan, each
+ * Brainstorm brought in or removed; once it is long, the
  * summaries made of it, the latest last, and those that weren't used. Its
  * `model` is the Model chosen for it last, or for one that never had one
  * chosen, the Model of its latest reply; none before then.
@@ -265,6 +329,8 @@ export type Conversation = ConversationSummary & {
   messages: ConversationMessage[];
   emptyReplies?: EmptyReply[];
   focusChanges?: FocusChange[];
+  /** In a Plan, each Brainstorm brought in or removed. */
+  bringIns?: BringIn[];
   compactions?: Compaction[];
   unusedSummaries?: UnusedSummary[];
 };
