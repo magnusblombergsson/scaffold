@@ -32,6 +32,7 @@ import {
   backupPorts,
   defaultModel,
   lastFolder,
+  modelWindow,
   projectWindows,
   rememberFolder,
   rememberModel,
@@ -278,8 +279,8 @@ const assistantHandlers: Handlers<
     trashConversation(sender, store, conversationId),
   setInterviewFocus: ({ store }, conversationId, focus) =>
     store.setInterviewFocus(conversationId, focus),
-  bringInChoices: ({ engine }, planId, book) =>
-    engine.bringInChoices(planId, book),
+  bringInChoices: ({ engine }, planId, book, model) =>
+    engine.bringInChoices(planId, book, isModel(model) ? model : undefined),
   bringIn: ({ engine }, planId, brainstormId) =>
     engine.bringIn(planId, brainstormId),
   removeBroughtIn: ({ store }, planId, brainstormId) =>
@@ -323,6 +324,7 @@ export function registerAssistantIpc(): void {
       providerFor: assistantProvider,
       defaultModel,
       clock: systemClock,
+      windowOf: modelWindow,
     });
     return { store, engine, sender };
   });

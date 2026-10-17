@@ -78,6 +78,18 @@ export class ProviderError extends Error {
   }
 }
 
+/**
+ * Whether what a Provider said of a refused call means the request was past
+ * the Model's window: Claude's "prompt is too long", Chat Completions'
+ * "maximum context length", or LM Studio's words for a prompt past the
+ * context length the Model is loaded with.
+ */
+export function saysPastWindow(message: string): boolean {
+  return /prompt is too long|maximum context length|context_length_exceeded|greater than the context length|context the overflows/i.test(
+    message,
+  );
+}
+
 /** What a failed key check or listing says of the Provider. */
 export function statusOfFailure(error: unknown): ProviderStatus {
   if (error instanceof ProviderError) {

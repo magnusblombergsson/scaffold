@@ -42,6 +42,7 @@ import type {
   ManuscriptScene,
 } from '../shared/project-types';
 import type { CallFailure } from '../shared/api';
+import type { RequestSize } from '../shared/request-size';
 import {
   atMentionAt,
   atMentionOptions,
@@ -63,7 +64,11 @@ import type { ProposalView } from '../shared/proposal';
 import { proposalCardId, ProposalCard } from './ProposalCard';
 import { modelName } from './model-listing';
 import { emptyReplyNote } from './empty-reply-note';
-import { failureMessage } from './provider-messages';
+import {
+  failureMessage,
+  tooBigMessage,
+  type TooBigMessage,
+} from './provider-messages';
 import { NO_SHORTLISTS, useProviders, useShortlists } from './Providers';
 import { ReadOnlyContext } from './read-only';
 import { ReplyInlineText, ReplyText } from './ReplyText';
@@ -163,10 +168,14 @@ export function useConversation({
   /** The reply streaming in, while the Assistant answers. */
   const [streaming, setStreaming] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  /** Why the last call failed, and on which Model, until the Author asks again. */
+  /**
+   * Why the last call failed, and on which Model, until the Author asks
+   * again; for a Plan's request too big for its Model, what it is made of.
+   */
   const [failure, setFailure] = useState<{
     kind: AssistantFailure;
     model: Model;
+    tooBig?: RequestSize;
   } | null>(null);
   /** The Model a new Conversation starts on unless the Author chooses. */
   const [defaultModel, setDefaultModel] = useState<Model>();
@@ -553,12 +562,16 @@ export function useConversation({
   /** Shows the Conversation as logged once the call is over, and how it went. */
   async function showResult(id: string, result: Promise<AskResult>) {
     const asked = model;
-    const { failure } = await result;
+    const { failure, tooBig } = await result;
     // The log, not this window, says what was sent and when.
     const logged = await window.assistant.readConversation(id);
     setCurrent(logged);
     const on = logged.model ?? asked;
-    setFailure(failure && on ? { kind: failure, model: on } : null);
+    setFailure(
+      failure && on
+        ? { kind: failure, model: on, ...(tooBig && { tooBig }) }
+        : null,
+    );
   }
 
   // Summarising a long Conversation is a call too, and counts, even when
@@ -766,10 +779,20 @@ export function MessageLog({
       )}
       {failure && streaming === null && (
         <article className="message message-system" aria-label="System">
-          <p>
-            {providers &&
-              failureMessage(failure.kind, failure.model, providers)}
-          </p>
+          {failure.tooBig ? (
+            <TooBig
+              message={tooBigMessage(
+                failure.tooBig,
+                failure.model,
+                named(failure.model.id, failure.model.provider),
+              )}
+            />
+          ) : (
+            <p>
+              {providers &&
+                failureMessage(failure.kind, failure.model, providers)}
+            </p>
+          )}
           <div className="message-actions">
             <button onClick={() => void retry()} disabled={readOnly}>
               Retry
@@ -786,6 +809,23 @@ export function MessageLog({
       )}
       <div ref={messagesEnd} />
     </div>
+  );
+}
+
+/** Why a Plan's request wasn't answered: too big for its Model, what is biggest in it, and the ways out. */
+function TooBig({ message }: { message: TooBigMessage }) {
+  return (
+    <>
+      <p>{message.lead}</p>
+      <ul className="too-big-parts">
+        {message.parts.map((part) => (
+          <li key={part}>{part}</li>
+        ))}
+      </ul>
+      {message.after.map((line) => (
+        <p key={line}>{line}</p>
+      ))}
+    </>
   );
 }
 

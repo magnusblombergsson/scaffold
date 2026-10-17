@@ -2,6 +2,7 @@ import type { Finding, PlanFinding, ReviewCommand } from './finding';
 import type { Model, ProviderId } from './models';
 import { ENTRY_TYPES, type EntryType } from './project-types';
 import type { ProposalView } from './proposal';
+import type { RequestSize } from './request-size';
 import type { Usage } from './usage';
 
 // Conversations between the Author and the Assistant, as main tells the
@@ -152,7 +153,8 @@ export type Bringing = { conversation: string; messages: number; size: number };
 /**
  * A Brainstorm the Author may bring into a Plan, as the picker lists it:
  * how many messages it has, its rough size in tokens, and how far it is
- * brought in already, if it is.
+ * brought in already, if it is. One that would push the Plan's request past
+ * its Model's window is `tooBig`, though it may still be brought in.
  */
 export type BringInChoice = {
   id: string;
@@ -162,6 +164,7 @@ export type BringInChoice = {
   messages: number;
   size: number;
   broughtIn?: number;
+  tooBig?: true;
 };
 
 /**
@@ -240,14 +243,15 @@ export type ConversationMessage = {
 
 /**
  * Why the Assistant couldn't answer: the API key was refused, the account has
- * no credit, too many calls were made, Anthropic couldn't be reached, or
- * something else went wrong.
+ * no credit, too many calls were made, Anthropic couldn't be reached, the
+ * request was past the Model's window, or something else went wrong.
  */
 export type AssistantFailure =
   | 'key'
   | 'credit'
   | 'rate-limit'
   | 'offline'
+  | 'context'
   | 'other';
 
 /**
@@ -277,12 +281,15 @@ export type EmptyReply = {
  * one, and why the call failed, if it did. A call that fails partway logs
  * what came as an interrupted reply; one that fails before any reply logs
  * nothing, unless the Provider said what it used: then it logs an `empty`
- * one, so its cost counts.
+ * one, so its cost counts. A Plan's request past its Model's window, as
+ * measured before sending or as the Provider refused it, fails as
+ * `context`, with what it is made of as `tooBig`; nothing was sent.
  */
 export type AskResult = {
   reply: ConversationMessage | null;
   empty?: EmptyReply;
   failure: AssistantFailure | null;
+  tooBig?: RequestSize;
 };
 
 /**

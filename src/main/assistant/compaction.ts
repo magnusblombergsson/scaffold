@@ -3,6 +3,7 @@ import type {
   ConversationMessage,
 } from '../../shared/conversation';
 import type { Model } from '../../shared/models';
+import { tokens } from '../../shared/request-size';
 import { messageContent } from './context-builder';
 import type { ProviderRequest } from './provider';
 import { SUMMARY_PROMPT } from './system-prompts';
@@ -23,11 +24,6 @@ export const DEFAULT_COMPACTION: CompactionPolicy = {
   compactAt: 40_000,
   keep: 10_000,
 };
-
-/** About how many tokens a text is: some 4 characters each. */
-export function tokens(text: string): number {
-  return Math.ceil(text.length / 4);
-}
 
 /** About how many tokens `messages` are as sent; a reply cut short isn't. */
 function sentTokens(messages: ConversationMessage[]): number {

@@ -251,6 +251,25 @@ describe('claudeProvider', () => {
     expect(error?.kind).toBe('credit');
   });
 
+  it('types a prompt too long for the Model’s window as a context failure', async () => {
+    answer = (response) => {
+      response.writeHead(400, { 'content-type': 'application/json' });
+      response.end(
+        JSON.stringify({
+          type: 'error',
+          error: {
+            type: 'invalid_request_error',
+            message: 'prompt is too long: 208310 tokens > 200000 maximum',
+          },
+        }),
+      );
+    };
+
+    const { error } = await collect();
+
+    expect(error?.kind).toBe('context');
+  });
+
   it('says it is offline when Anthropic can’t be reached', async () => {
     const provider = claudeProvider({
       apiKey: () => 'sk-ant-key',

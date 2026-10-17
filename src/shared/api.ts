@@ -1197,13 +1197,15 @@ export interface AssistantApi {
   ): Promise<void>;
   /**
    * The Brainstorms a Plan may bring in (spec: Outline planner §6), or a
-   * new one, with no id yet, on the Book `book`: those of its Book, never
-   * in Trash or the Drawer, Starred first, then newest, each with its
-   * rough size. Refused for another Mode.
+   * new one, with no id yet, on the Book `book` and the Model `model`:
+   * those of its Book, never in Trash or the Drawer, Starred first, then
+   * newest, each with its rough size, marked when it would push the
+   * request past the Model's window. Refused for another Mode.
    */
   bringInChoices(
     planId: string | null,
     book?: string,
+    model?: Model,
   ): Promise<BringInChoice[]>;
   /**
    * Brings a Brainstorm into a Plan as far as it goes now, or the rest of

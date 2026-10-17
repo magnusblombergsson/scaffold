@@ -2,7 +2,7 @@ import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { Model } from '../../shared/models';
+import type { Model, ModelWindow } from '../../shared/models';
 import { instantClock } from '../project-store/clock';
 import { nodeFileSystem, type FileSystem } from '../project-store/file-system';
 import { createProject, openProject } from '../project-store/project-store';
@@ -30,7 +30,7 @@ async function setUp(
     'What does ',
     'she fear?',
   ],
-  { compaction }: Pick<EngineDeps, 'compaction'> = {},
+  { compaction, windowOf }: Pick<EngineDeps, 'compaction' | 'windowOf'> = {},
 ) {
   const projectPath = path.join(dir, 'My Novel');
   const clock = instantClock(1_000);
@@ -44,6 +44,7 @@ async function setUp(
     defaultModel: () => OPUS,
     clock,
     compaction,
+    windowOf,
   });
   return { projectPath, store, clock, chapterId, sceneId, provider, engine };
 }
@@ -2231,5 +2232,175 @@ describe('Bringing in Brainstorms', () => {
     expect(await notSent()).toBe('other-book');
     await store.chooseBook(brainstorm, two);
     expect(await sentNow()).toBe(true);
+  });
+});
+
+describe('Fitting a Plan’s request to the Model', () => {
+  /** The Model's window as its listing says, which a test may change. */
+  let window: ModelWindow | null;
+  const windowOf = () => window;
+  const long = (words: number) => 'A heist on the island. '.repeat(words / 5);
+
+  /** A Plan with the Brainstorm “Heist ideas” brought in, some 3k tokens of it. */
+  async function planned(reply: FakeReply = ['Hm.']) {
+    window = null;
+    const setup = await setUp(() => reply, { windowOf });
+    const { store, engine } = setup;
+    const { id: brainstorm } = await store.startConversation(
+      'brainstorm',
+      'Heist ideas',
+    );
+    await engine.askAssistant(
+      brainstorm,
+      long(2_000),
+      { sceneId: null },
+      () => {},
+    );
+    const { id: plan } = await store.startConversation('plan', 'Shape');
+    await engine.bringIn(plan, brainstorm);
+    return { ...setup, brainstorm, plan };
+  }
+
+  it('sends nothing when the request and room for the reply are past the window, and says what is biggest', async () => {
+    const { store, engine, provider, brainstorm, plan } = await planned();
+    const sentBefore = provider.requests.length;
+    window = { contextWindow: 4_000, outputLimit: 64_000 };
+
+    const result = await engine.askAssistant(
+      plan,
+      'Shape it.',
+      { sceneId: null },
+      () => {},
+    );
+
+    expect(provider.requests).toHaveLength(sentBefore);
+    expect(result).toMatchObject({ reply: null, failure: 'context' });
+    const size = result.tooBig!;
+    expect(size.window).toBe(4_000);
+    // The request's own limit, capped at a quarter of a small window.
+    expect(size.reply).toBe(1_000);
+    expect(size.broughtIn).toEqual([
+      { id: brainstorm, title: 'Heist ideas', size: expect.any(Number) },
+    ]);
+    // Some 9,000 characters of the Brainstorm, at about 4 a token.
+    expect(size.broughtIn[0].size).toBeGreaterThan(2_000);
+    expect(size.plan).toBeGreaterThan(0);
+    expect(size.storyBible).toBeGreaterThan(0);
+    expect(size.request).toBeGreaterThan(
+      size.plan + size.storyBible + size.broughtIn[0].size,
+    );
+    // The Author's message waits for a Retry, as after a failed call.
+    const { messages } = await store.readConversation(plan);
+    expect(messages.map((m) => m.text)).toEqual(['Shape it.']);
+  });
+
+  it('sends a request that fits, and answers on Retry once room is made', async () => {
+    const { store, engine, provider, brainstorm, plan } = await planned();
+    window = { contextWindow: 4_000, outputLimit: 64_000 };
+    const { tooBig } = await engine.askAssistant(
+      plan,
+      'Shape it.',
+      { sceneId: null },
+      () => {},
+    );
+    const sentBefore = provider.requests.length;
+    window = {
+      contextWindow: tooBig!.request - tooBig!.broughtIn[0].size + 2_000,
+      outputLimit: 1_000,
+    };
+
+    expect(await engine.retry(plan, () => {})).toMatchObject({
+      reply: null,
+      failure: 'context',
+    });
+    await store.removeBroughtIn(plan, brainstorm);
+    const result = await engine.retry(plan, () => {});
+
+    expect(result).toMatchObject({ reply: { text: 'Hm.' }, failure: null });
+    expect(result.tooBig).toBeUndefined();
+    expect(provider.requests).toHaveLength(sentBefore + 1);
+  });
+
+  it('doesn’t measure with an unknown window, or a Model from LM Studio', async () => {
+    const { engine, provider, store, plan } = await planned();
+    window = { contextWindow: null, outputLimit: null };
+    await engine.askAssistant(plan, 'Shape it.', { sceneId: null }, () => {});
+    window = null;
+    await engine.askAssistant(plan, 'Again.', { sceneId: null }, () => {});
+    window = { contextWindow: 4_000, outputLimit: null };
+    await store.chooseModel(plan, { provider: 'lmstudio', id: 'qwen3-8b' });
+    await engine.askAssistant(plan, 'And?', { sceneId: null }, () => {});
+
+    expect(
+      provider.requests.slice(-3).map((r) => r.messages.at(-1)!.content),
+    ).toEqual(['Shape it.', 'Again.', 'And?']);
+  });
+
+  it('gives a Provider’s context-length refusal in Plan with the sizes too', async () => {
+    const { engine, brainstorm, plan } = await planned({
+      text: [],
+      fail: 'context',
+    });
+
+    const result = await engine.askAssistant(
+      plan,
+      'Shape it.',
+      { sceneId: null },
+      () => {},
+    );
+
+    expect(result).toMatchObject({ reply: null, failure: 'context' });
+    expect(result.tooBig).toMatchObject({
+      window: null,
+      broughtIn: [{ id: brainstorm, title: 'Heist ideas' }],
+    });
+  });
+
+  it('leaves other Modes as they are: never measured, a refusal told as any other', async () => {
+    window = { contextWindow: 1_000, outputLimit: null };
+    const { store, engine, provider } = await setUp(
+      (n) => (n === 0 ? ['Hm.'] : { text: [], fail: 'context' }),
+      { windowOf },
+    );
+    const { id } = await store.startConversation('brainstorm', 'Ideas');
+
+    await engine.askAssistant(id, 'Ideas?', { sceneId: null }, () => {});
+    const refused = await engine.askAssistant(
+      id,
+      'More?',
+      { sceneId: null },
+      () => {},
+    );
+
+    expect(provider.requests).toHaveLength(2);
+    expect(refused).toEqual({ reply: null, failure: 'context' });
+  });
+
+  it('marks in the picker a Brainstorm that would push the request past the window', async () => {
+    const { store, engine, plan } = await planned();
+    const { id: small } = await store.startConversation('brainstorm', 'Small');
+    await engine.askAssistant(small, 'Ideas?', { sceneId: null }, () => {});
+    window = { contextWindow: 4_000, outputLimit: 64_000 };
+    const { tooBig } = await engine.askAssistant(
+      plan,
+      'Shape it.',
+      { sceneId: null },
+      () => {},
+    );
+    await store.removeBroughtIn(plan, tooBig!.broughtIn[0].id);
+    window = {
+      contextWindow: tooBig!.request - tooBig!.broughtIn[0].size + 2_000,
+      outputLimit: 1_000,
+    };
+
+    const choices = await engine.bringInChoices(plan);
+
+    expect(
+      Object.fromEntries(choices.map((c) => [c.title, c.tooBig ?? false])),
+    ).toEqual({ Small: false, 'Heist ideas': true });
+    window = null;
+    expect((await engine.bringInChoices(plan)).some((c) => c.tooBig)).toBe(
+      false,
+    );
   });
 });

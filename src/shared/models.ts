@@ -27,6 +27,9 @@ export type ListedModel = {
   quantisation?: string;
 };
 
+/** How much a Model takes in and gives out, in tokens, where its listing says. */
+export type ModelWindow = Pick<ListedModel, 'contextWindow' | 'outputLimit'>;
+
 /**
  * Whether a Provider answers: with the credential given, rejecting it, taking
  * it but out of credit, or not at all.

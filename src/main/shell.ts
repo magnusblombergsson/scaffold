@@ -37,7 +37,12 @@ import {
   type StoryBibleChoice,
 } from '../shared/export-choice';
 import { splitManuscript } from '../shared/manuscript-import';
-import { isProviderId, type Model } from '../shared/models';
+import {
+  claudeListing,
+  isProviderId,
+  type Model,
+  type ModelWindow,
+} from '../shared/models';
 import type { ProseLanguage } from '../shared/project-types';
 import { unitName } from '../shared/unit-name';
 import type { ViewSettings } from '../shared/view-settings';
@@ -144,6 +149,21 @@ let quitting = false;
 /** The Model a new Conversation starts on: the one chosen last, or one shortlisted of a Provider that is added. */
 export function defaultModel(): Model {
   return providers.defaultModel(settings.lastUsedModel());
+}
+
+/**
+ * How much `model` takes in and gives out, as its shortlist says, or a
+ * built-in Claude model's listing; null for one listed nowhere.
+ */
+export function modelWindow(model: Model): ModelWindow | null {
+  const listed =
+    providers.shortlists()[model.provider].find((m) => m.id === model.id) ??
+    (model.provider === 'anthropic'
+      ? claudeListing().find((m) => m.id === model.id)
+      : undefined);
+  return listed
+    ? { contextWindow: listed.contextWindow, outputLimit: listed.outputLimit }
+    : null;
 }
 
 /** The Author chose `model` for a Conversation: a new one starts on it. */
