@@ -140,6 +140,8 @@ const projectHandlers: Handlers<
   setStatus: ({ store }, unitId, statusId) => store.setStatus(unitId, statusId),
   setWordTarget: ({ store }, unitId, words) =>
     store.setWordTarget(unitId, words),
+  setBookDetail: ({ store }, bookId, key, value) =>
+    store.setBookDetail(bookId, key, value),
   editStatus: ({ store, sender }, edit) =>
     saveProjectSetting(
       sender,

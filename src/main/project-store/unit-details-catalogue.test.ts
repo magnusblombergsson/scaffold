@@ -99,6 +99,13 @@ const SAMPLES: Record<
       { kind: 'entry', id: idOf(ref), book: firstBook(store) },
       { data: JPEG, extension: 'jpg' },
     ),
+  genres: (store, ref) => store.setBookDetail(idOf(ref), 'genres', ['mystery']),
+  bookFormat: (store, ref) =>
+    store.setBookDetail(idOf(ref), 'bookFormat', 'novel'),
+  structure: (store, ref) =>
+    store.setBookDetail(idOf(ref), 'structure', 'three-act'),
+  genreConventions: (store, ref) =>
+    store.setBookDetail(idOf(ref), 'genreConventions', ['mystery']),
 };
 
 /** The Project's Book 1, by id. */

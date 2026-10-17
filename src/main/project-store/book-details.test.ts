@@ -1,0 +1,297 @@
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { PROJECT_OUTLINE } from '../../shared/project-types';
+import { instantClock } from './clock';
+import { nodeFileSystem } from './file-system';
+import { createProject, openProject, type ProjectStore } from './project-store';
+import { formatUnitFile, parseUnitFile } from './unit-file';
+import { v2ReadUnit, v2WriteUnit } from './v2-unit-file';
+
+// A Book's Genres, Format, Structure and Genre conventions (spec: Outline
+// planner §3, §11) are unit details (ADR 0008): header keys of the Book's
+// Outline file, the Project Outline's while the Project has one Book. They
+// merge one by one, the later save winning; an id the catalogue doesn't
+// know is kept.
+
+let dir: string;
+let projectPath: string;
+const opened: ProjectStore[] = [];
+
+beforeEach(async () => {
+  dir = await mkdtemp(path.join(tmpdir(), 'scaffold-'));
+  projectPath = path.join(dir, 'My Novel');
+});
+afterEach(async () => {
+  for (const store of opened.splice(0)) await store.close().catch(() => {});
+  await rm(dir, { recursive: true, force: true, maxRetries: 5 });
+});
+
+async function open(host = 'GAMMA', now = 0): Promise<ProjectStore> {
+  const store = await openProject(projectPath, {
+    fs: nodeFileSystem,
+    clock: instantClock(now),
+    host,
+  });
+  opened.push(store);
+  return store;
+}
+
+/** A Project of one Book, created on ALPHA and closed; its first Chapter. */
+async function newProject(): Promise<{ chapterId: string }> {
+  const store = await createProject(projectPath, {
+    fs: nodeFileSystem,
+    clock: instantClock(),
+    host: 'ALPHA',
+  });
+  const chapterId = store.tree().chapters[0].id;
+  await store.close();
+  return { chapterId };
+}
+
+const outlinePath = (id: string, name = `${id}.md`) =>
+  path.join(projectPath, 'outlines', name);
+
+async function headerOf(id: string): Promise<Record<string, unknown>> {
+  return parseUnitFile(await readFile(outlinePath(id), 'utf8')).frontmatter;
+}
+
+/** Writes the Project Outline with `keys` in its header, as another app might. */
+async function writeHeader(keys: Record<string, unknown>) {
+  await mkdir(path.join(projectPath, 'outlines'), { recursive: true });
+  await writeFile(
+    outlinePath(PROJECT_OUTLINE),
+    formatUnitFile({
+      frontmatter: { id: PROJECT_OUTLINE, format: 1, ...keys },
+      body: '- The whole story.\n',
+    }),
+  );
+}
+
+/** The four details of the one Book, as the window is told them. */
+const detailsOf = (store: ProjectStore) => {
+  const { genres, bookFormat, structure, genreConventions } =
+    store.manuscript();
+  return { genres, bookFormat, structure, genreConventions };
+};
+
+describe('setting a Book’s details', () => {
+  it('keeps each in its own header key of the Outline file, and they survive reopening', async () => {
+    await newProject();
+    const store = await open();
+
+    await store.setBookDetail(PROJECT_OUTLINE, 'genres', [
+      'mystery',
+      'romance',
+    ]);
+    await store.setBookDetail(PROJECT_OUTLINE, 'bookFormat', 'novel');
+    await store.setBookDetail(PROJECT_OUTLINE, 'structure', 'save-the-cat');
+    await store.setBookDetail(PROJECT_OUTLINE, 'genreConventions', ['mystery']);
+
+    const set = {
+      genres: ['mystery', 'romance'],
+      bookFormat: 'novel',
+      structure: 'save-the-cat',
+      genreConventions: ['mystery'],
+    };
+    expect(detailsOf(store)).toEqual(set);
+    expect(await headerOf(PROJECT_OUTLINE)).toMatchObject(set);
+    await store.close();
+    expect(detailsOf(await open())).toEqual(set);
+  });
+
+  it('records No set Structure as none, and none chosen yet as no key', async () => {
+    await newProject();
+    const store = await open();
+
+    await store.setBookDetail(PROJECT_OUTLINE, 'structure', 'none');
+    expect(store.manuscript().structure).toBe('none');
+    expect(await headerOf(PROJECT_OUTLINE)).toMatchObject({
+      structure: 'none',
+    });
+
+    await store.setBookDetail(PROJECT_OUTLINE, 'structure', null);
+    expect(store.manuscript()).not.toHaveProperty('structure');
+    expect(await headerOf(PROJECT_OUTLINE)).not.toHaveProperty('structure');
+  });
+
+  it('takes away the Genres or Genre conventions when none are left', async () => {
+    await newProject();
+    const store = await open();
+    await store.setBookDetail(PROJECT_OUTLINE, 'genres', ['horror']);
+    await store.setBookDetail(PROJECT_OUTLINE, 'genreConventions', ['horror']);
+
+    await store.setBookDetail(PROJECT_OUTLINE, 'genres', []);
+    await store.setBookDetail(PROJECT_OUTLINE, 'genreConventions', []);
+
+    expect(detailsOf(store)).toEqual({});
+    expect(await headerOf(PROJECT_OUTLINE)).not.toHaveProperty('genres');
+  });
+
+  it('puts them on a Book of a Series in that Book’s Outline file', async () => {
+    await newProject();
+    const store = await open();
+    const { id: book } = await store.createBook();
+
+    await store.setBookDetail(book, 'bookFormat', 'novella');
+    await store.setBookDetail(book, 'genres', ['fantasy']);
+
+    expect(store.manuscript().books!.find((b) => b.id === book)).toMatchObject({
+      bookFormat: 'novella',
+      genres: ['fantasy'],
+    });
+    expect(await headerOf(book)).toMatchObject({
+      bookFormat: 'novella',
+      genres: ['fantasy'],
+    });
+  });
+
+  it('gives Book 1 those of the Project when it becomes a Series', async () => {
+    await newProject();
+    const store = await open();
+    await store.setBookDetail(PROJECT_OUTLINE, 'structure', 'three-act');
+    await store.setBookDetail(PROJECT_OUTLINE, 'genres', ['crime']);
+
+    await store.createBook();
+
+    const [one] = store.manuscript().books!;
+    expect(one).toMatchObject({ structure: 'three-act', genres: ['crime'] });
+    expect(detailsOf(store)).toEqual({});
+  });
+
+  it('refuses a Scene, Chapter or Part, and an id that isn’t a slug', async () => {
+    const { chapterId } = await newProject();
+    const store = await open();
+
+    await expect(
+      store.setBookDetail(chapterId, 'bookFormat', 'novel'),
+    ).rejects.toThrow();
+    await expect(
+      store.setBookDetail(PROJECT_OUTLINE, 'genres', ['Not a slug']),
+    ).rejects.toThrow();
+    await expect(
+      store.setBookDetail(PROJECT_OUTLINE, 'bookFormat', 42 as never),
+    ).rejects.toThrow();
+  });
+});
+
+describe('ids the catalogue does not know', () => {
+  it('are kept in the file and the Manuscript, and a change to another key leaves them', async () => {
+    await newProject();
+    await writeHeader({
+      structure: 'from-a-newer-app',
+      genreConventions: ['romance', 'newer-convention'],
+    });
+    const reopened = await open();
+
+    expect(detailsOf(reopened)).toMatchObject({
+      structure: 'from-a-newer-app',
+      genreConventions: ['romance', 'newer-convention'],
+    });
+    await reopened.setBookDetail(PROJECT_OUTLINE, 'genres', ['romance']);
+
+    expect(await headerOf(PROJECT_OUTLINE)).toMatchObject({
+      structure: 'from-a-newer-app',
+      genreConventions: ['romance', 'newer-convention'],
+      genres: ['romance'],
+    });
+  });
+
+  it('are left out of what a header holds when they are not ids at all', async () => {
+    await newProject();
+    await writeHeader({
+      genres: ['mystery', 7, { a: 1 }],
+      structure: ['three-act'],
+    });
+
+    const store = await open();
+
+    expect(store.manuscript().genres).toEqual(['mystery']);
+    expect(store.manuscript()).not.toHaveProperty('structure');
+  });
+});
+
+describe('Book details set on two computers', () => {
+  /**
+   * The Project Outline as ALPHA saved it at 1000 and 3000 after `alpha`,
+   * beside BETA's copy saved at 2000 after `beta`, each from the same base.
+   */
+  async function both(
+    alpha: (store: ProjectStore) => Promise<void>,
+    beta: (store: ProjectStore) => Promise<void>,
+  ): Promise<ProjectStore> {
+    await newProject();
+    await writeHeader({});
+    const base = await readFile(outlinePath(PROJECT_OUTLINE), 'utf8');
+    const a = await open('ALPHA', 3000);
+    await alpha(a);
+    await a.close();
+    const alphas = await readFile(outlinePath(PROJECT_OUTLINE), 'utf8');
+    await writeFile(outlinePath(PROJECT_OUTLINE), base);
+    const b = await open('BETA', 2000);
+    await beta(b);
+    await b.close();
+    await writeFile(
+      outlinePath(PROJECT_OUTLINE, `${PROJECT_OUTLINE}-ALPHA.md`),
+      alphas,
+    );
+    return open();
+  }
+
+  it('merge one by one, keeping a key each set, with no Conflict', async () => {
+    const store = await both(
+      (a) => a.setBookDetail(PROJECT_OUTLINE, 'structure', 'four-part'),
+      (b) => b.setBookDetail(PROJECT_OUTLINE, 'genres', ['thriller']),
+    );
+
+    expect(store.listConflicts()).toEqual([]);
+    expect(detailsOf(store)).toEqual({
+      structure: 'four-part',
+      genres: ['thriller'],
+    });
+  });
+
+  it('keep the later save of a key both set, a list whole', async () => {
+    const store = await both(
+      (a) => a.setBookDetail(PROJECT_OUTLINE, 'genreConventions', ['mystery']),
+      (b) =>
+        b.setBookDetail(PROJECT_OUTLINE, 'genreConventions', [
+          'romance',
+          'fantasy',
+        ]),
+    );
+
+    expect(store.listConflicts()).toEqual([]);
+    expect(store.manuscript().genreConventions).toEqual(['mystery']);
+  });
+});
+
+it('the v2 app rewrites a Book’s Outline keeping its details, and this app reads them back', async () => {
+  await newProject();
+  const store = await open('ALPHA', 1000);
+  await store.setBookDetail(PROJECT_OUTLINE, 'structure', 'kishotenketsu');
+  await store.setBookDetail(PROJECT_OUTLINE, 'bookFormat', 'short-story');
+  await store.setBookDetail(PROJECT_OUTLINE, 'genres', ['literary']);
+  await store.setBookDetail(PROJECT_OUTLINE, 'genreConventions', ['fantasy']);
+  await store.close();
+  const ref = { kind: 'outline', id: PROJECT_OUTLINE } as const;
+  const text = await readFile(outlinePath(PROJECT_OUTLINE), 'utf8');
+
+  const read = v2ReadUnit(ref, text);
+  await writeFile(
+    outlinePath(PROJECT_OUTLINE),
+    v2WriteUnit(ref, { ...read, body: '- A quiet story.' }, text),
+  );
+
+  const reopened = await open();
+  expect(detailsOf(reopened)).toEqual({
+    structure: 'kishotenketsu',
+    bookFormat: 'short-story',
+    genres: ['literary'],
+    genreConventions: ['fantasy'],
+  });
+  expect(
+    (await reopened.read({ kind: 'outline', id: PROJECT_OUTLINE })).body,
+  ).toBe('- A quiet story.');
+});
