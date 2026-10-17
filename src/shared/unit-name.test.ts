@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { PROJECT_OUTLINE, type Manuscript } from './project-types';
-import { unitName } from './unit-name';
+import { manuscriptUnit, unitName } from './unit-name';
 
 const manuscript: Manuscript = {
   chapters: [
@@ -53,5 +53,41 @@ describe('unitName', () => {
     expect(unitName({ kind: 'notes', id: 'gone' }, manuscript)).toBe(
       'some Notes',
     );
+  });
+});
+
+describe('manuscriptUnit', () => {
+  const series: Manuscript = {
+    books: [{ id: 'b1', title: 'Islands', top: ['p1'] }],
+    parts: [{ id: 'p1', title: 'Leaving', chapters: ['ch1'], book: 'b1' }],
+    chapters: [
+      {
+        id: 'ch1',
+        title: 'One',
+        part: 'p1',
+        book: 'b1',
+        scenes: [{ id: 's1', title: 'Ferry' }],
+      },
+    ],
+    unplaced: [],
+  };
+
+  it('is the Book, Part, Chapter or placed Scene with an id, as a Todo links it, with its title', () => {
+    expect(manuscriptUnit('s1', series)).toEqual({
+      kind: 'scene',
+      id: 's1',
+      title: 'Ferry',
+    });
+    expect(manuscriptUnit('ch1', series)).toEqual({
+      kind: 'chapter',
+      id: 'ch1',
+      title: 'One',
+    });
+    expect(manuscriptUnit('p1', series)).toMatchObject({ kind: 'part' });
+    expect(manuscriptUnit('b1', series)).toMatchObject({ kind: 'book' });
+  });
+
+  it('is none once the unit is no longer in the Manuscript', () => {
+    expect(manuscriptUnit('gone', series)).toBeNull();
   });
 });

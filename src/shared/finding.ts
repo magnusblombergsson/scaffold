@@ -94,8 +94,6 @@ export function findingOf(block: unknown): Finding | null {
     string,
     unknown
   >;
-  const line = (value: unknown) =>
-    typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
   if (!FINDING_TYPES.includes(type as FindingType)) return null;
   if (!line(comment)) return null;
   return {
@@ -137,6 +135,90 @@ export function isFinding(value: unknown): value is Finding {
     optional(finding.sceneId) &&
     optional(finding.question)
   );
+}
+
+// A Plan check's Findings (spec: Outline planner §5) point at the plan, not
+// the Prose: each names the units it concerns, and quotes, if anything, an
+// Outline or Notes. They too live only in the reply they were made in.
+
+/** The kinds of Finding a Plan check makes. */
+export const PLAN_FINDING_KINDS = [
+  'beat',
+  'convention',
+  'contradiction',
+  'gap',
+  'idle',
+] as const;
+export type PlanFindingKind = (typeof PLAN_FINDING_KINDS)[number];
+
+export const PLAN_FINDING_LABELS: Record<PlanFindingKind, string> = {
+  beat: 'Beat',
+  convention: 'Convention',
+  contradiction: 'Contradiction',
+  gap: 'Gap',
+  idle: 'Idle',
+};
+
+/**
+ * One point of a Plan check: its kind, the `units` it concerns by id, a
+ * short comment, and usually a `quote` from an Outline or Notes and a
+ * `question`.
+ */
+export type PlanFinding = {
+  kind: PlanFindingKind;
+  units: string[];
+  quote?: string;
+  comment: string;
+  question?: string;
+};
+
+/**
+ * The Finding of a Plan check a block holds, or null when it holds none: a
+ * block gives its `kind` and `comment`, and may give the `units` it
+ * concerns, a `quote` and a `question`. Text is kept to one line; a unit
+ * that is no id is left out.
+ */
+export function planFindingOf(block: unknown): PlanFinding | null {
+  if (typeof block !== 'object' || block === null) return null;
+  const { kind, units, quote, comment, question } = block as Record<
+    string,
+    unknown
+  >;
+  if (!PLAN_FINDING_KINDS.includes(kind as PlanFindingKind)) return null;
+  if (!line(comment)) return null;
+  return {
+    kind: kind as PlanFindingKind,
+    units: Array.isArray(units) ? units.map(line).filter(Boolean) : [],
+    ...(line(quote) && { quote: line(quote) }),
+    comment: line(comment),
+    ...(line(question) && { question: line(question) }),
+  };
+}
+
+/** A Plan check's Finding as the Assistant would write it, for the Conversation sent back to it. */
+export function planFindingBlock(finding: PlanFinding): string {
+  const { kind, units, quote, comment, question } = finding;
+  const json = JSON.stringify({ kind, units, quote, comment, question });
+  return `\`\`\`finding\n${json}\n\`\`\``;
+}
+
+/** Whether a value read from a log is a Plan check's Finding. */
+export function isPlanFinding(value: unknown): value is PlanFinding {
+  const finding = value as Partial<PlanFinding> | null | undefined;
+  const optional = (v: unknown) => v === undefined || typeof v === 'string';
+  return (
+    PLAN_FINDING_KINDS.includes(finding?.kind as PlanFindingKind) &&
+    Array.isArray(finding?.units) &&
+    finding.units.every((u) => typeof u === 'string') &&
+    typeof finding.comment === 'string' &&
+    optional(finding.quote) &&
+    optional(finding.question)
+  );
+}
+
+/** Text kept to one line; anything but text is none. */
+function line(value: unknown): string {
+  return typeof value === 'string' ? value.replace(/\s+/g, ' ').trim() : '';
 }
 
 /**

@@ -18,6 +18,7 @@ import {
 } from '../../shared/conversation';
 import {
   isFinding,
+  isPlanFinding,
   REVIEW_COMMANDS,
   type ReviewCommand,
 } from '../../shared/finding';
@@ -1385,13 +1386,14 @@ function acceptedOf(
 
 /**
  * The message an event holds; the Review it asked for, what is known of a
- * turn's cost, what the Assistant saw and the Findings it made are kept if
- * readable.
+ * turn's cost, what the Assistant saw and the Findings it made, of a Review
+ * or a Plan check, are kept if readable.
  */
 function messageOf(event: MessageEvent): ConversationMessage {
   const { role, text, command, focus, at, model, usage, interrupted, saw } =
     event;
   const { provider, cost, cutShort, unreadable, findings, ask } = event;
+  const { planFindings } = event;
   return {
     role,
     text,
@@ -1408,6 +1410,8 @@ function messageOf(event: MessageEvent): ConversationMessage {
     ...(isCount(unreadable) && { unreadable }),
     ...(isSaw(saw) && { saw }),
     ...(Array.isArray(findings) && findings.every(isFinding) && { findings }),
+    ...(Array.isArray(planFindings) &&
+      planFindings.every(isPlanFinding) && { planFindings }),
   };
 }
 

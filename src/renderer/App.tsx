@@ -1788,6 +1788,11 @@ function ProjectView({
                   pane={pane}
                   opening={planOpening}
                   onAddProvider={onAddProvider}
+                  // Plan has no Todos dock: a Finding's Todo starts in Writing's.
+                  onAddTodo={(text, link) => {
+                    switchRoom('writing');
+                    startTodo('writing', link, text);
+                  }}
                 />
               </div>
             )}

@@ -821,3 +821,88 @@ for (const theme of ['light', 'dark'] as const) {
     }
   });
 }
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`a Plan check from Check my plan shows its Findings with the units they name, which show in the tree, and a Finding becomes a Todo in Writing, ${theme}`, async () => {
+    const { app, page, projectPath, chapters } = await newProject(theme);
+    try {
+      const manifest = JSON.parse(
+        await readFile(path.join(projectPath, 'project.json'), 'utf8'),
+      ) as { tree: { chapters: { scenes: { id: string }[] }[] } };
+      const sceneId = manifest.tree.chapters[0].scenes[0].id;
+      await roomButton(page, 'Plan').click();
+      const panel = page.getByRole('complementary', {
+        name: 'Plan Conversation',
+      });
+      const tree = page.getByRole('region', { name: 'Outline tree' });
+      const finding = (json: object) =>
+        `\`\`\`finding\n${JSON.stringify(json)}\n\`\`\``;
+      anthropic.calls.push({
+        reply: [
+          'Measured by Scene order; two Findings.\n\n',
+          finding({
+            kind: 'gap',
+            units: [sceneId, chapters.storm],
+            comment: 'Neither has an Outline yet.',
+            question: 'What happens in the storm?',
+          }),
+          '\n\n',
+          finding({
+            kind: 'idle',
+            units: [sceneId],
+            comment: 'Anna packs, and nothing turns.',
+          }),
+          '\n\n',
+          block({ retitle: sceneId, title: 'Packing' }),
+        ],
+      });
+
+      await panel.getByRole('button', { name: 'Check my plan' }).click();
+
+      const reply = panel.getByRole('article', { name: 'Assistant' });
+      await expect(reply.locator('.message-text')).toHaveText(
+        'Measured by Scene order; two Findings.',
+      );
+      expect(JSON.stringify(anthropic.sent[0].messages)).toContain(
+        'Check the plan within the focus, as a Plan check is done',
+      );
+      expect(JSON.stringify(anthropic.sent[0].system)).toContain(
+        'Where a Scene falls is measured by Scene order',
+      );
+      const findings = reply.getByRole('list', { name: 'Findings' });
+      const gap = findings.getByRole('listitem').filter({ hasText: 'Gap' });
+      await expect(
+        gap.getByRole('list', { name: 'Units' }).getByRole('listitem'),
+      ).toHaveText(['Scene 1', 'Storm']);
+      await expect(gap).toContainText('What happens in the storm?');
+      await expect(findings.getByText('Idle')).toBeVisible();
+      // A Plan check holds no Proposals.
+      await expect(reply.getByRole('list', { name: 'Proposals' })).toHaveCount(
+        0,
+      );
+      await expect(reply).toContainText('1 Proposal couldn’t be read');
+
+      await gap.getByRole('button', { name: 'Storm' }).click();
+      await expect(
+        tree.getByRole('listitem', { name: 'Chapter “Storm”' }),
+      ).toHaveAttribute('data-lit', 'true');
+      await expect(page).toHaveScreenshot(`plan-check-${theme}.png`, {
+        mask: [page.locator('.save-status'), page.locator('.toasts')],
+      });
+
+      await gap.getByRole('button', { name: 'Add as Todo' }).click();
+      await expect(roomButton(page, 'Writing')).toHaveAttribute(
+        'aria-pressed',
+        'true',
+      );
+      const todos = page.getByRole('region', { name: 'Todos' });
+      await expect(todos.getByLabel('New Todo')).toBeFocused();
+      await expect(todos.getByLabel('New Todo')).toHaveValue(
+        'Neither has an Outline yet.',
+      );
+      await expect(todos.locator('.new-todo-link')).toHaveText(/Scene 1/);
+    } finally {
+      await app.close();
+    }
+  });
+}

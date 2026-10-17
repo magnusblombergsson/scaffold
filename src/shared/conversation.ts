@@ -1,4 +1,4 @@
-import type { Finding, ReviewCommand } from './finding';
+import type { Finding, PlanFinding, ReviewCommand } from './finding';
 import type { Model, ProviderId } from './models';
 import { ENTRY_TYPES, type EntryType } from './project-types';
 import type { ProposalView } from './proposal';
@@ -206,9 +206,10 @@ export type Saw = {
  * One message in a Conversation: `focus` holds the ids of the Scenes in focus
  * when it was sent, which the Conversation isn't bound to. The Author's
  * message says which Review it asked for, if any, as its `command`, or in
- * Plan, which start button sent it, as its `ask`; the reply to a Review
- * holds its `findings`. An Assistant turn says which
- * `model` answered and through which `provider`; a turn logged before
+ * Plan, which start button sent it, as its `ask`, or for the first message
+ * on a Book already outlined, the Plan check it asks for; the reply to a
+ * Review holds its `findings`, and a Plan check its `planFindings`. An
+ * Assistant turn says which `model` answered and through which `provider`; a turn logged before
  * Providers names no Provider, as it was Anthropic's. It says what it used,
  * when that is known, and what it `cost` in USD when the Provider said. It
  * is `interrupted` when the Assistant didn't finish it, so it is never sent
@@ -233,6 +234,7 @@ export type ConversationMessage = {
   unreadable?: number;
   saw?: Saw;
   findings?: Finding[];
+  planFindings?: PlanFinding[];
   proposals?: ProposalView[];
 };
 
