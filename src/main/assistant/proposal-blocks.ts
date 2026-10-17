@@ -6,9 +6,15 @@ import {
   detailValue,
   isBookDetailBlock,
 } from '../../shared/book-details';
-import { bookManuscript, topItems } from '../../shared/manuscript-order';
+import {
+  bookManuscript,
+  placeOfUnit,
+  topItems,
+  unitsWithin,
+} from '../../shared/manuscript-order';
 import { PROJECT_OUTLINE, type Manuscript } from '../../shared/project-types';
 import {
+  isPlaced,
   mayPropose,
   newEntryOf,
   outlineChangeOf,
@@ -45,21 +51,68 @@ export async function readProposals(
 ): Promise<{ proposals: Proposal[]; unreadable: number }> {
   const proposals: Proposal[] = [];
   let unreadable = 0;
-  const added = addedBy(earlier);
-  for (const block of blocks) {
+  const ids: string[] = blocks.map(() => randomUUID());
+  const reply: Reply = {
+    added: addedBy(earlier),
+    moves: movesIn(blocks, ids),
+    moved: new Set(),
+  };
+  for (const [i, block] of blocks.entries()) {
     const kind = kindOf(block);
-    const id = randomUUID();
+    const id = ids[i];
     const change = !mayPropose(mode, kind)
       ? null
       : kind === 'add'
-        ? addOf(view, block, lens, added, id)
+        ? addOf(view, block, lens, reply, id)
         : kind === 'retitle'
-          ? retitleOf(view, block, lens, added)
-          : await changeOf(view, block, kind, lens, mode);
+          ? retitleOf(view, block, lens, reply.added)
+          : kind === 'move'
+            ? moveOf(view, block, lens, reply, id)
+            : kind === 'trash'
+              ? await trashOf(view, block, lens, reply.added)
+              : await changeOf(view, block, kind, lens, mode);
     if (change === null) unreadable++;
     else if (change !== 'unchanged') proposals.push({ id, ...change });
   }
-  return { proposals, unreadable };
+  // Placed by a block of this reply that made nothing, as after a unit an
+  // unreadable Move moves, it was judged against a change that never was.
+  let made = proposals;
+  for (let dropped = true; dropped; ) {
+    const kept = new Set(made.map((p) => p.id));
+    const next = made.filter((p) =>
+      (p.needs ?? []).every((n) => kept.has(n) || !ids.includes(n)),
+    );
+    dropped = next.length < made.length;
+    unreadable += made.length - next.length;
+    made = next;
+  }
+  return { proposals: made, unreadable };
+}
+
+/**
+ * What a reply's blocks name as they are read: the units Adds still pending
+ * propose, this reply's among them; the first Move of each unit, which a
+ * Proposal placed after that unit needs; and the units a block read so far
+ * moves, which no later one may move again.
+ */
+type Reply = {
+  added: Map<string, Added>;
+  moves: Map<string, { proposal: string; in: string }>;
+  moved: Set<string>;
+};
+
+/** The first Move block of each unit in `blocks`, as made under `ids`: its id and the container it names. */
+function movesIn(
+  blocks: unknown[],
+  ids: string[],
+): Map<string, { proposal: string; in: string }> {
+  const moves = new Map<string, { proposal: string; in: string }>();
+  for (const [i, block] of blocks.entries()) {
+    const { move, in: within } = (block ?? {}) as Record<string, unknown>;
+    if (typeof move !== 'string' || typeof within !== 'string') continue;
+    if (!moves.has(move)) moves.set(move, { proposal: ids[i], in: within });
+  }
+  return moves;
 }
 
 /**
@@ -106,7 +159,7 @@ function addOf(
   view: AssistantView,
   block: unknown,
   { book }: StoryBibleLens,
-  added: Map<string, Added>,
+  reply: Reply,
   proposalId: string,
 ): ProposalChange | null {
   const {
@@ -117,35 +170,13 @@ function addOf(
     in: within,
     after,
   } = block as Record<string, unknown>;
-  if (!PLAN_UNITS.includes(unit as PlanUnit) || typeof within !== 'string') {
-    return null;
-  }
+  if (!PLAN_UNITS.includes(unit as PlanUnit)) return null;
   if (typeof title !== 'string' || !title.trim()) return null;
   if (typeof outline !== 'string') return null;
-  if (after !== undefined && typeof after !== 'string') return null;
-  const needs = new Set<string>();
-  const proposed = added.get(within);
-  let container: { id: string; kind: keyof typeof TAKES; holds: string[] };
-  if (proposed) {
-    if (proposed.unit === 'scene') return null;
-    needs.add(proposed.proposal);
-    container = { id: proposed.unitId, kind: proposed.unit, holds: [] };
-  } else {
-    const found = containerIn(view, book, within);
-    if (!found) return null;
-    container = found;
-  }
-  if (!TAKES[container.kind].includes(unit as PlanUnit)) return null;
-  let anchor: string | undefined;
-  if (after !== undefined) {
-    const placed = added.get(after);
-    if (placed) {
-      if (placed.in !== container.id) return null;
-      needs.add(placed.proposal);
-      anchor = placed.unitId;
-    } else if (container.holds.includes(after)) anchor = after;
-    else return null;
-  }
+  const place = placeIn(view, book, unit as PlanUnit, within, after, reply);
+  if (!place) return null;
+  const { container, anchor, needs } = place;
+  const { added } = reply;
   const unitId = randomUUID();
   const made = {
     proposal: proposalId,
@@ -166,6 +197,169 @@ function addOf(
     proposed: { title: title.trim(), outline: outline.trim() },
     ...(needs.size > 0 && { needs: [...needs] }),
   };
+}
+
+/**
+ * Where a block places a `unit`: in the container `within` names, if it
+ * takes that kind; first there, or right `after` a unit there. The
+ * container may be one an Add still pending proposes, and the anchor a
+ * unit one proposes there, or a unit a Move of this reply puts there,
+ * judged where that Move puts it; each such Proposal is needed.
+ */
+function placeIn(
+  view: AssistantView,
+  book: string | undefined,
+  unit: PlanUnit,
+  within: unknown,
+  after: unknown,
+  { added, moves }: Reply,
+): {
+  container: Container;
+  anchor?: string;
+  needs: Set<string>;
+} | null {
+  if (typeof within !== 'string') return null;
+  if (after !== undefined && typeof after !== 'string') return null;
+  const needs = new Set<string>();
+  const proposed = added.get(within);
+  let container: Container;
+  if (proposed) {
+    if (proposed.unit === 'scene') return null;
+    needs.add(proposed.proposal);
+    container = { id: proposed.unitId, kind: proposed.unit, holds: [] };
+  } else {
+    const found = containerIn(view, book, within);
+    if (!found) return null;
+    container = found;
+  }
+  if (!TAKES[container.kind].includes(unit)) return null;
+  if (after === undefined) return { container, needs };
+  const placed = added.get(after);
+  const move = moves.get(after);
+  if (placed) {
+    if (placed.in !== container.id) return null;
+    needs.add(placed.proposal);
+    return { container, anchor: placed.unitId, needs };
+  }
+  if (move) {
+    const to = added.get(move.in)?.unitId ?? move.in;
+    if (to !== container.id) return null;
+    needs.add(move.proposal);
+    return { container, anchor: after, needs };
+  }
+  return container.holds.includes(after)
+    ? { container, anchor: after, needs }
+    : null;
+}
+
+/** A container a unit may be placed in: its id, what kind it is, and the units it holds now by id. */
+type Container = { id: string; kind: keyof typeof TAKES; holds: string[] };
+
+/**
+ * The Move a block proposes, made as `proposalId`: a Part, placed Chapter or
+ * Scene of the lens's Book, by its id, into a container of the Book that
+ * takes it, placed as an Add. Never a Scene Missing, Unplaced or in
+ * Conflict, nor a unit only proposed, whose Add is edited instead; and only
+ * the first Move of a unit in a reply. `'unchanged'` when it is where it
+ * would go already.
+ */
+function moveOf(
+  view: AssistantView,
+  block: unknown,
+  { book }: StoryBibleLens,
+  reply: Reply,
+  proposalId: string,
+): ProposalChange | 'unchanged' | null {
+  const { move: unitId, in: within, after } = block as Record<string, unknown>;
+  if (typeof unitId !== 'string' || reply.added.has(unitId)) return null;
+  if (reply.moved.has(unitId)) return null;
+  reply.moved.add(unitId);
+  if (after === unitId) return null;
+  const manuscript = view.manuscript();
+  if (!outlinesIn(manuscript, book).has(unitId)) return null;
+  if (view.conflicted?.(unitId)) return null;
+  const at = placeOfUnit(manuscript, unitId);
+  if (!at) return null;
+  const unit = unitKind(manuscript, unitId);
+  // Placed after a unit moved by itself, it would need itself.
+  const others = { ...reply, moves: new Map(reply.moves) };
+  if (others.moves.get(unitId)?.proposal === proposalId) {
+    others.moves.delete(unitId);
+  }
+  const place = placeIn(view, book, unit, within, after, others);
+  if (!place) return null;
+  const { container, anchor, needs } = place;
+  if (
+    container.id === at.in &&
+    isPlaced(
+      { unitId, ...(anchor !== undefined && { after: anchor }) },
+      at.holds,
+    )
+  ) {
+    return 'unchanged';
+  }
+  return {
+    kind: 'move',
+    unit,
+    unitId,
+    from: at.in,
+    in: container.id,
+    ...(anchor !== undefined && { after: anchor }),
+    ...(needs.size > 0 && { needs: [...needs] }),
+  };
+}
+
+/**
+ * The Put in Trash a block proposes: a Part, placed Chapter or Scene of the
+ * lens's Book, by its id, kept as it is now, with the units it holds. Never
+ * one that holds Prose or contains a Scene that does, or a Missing one;
+ * never a Scene in Conflict, nor a unit only proposed, whose Add is
+ * rejected instead.
+ */
+async function trashOf(
+  view: AssistantView,
+  block: unknown,
+  { book }: StoryBibleLens,
+  added: Map<string, Added>,
+): Promise<ProposalChange | null> {
+  const { trash: unitId } = block as Record<string, unknown>;
+  if (typeof unitId !== 'string' || added.has(unitId)) return null;
+  const manuscript = view.manuscript();
+  if (unitId === book || !outlinesIn(manuscript, book).has(unitId)) {
+    return null;
+  }
+  const holds = unitsWithin(manuscript, unitId);
+  const scenes = new Map(
+    manuscript.chapters.flatMap((c) => c.scenes).map((s) => [s.id, s]),
+  );
+  for (const id of [unitId, ...holds]) {
+    const scene = scenes.get(id);
+    if (!scene) continue;
+    // A Missing Scene's Prose can't be told; nor one in Conflict.
+    if (scene.missing || view.conflicted?.(id)) return null;
+    const { markdown } = await view.read({ kind: 'scene', id });
+    if (markdown.trim() !== '') return null;
+  }
+  const unit = unitKind(manuscript, unitId);
+  const title =
+    unit === 'part'
+      ? manuscript.parts!.find((p) => p.id === unitId)!.title
+      : unit === 'chapter'
+        ? manuscript.chapters.find((c) => c.id === unitId)!.title
+        : scenes.get(unitId)!.title;
+  const { body } = await view.read({ kind: 'outline', id: unitId });
+  return {
+    kind: 'trash',
+    unit,
+    unitId,
+    base: { title, outline: body, holds },
+  };
+}
+
+/** Whether a unit of the Manuscript is a Part, a Chapter, or else a Scene. */
+function unitKind(manuscript: Manuscript, id: string): PlanUnit {
+  if (manuscript.parts?.some((p) => p.id === id)) return 'part';
+  return manuscript.chapters.some((c) => c.id === id) ? 'chapter' : 'scene';
 }
 
 /** Whether `id` is the story's, or a Book's, Part's, Chapter's or Scene's anywhere in the Project. */
@@ -192,7 +386,7 @@ function containerIn(
   view: AssistantView,
   book: string | undefined,
   id: string,
-): { id: string; kind: keyof typeof TAKES; holds: string[] } | null {
+): Container | null {
   const manuscript = bookManuscript(view.manuscript(), book);
   const items = topItems(manuscript);
   if (id === (book ?? PROJECT_OUTLINE)) {
@@ -247,13 +441,13 @@ function retitleOf(
  * a Book's detail, or else a field of an Entry.
  */
 function kindOf(block: unknown): ProposalChange['kind'] {
-  const { entry, outline, from, add, retitle } = (block ?? {}) as Record<
-    string,
-    unknown
-  >;
+  const { entry, outline, from, add, retitle, move, trash } = (block ??
+    {}) as Record<string, unknown>;
   // An item added to a list names its Entry.
   if (typeof add === 'string' && entry === undefined) return 'add';
   if (typeof retitle === 'string') return 'retitle';
+  if (typeof move === 'string') return 'move';
+  if (typeof trash === 'string') return 'trash';
   if (newEntryOf(block)) return 'new-entry';
   if (typeof outline === 'string') return 'outline';
   if (isBookDetailBlock(block)) return 'book-detail';

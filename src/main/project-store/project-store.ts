@@ -81,6 +81,8 @@ import {
   type PendingProposal,
   type Proposal,
   type UnitAddition,
+  type UnitMove,
+  type UnitPlace,
 } from '../../shared/proposal';
 import { joinProse, type Cut } from '../../shared/prose-split';
 import {
@@ -1237,6 +1239,11 @@ export class ProjectStore {
         this.byProposal(async () => {
           await this.trash.move(kind, id);
         }),
+      restoreUnit: (id) =>
+        this.byProposal(async () => {
+          await this.trash.restore(id);
+        }),
+      moveUnit: (kind, id, place) => this.moveUnit(kind, id, place),
       holdsProse: (id) => this.holdsProse(id),
       conflicted: (id) => this.conflicts.has(unitKey(sceneRef(id))),
     });
@@ -4154,6 +4161,46 @@ export class ProjectStore {
             chapter.title = title;
           } else tree.chapters.push({ id, title, scenes: [] });
         }
+        list.splice(landing(list, after), 0, id);
+      });
+    });
+  }
+
+  /**
+   * Moves a Scene, Chapter or Part where an accepted Move, or its undo,
+   * puts it: into the container `place.in`, a Chapter, a Part or a Book's
+   * top level, right after `place.after`, at the end when that is no longer
+   * there, or first with none.
+   */
+  private moveUnit(
+    kind: UnitMove['unit'],
+    id: string,
+    place: UnitPlace,
+  ): Promise<void> {
+    const { in: container, after } = place;
+    return this.byProposal(async () => {
+      if (kind === 'scene') {
+        await this.restructure((tree) => {
+          const { chapter, scene } = findScene(tree, id);
+          chapter.scenes.splice(chapter.scenes.indexOf(scene), 1);
+          const scenes = findChapter(tree, container).scenes;
+          const at = landing(
+            scenes.map((s) => s.id),
+            after,
+          );
+          scenes.splice(at, 0, scene);
+        });
+        return;
+      }
+      await this.restructureParts((tree) => {
+        if (kind === 'part') takeFromBook(tree, id);
+        else unplace(tree, id);
+        const top =
+          container === PROJECT_OUTLINE ||
+          tree.books.some((b) => b.id === container);
+        const list = top
+          ? bookTop(tree, container === PROJECT_OUTLINE ? undefined : container)
+          : findPart(tree, container).chapters;
         list.splice(landing(list, after), 0, id);
       });
     });
