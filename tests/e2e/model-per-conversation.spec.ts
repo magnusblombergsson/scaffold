@@ -100,8 +100,8 @@ test('the Author switches Model mid-Conversation: each reply names its Model, an
   await expect(picker).toHaveText('Anthropic · Sonnet 5.5 · Untested ▾');
 
   // The dropdown groups the shortlisted Models under their Provider, and
-  // marks those not on the tested list: every one, until the never-Prose
-  // eval is run again on Plan's prompt (#326).
+  // marks those not on the tested list: every one, until the eval is run
+  // again on the current prompts.
   await picker.click();
   const claude = models.getByRole('group', { name: 'Anthropic' });
   await expect(claude.getByRole('menuitemradio')).toHaveText([

@@ -15,8 +15,6 @@ export type TestedModel = Model & {
  * Model is Untested. A Model tested against older prompts leaves the list
  * until its eval is run again; a test says which.
  */
-// Plan's prompt changed the prompts every Model was tested against: each is
-// off the list until its eval is run again (#326).
 export const TESTED_MODELS: readonly TestedModel[] = [];
 
 /** Whether `model` is on the tested list; else it is Untested. */
