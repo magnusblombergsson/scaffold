@@ -19,6 +19,7 @@ import {
   type ManuscriptScene,
   type ProseLanguage,
 } from '../shared/project-types';
+import { BookDetailsStrip, StructureGuide } from './BookDetails';
 import { BookPicker } from './BookPicker';
 import {
   Composer,
@@ -101,6 +102,10 @@ export function PlanRoom({
     () => planTree(manuscript, planned, title),
     [manuscript, planned, title],
   );
+  /** The Book planned, whose details the strip and guide show: in a Project of one Book, the Manuscript's. */
+  const plannedBook = manuscript.books?.find((b) => b.id === planned);
+  const bookId = plannedBook?.id ?? PROJECT_OUTLINE;
+  const bookDetails = plannedBook ?? manuscript;
   /** Each unit's Outline Proposals made in the Conversation open. */
   const proposals = useMemo(() => {
     const byUnit = new Map<string, ProposalView[]>();
@@ -177,6 +182,7 @@ export function PlanRoom({
           </label>
           <BookPicker conversation={conversation} names={names} />
         </div>
+        <BookDetailsStrip bookId={bookId} book={bookDetails} />
         <div className="plan-body">
           <PlanTree
             nodes={tree}
@@ -189,6 +195,7 @@ export function PlanRoom({
           />
           <aside className="plan-details" aria-label="Details">
             <UnitDetails node={findNode(tree, selected)} language={language} />
+            <StructureGuide bookId={bookId} book={bookDetails} />
           </aside>
         </div>
       </main>

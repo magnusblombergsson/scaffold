@@ -199,3 +199,60 @@ for (const theme of ['light', 'dark'] as const) {
     }
   });
 }
+
+for (const theme of ['light', 'dark'] as const) {
+  test(`the Book details are set with a click, and the structure guide follows a Structure and a Genre convention, ${theme}`, async () => {
+    const { app, page, projectPath } = await newProject(theme);
+    try {
+      await roomButton(page, 'Plan').click();
+      const strip = page.getByRole('region', { name: 'Book details' });
+      const guide = page.getByRole('region', { name: 'Structure guide' });
+      const header = async () =>
+        readFile(path.join(projectPath, 'outlines', 'project.md'), 'utf8');
+
+      await strip.getByRole('button', { name: 'Literary' }).click();
+      await strip
+        .getByRole('combobox', { name: 'Format' })
+        .selectOption('short-story');
+      await expect(
+        strip.getByRole('button', { name: 'Literary' }),
+      ).toHaveAttribute('aria-pressed', 'true');
+      await expect.poll(header).toContain('bookFormat: short-story');
+      expect(await header()).toMatch(/genres:\s*(- |\[)literary/);
+
+      // Fitting a literary short story: Freytag first, the rest less usual.
+      await strip.getByRole('button', { name: 'About Structures…' }).click();
+      await expect(guide).toBeInViewport();
+      await expect(guide.locator('details > summary').first()).toHaveText(
+        'Freytag’s pyramid',
+      );
+      await expect(guide).toContainText('Less usual for this Book');
+      await guide.locator('summary', { hasText: 'Kishōtenketsu' }).click();
+      await guide.getByRole('button', { name: 'Follow this' }).click();
+
+      await expect(
+        strip.getByRole('combobox', { name: 'Structure' }),
+      ).toHaveValue('kishotenketsu');
+      await expect(
+        guide.getByRole('article', { name: 'Kishōtenketsu' }),
+      ).toContainText('Not marked');
+      await guide.locator('summary', { hasText: 'Fantasy' }).click();
+      await guide.getByRole('button', { name: 'Follow too' }).click();
+      await expect(
+        strip.getByRole('button', { name: 'Fantasy (promises before payoff)' }),
+      ).toHaveAttribute('aria-pressed', 'true');
+      await expect.poll(header).toContain('structure: kishotenketsu');
+      expect(await header()).toMatch(/genreConventions:\s*(- |\[)fantasy/);
+
+      await strip
+        .getByRole('combobox', { name: 'Structure' })
+        .selectOption('none');
+      await expect(guide).toContainText('This Book follows no set Structure.');
+      await expect(page).toHaveScreenshot(`plan-book-details-${theme}.png`, {
+        mask: [page.locator('.save-status'), page.locator('.toasts')],
+      });
+    } finally {
+      await app.close();
+    }
+  });
+}

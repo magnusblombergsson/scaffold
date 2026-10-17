@@ -5234,3 +5234,147 @@ button.finding-quote:hover {
 .plan-proposal-state {
   color: var(--muted);
 }
+
+/* The Book details strip above the Outline tree, each set with a click. */
+.book-details-strip {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 0.5rem 1.25rem;
+  padding: 0.5rem 1rem;
+  border-bottom: 1px solid var(--line);
+  font-size: 0.85rem;
+}
+
+.book-detail {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  color: var(--muted);
+}
+
+.book-detail select {
+  color: var(--fg);
+}
+
+.book-detail-chips {
+  flex-direction: row;
+  flex-wrap: wrap;
+  max-width: 28rem;
+  margin: 0;
+  padding: 0;
+  border: none;
+}
+
+.book-detail-chips legend {
+  padding: 0 0 0.2rem;
+}
+
+.book-chip {
+  padding: 0.05rem 0.55rem;
+  border: 1px solid var(--pill-line);
+  border-radius: 999px;
+  background: none;
+  color: var(--fg);
+  font: inherit;
+  cursor: pointer;
+}
+
+.book-chip:hover:not(:disabled) {
+  background: var(--hover);
+}
+
+.book-chip[aria-pressed='true'] {
+  border-color: var(--accent);
+  background: var(--accent-tint);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.book-details-about {
+  align-self: center;
+  margin-left: auto;
+}
+
+/* The structure guide, below the chosen unit's details. */
+.structure-guide {
+  margin-top: 1.25rem;
+  padding-top: 0.75rem;
+  border-top: 1px solid var(--line);
+}
+
+.structure-guide h4 {
+  margin: 0.75rem 0 0.25rem;
+}
+
+.structure-guide-note,
+.guide-group-note {
+  color: var(--muted);
+  margin: 0.5rem 0 0.25rem;
+}
+
+.guide-entry {
+  margin: 0.25rem 0;
+}
+
+.guide-entry[data-open] {
+  padding: 0.5rem;
+  border-radius: 6px;
+  background: var(--accent-tint);
+}
+
+.guide-entry summary {
+  cursor: pointer;
+}
+
+.guide-entry > button {
+  margin: 0.25rem 0 0.5rem;
+}
+
+.guide-credit,
+.guide-fits {
+  color: var(--muted);
+  font-size: 0.8rem;
+  margin: 0.25rem 0;
+}
+
+.guide-description {
+  white-space: pre-line;
+  margin: 0.25rem 0;
+}
+
+.guide-fit-match {
+  background: none;
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.guide-subheading {
+  margin: 0.5rem 0 0.1rem;
+  font-weight: 600;
+}
+
+.guide-beats,
+.guide-rules {
+  margin: 0.25rem 0;
+  padding-left: 1.2rem;
+}
+
+.guide-beats li {
+  margin-bottom: 0.35rem;
+}
+
+.guide-beat-name {
+  font-weight: 600;
+}
+
+.guide-beat-where,
+.guide-beat-marked {
+  color: var(--muted);
+  font-size: 0.8rem;
+}
+
+.guide-beat-purpose,
+.guide-beat-marked {
+  display: block;
+}
