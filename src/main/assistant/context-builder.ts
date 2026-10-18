@@ -613,9 +613,17 @@ function entryText(entry: EntryValue, fields: readonly CustomField[]): string {
     lines.push(`Tags: ${entry.tags.join(', ')}`);
   }
   const { role, roleNote, appearance, voice, senses, status } = entry.fields;
+  const { sources, captured, appliesTo, checked } = entry.fields;
   const roles = roleText(role, roleNote);
   if (roles) lines.push(`Role: ${roles}`);
   if (status) lines.push(`Status: ${STATUS_LABELS[status]}`);
+  if (checked !== undefined) {
+    lines.push(
+      checked
+        ? 'Checked: Yes, the Author has verified it.'
+        : 'Checked: No, the Author has not verified it yet.',
+    );
+  }
   lines.push(entry.description.trim() || '(No description.)');
   if (appearance?.trim()) lines.push(`Appearance: ${appearance.trim()}`);
   if (voice) {
@@ -646,6 +654,11 @@ function entryText(entry: EntryValue, fields: readonly CustomField[]): string {
       if (value.trim()) lines.push(`${label}: ${value.trim()}`);
     }
   }
+  if (appliesTo?.trim()) lines.push(`Applies to: ${appliesTo.trim()}`);
+  if (sources && sources.length > 0) {
+    lines.push('Sources:', ...sources.map((source) => `- ${source}`));
+  }
+  if (captured) lines.push(`Captured: ${captured}`);
   for (const { field, value } of customValues(entry, fields)) {
     lines.push(`${field.label}: ${value.trim()}`);
   }

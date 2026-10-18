@@ -1,4 +1,4 @@
-import { roleText } from './entry';
+import { checkedText, isCapturedDate, roleText } from './entry';
 import {
   ROLE_LABELS,
   ROLES,
@@ -144,6 +144,40 @@ const STATUS_FIELD: LabelledField = {
   },
 };
 
+/** Whether a Fact is Checked, as Yes or No. */
+const CHECKED_FIELD: LabelledField = {
+  label: 'Checked',
+  beforeDescription: true,
+  text: (fields) => checkedText(fields.checked),
+  read: (fields, text) => {
+    const key = matchKey(text);
+    if (key !== 'yes' && key !== 'no') return null;
+    return { ...fields, checked: key === 'yes' };
+  },
+};
+
+/** A Fact's fields: what it Applies to, its Sources one per line, when it was Captured, and whether it is Checked. */
+const FACT_FIELDS: readonly LabelledField[] = [
+  CHECKED_FIELD,
+  {
+    label: 'Applies to',
+    text: (fields) => fields.appliesTo ?? '',
+    read: (fields, text) => ({ ...fields, appliesTo: text }),
+  },
+  {
+    // One per line: a citation may hold commas.
+    label: 'Sources',
+    text: (fields) => fields.sources?.join('\n') ?? '',
+    read: (fields, text) => ({ ...fields, sources: splitLines(text) }),
+  },
+  {
+    label: 'Captured',
+    text: (fields) => fields.captured ?? '',
+    read: (fields, text) =>
+      isCapturedDate(text.trim()) ? { ...fields, captured: text.trim() } : null,
+  },
+];
+
 /** Each type's labelled fields, in the order an Export writes them. */
 export const TYPE_FIELDS: Record<EntryType, readonly LabelledField[]> = {
   character: [
@@ -169,5 +203,6 @@ export const TYPE_FIELDS: Record<EntryType, readonly LabelledField[]> = {
   'world-rule': [],
   'plot-thread': [STATUS_FIELD],
   theme: [],
+  fact: FACT_FIELDS,
   other: [],
 };

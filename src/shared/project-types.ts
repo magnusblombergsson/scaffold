@@ -27,7 +27,7 @@ export function unitKey(ref: UnitRef): string {
   return `${ref.kind}:${ref.id}`;
 }
 
-/** The seven fixed Entry types, in the order the Story Bible lists them. */
+/** The eight fixed Entry types, in the order the Story Bible lists them. */
 export const ENTRY_TYPES = [
   'character',
   'place',
@@ -35,10 +35,10 @@ export const ENTRY_TYPES = [
   'world-rule',
   'plot-thread',
   'theme',
+  'fact',
   'other',
 ] as const;
 export type EntryType = (typeof ENTRY_TYPES)[number];
-
 export const ENTRY_TYPE_LABELS: Record<EntryType, string> = {
   character: 'Character',
   place: 'Place',
@@ -46,6 +46,7 @@ export const ENTRY_TYPE_LABELS: Record<EntryType, string> = {
   'world-rule': 'World Rule',
   'plot-thread': 'Plot Thread',
   theme: 'Theme',
+  fact: 'Fact',
   other: 'Other',
 };
 
@@ -57,6 +58,7 @@ export const ENTRY_GROUP_TITLES: Record<EntryType, string> = {
   'world-rule': 'World Rules',
   'plot-thread': 'Plot Threads',
   theme: 'Themes',
+  fact: 'Facts',
   other: 'Other',
 };
 
@@ -120,8 +122,9 @@ export const STATUS_LABELS: Record<ThreadStatus, string> = {
 
 /**
  * An Entry's type-specific fields: a Character has `role`, with a short
- * `roleNote` beside it, `appearance` and `voice`, a Place `senses` and a
- * Plot Thread `status`; the other types have none.
+ * `roleNote` beside it, `appearance` and `voice`, a Place `senses`, a
+ * Plot Thread `status`, and a Fact `sources`, `captured`, `appliesTo` and
+ * `checked`; the other types have none.
  */
 export type EntryFields = {
   role?: Role | null;
@@ -130,6 +133,14 @@ export type EntryFields = {
   voice?: Voice;
   senses?: Senses;
   status?: ThreadStatus;
+  /** A Fact's Sources: each a link or a citation, such as a book and page. */
+  sources?: string[];
+  /** When a Fact was Captured, gathered or last checked, as `YYYY-MM-DD`; empty until said. */
+  captured?: string;
+  /** Where and when a Fact holds. */
+  appliesTo?: string;
+  /** Whether the Author has Checked a Fact: only the Author sets it, never a Proposal. */
+  checked?: boolean;
 };
 
 export type SceneValue = { id: string; markdown: string };
@@ -189,7 +200,8 @@ export type EntryValue = {
 /**
  * A field of an Entry that may evolve from one Book to the next, as a
  * Proposal names it, or its name or a Voice's example lines; its image
- * evolves too, as a unit detail. Never its type, Tags or private notes.
+ * evolves too, as a unit detail. Never its type, Tags, private notes, nor
+ * whether a Fact is Checked.
  */
 export type EvolvingField =
   | 'name'
@@ -208,6 +220,9 @@ export type EvolvingField =
   | 'senses.sound'
   | 'senses.touch'
   | 'senses.atmosphere'
+  | 'appliesTo'
+  | 'sources'
+  | 'captured'
   | `custom:${string}`;
 
 /** The values an Evolution gives its fields: text, a list, or a Role, which may be unset. */

@@ -8,6 +8,8 @@ import {
 } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import path from 'node:path';
+import { CLAUDE_MODELS } from '../../src/shared/models';
+import { TESTED_MODELS } from '../../src/shared/tested-models';
 import { answerDialogs, launch, useTempDir } from './app';
 
 const tempDir = useTempDir();
@@ -352,19 +354,25 @@ test('the current three Claude models are shortlisted until the Author chooses o
   await expect(choose.getByRole('checkbox', { checked: true })).toHaveCount(3);
   await expect(choose.getByText('Fable 5.1')).toBeVisible();
   await expect(choose).toContainText('$10 in · $50 out per M');
-  // The tested Models are marked with a check, read out as Tested.
+  // The tested Models are marked with a check, read out as Tested: those
+  // on the list now, none while a prompt change awaits the evals (README).
+  const testedLabels = CLAUDE_MODELS.filter(({ id }) =>
+    TESTED_MODELS.some((m) => m.provider === 'anthropic' && m.id === id),
+  ).map(({ label }) => label);
   const tested = choose.getByRole('checkbox', { name: /, Tested$/ });
-  await expect(tested).toHaveCount(3);
-  for (const name of ['Sonnet 5.5', 'Sonnet 5', 'Haiku 4.5']) {
+  await expect(tested).toHaveCount(testedLabels.length);
+  for (const name of testedLabels) {
     await expect(
       choose.getByRole('checkbox', { name: `${name}, Tested`, exact: true }),
     ).toBeVisible();
   }
-  await expect(choose.locator('.tested-mark')).toHaveCount(3);
-  await expect(choose.locator('.tested-mark').first()).toHaveAttribute(
-    'title',
-    /checked against the rule that the Assistant never writes Prose/,
-  );
+  await expect(choose.locator('.tested-mark')).toHaveCount(testedLabels.length);
+  if (testedLabels.length > 0) {
+    await expect(choose.locator('.tested-mark').first()).toHaveAttribute(
+      'title',
+      /checked against the rule that the Assistant never writes Prose/,
+    );
+  }
   await choose.getByRole('checkbox', { name: /Fable 5\.1/ }).check();
   await choose.getByRole('checkbox', { name: /Sonnet 5\.5/ }).uncheck();
   await choose.getByRole('button', { name: 'Save' }).click();

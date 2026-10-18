@@ -81,3 +81,5 @@ The Plan Mode's prompt and its two start buttons (Find a structure, Check my pla
 - through OpenRouter: Sonnet 5.5, GPT-5.6 Sol (one grey-area case, let through), GPT-6 Sol, Gemini 3.8 Flash, DeepSeek V4.1 Flash, Qwen3.8 Flash and Mistral Medium 3.1
 
 These leaked and stay Untested: Kimi K2.5, Sonnet 5 through OpenRouter, and, in LM Studio, Ministral 3 3B, Dirty Muse Writer and Llama 3.2 Dark Champion. The Mistral Large re-run stays deferred.
+
+The Fact Entry type ([#357](https://github.com/magnusblombergsson/scaffold/issues/357)) changed the fingerprint again: Facts as a type to propose, their Applies to, Sources and Captured as fields, never Checked; the Interview's checklist; and a contradiction with a Fact not yet Checked saying so, in a Review and a Plan check. It took every Model off the list until its eval is run on the new prompts.

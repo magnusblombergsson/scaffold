@@ -33,6 +33,7 @@ const BUILT_IN_LABELS: Record<EntryType, readonly string[]> = {
   'world-rule': [],
   'plot-thread': ['Status'],
   theme: [],
+  fact: ['Applies to', 'Sources', 'Captured', 'Checked'],
   other: [],
 };
 

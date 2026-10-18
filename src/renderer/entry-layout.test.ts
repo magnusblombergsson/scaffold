@@ -40,6 +40,16 @@ describe('entryBody', () => {
     ]);
   });
 
+  it('puts whether a Fact is Checked above its Description, then Applies to, Sources and Captured', () => {
+    expect(entryBody('fact')).toEqual([
+      { rows: [['checked']] },
+      { rows: [['description']] },
+      { rows: [['appliesTo']] },
+      { rows: [['sources']] },
+      { rows: [['captured']] },
+    ]);
+  });
+
   it.each(['item', 'world-rule', 'theme', 'other'] as const)(
     'gives a %s only its Description',
     (type) => {

@@ -277,6 +277,19 @@ describe('an Export imported back', () => {
       description: '1. Never.\n\n- Not once.',
     }),
     entry('e6', 'other', 'Misc'),
+    entry('e7', 'fact', 'Lay judges', {
+      description: 'Three sit with the judge.',
+      fields: {
+        sources: [
+          'https://www.domstol.se/amnen/namndeman/',
+          'Bylund, Rättegång i tingsrätt, p. 42',
+        ],
+        captured: '2026-10-12',
+        appliesTo: 'Swedish district courts, since 1975',
+        checked: true,
+      },
+    }),
+    entry('e8', 'fact', 'Ferry fares'),
   ];
   const images: Record<string, EntryImage> = { e1: png(4, 2) };
   const source: StoryBibleSource = {

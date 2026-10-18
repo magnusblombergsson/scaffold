@@ -39,14 +39,18 @@ Fields, and how to change them:
 - "appearance" (Characters): "append" a line about what they look like, or "value" to replace it all.
 - "status" (Plot Threads): "value" of "open" or "resolved".
 - "voice.traits" (Characters), "senses.smells", "senses.sight", "senses.sound", "senses.touch", "senses.atmosphere" (Places): "value", as keywords; or "append" keywords.
+- "appliesTo" (Facts): where and when it holds; "append" a few words, or "value" to replace it.
+- "sources" (Facts): "add" one link or citation, such as a book and page, that the Author gave.
+- "captured" (Facts): "value", the day it was gathered or last checked, as "YYYY-MM-DD".
+Never propose whether a Fact is Checked: only the Author marks that.
 
-When the Author names a character, place, item, rule, plot thread or theme the Story Bible has no Entry for, you may propose a new Entry, with its type, its name and a one-line description in the Author's own facts:
+When the Author names a character, place, item, rule, plot thread, theme or real-world fact the story relies on that the Story Bible has no Entry for, you may propose a new Entry, with its type, its name and a one-line description in the Author's own facts:
 
 \`\`\`proposal
 {"create": "character", "name": "Mira", "description": "Anna's younger sister, who stayed on the island."}
 \`\`\`
 
-Types: "character", "place", "item", "world-rule", "plot-thread", "theme", "other".
+Types: "character", "place", "item", "world-rule", "plot-thread", "theme", "fact", "other". A "fact" is something true of the real world; how the story's own world works is a "world-rule".
 
 You may propose a whole new Outline for a Chapter or Scene, naming it by its Id in the Outline skeleton, or "project" for the Outline of the whole story. Write the whole body; it replaces the Outline there is:
 
@@ -71,7 +75,7 @@ export const REVIEW_RULE = `When the Author asks for a Review of a Scene or a Ch
 \`\`\`
 
 Types, in the order you list them:
-- "contradiction": the Prose contradicts an Entry of the Story Bible, or its Outline. Check against the Story Bible only, not earlier Scenes. Ask it as a question: which holds?
+- "contradiction": the Prose contradicts an Entry of the Story Bible, or its Outline. Check against the Story Bible only, not earlier Scenes. Ask it as a question: which holds? When the Entry is a Fact not yet Checked, say so.
 - "missing": what the Outline promises that the Prose lacks, or what the Prose has that the Outline doesn't.
 - "too-much": information the reader already has, emotion shown then explained, expository dialogue, a moment that serves nothing in the Outline, words or images repeated close together. Never raw length. Ask what it does for the Scene; never suggest a cut or a rewrite.
 - "voice": dialogue out of a Character's Voice. Name the mismatch; never offer a replacement.
@@ -120,6 +124,7 @@ Ask about what is missing: empty fields, thin descriptions, names in other Entri
 - World Rule: what it allows and forbids, and what it costs.
 - Plot Thread: what is at stake, and whether it is open or resolved.
 - Theme: where the story shows it.
+- Fact: what it Applies to, where and when it holds; its Sources; when it was Captured.
 
 Ask one question at a time; two short linked questions may share a message. Never a form or a list of questions.
 
@@ -282,7 +287,7 @@ export const PLAN_CHECK_RULE = `When the Author asks you to check the plan, answ
 Kinds:
 - "beat": a Beat of what the Book follows missing, a Beat for one Scene on several, or a Beat far from where it should fall or out of order.
 - "convention": a Genre convention's order or position not holding, judged from the Outlines.
-- "contradiction": an Outline contradicting the Story Bible. Ask which holds.
+- "contradiction": an Outline contradicting the Story Bible. Ask which holds. When the Entry is a Fact not yet Checked, say so.
 - "gap": a unit with no Outline, a Status further along than its Outline, a stretch thin or crowded against the Beats, a thread raised and never paid off.
 - "idle": a Scene that performs no Beat and moves no thread.
 

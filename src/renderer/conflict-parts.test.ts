@@ -141,6 +141,28 @@ describe('entryParts', () => {
       differs: true,
     });
   });
+
+  it('shows a Fact’s Sources one per line, and whether it is Checked, merging the one chosen', () => {
+    const fact = (checked: boolean) => {
+      const entry = newEntryValue('e2', 'fact', 'Lay judges');
+      return {
+        ...entry,
+        fields: { ...entry.fields, sources: ['A', 'B'], checked },
+      };
+    };
+    const versions = [fact(false), fact(true)];
+    const parts = entryParts(versions);
+    expect(parts).toContainEqual({
+      key: 'sources',
+      label: 'Sources',
+      texts: ['A\nB', 'A\nB'],
+      differs: false,
+    });
+    expect(partsToChoose(parts)).toEqual([
+      { key: 'checked', label: 'Checked', texts: ['No', 'Yes'], differs: true },
+    ]);
+    expect(mergedEntry(versions, { checked: 1 }, '').fields.checked).toBe(true);
+  });
 });
 
 describe('mergedEntry', () => {

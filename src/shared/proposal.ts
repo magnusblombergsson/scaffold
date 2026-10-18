@@ -23,7 +23,7 @@ import {
 } from './book-details';
 import type { BookDetailKey } from './project-types';
 import { isBeatId } from './structure-catalogue';
-import { newEntryValue } from './entry';
+import { isCapturedDate, newEntryValue } from './entry';
 import {
   customValue,
   fieldsOfType,
@@ -49,8 +49,9 @@ import { isWordTarget, isWordTargetOrNone } from './word-target';
 // and how the Assistant writes one in its reply.
 
 /**
- * The fields of an Entry a Proposal may change. Never its private notes, nor
- * a Voice's example lines, which only the Author writes.
+ * The fields of an Entry a Proposal may change. Never its private notes, a
+ * Voice's example lines, nor whether a Fact is Checked, which only the
+ * Author writes.
  */
 export const PROPOSAL_FIELDS = [
   'description',
@@ -67,6 +68,9 @@ export const PROPOSAL_FIELDS = [
   'senses.sound',
   'senses.touch',
   'senses.atmosphere',
+  'appliesTo',
+  'sources',
+  'captured',
 ] as const;
 /** A field every Entry of a type has, which `PROPOSAL_FIELDS` lists. */
 export type BuiltInField = (typeof PROPOSAL_FIELDS)[number];
@@ -105,6 +109,9 @@ export const FIELD_LABELS: Record<BuiltInField, string> = {
   'senses.sound': 'Sound',
   'senses.touch': 'Touch',
   'senses.atmosphere': 'Atmosphere',
+  appliesTo: 'Applies to',
+  sources: 'Sources',
+  captured: 'Captured',
 };
 
 /** A field's value: text, a list (aliases, words), or a Role, which may be unset. */
@@ -495,6 +502,7 @@ const FIELDS_OF: Record<EntryType, BuiltInField[]> = {
   item: ['description', 'aliases'],
   'world-rule': ['description', 'aliases'],
   theme: ['description', 'aliases'],
+  fact: ['description', 'aliases', 'appliesTo', 'sources', 'captured'],
   other: ['description', 'aliases'],
 };
 
@@ -515,13 +523,24 @@ export function isProposalField(field: unknown): field is ProposalField {
 /** Whether `field` holds a list, one item per line when edited. */
 export function isListField(field: ProposalField): boolean {
   return (
-    field === 'aliases' || field === 'voice.says' || field === 'voice.neverSays'
+    field === 'aliases' ||
+    field === 'voice.says' ||
+    field === 'voice.neverSays' ||
+    field === 'sources'
   );
 }
 
 /** Whether `field` is a choice of a few values, such as a Role, rather than text. */
 export function isChoiceField(field: ProposalField): boolean {
   return field === 'role' || field === 'status';
+}
+
+/**
+ * Whether text may be appended to `field`: text that is neither a choice
+ * nor a Fact's Captured day.
+ */
+export function takesAppend(field: ProposalField): boolean {
+  return !isListField(field) && !isChoiceField(field) && field !== 'captured';
 }
 
 /**
@@ -545,9 +564,15 @@ export function fieldOf(
   if (field === 'aliases') return entry.aliases;
   if (field === 'role') return fields.role ?? null;
   if (field === 'status') return fields.status ?? 'open';
-  if (field === 'roleNote' || field === 'appearance') {
+  if (
+    field === 'roleNote' ||
+    field === 'appearance' ||
+    field === 'appliesTo' ||
+    field === 'captured'
+  ) {
     return fields[field] ?? '';
   }
+  if (field === 'sources') return fields.sources ?? [];
   const [group, key] = field.split('.') as ['voice' | 'senses', string];
   return (fields[group] as Record<string, FieldValue> | undefined)?.[key];
 }
@@ -566,9 +591,15 @@ export function withField(
   const fields: EntryFields = { ...entry.fields };
   if (field === 'role') fields.role = value as Role | null;
   else if (field === 'status') fields.status = value as ThreadStatus;
-  else if (field === 'roleNote' || field === 'appearance') {
+  else if (
+    field === 'roleNote' ||
+    field === 'appearance' ||
+    field === 'appliesTo' ||
+    field === 'captured'
+  ) {
     fields[field] = value as string;
-  } else if (field.startsWith('voice.')) {
+  } else if (field === 'sources') fields.sources = value as string[];
+  else if (field.startsWith('voice.')) {
     const key = field.slice('voice.'.length) as keyof Voice;
     fields.voice = { ...fields.voice!, [key]: value };
   } else {
@@ -586,6 +617,7 @@ export function isFieldValue(
   if (field === 'role') return value === null || ROLES.includes(value as Role);
   if (field === 'status')
     return THREAD_STATUSES.includes(value as ThreadStatus);
+  if (field === 'captured') return value === '' || isCapturedDate(value);
   if (isListField(field)) {
     return Array.isArray(value) && value.every((v) => typeof v === 'string');
   }
@@ -652,7 +684,7 @@ export function proposalOf(
       ? typeof add === 'string'
         ? { ...target, operation: 'add', proposed: [add.trim()] }
         : null
-      : typeof append === 'string' && !isChoiceField(field)
+      : typeof append === 'string' && takesAppend(field)
         ? { ...target, operation: 'append', proposed: append.trim() }
         : null;
     if (!change) return null;
@@ -731,7 +763,10 @@ export function canAppend(change: ProposalChange): boolean {
     return false;
   }
   if (isAppending(change)) return false;
-  return change.kind === 'outline' || !isChoiceField(change.field);
+  return (
+    change.kind === 'outline' ||
+    (!isChoiceField(change.field) && change.field !== 'captured')
+  );
 }
 
 /**

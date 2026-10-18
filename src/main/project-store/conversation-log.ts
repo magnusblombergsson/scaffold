@@ -29,9 +29,9 @@ import {
   isBeatsValue,
   decided,
   isAppending,
-  isChoiceField,
   isFieldValue,
   isListField,
+  takesAppend,
   isProposalField,
   type Decision,
   type DecisionEvent,
@@ -1165,7 +1165,7 @@ function loggedOffer(event: Partial<OfferedEvent>): Proposal | null {
       ? { ...change, operation, proposed: [proposed] }
       : null;
   }
-  return operation === 'append' && !isChoiceField(field)
+  return operation === 'append' && takesAppend(field)
     ? { ...change, operation, proposed }
     : null;
 }

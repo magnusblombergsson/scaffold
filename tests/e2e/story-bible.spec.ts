@@ -275,6 +275,49 @@ test('a Character, a Place and a Plot Thread show and save their own fields', as
   await app.close();
 });
 
+test('a Fact shows and saves its Sources, Captured, Applies to and Checked', async () => {
+  const projectPath = path.join(tempDir(), 'My Novel');
+  const { app, page } = await newProject(projectPath);
+
+  await newEntry(page, 'Fact');
+  await expect(page.getByLabel('Name', { exact: true })).toHaveText('New Fact');
+  const checked = page.getByLabel('Checked', { exact: true });
+  await expect(checked).not.toBeChecked();
+  await expect(page.getByText('Only you mark a Fact Checked')).toBeVisible();
+  await fill(page, 'Applies to', 'Swedish district courts');
+  await fill(page, 'Sources', 'https://www.domstol.se/\nBylund, p. 42');
+  await page.getByLabel('Captured', { exact: true }).fill('2026-10-12');
+  await checked.check();
+  await save(page);
+  await expect
+    .poll(() => bibleFile(projectPath))
+    .toContain(
+      [
+        'appliesTo: Swedish district courts',
+        'sources:',
+        '  - https://www.domstol.se/',
+        '  - Bylund, p. 42',
+        'captured: 2026-10-12',
+        'checked: true',
+      ].join('\n'),
+    );
+
+  // Back to it: what was saved shows.
+  await newEntry(page, 'Theme');
+  await storyBible(page)
+    .getByRole('button', { name: 'New Fact', exact: true })
+    .click();
+  await expect(page.getByLabel('Checked', { exact: true })).toBeChecked();
+  await expect(page.getByLabel('Captured', { exact: true })).toHaveValue(
+    '2026-10-12',
+  );
+  await expect(page.getByLabel('Applies to', { exact: true })).toHaveText(
+    'Swedish district courts',
+  );
+
+  await app.close();
+});
+
 test('changing an Entry’s type writes the fields that don’t fit into its description, and can be undone', async () => {
   const projectPath = path.join(tempDir(), 'My Novel');
   const { app, page } = await newProject(projectPath);

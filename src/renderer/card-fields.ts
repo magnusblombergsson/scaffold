@@ -1,4 +1,5 @@
 import { customValues, type CustomField } from '../shared/custom-field';
+import { checkedText } from '../shared/entry';
 import {
   isKeyField,
   type KeyFieldChoices,
@@ -39,6 +40,10 @@ const TYPE_FIELDS: Record<
     'Status',
     ({ fields }) => (fields.status ? STATUS_LABELS[fields.status] : ''),
   ],
+  checked: ['Checked', ({ fields }) => checkedText(fields.checked)],
+  appliesTo: ['Applies to', ({ fields }) => fields.appliesTo ?? ''],
+  sources: ['Sources', ({ fields }) => fields.sources?.join('\n') ?? ''],
+  captured: ['Captured', ({ fields }) => fields.captured ?? ''],
 };
 
 /** The type-specific fields among `keys` that have a value, labelled, in that order. */

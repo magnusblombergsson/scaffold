@@ -109,7 +109,10 @@ const sense = (key: keyof Senses, label: string): TextField => ({
   text: senseText(key),
 });
 
-type TextBodyField = Exclude<BodyField, 'role' | 'status'>;
+type TextBodyField = Exclude<
+  BodyField,
+  'role' | 'status' | 'captured' | 'checked'
+>;
 
 /**
  * The body's text fields. A Character's Voice: its traits as free text, the
@@ -156,6 +159,18 @@ const TEXT_FIELDS: Record<TextBodyField, TextField> = {
   'senses.sound': sense('sound', 'Sound'),
   'senses.smells': sense('smells', 'Smells'),
   'senses.touch': sense('touch', 'Touch'),
+  appliesTo: {
+    label: 'Applies to',
+    hint: 'Where and when it holds',
+    short: true,
+    text: (value) => (value as EntryValue).fields.appliesTo ?? '',
+  },
+  sources: {
+    label: 'Sources',
+    hint: 'One per line: a link, or a citation such as a book and page',
+    short: true,
+    text: (value) => ((value as EntryValue).fields.sources ?? []).join('\n'),
+  },
 };
 
 /**
@@ -231,7 +246,10 @@ export function EntryView({
   const value = useRef<EntryValue | null>(null);
   /** The values this view wrote, which the mirror shows once main has them. */
   const written = useRef(new WeakSet<EntryValue>());
-  /** A Character's Role and a Plot Thread's Status, as last saved or reloaded. */
+  /**
+   * A Character's Role, a Plot Thread's Status, and a Fact's Captured and
+   * Checked, as last saved or reloaded.
+   */
   const [choices, setChoices] = useState<EntryFields>({});
   const pending = usePending(entryId);
   /** Which values come from an Evolution, as last written or reloaded. */
@@ -319,9 +337,20 @@ export function EntryView({
     void write();
   }
 
-  function choose(field: 'role' | 'status', chosen: FieldValue) {
+  function choose(field: 'role' | 'status' | 'captured', chosen: FieldValue) {
     setChoices((choices) => ({ ...choices, [field]: chosen }));
     void save(field, chosen);
+  }
+
+  /** Marks a Fact Checked or not: the Entry's own, never an Evolution. */
+  function check(checked: boolean) {
+    if (!value.current) return;
+    setChoices((choices) => ({ ...choices, checked }));
+    value.current = {
+      ...value.current,
+      fields: { ...value.current.fields, checked },
+    };
+    void write();
   }
 
   /** Saves what was typed in a text field of the body. */
@@ -329,7 +358,8 @@ export function EntryView({
     const list =
       field === 'voice.says' ||
       field === 'voice.neverSays' ||
-      field === 'voice.examples';
+      field === 'voice.examples' ||
+      field === 'sources';
     return save(field, list ? textToLines(typed) : typed);
   }
 
@@ -451,8 +481,47 @@ export function EntryView({
           {ghosts('status')}
         </fieldset>
       );
-    const { label, hint, short, text } = TEXT_FIELDS[field];
     const Heading = inGroup ? 'h4' : 'h3';
+    if (field === 'checked')
+      return (
+        <section className="entry-checked" data-field="checked" key={field}>
+          <div className="field-heading">
+            <label>
+              <input
+                type="checkbox"
+                checked={choices.checked ?? false}
+                onChange={(event) => check(event.target.checked)}
+              />
+              Checked
+            </label>
+            <ShowInPeek type={entry.type} item="checked" label="Checked" />
+          </div>
+          <p className="field-hint">
+            Only you mark a Fact Checked, once you have verified it
+          </p>
+        </section>
+      );
+    if (field === 'captured')
+      return (
+        <section className="plain-text-field" data-field="captured" key={field}>
+          <div className="field-heading">
+            <Heading>
+              <label htmlFor={`captured-${entryId}`}>Captured</label>
+            </Heading>
+            <ShowInPeek type={entry.type} item="captured" label="Captured" />
+            {evolution('captured')}
+          </div>
+          <input
+            id={`captured-${entryId}`}
+            type="date"
+            value={choices.captured ?? ''}
+            onChange={(event) => choose('captured', event.target.value)}
+          />
+          <p className="field-hint">When it was gathered or last checked</p>
+          {ghosts('captured')}
+        </section>
+      );
+    const { label, hint, short, text } = TEXT_FIELDS[field];
     return (
       <section className="plain-text-field" key={field} data-field={field}>
         <div className="field-heading">

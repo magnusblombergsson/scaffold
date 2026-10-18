@@ -247,6 +247,76 @@ describe('proposalOf', () => {
     }
   });
 
+  describe('to a Fact', () => {
+    const fact: EntryValue = {
+      id: 'judges',
+      type: 'fact',
+      name: 'Lay judges',
+      aliases: [],
+      visibility: 'mentioned',
+      description: 'Three sit with the judge.',
+      fields: {
+        sources: ['Bylund, p. 42'],
+        captured: '',
+        appliesTo: 'Swedish district courts',
+        checked: true,
+      },
+    };
+
+    it('adds a Source, sets when it was Captured, and replaces or appends to what it Applies to', () => {
+      expect(
+        proposalOf(
+          { entry: 'judges', field: 'sources', add: 'https://www.domstol.se/' },
+          fact,
+        ),
+      ).toMatchObject({
+        operation: 'add',
+        proposed: ['https://www.domstol.se/'],
+      });
+      expect(
+        proposalOf(
+          { entry: 'judges', field: 'captured', value: '2026-10-12' },
+          fact,
+        ),
+      ).toMatchObject({ base: '', proposed: '2026-10-12' });
+      expect(
+        proposalOf(
+          { entry: 'judges', field: 'appliesTo', append: 'since 1975' },
+          fact,
+        ),
+      ).toMatchObject({ operation: 'append', proposed: 'since 1975' });
+      expect(withField(fact, 'sources', ['A', 'B']).fields).toMatchObject({
+        sources: ['A', 'B'],
+        checked: true,
+      });
+    });
+
+    it('takes a Captured only as a day, and nothing appended to one', () => {
+      for (const block of [
+        { entry: 'judges', field: 'captured', value: 'last spring' },
+        { entry: 'judges', field: 'captured', value: '2026-02-30' },
+        { entry: 'judges', field: 'captured', append: '2026-10-12' },
+      ]) {
+        expect(proposalOf(block, fact)).toBeNull();
+      }
+    });
+
+    it('never sets or clears Checked', () => {
+      for (const value of [true, false, 'yes', null]) {
+        expect(
+          proposalOf({ entry: 'judges', field: 'checked', value }, fact),
+        ).toBeNull();
+      }
+      expect(fieldOf(fact, 'checked' as ProposalField)).toBeUndefined();
+    });
+
+    it('never gives another type a Fact’s fields', () => {
+      expect(
+        proposalOf({ entry: 'anna', field: 'sources', add: 'A book' }, anna),
+      ).toBeNull();
+    });
+  });
+
   it('changes nothing with the value the field holds already', () => {
     expect(
       proposalOf(
