@@ -393,7 +393,7 @@ ${JSON.stringify({ type: 'message', role: 'assistant', text: 'Odd.', focus: [], 
     const interview = await store.startConversation('interview', 'Mara');
 
     await expect(store.chooseBook(writing.id, book)).rejects.toThrow(
-      'Only a Brainstorm, Interview or Plan Conversation is on a Book',
+      'Only a Brainstorm, Interview, Research or Plan Conversation is on a Book',
     );
     await expect(store.chooseBook(interview.id, 'gone')).rejects.toThrow(
       'No such Book',

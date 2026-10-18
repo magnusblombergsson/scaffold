@@ -57,6 +57,13 @@ export function isCapturedDate(text: unknown): text is string {
   );
 }
 
+/** The day `at` falls on, where the app runs, as a Fact is Captured: `YYYY-MM-DD`. */
+export function dayOf(at: number): string {
+  const date = new Date(at);
+  const two = (n: number) => String(n).padStart(2, '0');
+  return `${date.getFullYear()}-${two(date.getMonth() + 1)}-${two(date.getDate())}`;
+}
+
 /** A new Entry, seen when mentioned, with the empty fields of its type. */
 export function newEntryValue(
   id: string,

@@ -66,7 +66,7 @@ import type { TodoLink } from '../shared/todo';
 import { capitalized, unitName } from '../shared/unit-name';
 import { AssistantPanel } from './AssistantPanel';
 import { Binder, type Selection } from './Binder';
-import { BrainstormRoom } from './BrainstormRoom';
+import { BrainstormRoom, ResearchRoom } from './BrainstormRoom';
 import type { ShowProposal } from './Conversation';
 import { ConflictList, ConflictResolver } from './Conflicts';
 import {
@@ -1774,6 +1774,27 @@ function ProjectView({
                   pane={pane}
                   onAddProvider={onAddProvider}
                   onOpenEntry={showEntry}
+                />
+              </div>
+            )}
+            {visited.has('research') && (
+              <div className="room" hidden={room !== 'research'}>
+                <ResearchRoom
+                  active={room === 'research'}
+                  names={{ manuscript, entries }}
+                  book={writtenBook}
+                  pane={pane}
+                  onAddProvider={onAddProvider}
+                  onOpenEntry={showEntry}
+                  todos={
+                    <TodoList
+                      todos={todos}
+                      names={{ manuscript, entries, trash, drawer }}
+                      prelink={null}
+                      onOpen={openLink}
+                      onOpenTrash={openTrashItem}
+                    />
+                  }
                 />
               </div>
             )}

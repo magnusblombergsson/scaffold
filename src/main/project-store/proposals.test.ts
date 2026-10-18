@@ -490,6 +490,68 @@ describe('a Proposal to create an Entry', () => {
     await store.close();
   });
 
+  it('a new Fact logs its Sources, Captured and Applies to, and accepting creates it with them, not Checked', async () => {
+    const { store, conversationId } = await withReply();
+    const judges: Proposal = {
+      kind: 'new-entry',
+      id: 'p1',
+      entryId: MIRA,
+      proposed: {
+        type: 'fact',
+        name: 'Lay judges',
+        description: 'Three sit with the judge.',
+        appliesTo: 'Swedish district courts',
+        sources: ['Bylund, p. 42'],
+        captured: '2026-10-18',
+      },
+    };
+    await store.conversations.appendProposal(conversationId, judges);
+
+    expect((await logLines(conversationId)).at(-1)).toMatchObject({
+      fields: {
+        type: { proposed: 'fact' },
+        sources: { proposed: ['Bylund, p. 42'] },
+        captured: { proposed: '2026-10-18' },
+        appliesTo: { proposed: 'Swedish district courts' },
+      },
+    });
+    expect(await cardOf(store, conversationId)).toMatchObject({
+      proposed: judges.proposed,
+    });
+
+    await store.conversations.acceptProposal(conversationId, 'p1');
+
+    expect(await store.read(entryRef(MIRA))).toMatchObject({
+      type: 'fact',
+      description: 'Three sit with the judge.',
+      fields: {
+        sources: ['Bylund, p. 42'],
+        captured: '2026-10-18',
+        appliesTo: 'Swedish district courts',
+        checked: false,
+      },
+    });
+    expect((await logLines(conversationId)).at(-1)).toMatchObject({
+      type: 'proposal.accepted',
+      fields: { sources: { wrote: ['Bylund, p. 42'] } },
+    });
+    // Untouched since, it may be undone.
+    expect((await cardOf(store, conversationId))?.state).toEqual({
+      kind: 'accepted',
+      edited: false,
+    });
+    await store.close();
+    const reopened = await openProject(projectPath, {
+      fs: nodeFileSystem,
+      clock: instantClock(2_000),
+    });
+    expect(await cardOf(reopened, conversationId)).toMatchObject({
+      proposed: judges.proposed,
+      state: { kind: 'accepted', edited: false },
+    });
+    await reopened.close();
+  });
+
   it('accepts it as the Author edited it, with the description on one line', async () => {
     const { store, conversationId } = await withReply();
     await store.conversations.appendProposal(conversationId, mira);

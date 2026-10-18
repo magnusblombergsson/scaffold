@@ -89,6 +89,7 @@ export const WINDOW_MODES = [
   'writing',
   'brainstorm',
   'interview',
+  'research',
   'plan',
 ] as const satisfies Mode[];
 
@@ -186,8 +187,8 @@ export function useConversation({
   /** The Book the Author chose for a new Conversation, before it starts. */
   const [newBook, setNewBook] = useState<string>();
   /**
-   * In a Series, the Book a Brainstorm or Interview is about, as main sends
-   * it; none in Writing, which is about the Book of the Scene in focus.
+   * In a Series, the Book a Brainstorm, Interview, Research or Plan is
+   * about, as main sends it; none in Writing, which is about the Book of the Scene in focus.
    */
   const book =
     mode === 'writing'

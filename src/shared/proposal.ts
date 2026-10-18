@@ -140,8 +140,22 @@ export type EntryFieldChange = {
   book?: string;
 } & Operation<FieldValue, 'append' | 'add'>;
 
-/** A new Entry as proposed: its type, name and a one-line description. */
-export type NewEntry = { type: EntryType; name: string; description: string };
+/**
+ * A new Entry as proposed: its type, name and a one-line description, and a
+ * new Fact's details, those it is proposed with.
+ */
+export type NewEntry = {
+  type: EntryType;
+  name: string;
+  description: string;
+} & Partial<FactDetails>;
+
+/** The fields of a Fact a new one may be proposed with: never whether it is Checked. */
+export type FactDetails = {
+  sources: string[];
+  captured: string;
+  appliesTo: string;
+};
 
 /**
  * A new Entry, which has no base; `entryId` is the id it gets when accepted,
@@ -331,7 +345,17 @@ const PROPOSAL_KINDS: Record<Mode, readonly ProposalChange['kind'][]> = {
     'notes',
     'beats',
   ],
+  // Of Facts only, `RESEARCH_FIELDS` of them.
+  research: ['field', 'new-entry'],
 };
+
+/** The fields of a Fact Research may propose a change to. */
+export const RESEARCH_FIELDS: readonly ProposalField[] = [
+  'description',
+  'appliesTo',
+  'sources',
+  'captured',
+];
 
 /** Whether a Conversation in `mode` may propose a change of `kind`. */
 export function mayPropose(mode: Mode, kind: ProposalChange['kind']): boolean {
@@ -867,11 +891,18 @@ function wasAppended(
 /**
  * The new Entry a block proposes, or null when it proposes none this app
  * takes: a block names its type as `create`, its `name`, and a
- * `description`, which is kept to one line.
+ * `description`, which is kept to one line. A Fact may come with what it
+ * `appliesTo` and its `sources`, a list or one; one the field can't hold is
+ * left out. Never the day it was Captured: Research gives it the day of the
+ * answer, and another Mode none.
  */
 export function newEntryOf(block: unknown): NewEntry | null {
   if (typeof block !== 'object' || block === null) return null;
-  const { create, name, description } = block as Record<string, unknown>;
+  const { create, name, description, appliesTo, sources } = block as Record<
+    string,
+    unknown
+  >;
+  const listed = typeof sources === 'string' ? [sources] : sources;
   return asNewEntry({
     type: create,
     name: typeof name === 'string' ? name.trim() : name,
@@ -879,17 +910,53 @@ export function newEntryOf(block: unknown): NewEntry | null {
       typeof description === 'string'
         ? description.replace(/\s+/g, ' ').trim()
         : '',
+    ...(typeof appliesTo === 'string' && { appliesTo: appliesTo.trim() }),
+    ...(isTextList(listed) && {
+      sources: listed.map((s) => s.trim()).filter(Boolean),
+    }),
   });
 }
 
-/** The value as a new Entry, with its keys in order, or null when it isn't one. */
+/**
+ * The value as a new Entry, with its keys in order, or null when it isn't
+ * one. A Fact keeps the details it has that its fields can hold; another
+ * type has none.
+ */
 export function asNewEntry(value: unknown): NewEntry | null {
   if (typeof value !== 'object' || value === null) return null;
-  const { type, name, description } = value as Record<string, unknown>;
+  const { type, name, description, sources, captured, appliesTo } =
+    value as Record<string, unknown>;
   if (!ENTRY_TYPES.includes(type as EntryType)) return null;
   if (typeof name !== 'string' || !name.trim()) return null;
   if (typeof description !== 'string') return null;
-  return { type: type as EntryType, name, description };
+  const entry: NewEntry = { type: type as EntryType, name, description };
+  if (type !== 'fact') return entry;
+  return {
+    ...entry,
+    ...(typeof appliesTo === 'string' && { appliesTo }),
+    ...(isTextList(sources) && { sources }),
+    ...((captured === '' || isCapturedDate(captured)) && { captured }),
+  };
+}
+
+function isTextList(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((v) => typeof v === 'string');
+}
+
+/** The Entry accepting a new one creates under `id`: a Fact with the details it was proposed with. */
+export function createdEntry(id: string, created: NewEntry): EntryValue {
+  const { type, name, description, sources, captured, appliesTo } = created;
+  const entry = newEntryValue(id, type, name, description);
+  if (type !== 'fact') return entry;
+  return {
+    ...entry,
+    fields: {
+      ...entry.fields,
+      ...(sources && { sources }),
+      ...(captured !== undefined && { captured }),
+      ...(appliesTo !== undefined && { appliesTo }),
+    },
+  };
 }
 
 /**
@@ -952,8 +1019,8 @@ export function notesAppendOf(
 /** A Proposal as the Assistant would write it, for the Conversation sent back to it. */
 export function proposalBlock(change: ProposalChange): string {
   if (change.kind === 'new-entry') {
-    const { type, name, description } = change.proposed;
-    return fencedProposal({ create: type, name, description });
+    const { type, name, description, ...details } = change.proposed;
+    return fencedProposal({ create: type, name, description, ...details });
   }
   if (change.kind === 'add') {
     const { unit, unitId, proposed, after } = change;
@@ -1572,10 +1639,10 @@ function newEntryUndoBlocked(
 /** Whether an Entry, with its private notes, is just as an accept created it, `wrote`. */
 function asCreated(
   { entry, privateNotes }: { entry: EntryValue; privateNotes: string },
-  { type, name, description }: NewEntry,
+  created: NewEntry,
 ): boolean {
   return (
-    sameJson(entry, newEntryValue(entry.id, type, name, description)) &&
+    sameJson(entry, createdEntry(entry.id, created)) &&
     privateNotes.trim() === ''
   );
 }

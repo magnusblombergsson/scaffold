@@ -38,6 +38,7 @@ import {
   type FieldValue,
   type HeldValue,
   type WordTarget,
+  type FactDetails,
   type NewEntry,
   type NewUnit,
   PLAN_UNITS,
@@ -855,7 +856,7 @@ export function proposedEvent(
     };
   }
   if (proposal.kind === 'new-entry') {
-    const { type, name, description } = proposal.proposed;
+    const { type, name, description, ...details } = proposal.proposed;
     return {
       type: 'proposal.proposed',
       id,
@@ -864,6 +865,7 @@ export function proposedEvent(
         type: { proposed: type },
         name: { proposed: name },
         description: { proposed: description },
+        ...loggedDetails(details, (proposed) => ({ proposed })),
       },
       at,
     };
@@ -929,7 +931,7 @@ export function acceptedEvent(
     };
   }
   if (proposal.kind === 'new-entry') {
-    const { type, name, description } = wrote as NewEntry;
+    const { type, name, description, ...details } = wrote as NewEntry;
     return {
       type: 'proposal.accepted',
       id,
@@ -937,6 +939,7 @@ export function acceptedEvent(
         type: { wrote: type },
         name: { wrote: name },
         description: { wrote: description },
+        ...loggedDetails(details, (wrote) => ({ wrote })),
       },
       at,
     };
@@ -986,6 +989,19 @@ export type Landing = Pick<
 >;
 
 /**
+ * A new Fact's details, each as a field of its event by `as`: an app from
+ * before Facts reads the Proposal by its type, name and description alone.
+ */
+function loggedDetails<T>(
+  details: Partial<FactDetails>,
+  as: (value: FieldValue) => T,
+): Record<string, T> {
+  return Object.fromEntries(
+    Object.entries(details).map(([key, value]) => [key, as(value)]),
+  );
+}
+
+/**
  * The Proposal an event logs, if this app can take it: a change to one field
  * of an Entry that a Proposal may change, with values the field can hold; a
  * new Entry of a known type with a name; or an Outline's whole body. Never
@@ -1001,6 +1017,9 @@ function loggedProposal(event: Partial<ProposedEvent>): Proposal | null {
       type: fields.type?.proposed,
       name: fields.name?.proposed,
       description: fields.description?.proposed,
+      sources: fields.sources?.proposed,
+      captured: fields.captured?.proposed,
+      appliesTo: fields.appliesTo?.proposed,
     });
     return proposed && { kind: 'new-entry', id, entryId: target.id, proposed };
   }
@@ -1357,6 +1376,9 @@ function acceptedOf(
       type: fields.type?.wrote,
       name: fields.name?.wrote,
       description: fields.description?.wrote,
+      sources: fields.sources?.wrote,
+      captured: fields.captured?.wrote,
+      appliesTo: fields.appliesTo?.wrote,
     });
     return wrote && { kind: 'accepted', wrote };
   }

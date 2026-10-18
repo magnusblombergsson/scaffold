@@ -1,3 +1,4 @@
+import { dayOf } from '../../shared/entry';
 import {
   broughtInNow,
   focusIds,
@@ -320,10 +321,13 @@ export function createConversationEngine({
             finished.proposals,
             storyBibleOf(view, context.book),
             mode,
-            // An Add may go in or after a unit one still pending proposes.
-            messages.flatMap((m) =>
-              (m.proposals ?? []).filter((p) => p.state.kind === 'pending'),
-            ),
+            {
+              // An Add may go in or after a unit one still pending proposes.
+              earlier: messages.flatMap((m) =>
+                (m.proposals ?? []).filter((p) => p.state.kind === 'pending'),
+              ),
+              today: dayOf(clock.now()),
+            },
           );
     const proposals = made?.proposals ?? [];
     // A Plan check's Proposals can't be taken, so they count as unreadable.

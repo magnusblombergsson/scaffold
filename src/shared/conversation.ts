@@ -9,7 +9,13 @@ import type { Usage } from './usage';
 // renderer about them. The log on disk holds more; these are what is shown.
 
 /** One of the tool's working states, each giving the Assistant a different role. */
-export const MODES = ['brainstorm', 'interview', 'writing', 'plan'] as const;
+export const MODES = [
+  'brainstorm',
+  'interview',
+  'writing',
+  'plan',
+  'research',
+] as const;
 export type Mode = (typeof MODES)[number];
 
 export const MODE_LABELS: Record<Mode, string> = {
@@ -17,6 +23,7 @@ export const MODE_LABELS: Record<Mode, string> = {
   interview: 'Interview',
   writing: 'Writing',
   plan: 'Plan',
+  research: 'Research',
 };
 
 /**

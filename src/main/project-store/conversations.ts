@@ -33,7 +33,6 @@ import {
   type BookDetailValue,
 } from '../../shared/book-details';
 import type { CustomField } from '../../shared/custom-field';
-import { newEntryValue } from '../../shared/entry';
 import { removeEvolution, withEvolved } from '../../shared/evolution';
 import { type Relation, type RelationChoice } from '../../shared/relation';
 import {
@@ -72,6 +71,7 @@ import {
   type EntryFieldChange,
   type FieldValue,
   type WithFieldLabel,
+  createdEntry,
   type NewEntry,
   type NewEntryPlace,
   type Orphaned,
@@ -300,8 +300,8 @@ export class Conversations {
   }
 
   /**
-   * In a Series, puts a Brainstorm, Interview or Plan on the Book `book` from its
-   * next message on, logged as chosen; never a Writing Conversation, whose
+   * In a Series, puts a Brainstorm, Interview, Research or Plan on the Book
+   * `book` from its next message on, logged as chosen; never a Writing Conversation, whose
    * Book is that of the Scene in focus.
    */
   chooseBook(id: string, book: string): Promise<void> {
@@ -309,7 +309,7 @@ export class Conversations {
       const { mode } = await this.readLogged(id);
       if (mode === 'writing') {
         throw new Error(
-          'Only a Brainstorm, Interview or Plan Conversation is on a Book',
+          'Only a Brainstorm, Interview, Research or Plan Conversation is on a Book',
         );
       }
       await this.appendEvent(id, {
@@ -1295,8 +1295,7 @@ ${text}`);
       await this.deps.fs.unlink(entryTrashPath(this.deps.path, entryId));
       this.deps.trash.delete(entryId);
     }
-    const { type, name, description } = wrote as NewEntry;
-    await this.deps.addEntry(newEntryValue(entryId, type, name, description));
+    await this.deps.addEntry(createdEntry(entryId, wrote as NewEntry));
     return { wrote };
   }
 

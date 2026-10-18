@@ -108,13 +108,14 @@ export type { InterviewFocus, PlanFocus };
  * One turn: the Conversation's Mode and what it is about, and its messages
  * so far, ending with the Author's new one, with the latest `summary` of
  * the older ones once it is long. In Writing, `sceneId` is the Scene in
- * focus, and a Review Chapter reviews its Chapter. In a Series, a Brainstorm
- * Interview or Plan is about the `book` it is on, as `conversationBook`
+ * focus, and a Review Chapter reviews its Chapter. In a Series, a Brainstorm,
+ * Interview, Research or Plan is about the `book` it is on, as `conversationBook`
  * says, and Writing about the Book holding the Scene in focus. A Plan is
  * about its `focus` within that Book, with the Brainstorms `broughtIn`.
  */
 export type ContextRequest = (
   | { mode: 'brainstorm'; book?: string }
+  | { mode: 'research'; book?: string }
   | { mode: 'interview'; focus: InterviewFocus; book?: string }
   | {
       mode: 'plan';
@@ -181,6 +182,7 @@ export async function buildContext(
     request.mode === 'interview' ? request.focus : null,
     lens,
     mayPropose(request.mode, 'relation'),
+    request.mode === 'research',
   );
 
   const system: PromptBlock[] = [
@@ -464,8 +466,9 @@ function acceptedMention(proposal: ProposalView): string {
 /**
  * The Entries the Assistant may see, as one block: those seen always, those
  * seen when mentioned whose name or an alias is in `texts`, and those an
- * Interview is about, by Entry, type or Tag. A mention in another Entry
- * doesn't count, and an Entry seen never is never sent. In a Series, each
+ * Interview is about, by Entry, type or Tag, and in Research, with `everyFact`,
+ * every Fact. A mention in another Entry doesn't count, and an Entry seen
+ * never is never sent. In a Series, each
  * is as `lens` sees it, as of the Book the turn is about: a mention is by
  * any name or alias it has had up to it, and one that first appears in a
  * later Book is never sent. Where the Assistant
@@ -478,6 +481,7 @@ async function storyBible(
   interview: InterviewFocus | null,
   lens: StoryBibleLens,
   relate: boolean,
+  everyFact = false,
 ): Promise<{ text: string; ids: string[]; focused: string }> {
   const summaries = lens.entries;
   const mentioned = mentionMatcher(
@@ -492,7 +496,10 @@ async function storyBible(
   const seen = summaries.filter(
     (e) =>
       e.visibility === 'always' ||
-      (e.visibility === 'mentioned' && (mentioned.has(e.id) || inFocus(e))),
+      (e.visibility === 'mentioned' &&
+        (mentioned.has(e.id) ||
+          inFocus(e) ||
+          (everyFact && e.type === 'fact'))),
   );
   const entries = await Promise.all(
     seen.map(
@@ -1459,9 +1466,9 @@ export function readableScene(
 /**
  * For a log that names the Mode: the request a Mode's turn makes. In
  * Writing, a Review when the Author's message asks for one; in an Interview,
- * about the focus it was last set to; in a Brainstorm or Interview, about
- * the `book` it was last put on, if any; in a Plan, about the focus it was
- * last set to within that Book, or the whole Book.
+ * about the focus it was last set to; in a Brainstorm, Interview or
+ * Research, about the `book` it was last put on, if any; in a Plan, about
+ * the focus it was last set to within that Book, or the whole Book.
  */
 export function defaultRequest(
   mode: Mode,
@@ -1471,7 +1478,9 @@ export function defaultRequest(
   book?: string,
 ): ContextRequest {
   const onBook = book !== undefined ? { book } : {};
-  if (mode === 'brainstorm') return { mode, messages, ...onBook };
+  if (mode === 'brainstorm' || mode === 'research') {
+    return { mode, messages, ...onBook };
+  }
   if (mode === 'interview') {
     return { mode, focus: interviewFocus, messages, ...onBook };
   }
