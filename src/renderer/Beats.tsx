@@ -3,7 +3,9 @@ import {
   beatWhere,
   carriers,
   sceneBeatsInWriting,
+  measureOf,
   spanText,
+  type Falls,
   type FollowedBeat,
   type Measure,
   type Span,
@@ -22,6 +24,19 @@ const MEASURED: Record<Measure, string> = {
   words: 'by planned words',
   order: 'by Scene order',
 };
+
+/**
+ * How where the Book's Scenes fall is measured, as the rail heads it: over
+ * the Book, or within each Part, called by `label`, each on its own.
+ */
+function measuredText(falls: Falls, label: string): string {
+  if (falls.within === 'book') return `Measured ${MEASURED[falls.measure]}`;
+  const measures = new Set(falls.parts.map((p) => p.measure));
+  const [only] = measures;
+  return measures.size === 1
+    ? `Measured within each ${label}, ${MEASURED[only]}`
+    : `Measured within each ${label}: by planned words in some, by Scene order in others`;
+}
 
 /**
  * The Beats a Scene carries of what the Book follows, as chips on its row in
@@ -126,13 +141,15 @@ function proposedChange(
 export function SceneBeats({
   scene,
   falls,
-  measure,
+  partLabel,
   followed,
   proposed,
 }: {
   scene: ManuscriptScene;
-  falls: Span | undefined;
-  measure: Measure;
+  /** Where the Book's Scenes fall. */
+  falls: Falls;
+  /** What the Project calls its Parts. */
+  partLabel: string;
   followed: readonly FollowedBeat[];
   /** The whole list a pending Proposal sets, null for none; undefined with none pending. */
   proposed?: readonly string[] | null;
@@ -140,15 +157,19 @@ export function SceneBeats({
   const readOnly = useContext(ReadOnlyContext);
   const run = useRun();
   const sources = [...new Set(followed.map((b) => b.source))];
+  const span = falls.falls.get(scene.id);
+  const measure = measureOf(falls, scene.id);
   const mark = (beat: FollowedBeat, carries: boolean) =>
     void run((project) => project.setBeat(scene.id, beat.id, carries), {
       what: 'mark the Scene’s Beats',
     });
   return (
     <section className="scene-beats" aria-label="Beats">
-      {falls && (
+      {span && measure && (
         <p className="scene-falls">
-          Falls at {spanText(falls)} of the Book, {MEASURED[measure]}
+          Falls at {spanText(span)} of{' '}
+          {falls.within === 'part' ? `its ${partLabel}` : 'the Book'},{' '}
+          {MEASURED[measure]}
         </p>
       )}
       {sources.length === 0 ? (
@@ -193,22 +214,24 @@ export function SceneBeats({
 
 /**
  * The Beat rail beside the tree: each Beat of what the Book follows with
- * where it should fall, drawn on a track of the whole Book, and a pin for
- * each Scene carrying it at where that Scene falls; the Structure's Beats
+ * where it should fall, drawn on a track of the whole Book, or of every
+ * Part when its Structure runs anew in each, and a pin for each Scene
+ * carrying it at where that Scene falls; the Structure's Beats
  * in one column, the Genre conventions' in another. A pin chooses its
  * Scene.
  */
 export function BeatRail({
   scenes,
   falls,
-  measure,
+  partLabel,
   followed,
   onChoose,
 }: {
   /** The Book's Scenes, in reading order. */
   scenes: readonly ManuscriptScene[];
-  falls: Map<string, Span>;
-  measure: Measure;
+  falls: Falls;
+  /** What the Project calls its Parts. */
+  partLabel: string;
   followed: readonly FollowedBeat[];
   onChoose(sceneId: string): void;
 }) {
@@ -219,7 +242,7 @@ export function BeatRail({
   ] as const;
   return (
     <section className="beat-rail" aria-label="Beat rail">
-      <p className="beat-rail-measure">Measured {MEASURED[measure]}</p>
+      <p className="beat-rail-measure">{measuredText(falls, partLabel)}</p>
       {columns.map(({ key, label }) => {
         const beats = followed.filter((b) => b.column === key);
         if (beats.length === 0) return null;
@@ -235,7 +258,7 @@ export function BeatRail({
                 key={beat.id}
                 beat={beat}
                 carriers={carriers(scenes, beat.id)}
-                falls={falls}
+                falls={falls.falls}
                 onChoose={onChoose}
               />
             ))}

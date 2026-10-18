@@ -1,6 +1,6 @@
 import { wordTargetOf } from '../../shared/word-target';
 import { followedBeats, shownBeats } from '../../shared/beat-measure';
-import { bookDetailsOf } from '../../shared/book-details';
+import { bookDetailsOf, mayRunInEveryPart } from '../../shared/book-details';
 import { createHash, randomUUID } from 'node:crypto';
 import { hostname } from 'node:os';
 import path from 'node:path';
@@ -11,6 +11,7 @@ import {
   partLabel,
   type BookDetailKey,
   type BookDetails,
+  type StructureRuns,
   partName,
   proseLanguage,
   unitKey,
@@ -313,8 +314,26 @@ const BOOK_OWN_DETAILS = [
   'genres',
   'bookFormat',
   'structure',
+  'partStructure',
   'genreConventions',
+  'archetype',
 ] as const;
+
+/**
+ * A Book's details as the window is told them (ADR 0017): a Structure held
+ * as `partStructure` runs anew in every Part; with `structure` held too, as
+ * when a switch was cut short, the Structure runs over the Book.
+ */
+function withStructureRuns<T extends object>(node: T): T {
+  const { partStructure, ...rest } = node as T & {
+    structure?: string;
+    partStructure?: string;
+  };
+  if (partStructure === undefined || rest.structure !== undefined) {
+    return rest as T;
+  }
+  return { ...rest, structure: partStructure, structureRuns: 'part' } as T;
+}
 /** How long edits are still saved once a newer app has upgraded the Project, for the window to hand its over. */
 const HANDOVER_MS = 2000;
 
@@ -1248,7 +1267,13 @@ export class ProjectStore {
       changeRelations: (change) => this.changeRecords('relations', change),
       changeBookDetail: (bookId, key, change) =>
         this.enqueueWrite(async () => {
-          await this.setDetail(this.detailRef(bookId), key, change());
+          // A Structure stays where it runs, as when set with a click.
+          if (key === 'structure') {
+            const value = change() as string | null | undefined;
+            await this.setStructure(bookId, value ?? null, 'kept');
+          } else {
+            await this.setDetail(this.detailRef(bookId), key, change());
+          }
         }),
       changeWordTarget: (unitId, change) =>
         this.enqueueWrite(async () => {
@@ -1947,11 +1972,60 @@ export class ProjectStore {
     value: BookDetails[K] | null,
   ): Promise<void> {
     return this.enqueueWrite(async () => {
-      if (await this.setDetail(this.detailRef(bookId), key, value)) {
-        // Plan's Proposals on it may be stale, or applied, now.
+      const changed =
+        key === 'structure'
+          ? await this.setStructure(bookId, value as string | null, 'kept')
+          : await this.setDetail(this.detailRef(bookId), key, value);
+      // Plan's Proposals on it may be stale, or applied, now.
+      if (changed) this.emit({ type: 'proposalsChanged' });
+    });
+  }
+
+  /**
+   * Sets where the Structure of a Book, or with `PROJECT_OUTLINE` the one
+   * Book a Project without Books is, runs (ADR 0017): over the whole Book,
+   * or anew in every Part, which only a Structure of the catalogue's form
+   * may; refused while none is chosen, or with No set Structure. The
+   * Scenes' Beats stay as they are. There is no undo.
+   */
+  setStructureRuns(bookId: string, runs: StructureRuns): Promise<void> {
+    return this.enqueueWrite(async () => {
+      const held = this.heldDetails(this.detailRef(bookId));
+      const structure = held?.structure ?? held?.partStructure;
+      if (runs === 'part' && !mayRunInEveryPart(structure)) {
+        throw new Error('Only a chosen Structure runs anew in every Part');
+      }
+      if (await this.setStructure(bookId, structure ?? null, runs)) {
         this.emit({ type: 'proposalsChanged' });
       }
     });
+  }
+
+  /**
+   * Gives a Book its Structure, running where `runs` says, or where it runs
+   * now when `kept`: in every Part under its own key, `structure` left empty
+   * so an older app sees none chosen; over the Book, and always with none
+   * or No set Structure, under `structure`. The key it goes to is saved
+   * first, the other emptied after, so a switch cut short leaves both,
+   * which reads as over the Book. Resolves with whether it changed anything.
+   */
+  private async setStructure(
+    bookId: string,
+    structure: string | null,
+    runs: StructureRuns | 'kept',
+  ): Promise<boolean> {
+    const ref = this.detailRef(bookId);
+    const held = this.heldDetails(ref);
+    const inParts =
+      held?.partStructure !== undefined && held.structure === undefined;
+    const running = runs !== 'kept' ? runs : inParts ? 'part' : 'book';
+    const [to, from] =
+      running === 'part' && mayRunInEveryPart(structure ?? undefined)
+        ? (['partStructure', 'structure'] as const)
+        : (['structure', 'partStructure'] as const);
+    const set = await this.setDetail(ref, to, structure);
+    const emptied = await this.setDetail(ref, from, undefined);
+    return set || emptied;
   }
 
   /**
@@ -2862,9 +2936,9 @@ export class ProjectStore {
   manuscript(): Manuscript {
     const { tree } = this.manifest;
     const placed = new Set(sceneIds(tree));
-    const own = Object.fromEntries(
-      structuredClone(this.bookOwnDetails()),
-    ) as Pick<Manuscript, 'wordTarget' | BookDetailKey>;
+    const own = withStructureRuns(
+      Object.fromEntries(structuredClone(this.bookOwnDetails())),
+    ) as Pick<Manuscript, 'wordTarget' | keyof BookDetails>;
     const label = partLabel(this.manifest.partLabel);
     const withUnitDetails = <T extends { id: string }>(node: T): T => {
       const details = this.unitDetails.get(node.id);
@@ -2919,11 +2993,13 @@ export class ProjectStore {
       ...((parts.length > 0 || series) && { top: topIds(top) }),
       ...(series && {
         books: books.map(({ book, top }) =>
-          withUnitDetails<ManuscriptBook>({
-            id: book.id,
-            title: book.title,
-            top: topIds(top),
-          }),
+          withStructureRuns(
+            withUnitDetails<ManuscriptBook>({
+              id: book.id,
+              title: book.title,
+              top: topIds(top),
+            }),
+          ),
         ),
       }),
       unplaced: [...this.files]

@@ -1,4 +1,4 @@
-import type { BookDetails, Manuscript } from './project-types';
+import type { BookDetails, Manuscript, StructureRuns } from './project-types';
 import {
   conventionOf,
   CONVENTIONS,
@@ -8,26 +8,77 @@ import {
   type Beat,
 } from './structure-catalogue';
 
-// Where Scenes and Beats fall in a Book (spec: Outline planner §2, §3): each
-// Scene's share of the Book in planned words, or by Scene order when any
-// Scene has no Word target, never a mix and never by the Book's own Word
-// target; and the Beats of what the Book follows, those of anything else a
-// Scene carries set aside, unseen.
+// Where Scenes and Beats fall in a Book (spec: Outline planner §2, §3;
+// ADR 0017): each Scene's share of the Book, or of its Part when the
+// Structure runs anew in every Part, in planned words, or by Scene order
+// when any Scene there has no Word target, never a mix and never by the
+// Book's own Word target; and the Beats of what the Book follows, those of
+// anything else a Scene carries set aside, unseen.
 
 /** How where a Scene falls is measured. */
 export type Measure = 'words' | 'order';
 
-/** A share of the Book in %, from where it starts to where it ends. */
+/** A share of the Book, or of a Part, in %, from where it starts to where it ends. */
 export type Span = { from: number; to: number };
+
+/** A Scene as where it falls is measured: its Word target, and the Part it is in, if any. */
+export type MeasuredScene = { id: string; wordTarget?: number; part?: string };
+
+/**
+ * Where each Scene falls, a share of the Book or of its Part: over the
+ * Book, measured one way; anew in every Part, each Part measured on its
+ * own, in reading order.
+ */
+export type Falls = { falls: Map<string, Span> } & (
+  | { within: 'book'; measure: Measure }
+  | {
+      within: 'part';
+      /** Each Part by id, how it is measured, and its Scenes by id. */
+      parts: { id: string; measure: Measure; scenes: string[] }[];
+    }
+);
 
 /**
  * Where each of `scenes`, the Book's in reading order, falls: in planned
  * words when every one has a Word target, otherwise by Scene order, each
- * an equal share.
+ * an equal share. When the Structure `runs` anew in every Part, each Scene
+ * falls within its Part, by the same rule applied to that Part's Scenes;
+ * a Scene of a Loose Chapter, in no Part, falls nowhere. In a Book without
+ * Parts, every Part means the whole Book.
  */
 export function sceneFalls(
-  scenes: readonly { id: string; wordTarget?: number }[],
-): { measure: Measure; falls: Map<string, Span> } {
+  scenes: readonly MeasuredScene[],
+  runs: StructureRuns = 'book',
+): Falls {
+  const inParts = scenes.filter((s) => s.part !== undefined);
+  if (runs === 'book' || inParts.length === 0) {
+    return { within: 'book', ...measured(scenes) };
+  }
+  const ids = [...new Set(inParts.map((s) => s.part!))];
+  const falls = new Map<string, Span>();
+  const parts = ids.map((id) => {
+    const held = inParts.filter((s) => s.part === id);
+    const each = measured(held);
+    each.falls.forEach((span, scene) => falls.set(scene, span));
+    return { id, measure: each.measure, scenes: held.map((s) => s.id) };
+  });
+  return { within: 'part', parts, falls };
+}
+
+/**
+ * How where the Scene `sceneId` falls is measured: as the Book is, or as
+ * its Part is; undefined for a Scene that falls nowhere.
+ */
+export function measureOf(falls: Falls, sceneId: string): Measure | undefined {
+  if (falls.within === 'book') return falls.measure;
+  return falls.parts.find((p) => p.scenes.includes(sceneId))?.measure;
+}
+
+/** Where each of `scenes` falls within them all, as `sceneFalls` measures it. */
+function measured(scenes: readonly MeasuredScene[]): {
+  measure: Measure;
+  falls: Map<string, Span>;
+} {
   const planned = scenes.every((s) => s.wordTarget !== undefined);
   const measure: Measure = planned && scenes.length > 0 ? 'words' : 'order';
   const size = (s: { wordTarget?: number }) =>

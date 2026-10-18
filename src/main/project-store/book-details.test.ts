@@ -116,6 +116,40 @@ describe('setting a Book’s details', () => {
     expect(await headerOf(PROJECT_OUTLINE)).not.toHaveProperty('structure');
   });
 
+  it('keeps an Archetype or none, and none chosen yet as no key', async () => {
+    await newProject();
+    const store = await open();
+
+    await store.setBookDetail(PROJECT_OUTLINE, 'archetype', 'rags-to-riches');
+    expect(store.manuscript().archetype).toBe('rags-to-riches');
+    expect(await headerOf(PROJECT_OUTLINE)).toMatchObject({
+      archetype: 'rags-to-riches',
+    });
+    await store.setBookDetail(PROJECT_OUTLINE, 'archetype', 'none');
+    expect(store.manuscript().archetype).toBe('none');
+    await store.close();
+    const reopened = await open();
+    expect(reopened.manuscript().archetype).toBe('none');
+
+    await reopened.setBookDetail(PROJECT_OUTLINE, 'archetype', null);
+    expect(reopened.manuscript()).not.toHaveProperty('archetype');
+    expect(await headerOf(PROJECT_OUTLINE)).not.toHaveProperty('archetype');
+  });
+
+  it('gives each Book of a Series its own Archetype, Book 1 the Project’s', async () => {
+    await newProject();
+    const store = await open();
+    await store.setBookDetail(PROJECT_OUTLINE, 'archetype', 'tragedy');
+
+    const { id: two } = await store.createBook();
+    await store.setBookDetail(two, 'archetype', 'rebirth');
+
+    const [one, second] = store.manuscript().books!;
+    expect(one.archetype).toBe('tragedy');
+    expect(second.archetype).toBe('rebirth');
+    expect(store.manuscript()).not.toHaveProperty('archetype');
+  });
+
   it('takes away the Genres or Genre conventions when none are left', async () => {
     await newProject();
     const store = await open();
@@ -173,6 +207,111 @@ describe('setting a Book’s details', () => {
     await expect(
       store.setBookDetail(PROJECT_OUTLINE, 'bookFormat', 42 as never),
     ).rejects.toThrow();
+  });
+});
+
+describe('where a Book’s Structure runs', () => {
+  it('in every Part, keeps the Structure under its own key and the Structure key empty, and survives reopening', async () => {
+    await newProject();
+    const store = await open();
+    await store.setBookDetail(PROJECT_OUTLINE, 'structure', 'three-act');
+
+    await store.setStructureRuns(PROJECT_OUTLINE, 'part');
+
+    expect(store.manuscript()).toMatchObject({
+      structure: 'three-act',
+      structureRuns: 'part',
+    });
+    // An older app sees no Structure chosen, and never applies the Beats over the whole Book.
+    const header = await headerOf(PROJECT_OUTLINE);
+    expect(header).not.toHaveProperty('structure');
+    expect(header).toMatchObject({ partStructure: 'three-act' });
+    await store.close();
+    expect(await open()).toSatisfy(
+      (s: ProjectStore) => s.manuscript().structureRuns === 'part',
+    );
+  });
+
+  it('back over the Book, moves the Structure back to its key, and the Scenes keep their Beats', async () => {
+    await newProject();
+    const store = await open();
+    const sceneId = store.tree().chapters[0].scenes[0].id;
+    await store.setBookDetail(PROJECT_OUTLINE, 'structure', 'three-act');
+    await store.setBeat(sceneId, 'three-act/midpoint', true);
+    await store.setStructureRuns(PROJECT_OUTLINE, 'part');
+
+    await store.setStructureRuns(PROJECT_OUTLINE, 'book');
+
+    expect(store.manuscript().structure).toBe('three-act');
+    expect(store.manuscript()).not.toHaveProperty('structureRuns');
+    const header = await headerOf(PROJECT_OUTLINE);
+    expect(header).toMatchObject({ structure: 'three-act' });
+    expect(header).not.toHaveProperty('partStructure');
+    expect(store.manuscript().chapters[0].scenes[0].beats).toEqual([
+      'three-act/midpoint',
+    ]);
+  });
+
+  it('stays in every Part when another Structure is chosen, and goes back over the Book with none or No set Structure', async () => {
+    await newProject();
+    const store = await open();
+    await store.setBookDetail(PROJECT_OUTLINE, 'structure', 'three-act');
+    await store.setStructureRuns(PROJECT_OUTLINE, 'part');
+
+    await store.setBookDetail(PROJECT_OUTLINE, 'structure', 'freytag');
+    expect(store.manuscript()).toMatchObject({
+      structure: 'freytag',
+      structureRuns: 'part',
+    });
+    expect(await headerOf(PROJECT_OUTLINE)).not.toHaveProperty('structure');
+
+    await store.setBookDetail(PROJECT_OUTLINE, 'structure', 'none');
+    expect(store.manuscript().structure).toBe('none');
+    expect(store.manuscript()).not.toHaveProperty('structureRuns');
+    expect(await headerOf(PROJECT_OUTLINE)).not.toHaveProperty('partStructure');
+  });
+
+  it('is refused in every Part while no Structure is chosen, or with No set Structure', async () => {
+    await newProject();
+    const store = await open();
+
+    await expect(
+      store.setStructureRuns(PROJECT_OUTLINE, 'part'),
+    ).rejects.toThrow();
+    await store.setBookDetail(PROJECT_OUTLINE, 'structure', 'none');
+    await expect(
+      store.setStructureRuns(PROJECT_OUTLINE, 'part'),
+    ).rejects.toThrow();
+  });
+
+  it('goes with Book 1 when the Project becomes a Series', async () => {
+    await newProject();
+    const store = await open();
+    await store.setBookDetail(PROJECT_OUTLINE, 'structure', 'three-act');
+    await store.setStructureRuns(PROJECT_OUTLINE, 'part');
+
+    await store.createBook();
+
+    const [one] = store.manuscript().books!;
+    expect(one).toMatchObject({
+      structure: 'three-act',
+      structureRuns: 'part',
+    });
+    expect(one).not.toHaveProperty('partStructure');
+    expect(await headerOf(one.id)).toMatchObject({
+      partStructure: 'three-act',
+    });
+  });
+
+  it('is over the Book when a header holds both keys, as when a switch was cut short', async () => {
+    await newProject();
+    await writeHeader({ structure: 'three-act', partStructure: 'freytag' });
+
+    const store = await open();
+
+    expect(store.manuscript().structure).toBe('three-act');
+    expect(store.manuscript()).not.toHaveProperty('structureRuns');
+    expect(store.manuscript()).not.toHaveProperty('partStructure');
   });
 });
 
@@ -265,6 +404,48 @@ describe('Book details set on two computers', () => {
     expect(store.listConflicts()).toEqual([]);
     expect(store.manuscript().genreConventions).toEqual(['mystery']);
   });
+});
+
+it('the v2 app rewrites a Book’s Outline seeing no Structure in every Part, and keeps it for this app', async () => {
+  await newProject();
+  const store = await open('ALPHA', 1000);
+  await store.setBookDetail(PROJECT_OUTLINE, 'structure', 'three-act');
+  await store.setStructureRuns(PROJECT_OUTLINE, 'part');
+  await store.close();
+  const ref = { kind: 'outline', id: PROJECT_OUTLINE } as const;
+  const text = await readFile(outlinePath(PROJECT_OUTLINE), 'utf8');
+
+  const read = v2ReadUnit(ref, text);
+  await writeFile(
+    outlinePath(PROJECT_OUTLINE),
+    v2WriteUnit(ref, { ...read, body: '- Episodes.' }, text),
+  );
+
+  expect(await headerOf(PROJECT_OUTLINE)).not.toHaveProperty('structure');
+  expect((await open()).manuscript()).toMatchObject({
+    structure: 'three-act',
+    structureRuns: 'part',
+  });
+});
+
+it('the v2 app rewrites a Book’s Outline keeping its Archetype, and this app reads it back', async () => {
+  await newProject();
+  const store = await open('ALPHA', 1000);
+  await store.setBookDetail(PROJECT_OUTLINE, 'archetype', 'the-quest');
+  await store.close();
+  const ref = { kind: 'outline', id: PROJECT_OUTLINE } as const;
+  const text = await readFile(outlinePath(PROJECT_OUTLINE), 'utf8');
+
+  const read = v2ReadUnit(ref, text);
+  await writeFile(
+    outlinePath(PROJECT_OUTLINE),
+    v2WriteUnit(ref, { ...read, body: '- A long road.' }, text),
+  );
+
+  expect(await headerOf(PROJECT_OUTLINE)).toMatchObject({
+    archetype: 'the-quest',
+  });
+  expect((await open()).manuscript().archetype).toBe('the-quest');
 });
 
 it('the v2 app rewrites a Book’s Outline keeping its details, and this app reads them back', async () => {

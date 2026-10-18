@@ -1,11 +1,12 @@
 import type { BookDetails } from './project-types';
 
 // The built-in catalogue (spec: Outline planner §2): the Structures a Book
-// may follow, the Genre conventions it may follow beside one, and the Genres
-// and Formats it may have. Every entry keeps its commonly known name, credits
-// its source and is described in the tool's own words: no text is copied from
-// the books. Every id is a fixed slug, never reused or renamed (§11); a later
-// revision that drops or merges one maps the old id in OLD_IDS.
+// may follow, the Genre conventions it may follow beside one, the Archetype
+// its plot may follow, and the Genres and Formats it may have. Every entry
+// keeps its commonly known name, credits its source and is described in the
+// tool's own words: no text is copied from the books. Every id is a fixed
+// slug, never reused or renamed (§11); a later revision that drops or
+// merges one maps the old id in OLD_IDS.
 
 export type GenreId =
   | 'mystery'
@@ -49,10 +50,13 @@ export type Beat = {
   opensPart?: true;
 };
 
+/** Where a Structure is used: over one Book, anew in every Part of one, or across a Series. */
+export type Across = 'book' | 'part' | 'series';
+
 /**
  * A named pattern of Beats. `fits` is information only: the Genres and
- * Formats it suits, and whether it is used per Book, across a Series, or
- * both.
+ * Formats it suits, and where it is used, any of per Book, per Part and
+ * across a Series (ADR 0017).
  */
 export type Structure = {
   id: string;
@@ -63,7 +67,7 @@ export type Structure = {
   fits: {
     genres: readonly GenreId[];
     formats: readonly FormatId[];
-    across: 'book' | 'series' | 'both';
+    across: readonly Across[];
   };
   beats: readonly Beat[];
 };
@@ -80,6 +84,21 @@ export type GenreConvention = {
   genre: GenreId;
   beats: readonly Beat[];
   rules: readonly string[];
+};
+
+/**
+ * A kind of story a Book's plot follows, from Booker's seven basic plots:
+ * what the plot is, and its typical rise and fall of fortune. It sits
+ * across Structures, and has no Beats.
+ */
+export type Archetype = {
+  id: string;
+  name: string;
+  credit: string;
+  /** One line on the kind of story. */
+  description: string;
+  /** One line on how the protagonist's fortune rises and falls. */
+  riseAndFall: string;
 };
 
 /** The Structure value of a Book that chose No set Structure. */
@@ -137,7 +156,7 @@ export const STRUCTURES: readonly Structure[] = [
     fits: {
       genres: GENRE_FICTION,
       formats: ['novelette', 'novella', 'novel'],
-      across: 'book',
+      across: ['book'],
     },
     beats: [
       {
@@ -230,7 +249,7 @@ export const STRUCTURES: readonly Structure[] = [
     fits: {
       genres: GENRE_FICTION,
       formats: ['novella', 'novel'],
-      across: 'both',
+      across: ['book', 'series'],
     },
     beats: [
       {
@@ -315,7 +334,7 @@ export const STRUCTURES: readonly Structure[] = [
     fits: {
       genres: GENRE_FICTION,
       formats: ['novella', 'novel'],
-      across: 'book',
+      across: ['book'],
     },
     beats: [
       {
@@ -438,7 +457,7 @@ export const STRUCTURES: readonly Structure[] = [
     fits: {
       genres: ['mystery', 'thriller', 'fantasy', 'science-fiction', 'other'],
       formats: ['novelette', 'novella', 'novel'],
-      across: 'book',
+      across: ['book'],
     },
     beats: [
       {
@@ -496,7 +515,7 @@ export const STRUCTURES: readonly Structure[] = [
     fits: {
       genres: ['fantasy', 'science-fiction', 'other'],
       formats: ['novella', 'novel'],
-      across: 'both',
+      across: ['book', 'series'],
     },
     beats: [
       {
@@ -597,7 +616,7 @@ export const STRUCTURES: readonly Structure[] = [
     fits: {
       genres: ['literary', 'horror', 'other'],
       formats: SHORT,
-      across: 'book',
+      across: ['book'],
     },
     beats: [
       {
@@ -666,7 +685,7 @@ export const STRUCTURES: readonly Structure[] = [
     fits: {
       genres: ['thriller', 'horror', 'crime', 'literary'],
       formats: SHORT,
-      across: 'book',
+      across: ['book'],
     },
     beats: [
       {
@@ -706,7 +725,7 @@ export const STRUCTURES: readonly Structure[] = [
     fits: {
       genres: ['literary', 'fantasy', 'other'],
       formats: SHORT,
-      across: 'book',
+      across: ['book'],
     },
     beats: [
       {
@@ -962,6 +981,79 @@ export const CONVENTIONS: readonly GenreConvention[] = [
   },
 ];
 
+/** The Archetype value of a Book that chose none. */
+export const NO_ARCHETYPE = 'none';
+
+const BOOKER = 'Christopher Booker, The Seven Basic Plots (2004).';
+
+// Described from the research (docs/research/story-structures.md §7), in the
+// tool's own words.
+export const ARCHETYPES: readonly Archetype[] = [
+  {
+    id: 'overcoming-the-monster',
+    name: 'Overcoming the monster',
+    credit: BOOKER,
+    description:
+      'A monstrous power threatens a hero or a whole community, and the hero sets out to destroy it.',
+    riseAndFall:
+      'Starts low under the threat, rises briefly while the hero prepares, falls deep when the monster shows its full power and the hero nearly loses, then rises sharply as the monster dies.',
+  },
+  {
+    id: 'rags-to-riches',
+    name: 'Rags to riches',
+    credit: BOOKER,
+    description:
+      'A humble or overlooked hero rises, loses everything, and wins it back in full, grown by the loss.',
+    riseAndFall:
+      'Rise, fall, rise: early success, then a central crisis in which all is lost, then a final rise, higher than the first, that the hero earns alone.',
+  },
+  {
+    id: 'the-quest',
+    name: 'The quest',
+    credit: BOOKER,
+    description:
+      'The hero, usually with companions, sets out for a distant goal and reaches it after a long journey.',
+    riseAndFall:
+      'A long run of setbacks and recoveries on the way, new obstacles near the goal, a last series of trials, and an ending high when the goal is won.',
+  },
+  {
+    id: 'voyage-and-return',
+    name: 'Voyage and return',
+    credit: BOOKER,
+    description:
+      'The hero leaves the ordinary world for a strange one, and comes home changed.',
+    riseAndFall:
+      'Rise, fall, rise: wonder at the strange world, which turns threatening and closes in, then an escape and the return home.',
+  },
+  {
+    id: 'comedy',
+    name: 'Comedy',
+    credit: BOOKER,
+    description:
+      'People caught in a tangle of confusion and misunderstanding come together once it is unknotted, often in marriage. A kind of plot, not of humour.',
+    riseAndFall:
+      'A deepening fall as the confusion grows to its height, then a quick rise at the very end, when the truth comes out and those kept apart are united.',
+  },
+  {
+    id: 'tragedy',
+    name: 'Tragedy',
+    credit: BOOKER,
+    description:
+      'A hero tempted into a course of action succeeds at first, and is then destroyed by it.',
+    riseAndFall:
+      'Rise, then fall: things go well once the hero commits, then go wrong, the hero loses control as the forces against them close in, and it ends low, in the hero’s destruction.',
+  },
+  {
+    id: 'rebirth',
+    name: 'Rebirth',
+    credit: BOOKER,
+    description:
+      'A hero falls under a dark power, and is freed by a redeeming act, often another character’s.',
+    riseAndFall:
+      'Fall, a false rise while the threat seems to recede, a deep fall when it returns and seems to have won, then a rise at the end as the hero is redeemed.',
+  },
+];
+
 /**
  * Ids replaced by a later revision of the catalogue, old to new, applied
  * when a Project is read, like the migration chain. None yet.
@@ -1040,25 +1132,38 @@ export function conventionOf(id: string): GenreConvention | undefined {
   return CONVENTIONS.find((c) => c.id === id);
 }
 
-/** The Genres, Format and Structure a Book has, as its header holds them. */
-type Fitted = Pick<BookDetails, 'genres' | 'bookFormat' | 'structure'>;
+export function archetypeOf(id: string | undefined): Archetype | undefined {
+  return ARCHETYPES.find((a) => a.id === id);
+}
+
+/** The Genres, Format and Structure a Book has, and where it runs, as its header holds them. */
+type Fitted = Pick<
+  BookDetails,
+  'genres' | 'bookFormat' | 'structure' | 'structureRuns'
+>;
 
 /**
  * Whether `structure` fits a Book of `genres` and `format`: on any of its
- * Genres, and on its Format; a Genre or Format the catalogue doesn't know
- * counts as none.
+ * Genres; over the whole Book, on its Format, unless it fits per Part
+ * only; anew in every Part, when it fits per Part, the Book's Format
+ * playing no part, as the Structure describes one Part. A Genre or Format
+ * the catalogue doesn't know counts as none.
  */
 export function fitsBook(
   structure: Structure,
-  { genres, bookFormat }: Fitted,
+  { genres, bookFormat, structureRuns }: Fitted,
 ): boolean {
+  const { fits } = structure;
   const known = shownIds(genres, GENRES) as GenreId[];
   const genreFits =
-    known.length === 0 || known.some((g) => structure.fits.genres.includes(g));
+    known.length === 0 || known.some((g) => fits.genres.includes(g));
+  if (structureRuns === 'part')
+    return genreFits && fits.across.includes('part');
   const formatFits =
     !FORMATS.some((f) => f.id === bookFormat) ||
-    structure.fits.formats.includes(bookFormat as FormatId);
-  return genreFits && formatFits;
+    fits.formats.includes(bookFormat as FormatId);
+  const perPartOnly = fits.across.every((a) => a === 'part');
+  return genreFits && formatFits && !perPartOnly;
 }
 
 /**
@@ -1083,8 +1188,9 @@ export type Shortlisted<E> = { full: E[]; byName: E[] };
 /**
  * The catalogue as the app shortlists it for Plan (spec: Outline planner
  * §2), before any Model sees it. In full: the Structures fitting the Book's
- * Genres and Format, as `fitsBook` judges, whether they work per Book or
- * across a Series playing no part; the Genre conventions of its Genres;
+ * Genres and Format, and where its Structure runs, as `fitsBook` judges,
+ * whether they also work across a Series playing no part; the Genre
+ * conventions of its Genres;
  * what the Book follows; and any entry the Author named in `asked`, their
  * messages. The rest by name only. Each in catalogue order.
  */

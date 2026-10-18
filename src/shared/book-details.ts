@@ -5,18 +5,21 @@ import {
   type Manuscript,
 } from './project-types';
 import {
+  ARCHETYPES,
   CONVENTIONS,
   FORMATS,
   GENRES,
+  NO_ARCHETYPE,
   NO_STRUCTURE,
   STRUCTURES,
   type Format,
 } from './structure-catalogue';
 
 // A Book's own details (spec: Outline planner §3): its Genres, Format,
-// Structure and Genre conventions, as the Manuscript holds them, and as a
-// Proposal of Plan's names and changes them (§4). An id this version of the
-// catalogue doesn't know, from a newer app, is kept and never shown (§11).
+// Structure, where that runs (ADR 0017), Genre conventions and Archetype,
+// as the Manuscript holds them, and as a Proposal of Plan's names and
+// changes them (§4). An id this version of the catalogue doesn't know,
+// from a newer app, is kept and never shown (§11).
 
 /** The details a Book has of its own, in the order the strip shows them. */
 export const BOOK_DETAIL_KEYS: readonly BookDetailKey[] = [
@@ -24,6 +27,7 @@ export const BOOK_DETAIL_KEYS: readonly BookDetailKey[] = [
   'bookFormat',
   'structure',
   'genreConventions',
+  'archetype',
 ];
 
 /** What the Author calls each of a Book's details. */
@@ -32,15 +36,20 @@ export const BOOK_DETAIL_LABELS: Record<BookDetailKey, string> = {
   bookFormat: 'Format',
   structure: 'Structure',
   genreConventions: 'Genre conventions',
+  archetype: 'Archetype',
 };
 
-/** What each detail may hold, by id and name: No set Structure among the Structures. */
+/**
+ * What each detail may hold, by id and name: No set Structure among the
+ * Structures, none among the Archetypes.
+ */
 const CHOICES: Record<BookDetailKey, readonly { id: string; name: string }[]> =
   {
     genres: GENRES,
     bookFormat: FORMATS,
     structure: [...STRUCTURES, { id: NO_STRUCTURE, name: 'No set Structure' }],
     genreConventions: CONVENTIONS,
+    archetype: [...ARCHETYPES, { id: NO_ARCHETYPE, name: 'None' }],
   };
 
 /** Whether a detail holds a list of ids rather than one. */
@@ -66,11 +75,20 @@ export function bookDetailsOf(
     ? manuscript.books.find((b) => b.id === book)
     : manuscript;
   const details: BookDetails = {};
-  for (const key of BOOK_DETAIL_KEYS) {
+  for (const key of [...BOOK_DETAIL_KEYS, 'structureRuns'] as const) {
     const value = holder?.[key];
     if (value !== undefined) Object.assign(details, { [key]: value });
   }
   return details;
+}
+
+/**
+ * Whether a Book's Structure `structure` may run anew in every Part (ADR
+ * 0017): one of the catalogue's form, known to this version or not; never
+ * none chosen yet, nor No set Structure, which have no Beats to repeat.
+ */
+export function mayRunInEveryPart(structure: string | undefined): boolean {
+  return structure !== undefined && structure !== NO_STRUCTURE;
 }
 
 /**
@@ -160,6 +178,7 @@ export const BOOK_DETAIL_BLOCK_KEYS: Record<BookDetailKey, string> = {
   bookFormat: 'format',
   structure: 'structure',
   genreConventions: 'genreConventions',
+  archetype: 'archetype',
 };
 
 /**
@@ -199,7 +218,9 @@ export function isBookDetailBlock(block: unknown): boolean {
  */
 export function detailText(key: BookDetailKey, value: BookDetailValue): string {
   if (value === null || (Array.isArray(value) && value.length === 0)) {
-    return key === 'structure' ? 'None chosen yet' : 'None';
+    return key === 'structure' || key === 'archetype'
+      ? 'None chosen yet'
+      : 'None';
   }
   const name = (id: string) =>
     CHOICES[key].find((choice) => choice.id === id)?.name ??

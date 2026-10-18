@@ -165,6 +165,36 @@ describe('a Proposal on a Book’s detail', () => {
     await store.close();
   });
 
+  it('on the Structure of a Book running it in every Part, keeps it running there through accept and undo', async () => {
+    const { store, conversationId } = await planned();
+    await store.setBookDetail(PROJECT_OUTLINE, 'structure', 'three-act');
+    await store.setStructureRuns(PROJECT_OUTLINE, 'part');
+    await store.conversations.appendProposal(conversationId, {
+      ...structure(),
+      base: 'three-act',
+    });
+    const header = async () =>
+      (await readFile(
+        path.join(projectPath, 'outlines', `${PROJECT_OUTLINE}.md`),
+        'utf8',
+      )) as string;
+
+    await store.acceptProposal(conversationId, 'p1');
+    expect(store.manuscript()).toMatchObject({
+      structure: 'save-the-cat',
+      structureRuns: 'part',
+    });
+    expect(await header()).not.toMatch(/^structure:/m);
+
+    await store.undoProposal(conversationId, 'p1');
+    expect(store.manuscript()).toMatchObject({
+      structure: 'three-act',
+      structureRuns: 'part',
+    });
+    expect(await header()).not.toMatch(/^structure:/m);
+    await store.close();
+  });
+
   it('counts as applied when the Book holds the same choice in another order', async () => {
     const { store, conversationId } = await planned();
     await store.conversations.appendProposal(conversationId, {

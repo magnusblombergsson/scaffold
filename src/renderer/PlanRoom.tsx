@@ -14,8 +14,7 @@ import {
   followedBeats,
   sceneFalls,
   type FollowedBeat,
-  type Measure,
-  type Span,
+  type Falls,
 } from '../shared/beat-measure';
 import { bookManuscript, topLevel } from '../shared/manuscript-order';
 import {
@@ -142,7 +141,7 @@ export function PlanRoom({
   const plannedBook = manuscript.books?.find((b) => b.id === planned);
   const bookId = plannedBook?.id ?? PROJECT_OUTLINE;
   const bookDetails = plannedBook ?? manuscript;
-  const { structure, genreConventions } = bookDetails;
+  const { structure, structureRuns, genreConventions } = bookDetails;
   /** The Beats of what the Book follows; a Scene's other marks are set aside. */
   const followed = useMemo(
     () => followedBeats({ structure, genreConventions }),
@@ -156,7 +155,18 @@ export function PlanRoom({
         .map((n) => n.scenes[0]),
     [tree],
   );
-  const { measure, falls } = useMemo(() => sceneFalls(scenes), [scenes]);
+  const falls = useMemo(() => {
+    const partOf = new Map(
+      allNodes(tree)
+        .filter((n) => n.kind === 'part')
+        .flatMap((p) => p.scenes.map((s) => [s.id, p.id] as const)),
+    );
+    return sceneFalls(
+      scenes.map((s) => ({ ...s, part: partOf.get(s.id) })),
+      structureRuns,
+    );
+  }, [tree, scenes, structureRuns]);
+  const partLabel = partName(manuscript.partLabel);
   /** The titles of the Scenes carrying a Beat, by its qualified id. */
   const carrying = (beat: string) => carriers(scenes, beat).map((s) => s.title);
   /** The Book's details and its Manuscript's Word target proposed in the Conversation open, still to decide: ghosts in the strip. */
@@ -312,6 +322,11 @@ export function PlanRoom({
         <BookDetailsStrip
           bookId={bookId}
           book={bookDetails}
+          partLabel={
+            bookManuscript(manuscript, planned).parts?.length
+              ? partLabel
+              : undefined
+          }
           proposed={proposedDetails}
         />
         <div className="plan-body">
@@ -331,7 +346,7 @@ export function PlanRoom({
           <BeatRail
             scenes={scenes}
             falls={falls}
-            measure={measure}
+            partLabel={partLabel}
             followed={followed}
             onChoose={(id) => {
               setSelected(id);
@@ -342,7 +357,12 @@ export function PlanRoom({
             <UnitDetails
               node={findNode(tree, selected)}
               language={language}
-              beats={{ falls, measure, followed, proposed: proposedBeats }}
+              beats={{
+                falls,
+                partLabel,
+                followed,
+                proposed: proposedBeats,
+              }}
             />
             <StructureGuide
               bookId={bookId}
@@ -1006,8 +1026,9 @@ function UnitDetails({
   node: PlanNode | null;
   language: ProseLanguage;
   beats: {
-    falls: Map<string, Span>;
-    measure: Measure;
+    falls: Falls;
+    /** What the Project calls its Parts. */
+    partLabel: string;
     followed: readonly FollowedBeat[];
     proposed: ReadonlyMap<string, string[] | null>;
   };
@@ -1031,8 +1052,8 @@ function UnitDetails({
       {node.kind === 'scene' && (
         <SceneBeats
           scene={node.scenes[0]}
-          falls={beats.falls.get(node.id)}
-          measure={beats.measure}
+          falls={beats.falls}
+          partLabel={beats.partLabel}
           followed={beats.followed}
           proposed={beats.proposed.get(node.id)}
         />

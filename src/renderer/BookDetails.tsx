@@ -1,25 +1,34 @@
 import { wordTargetText } from '../shared/word-target';
 import { useContext, useState, type ReactNode } from 'react';
 import { beatWhere } from '../shared/beat-measure';
-import { detailText, formatBand } from '../shared/book-details';
+import {
+  detailText,
+  formatBand,
+  mayRunInEveryPart,
+} from '../shared/book-details';
 import type { ProposalView } from '../shared/proposal';
 import { proposalCardId } from './ProposalCard';
 import type {
   BookDetailKey,
   BookDetails,
   ManuscriptBook,
+  StructureRuns,
 } from '../shared/project-types';
 import {
+  ARCHETYPES,
+  archetypeOf,
   CONVENTIONS,
   conventionOf,
   FORMATS,
   GENRES,
   guideStructures,
+  NO_ARCHETYPE,
   NO_STRUCTURE,
   qualifiedBeatId,
   shownIds,
   STRUCTURES,
   structureOf,
+  type Across,
   type GenreConvention,
   type Structure,
 } from '../shared/structure-catalogue';
@@ -54,19 +63,23 @@ function toggled(ids: readonly string[] | undefined, id: string): string[] {
 }
 
 /**
- * The strip above the Outline tree: the Book's Structure, Genre
- * conventions, Genres, Format and Word target, each set with a click, and
- * a link to the structure guide. A detail or Word target `proposed` in the
- * Conversation open shows as a ghost value beside it, which goes to its card.
+ * The strip above the Outline tree: the Book's Structure, with where it
+ * runs once the Book has a Part, Archetype, Genre conventions, Genres,
+ * Format and Word target, each set with a click, and a link to the
+ * structure guide. A detail or Word target `proposed` in the Conversation
+ * open shows as a ghost value beside it, which goes to its card.
  */
 export function BookDetailsStrip({
   bookId,
   book,
+  partLabel,
   proposed = [],
 }: {
   /** The Book's id, or `project` for a Project of one Book. */
   bookId: string;
   book: PlannedBook;
+  /** What the Project calls its Parts, while the Book has one; none without. */
+  partLabel?: string;
   /** The Book's details and its Manuscript's Word target proposed and still to decide. */
   proposed?: ProposalView[];
 }) {
@@ -81,11 +94,15 @@ export function BookDetailsStrip({
   const set = useSetBookDetail(bookId);
   const run = useRun();
   const [editingTarget, setEditingTarget] = useState(false);
-  const { structure, bookFormat, wordTarget } = book;
+  const { structure, archetype, bookFormat, wordTarget } = book;
   const knownStructure =
     structure === undefined ||
     structure === NO_STRUCTURE ||
     !!structureOf(structure);
+  const knownArchetype =
+    archetype === undefined ||
+    archetype === NO_ARCHETYPE ||
+    !!archetypeOf(archetype);
   const knownFormat =
     bookFormat === undefined || FORMATS.some((f) => f.id === bookFormat);
 
@@ -115,6 +132,54 @@ export function BookDetailsStrip({
           )}
         </select>
         {ghost('structure')}
+      </label>
+      {partLabel !== undefined && mayRunInEveryPart(structure) && (
+        <label className="book-detail">
+          Runs
+          <select
+            aria-label="Where the Structure runs"
+            value={book.structureRuns ?? 'book'}
+            disabled={readOnly}
+            onChange={(event) =>
+              void run(
+                (project) =>
+                  project.setStructureRuns(
+                    bookId,
+                    event.target.value as StructureRuns,
+                  ),
+                { what: 'set where the Structure runs' },
+              )
+            }
+          >
+            <option value="book">Over the whole Book</option>
+            <option value="part">Anew in every {partLabel}</option>
+          </select>
+        </label>
+      )}
+      <label className="book-detail">
+        Archetype
+        <select
+          aria-label="Archetype"
+          value={archetype ?? ''}
+          disabled={readOnly}
+          onChange={(event) =>
+            void set('archetype', event.target.value || null)
+          }
+        >
+          <option value="">None chosen yet</option>
+          {ARCHETYPES.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.name}
+            </option>
+          ))}
+          <option value={NO_ARCHETYPE}>None</option>
+          {!knownArchetype && (
+            <option value={archetype} disabled>
+              Not known to this version
+            </option>
+          )}
+        </select>
+        {ghost('archetype')}
       </label>
       <Chips
         label="Genre conventions"
@@ -449,16 +514,29 @@ function StructureBody({
           </span>
         ))}
         {'; '}
-        {fits.across === 'book'
-          ? 'per Book'
-          : fits.across === 'series'
-            ? 'across a Series'
-            : 'per Book or across a Series'}
+        {acrossText(fits.across)}
       </p>
       <Beats source={structure} carrying={carrying} />
     </>
   );
 }
+
+/** Where a Structure is used, in words, as in “per Book or across a Series”. */
+function acrossText(across: readonly Across[]): string {
+  const words = (['book', 'part', 'series'] as const)
+    .filter((a) => across.includes(a))
+    .map((a) => ACROSS_WORDS[a]);
+  return words.length > 1
+    ? `${words.slice(0, -1).join(', ')} or ${words.at(-1)}`
+    : words.join('');
+}
+
+/** Each place a Structure is used, in words. */
+const ACROSS_WORDS: Record<Across, string> = {
+  book: 'per Book',
+  part: 'per Part',
+  series: 'across a Series',
+};
 
 /** A Genre or Format a Structure fits, marked when the Book has it. */
 function Fit({ matches, children }: { matches: boolean; children: string }) {

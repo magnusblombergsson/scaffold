@@ -5,6 +5,7 @@ import {
   inOrder,
   isFinding,
   isPlanFinding,
+  PLAN_FINDING_LABELS,
   planFindingBlock,
   planFindingOf,
   quotedIn,
@@ -203,6 +204,20 @@ describe('planFindingOf', () => {
       units: [],
       comment: 'No Midpoint.',
     });
+  });
+
+  it('takes one on the Archetype, labelled as one', () => {
+    const finding = {
+      kind: 'archetype',
+      units: ['p3'],
+      quote: 'Ella is crowned.',
+      comment: 'Ella never loses what she won before her final rise.',
+      question: 'Where does the central crisis come?',
+    };
+
+    expect(planFindingOf(finding)).toEqual(finding);
+    expect(isPlanFinding(finding)).toBe(true);
+    expect(PLAN_FINDING_LABELS.archetype).toBe('Archetype');
   });
 
   it('takes nothing of a Review’s type, an unknown kind or without a comment', () => {

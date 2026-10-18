@@ -420,10 +420,24 @@ export type BookDetails = {
   bookFormat?: string;
   /** Its Structure by id, or `none` for No set Structure; absent while none is chosen yet. */
   structure?: string;
+  /**
+   * Where its Structure runs (ADR 0017): `part` anew in every Part, as for
+   * the Episodes of an episodic story; absent over the whole Book. Only a
+   * Structure of the catalogue's form runs in every Part.
+   */
+  structureRuns?: 'part';
   /** The Genre conventions it follows, by id; absent for none. */
   genreConventions?: string[];
+  /** Its Archetype by id, or `none` for none; absent while none is chosen. */
+  archetype?: string;
 };
-export type BookDetailKey = keyof BookDetails;
+/** Where a Book's Structure runs: over the whole Book, or anew in every Part. */
+export type StructureRuns = 'book' | 'part';
+/**
+ * A detail a Book sets on its own, and Plan may propose; where its
+ * Structure runs goes with the Structure, by `setStructureRuns`.
+ */
+export type BookDetailKey = Exclude<keyof BookDetails, 'structureRuns'>;
 /** A Book of a Series, with its Parts and Loose Chapters by id and its details, as a Part has them, and its own. */
 export type ManuscriptBook = {
   id: string;

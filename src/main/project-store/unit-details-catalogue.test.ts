@@ -17,6 +17,7 @@ import { createProject, openProject, type ProjectStore } from './project-store';
 import { formatUnitFile, parseUnitFile } from './unit-file';
 import {
   DETAILS,
+  windowKey,
   type DetailKey,
   type DetailKind,
 } from './unit-details-catalogue';
@@ -104,8 +105,14 @@ const SAMPLES: Record<
     store.setBookDetail(idOf(ref), 'bookFormat', 'novel'),
   structure: (store, ref) =>
     store.setBookDetail(idOf(ref), 'structure', 'three-act'),
+  partStructure: async (store, ref) => {
+    await store.setBookDetail(idOf(ref), 'structure', 'three-act');
+    await store.setStructureRuns(idOf(ref), 'part');
+  },
   genreConventions: (store, ref) =>
     store.setBookDetail(idOf(ref), 'genreConventions', ['mystery']),
+  archetype: (store, ref) =>
+    store.setBookDetail(idOf(ref), 'archetype', 'comedy'),
   beats: (store, ref) => store.setBeat(idOf(ref), 'mystery/reveal', true),
 };
 
@@ -156,12 +163,16 @@ describe('the Assistant’s view of unit details', () => {
       ];
 
       // The window does have it, so the row is what hides it.
+      const told = windowKey(key);
       const window = [keysIn(store.manuscript()), keysIn(store.listEntries())];
-      expect(window.some((keys) => keys.has(key))).toBe(true);
-      const sees = seen.slice(0, 3).some((keys) => keys.has(key));
+      expect(window.some((keys) => keys.has(told))).toBe(true);
+      const sees = seen.slice(0, 3).some((keys) => keys.has(told));
       expect(sees).toBe(row.assistant === 'sees');
       if (row.assistant === 'hidden') {
-        for (const keys of seen) expect(keys.has(key)).toBe(false);
+        for (const keys of seen) {
+          expect(keys.has(key)).toBe(false);
+          expect(keys.has(told)).toBe(false);
+        }
       }
     },
   );

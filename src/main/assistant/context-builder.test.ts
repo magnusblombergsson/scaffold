@@ -2367,6 +2367,78 @@ Holds Prose`,
       );
     });
 
+    it('send the Archetype chosen in full, with its rise and fall, and the rest by name', async () => {
+      const { store, view } = await planned();
+      await store.setBookDetail(PROJECT_OUTLINE, 'archetype', 'rags-to-riches');
+
+      const details = detailsOf(await plan(view, { kind: 'open' }));
+
+      expect(details).toContain('Archetype: Rags to riches (rags-to-riches)');
+      expect(details).toContain(
+        'Christopher Booker, The Seven Basic Plots (2004).',
+      );
+      expect(details).toContain(
+        'A humble or overlooked hero rises, loses everything, and wins it back in full, grown by the loss.',
+      );
+      expect(details).toContain(
+        'Rise and fall: Rise, fall, rise: early success, then a central crisis in which all is lost',
+      );
+      expect(details).toContain('Tragedy (tragedy)');
+      expect(details).not.toContain('A hero tempted into a course of action');
+    });
+
+    it('tell how to propose an Archetype, one only, and to check the Outlines against the one chosen, reading a blend in the Notes as intent', async () => {
+      const { store, view } = await planned();
+      await store.setBookDetail(PROJECT_OUTLINE, 'archetype', 'rags-to-riches');
+
+      const details = detailsOf(await plan(view, { kind: 'open' }));
+
+      expect(details).toContain('{"archetype": "<Id>"}');
+      expect(details).toMatch(/"none" for none/);
+      expect(details).toMatch(/propose only one/);
+      expect(details).toMatch(
+        /a Finding of kind "archetype" when the Outlines' turns of fortune contradict its rise and fall/,
+      );
+      expect(details).toMatch(/ranked among the others by consequence/);
+      expect(details).toMatch(
+        /A blend of Archetypes the Book's Notes describe is the Author's intent: quote it, never fault it/,
+      );
+    });
+
+    it('offer to find an Archetype only while none is chosen, and say nothing of one with none', async () => {
+      const { store, view } = await planned();
+
+      let details = detailsOf(await plan(view, { kind: 'open' }));
+      expect(details).toMatch(
+        /Archetype: none chosen yet\. When it would help, offer to find an Archetype: ask about the protagonist's fortunes/,
+      );
+      expect(details).toMatch(
+        /write no "archetype" Findings, and end it by offering to find an Archetype/,
+      );
+      expect(details).toContain(
+        'Overcoming the monster (overcoming-the-monster)',
+      );
+
+      await store.setBookDetail(PROJECT_OUTLINE, 'archetype', 'none');
+      details = detailsOf(await plan(view, { kind: 'open' }));
+      expect(details).toMatch(
+        /Archetype: none\. .*never judge the plan against one, and never nudge it toward one/,
+      );
+      expect(details).toMatch(/write no "archetype" Findings/);
+      expect(details).not.toMatch(/offering to find an Archetype/);
+      expect(details).not.toMatch(/Archetype: none chosen yet/);
+
+      await store.setBookDetail(
+        PROJECT_OUTLINE,
+        'archetype',
+        'from-a-newer-app',
+      );
+      details = detailsOf(await plan(view, { kind: 'open' }));
+      expect(details).toContain(
+        'Archetype: one this version of the app doesn’t know (from-a-newer-app). Tell the Author so.',
+      );
+    });
+
     it('send an entry the Author asked about in full', async () => {
       const { store, view } = await planned();
       await store.setBookDetail(PROJECT_OUTLINE, 'genres', ['mystery']);
@@ -2401,6 +2473,7 @@ Holds Prose`,
       await store.setBookDetail(PROJECT_OUTLINE, 'genreConventions', [
         'mystery',
       ]);
+      await store.setBookDetail(PROJECT_OUTLINE, 'archetype', 'tragedy');
       const asked = [message('author', "Save the Cat? The Hero's Journey?")];
       const requests: ContextRequest[] = [
         { mode: 'brainstorm', messages: asked },
@@ -2419,6 +2492,8 @@ Holds Prose`,
         expect(text).not.toContain('save-the-cat');
         expect(text).not.toContain('Joseph Campbell');
         expect(text).not.toContain('Mystery (fair play)');
+        expect(text).not.toContain('tragedy');
+        expect(text).not.toContain('Christopher Booker');
       }
     });
   });
@@ -2471,6 +2546,60 @@ Holds Prose`,
       );
       expect(skeletonOf(context)).toContain(
         `Id: ${scenes.harbour}\nWord target: 3,000 words\nHolds Prose\nFalls at 0–38% of the Book`,
+      );
+    });
+
+    it('fall within each Part when the Structure runs anew in every Part, each Part measured on its own', async () => {
+      const { store, view, chapters, scenes, shore } = await planned();
+      await store.setPartLabel('episode');
+      const { id: one } = await store.createPart(0, 'One');
+      const { id: two } = await store.createPart(1, 'Two');
+      await store.moveChapter(chapters.arrival, 0, one);
+      await store.moveChapter(chapters.storm, 0, two);
+      await store.setWordTarget(scenes.wreck, 1000);
+      await store.setWordTarget(shore, 3000);
+      await store.setBookDetail(PROJECT_OUTLINE, 'structure', 'three-act');
+      await store.setStructureRuns(PROJECT_OUTLINE, 'part');
+
+      const context = await plan(view, { kind: 'open' });
+
+      const details =
+        context.system.find((b) => b.text.startsWith('The Book’s details'))
+          ?.text ?? '';
+      expect(details).toContain(
+        'Structure: Three-act (three-act), running anew in every Episode: each Beat’s position is a share of its Episode, and every Episode should hold the Structure’s Beats.',
+      );
+      expect(details).toContain(
+        'In a Plan check, check each Episode on its own: each Beat missing, doubled or out of place within that Episode, and name the Episode in the Finding. Check every Episode; none is left out. The Notes of an Episode explaining a prologue or a two-part Episode are the Author’s intent: quote them, never fault them.',
+      );
+      expect(details).toContain(
+        'Where a Scene falls is measured within its Episode, each on its own: in “One” by Scene order, each an equal share, as not every Scene there has a Word target; in “Two” in planned words, as every Scene there has one.',
+      );
+      const skeleton = skeletonOf(context);
+      expect(skeleton).toContain(
+        `Id: ${scenes.harbour}
+Holds Prose
+Falls at 0–50% of its Episode`,
+      );
+      expect(skeleton).toContain(
+        `Id: ${shore}
+Word target: 3,000 words
+No Prose yet
+Falls at 25–100% of its Episode`,
+      );
+    });
+
+    it('fall over the Book when its Structure runs over the Book, as the Book’s details say', async () => {
+      const { store, view } = await planned();
+      await store.setBookDetail(PROJECT_OUTLINE, 'structure', 'three-act');
+
+      const context = await plan(view, { kind: 'open' });
+
+      const details =
+        context.system.find((b) => b.text.startsWith('The Book’s details'))
+          ?.text ?? '';
+      expect(details).toContain(
+        'Structure: Three-act (three-act), running over the whole Book.',
       );
     });
 
