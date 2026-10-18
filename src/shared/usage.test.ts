@@ -65,6 +65,44 @@ describe('describeUsage', () => {
     ).toBe('≈ 18k in · 900 out · ≈ $0.03');
   });
 
+  it('counts web searches, and prices Anthropic’s at $10 per thousand', () => {
+    // Opus 5.5: $0.0444 of tokens, as above, and 2 × $0.01 of searches.
+    expect(
+      describeUsage({
+        model: claude('claude-opus-5-5'),
+        usage: {
+          input: 18_000,
+          cached: 12_000,
+          written: 0,
+          output: 900,
+          searches: 2,
+        },
+      }),
+    ).toBe('≈ 18k in (12k cached) · 900 out · 2 searches · ≈ $0.06');
+    expect(
+      describeUsage({
+        model: claude('claude-haiku-4-5'),
+        usage: { input: 1_234, cached: 0, written: 0, output: 40, searches: 1 },
+      }),
+    ).toBe('≈ 1.2k in · 40 out · 1 search · ≈ $0.01');
+  });
+
+  it('takes what OpenRouter charged as including its searches', () => {
+    expect(
+      describeUsage({
+        model: routed('qwen/qwen3-235b'),
+        usage: {
+          input: 18_000,
+          cached: 0,
+          written: 0,
+          output: 900,
+          searches: 1,
+        },
+        cost: 0.031,
+      }),
+    ).toBe('≈ 18k in · 900 out · 1 search · ≈ $0.03');
+  });
+
   it('calls a local Model’s turn free, with its cached tokens only if any', () => {
     expect(
       describeUsage({
@@ -120,6 +158,37 @@ describe('describeTotal', () => {
         },
       ]),
     ).toEqual({ text: '≈ 38k in (12k cached) · 2k out · ≈ $0.12' });
+  });
+
+  it('adds up the searches of every turn, and what they cost', () => {
+    // $0.0444 + $0.03 of Opus 5.5 searches, and $0.08 OpenRouter charged.
+    expect(
+      describeTotal([
+        {
+          model: claude('claude-opus-5-5'),
+          usage: {
+            input: 18_000,
+            cached: 12_000,
+            written: 0,
+            output: 900,
+            searches: 3,
+          },
+        },
+        {
+          model: routed('qwen/qwen3-235b'),
+          usage: {
+            input: 20_000,
+            cached: 0,
+            written: 0,
+            output: 1_100,
+            searches: 1,
+          },
+          cost: 0.08,
+        },
+      ]),
+    ).toEqual({
+      text: '≈ 38k in (12k cached) · 2k out · 4 searches · ≈ $0.15',
+    });
   });
 
   it('counts a free turn as a known $0', () => {

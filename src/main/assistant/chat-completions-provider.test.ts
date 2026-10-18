@@ -338,6 +338,92 @@ describe('openRouterProvider', () => {
     });
   });
 
+  it('sends the web plugin when asked to search, and gives the search with the links the reply cites, counted in what it used', async () => {
+    const citation = (url: string, title: string) => ({
+      type: 'url_citation',
+      url_citation: { url, title, content: '…', start_index: 0, end_index: 9 },
+    });
+    routes['/api/v1/chat/completions'] = sse([
+      text('It ran until 1962 '),
+      delta({
+        content: '([kvarken.fi](https://kvarken.fi/history)).',
+        annotations: [
+          citation('https://kvarken.fi/history', 'Kvarken history'),
+          citation('https://example.org/1962', 'The last crossing'),
+        ],
+      }),
+      delta({
+        annotations: [
+          citation('https://kvarken.fi/history', 'Kvarken history'),
+        ],
+      }),
+      finished('stop'),
+      usageChunk({ ...openRouterUsage, cost: 0.0621 }),
+    ]);
+
+    const { events, error } = await collect(openRouter(), {
+      ...request('openai/gpt-6'),
+      search: true,
+    });
+
+    expect(error).toBeNull();
+    expect(chats()[0].body).toMatchObject({ plugins: [{ id: 'web' }] });
+    // OpenRouter doesn't say what it searched for.
+    expect(events.filter((e) => e.type === 'search')).toEqual([
+      {
+        type: 'search',
+        search: {
+          results: [
+            { url: 'https://kvarken.fi/history', title: 'Kvarken history' },
+            { url: 'https://example.org/1962', title: 'The last crossing' },
+          ],
+        },
+      },
+    ]);
+    expect(events.filter((e) => e.type === 'usage')).toEqual([
+      {
+        type: 'usage',
+        usage: {
+          input: 18_500,
+          cached: 12_000,
+          written: 500,
+          output: 900,
+          searches: 1,
+        },
+        cost: 0.0621,
+      },
+    ]);
+    expect(events.at(-1)).toEqual({ type: 'finish', finish: 'complete' });
+  });
+
+  it('still gives the search a reply made when it stops partway', async () => {
+    routes['/api/v1/chat/completions'] = dropsAfter([
+      delta({
+        content: 'It ran until 1962',
+        annotations: [
+          {
+            type: 'url_citation',
+            url_citation: { url: 'https://kvarken.fi/history' },
+          },
+        ],
+      }),
+    ]);
+    routes['/api/v1/generation'] = json(404, { error: { message: 'No' } });
+
+    const { events, error } = await collect(openRouter(), {
+      ...request('openai/gpt-6'),
+      search: true,
+    });
+
+    expect(error?.kind).toBe('offline');
+    expect(events.filter((e) => e.type === 'search')).toEqual([
+      {
+        type: 'search',
+        search: { results: [{ url: 'https://kvarken.fi/history' }] },
+      },
+    ]);
+  });
+
   it('lowers max tokens to the output limit OpenRouter reports for the Model', async () => {
     routes['/api/v1/models'] = json(200, {
       data: [
@@ -723,6 +809,19 @@ describe('lmStudioProvider', () => {
         { role: 'user', content: 'The sea.' },
       ],
     });
+  });
+
+  it('sends no search tool or plugin even when asked to search, as it has none', async () => {
+    routes['/v1/chat/completions'] = sse([text('Hm.'), finished('stop')]);
+
+    const { events } = await collect(lmStudio(), {
+      ...local(),
+      search: true,
+    });
+
+    expect(chats()[0].body).not.toHaveProperty('plugins');
+    expect(chats()[0].body).not.toHaveProperty('tools');
+    expect(events.filter((e) => e.type === 'search')).toEqual([]);
   });
 
   it.each([

@@ -1,4 +1,4 @@
-import type { AssistantFailure } from '../../shared/conversation';
+import type { AssistantFailure, WebSearch } from '../../shared/conversation';
 import type { Usage } from '../../shared/usage';
 import {
   ProviderError,
@@ -9,7 +9,8 @@ import {
 
 /**
  * What the fake replies: what the call used, if given, with what the
- * Provider said it cost, if it did; the pieces of text it streams; and how
+ * Provider said it cost, if it did; the web searches it made, before any
+ * text; the pieces of text it streams; and how
  * it finished, complete unless `finish` says, or with `finish: null`, not
  * at all; with `fail`, the call fails after the pieces instead.
  */
@@ -19,6 +20,7 @@ export type FakeReply =
       text: string[];
       usage?: Usage;
       cost?: number;
+      searches?: WebSearch[];
       finish?: Finish | null;
       fail?: AssistantFailure;
     };
@@ -37,12 +39,13 @@ export function fakeProvider(
       const n = requests.length;
       requests.push(structuredClone(request));
       const given = reply(request, n);
-      const { text, usage, cost, finish, fail } = Array.isArray(given)
+      const { text, usage, cost, searches, finish, fail } = Array.isArray(given)
         ? { text: given }
         : given;
       if (usage) {
         yield { type: 'usage', usage, ...(cost !== undefined && { cost }) };
       }
+      for (const search of searches ?? []) yield { type: 'search', search };
       for (const piece of text) {
         // A real reply arrives over time, not all at once.
         await new Promise((resolve) => setTimeout(resolve, 0));

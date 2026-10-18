@@ -52,6 +52,7 @@ import {
   readableScene,
   storyBibleOf,
 } from './context-builder';
+import { readOrNot, type LinkedPage } from './linked-pages';
 import type { ProviderFor, ProviderRequest } from './provider';
 import { readProposals } from './proposal-blocks';
 import { finishedCall } from './reply-finishing';
@@ -83,6 +84,8 @@ export type EngineDeps = {
   compaction?: CompactionPolicy;
   /** A Model's window as its listing says, if it is listed; without it, nothing is measured. */
   windowOf?: (model: Model) => ModelWindow | null;
+  /** The pages linked in a Research message, read just now; without it, none are read. */
+  readPages?: (message: string) => Promise<LinkedPage[]>;
 };
 
 /**
@@ -97,6 +100,7 @@ export function createConversationEngine({
   clock,
   compaction,
   windowOf = () => null,
+  readPages,
 }: EngineDeps) {
   /**
    * The window a request on `model` is measured against (spec: Outline
@@ -232,7 +236,11 @@ export function createConversationEngine({
    * does. Past the threshold for the Model's window, the older messages
    * are compacted first. Only a complete reply makes Proposals, and a
    * Review's reply holds Findings, never Proposals. So does a Plan check: a
-   * Plan reply asked for one, or holding Findings.
+   * Plan reply asked for one, or holding Findings. In Research, and only
+   * there, the pages linked in the Author's message are read afresh and sent
+   * with it; the reply names those that couldn't be read. Research alone
+   * may search the web, unless the Author turned searching off in it; the
+   * reply logs each search made.
    */
   async function answer(
     conversationId: string,
@@ -242,7 +250,11 @@ export function createConversationEngine({
       compactions,
       model,
       book,
-    }: Pick<Conversation, 'mode' | 'focus' | 'compactions' | 'model' | 'book'>,
+      searchOff,
+    }: Pick<
+      Conversation,
+      'mode' | 'focus' | 'compactions' | 'model' | 'book' | 'searchOff'
+    >,
     messages: ConversationMessage[],
     focus: string[],
     onText: (text: string) => void,
@@ -254,12 +266,19 @@ export function createConversationEngine({
       compactions?.at(-1),
       chosen,
     );
+    const pages =
+      mode === 'research' && readPages
+        ? await readPages(
+            messages.findLast((m) => m.role === 'author')?.text ?? '',
+          )
+        : [];
     const asked = {
       ...defaultRequest(mode, focus[0] ?? null, messages, interviewFocus, book),
       ...(summary && { summary }),
       ...(mode === 'plan' && {
         broughtIn: await store.broughtInBrainstorms(conversationId),
       }),
+      ...(pages.length > 0 && { pages }),
     };
     const view = store.assistantView();
     const context = await buildContext(view, asked);
@@ -276,6 +295,7 @@ export function createConversationEngine({
       model: chosen,
       system: context.system,
       messages: context.messages,
+      ...(mode === 'research' && !searchOff && { search: true as const }),
     };
     const finished = await finishedCall(providerFor(chosen), request, onText);
     const { metered } = finished;
@@ -336,6 +356,7 @@ export function createConversationEngine({
       : checking
         ? finished.unreadable + finished.proposals.length
         : 0;
+    const unreadLinks = readOrNot(pages).unread;
     const reply: ConversationMessage = {
       role: 'assistant',
       text: finished.text,
@@ -347,6 +368,8 @@ export function createConversationEngine({
       ...(finished.ending !== 'complete' && { interrupted: true as const }),
       ...(finished.ending === 'cut-short' && { cutShort: true as const }),
       ...(unreadable > 0 && { unreadable }),
+      ...(unreadLinks.length > 0 && { unreadLinks }),
+      ...(finished.searches.length > 0 && { searches: finished.searches }),
       saw: context.saw,
       ...(findings.length > 0 && { findings }),
       ...(planFindings.length > 0 && { planFindings }),

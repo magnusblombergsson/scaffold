@@ -1,4 +1,4 @@
-import type { Saw } from '../shared/conversation';
+import { pageLabel, type Saw } from '../shared/conversation';
 import type { EntrySummary, Manuscript } from '../shared/project-types';
 import { capitalized, unitName } from '../shared/unit-name';
 
@@ -38,5 +38,6 @@ export function sawList(
     'Outline skeleton',
     ...units,
     ...earlier,
+    ...(saw.pages ?? []).map(pageLabel),
   ];
 }

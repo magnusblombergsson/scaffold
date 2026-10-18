@@ -202,15 +202,68 @@ export type SawUnit = { kind: 'scene' | 'outline' | 'notes'; id: string };
 /**
  * What the Assistant saw for a reply, by id: the Entries of the Story Bible
  * it was sent, the units in focus, and how many earlier messages of the
- * Conversation, in full and, once it was compacted, as a summary. The
- * Outline skeleton is sent every time.
+ * Conversation, in full and, once it was compacted, as a summary; in
+ * Research, the `pages` linked in the Author's message that it read, by
+ * link only. The Outline skeleton is sent every time.
  */
 export type Saw = {
   entries: string[];
   units: SawUnit[];
   messages: number;
   summarised?: number;
+  pages?: string[];
 };
+
+/**
+ * Why a page linked in Research wasn't read: it couldn't be fetched, took
+ * too long, was too big, wasn't a web page or plain text, or was past the
+ * most links read in one message.
+ */
+export type UnreadReason =
+  | 'failed'
+  | 'timed-out'
+  | 'too-big'
+  | 'not-a-page'
+  | 'too-many';
+
+export const UNREAD_REASONS: readonly UnreadReason[] = [
+  'failed',
+  'timed-out',
+  'too-big',
+  'not-a-page',
+  'too-many',
+];
+
+/** Why a page wasn't read, as the Author and the Assistant are told. */
+export const UNREAD_SAYS: Record<UnreadReason, string> = {
+  failed: 'it couldn’t be fetched',
+  'timed-out': 'it took too long',
+  'too-big': 'it is too big',
+  'not-a-page': 'it isn’t a web page',
+  'too-many': 'only so many links are read in one message',
+};
+
+/** A page linked in Research that wasn't read, and why. */
+export type UnreadLink = { url: string; reason: UnreadReason };
+
+/** A page a web search found, by its link, with its title when known. */
+export type SearchResult = { url: string; title?: string };
+
+/**
+ * One web search the Assistant made in Research, through the Provider's own
+ * tool: what it searched for, when the Provider says, and the links it
+ * found, or that it `failed`.
+ */
+export type WebSearch = {
+  query?: string;
+  results: SearchResult[];
+  failed?: true;
+};
+
+/** A page linked in Research as the Author is told of it, by its link. */
+export function pageLabel(url: string): string {
+  return `The page ${url}`;
+}
 
 /**
  * One message in a Conversation: `focus` holds the ids of the Scenes in focus
@@ -225,7 +278,9 @@ export type Saw = {
  * is `interrupted` when the Assistant didn't finish it, so it is never sent
  * back: the call failed partway, or the reply was
  * `cutShort` at the length limit. It says what the Assistant `saw`, the `proposals` it made in it,
- * and how many more it made that couldn't be read, as `unreadable`.
+ * and how many more it made that couldn't be read, as `unreadable`; in
+ * Research, the pages linked in the Author's message that couldn't be read,
+ * as `unreadLinks`, and the web `searches` it made, in order.
  */
 export type ConversationMessage = {
   role: 'author' | 'assistant';
@@ -242,6 +297,8 @@ export type ConversationMessage = {
   interrupted?: true;
   cutShort?: true;
   unreadable?: number;
+  unreadLinks?: UnreadLink[];
+  searches?: WebSearch[];
   saw?: Saw;
   findings?: Finding[];
   planFindings?: PlanFinding[];
@@ -338,10 +395,13 @@ export type UnusedSummary = {
  * Brainstorm brought in or removed; once it is long, the
  * summaries made of it, the latest last, and those that weren't used. Its
  * `model` is the Model chosen for it last, or for one that never had one
- * chosen, the Model of its latest reply; none before then.
+ * chosen, the Model of its latest reply; none before then. A Research
+ * Conversation searches the web unless the Author last turned that off in
+ * it, as `searchOff` says.
  */
 export type Conversation = ConversationSummary & {
   model?: Model;
+  searchOff?: true;
   messages: ConversationMessage[];
   emptyReplies?: EmptyReply[];
   focusChanges?: FocusChange[];

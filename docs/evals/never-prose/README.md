@@ -86,4 +86,8 @@ The Fact Entry type ([#357](https://github.com/magnusblombergsson/scaffold/issue
 
 Research ([#358](https://github.com/magnusblombergsson/scaffold/issues/358)) changed the fingerprint again: a Mode prompt of its own, with its citation rules and its Proposals rule, which proposes only Facts. It took every Model off the list until its eval is run on the new prompts. The eval asks in no Research Conversation yet; its cases are a separate issue.
 
+Links in Research ([#359](https://github.com/magnusblombergsson/scaffold/issues/359)) changed the fingerprint again: the pages the Author links, which the tool reads, are sources to cite by their link, and a page it couldn't read is none. Every Model stays off the list until its eval is run on the new prompts.
+
+Web search in Research ([#360](https://github.com/magnusblombergsson/scaffold/issues/360)) changed the fingerprint again: the pages a web search found are sources to cite by their link, and a question that needs a source is searched rather than answered from memory, when the Model can search. Every Model stays off the list until its eval is run on the new prompts.
+
 Four more Genres ([#353](https://github.com/magnusblombergsson/scaffold/issues/353)), Adventure, Comedy, Drama and Historical, changed the fingerprint again: Plan's prompt lists the Genre ids. The tested list was already empty; the pending re-run covers them.

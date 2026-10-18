@@ -1,4 +1,4 @@
-import type { AssistantFailure } from '../../shared/conversation';
+import type { AssistantFailure, WebSearch } from '../../shared/conversation';
 import type { ListedModel, Model, ProviderStatus } from '../../shared/models';
 import type { Usage } from '../../shared/usage';
 
@@ -26,6 +26,11 @@ export type ProviderRequest = {
   system: PromptBlock[];
   /** The Conversation so far, ending with the Author's new message. */
   messages: PromptMessage[];
+  /**
+   * Whether the Model may search the web, through the Provider's own tool;
+   * a Provider that has none ignores it (ADR 0019).
+   */
+  search?: true;
 };
 
 /** How a reply ended: complete, or stopped at the length limit. */
@@ -34,11 +39,12 @@ export type Finish = 'complete' | 'length';
 /**
  * What the model streams: pieces of the reply, what the call has used so
  * far, which each `usage` event gives in full rather than as a difference,
- * with what it cost in USD when the Provider says, and once the reply has
- * ended, how it finished.
+ * with what it cost in USD when the Provider says, each web search it made,
+ * and once the reply has ended, how it finished.
  */
 export type ProviderEvent =
   | { type: 'text'; text: string }
+  | { type: 'search'; search: WebSearch }
   | { type: 'usage'; usage: Usage; cost?: number }
   | { type: 'finish'; finish: Finish };
 

@@ -321,6 +321,24 @@ export class Conversations {
   }
 
   /**
+   * Turns web search off, or back on, in a Research Conversation from its
+   * next message on, logged; refused in any other Mode, which never searches.
+   */
+  setSearching(id: string, on: boolean): Promise<void> {
+    return this.inLog(id, async () => {
+      const { mode } = await this.readLogged(id);
+      if (mode !== 'research') {
+        throw new Error('Only a Research Conversation searches the web');
+      }
+      await this.appendEvent(id, {
+        type: 'searchingSet',
+        on,
+        at: this.deps.clock.now(),
+      });
+    });
+  }
+
+  /**
    * The Conversations in `conversations/`, latest first; `project.json`
    * doesn't list them. A log whose header can't be read is logged and left out.
    */

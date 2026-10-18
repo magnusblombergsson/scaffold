@@ -1197,6 +1197,11 @@ export interface AssistantApi {
    * Conversation, and for what is no Book.
    */
   chooseBook(conversationId: string, bookId: string): Promise<void>;
+  /**
+   * Turns web search off, or back on, in a Research Conversation from its
+   * next message on, logged as an event. Refused in another Mode.
+   */
+  setSearching(conversationId: string, on: boolean): Promise<void>;
   /** Gives a Conversation a new title; refused for an empty one. */
   renameConversation(conversationId: string, title: string): Promise<void>;
   /**
@@ -1464,6 +1469,7 @@ export const assistantMethods = {
   startConversation: 'invoke',
   chooseModel: 'invoke',
   chooseBook: 'invoke',
+  setSearching: 'invoke',
   renameConversation: 'invoke',
   starConversation: 'invoke',
   trashConversation: 'invoke',

@@ -1,4 +1,4 @@
-import type { AssistantFailure } from '../../shared/conversation';
+import type { AssistantFailure, WebSearch } from '../../shared/conversation';
 import { replyText, splitReply, withoutThinking } from '../../shared/reply';
 import type { Usage } from '../../shared/usage';
 import {
@@ -41,12 +41,13 @@ export type ReplyEnding = 'complete' | 'cut-short' | 'interrupted';
  * more couldn't be read as JSON. A reply with no text once its thinking is
  * stripped is `empty`, for the `reason` it finished, or `failed`; one whose
  * call failed and said nothing of what it used is `nothing`, as it has
- * nothing to count.
+ * nothing to count. A reply holds the web searches made for it, in order.
  */
 export type FinishedCall = { metered: Metered; failure: CallFailure | null } & (
   | {
       kind: 'reply';
       text: string;
+      searches: WebSearch[];
       ending: ReplyEnding;
       proposals: unknown[];
       findings: unknown[];
@@ -66,7 +67,7 @@ export async function finishedCall(
   request: ProviderRequest,
   onText: (text: string) => void = () => {},
 ): Promise<FinishedCall> {
-  const { text, finish, failure, metered } = await streamCall(
+  const { text, searches, finish, failure, metered } = await streamCall(
     provider,
     request,
     onText,
@@ -91,6 +92,7 @@ export async function finishedCall(
   return {
     kind: 'reply',
     text: replyText(said),
+    searches,
     ending,
     proposals: complete ? proposals : [],
     findings,
@@ -101,9 +103,9 @@ export async function finishedCall(
 }
 
 /**
- * What a stream came to: the reply text as streamed, how the Provider said
- * it finished, what it used and cost, and why it failed, if it did; a
- * stream that stops with no finish failed too.
+ * What a stream came to: the reply text as streamed, the web searches
+ * made, how the Provider said it finished, what it used and cost, and why
+ * it failed, if it did; a stream that stops with no finish failed too.
  */
 async function streamCall(
   provider: Provider,
@@ -111,11 +113,13 @@ async function streamCall(
   onText: (text: string) => void,
 ): Promise<{
   text: string;
+  searches: WebSearch[];
   finish: Finish | null;
   metered: Metered;
   failure: CallFailure | null;
 }> {
   let text = '';
+  const searches: WebSearch[] = [];
   let usage: Usage | undefined;
   let cost: number | undefined;
   let finish: Finish | null = null;
@@ -127,6 +131,8 @@ async function streamCall(
       } else if (event.type === 'text') {
         text += event.text;
         onText(event.text);
+      } else if (event.type === 'search') {
+        searches.push(event.search);
       } else {
         finish = event.finish;
       }
@@ -154,6 +160,7 @@ async function streamCall(
   }
   return {
     text,
+    searches,
     finish,
     metered: {
       ...(usage && { usage }),
