@@ -2,11 +2,14 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { NewCandidate } from '../../shared/gathering';
 import type { Model } from '../../shared/models';
 import { fakeProvider } from './fake-provider';
 import {
+  candidateLine,
   evalConfig,
   evalScope,
+  GATHERING_CASES,
   NEVER_PROSE_CASES,
   planProposalLine,
   proposalLine,
@@ -16,10 +19,13 @@ import {
   type Answer,
   type EvalCase,
   type EvalResult,
+  type GatheringCase,
+  type GatheringEvalResult,
   type ImagePromptEvalResult,
 } from './never-prose-eval';
 import { TESTED_MODELS } from '../../shared/tested-models';
 import {
+  GATHERING_PROMPT,
   IMAGE_PROMPT,
   MODE_PROMPTS,
   PLAN_REQUESTS,
@@ -68,6 +74,7 @@ describe('the eval set', () => {
     const categories = new Set(NEVER_PROSE_CASES.map((c) => c.category));
     expect([...categories].sort()).toEqual([
       'allowed',
+      'citation',
       'dialogue',
       'literature-quote',
       'rewrite',
@@ -149,6 +156,7 @@ describe('runNeverProseEval', () => {
       provider,
       model: HAIKU,
       dir,
+      gatherings: [],
       // One at a time, so the requests come in the order of the results.
       concurrency: 1,
       cases,
@@ -196,6 +204,7 @@ describe('runNeverProseEval', () => {
       provider,
       model: HAIKU,
       dir,
+      gatherings: [],
       concurrency: 1,
       cases: [],
     });
@@ -246,6 +255,7 @@ describe('runNeverProseEval', () => {
       provider,
       model: HAIKU,
       dir,
+      gatherings: [],
       cases: [{ ...cases[0], modes: ['brainstorm'] }],
     });
 
@@ -286,6 +296,7 @@ describe('runNeverProseEval', () => {
       provider,
       model: HAIKU,
       dir,
+      gatherings: [],
       // One at a time, so the requests come in the order of the results.
       concurrency: 1,
       cases: [
@@ -322,6 +333,7 @@ describe('runNeverProseEval', () => {
       provider,
       model: HAIKU,
       dir,
+      gatherings: [],
       concurrency: 1,
       retries: 3,
       wait: async (ms) => {
@@ -347,6 +359,7 @@ describe('runNeverProseEval', () => {
       provider,
       model: HAIKU,
       dir,
+      gatherings: [],
       repeat: 3,
       cases: [{ ...cases[1], modes: ['writing', 'brainstorm'] }],
       imagePrompts: false,
@@ -376,6 +389,7 @@ describe('a Review case', () => {
       provider,
       model: HAIKU,
       dir,
+      gatherings: [],
       // One at a time, so the Review is the first request.
       concurrency: 1,
       cases: [
@@ -439,6 +453,7 @@ describe('a Plan case', () => {
       provider,
       model: HAIKU,
       dir,
+      gatherings: [],
       cases: [
         {
           id: 'p',
@@ -499,6 +514,7 @@ describe('a Plan check case', () => {
       provider,
       model: HAIKU,
       dir,
+      gatherings: [],
       cases: [
         {
           id: 'check',
@@ -754,7 +770,7 @@ describe('reviewSheet', () => {
   ];
 
   const sheet = reviewSheet(
-    { conversations, imagePrompts },
+    { conversations, imagePrompts, gatherings: [] },
     {
       model: { provider: 'openrouter', id: 'qwen/qwen3-32b' },
       date: '2026-10-05',
@@ -786,6 +802,7 @@ describe('reviewSheet', () => {
           },
         ],
         imagePrompts: [],
+        gatherings: [],
       },
       { model: HAIKU, date: '2026-10-05', prompts: 'abc123' },
     );
@@ -802,6 +819,7 @@ describe('reviewSheet', () => {
           { ...conversations[0], run: 2 },
         ],
         imagePrompts: [],
+        gatherings: [],
       },
       { model: HAIKU, date: '2026-10-05', prompts: 'abc123', dev: true },
     );
@@ -873,7 +891,7 @@ describe('reviewSheet', () => {
 
   it('records the quantisation an LM Studio run used', () => {
     const local = reviewSheet(
-      { conversations: [], imagePrompts: [] },
+      { conversations: [], imagePrompts: [], gatherings: [] },
       {
         model: { provider: 'lmstudio', id: 'qwen3-8b' },
         date: '2026-10-05',
@@ -958,6 +976,7 @@ describe('evalScope', () => {
     expect(evalScope({}, 'anthropic')).toEqual({
       cases: NEVER_PROSE_CASES,
       imagePrompts: true,
+      gatherings: GATHERING_CASES,
       repeat: 1,
       concurrency: 4,
       dev: false,
@@ -1034,5 +1053,468 @@ describe('the tested list', () => {
     ).map(({ provider, id }) => `${provider} ${id}`);
     // Run the eval again for each, or take it off the list (README).
     expect(stale).toEqual([]);
+  });
+});
+
+describe('the Research cases', () => {
+  const research = NEVER_PROSE_CASES.filter((c) =>
+    c.modes?.includes('research'),
+  );
+
+  it('are asked in Research only', () => {
+    expect(research.length).toBeGreaterThan(0);
+    for (const c of research) expect(c.modes).toEqual(['research']);
+  });
+
+  it('ask for a Scene and for the narrator’s voice, and for claims that need a source of every kind', () => {
+    expect(
+      research.map(({ id, category, pages, searchOff }) => ({
+        id,
+        category,
+        pages: pages?.length ?? 0,
+        searchOff: searchOff ?? false,
+      })),
+    ).toEqual([
+      {
+        id: 'research-courtroom-scene',
+        category: 'dialogue',
+        pages: 0,
+        searchOff: false,
+      },
+      {
+        id: 'research-as-narrator',
+        category: 'rewrite',
+        pages: 0,
+        searchOff: false,
+      },
+      {
+        id: 'research-cite-pasted',
+        category: 'citation',
+        pages: 0,
+        searchOff: false,
+      },
+      {
+        id: 'research-cite-page',
+        category: 'citation',
+        pages: 1,
+        searchOff: false,
+      },
+      {
+        id: 'research-cite-search',
+        category: 'citation',
+        pages: 0,
+        searchOff: false,
+      },
+      {
+        id: 'research-from-memory',
+        category: 'citation',
+        pages: 0,
+        searchOff: true,
+      },
+      {
+        id: 'research-source-and-reading',
+        category: 'citation',
+        pages: 0,
+        searchOff: false,
+      },
+    ]);
+    // Pasted text, to cite by what it is.
+    for (const id of ['research-cite-pasted', 'research-source-and-reading']) {
+      expect(research.find((c) => c.id === id)?.request).toMatch(/“[^”]+”/);
+    }
+    // The page its link names, as the app would have read it.
+    const page = research.find((c) => c.id === 'research-cite-page')!;
+    expect(page.request).toContain(page.pages![0].url);
+  });
+});
+
+describe('the Gathering cases', () => {
+  it('read Prose with a strong voice, dialogue, a Character of several names, and a Scene to continue', () => {
+    expect(GATHERING_CASES.map((c) => c.id)).toEqual([
+      'gathering-voice',
+      'gathering-dialogue',
+      'gathering-aliases',
+      'gathering-continue',
+    ]);
+    const ids = [...NEVER_PROSE_CASES, ...GATHERING_CASES].map((c) => c.id);
+    expect(new Set(ids).size).toBe(ids.length);
+    const prose = (id: string) =>
+      GATHERING_CASES.find((c) => c.id === id)!
+        .scenes.map((s) => s.prose)
+        .join('\n');
+    // Mostly lines of dialogue.
+    expect(prose('gathering-dialogue').match(/“/g)!.length).toBeGreaterThan(10);
+    // Ingrid Falk, by every name the text gives her.
+    for (const name of ['Ingrid', 'the Professor', 'Miss Falk', 'Inge']) {
+      expect(prose('gathering-aliases')).toContain(name);
+    }
+    // It stops mid-sentence.
+    expect(prose('gathering-continue')).toMatch(/, and$/);
+  });
+});
+
+describe('a Research case', () => {
+  it('is asked as Research asks it: its linked page sent with it, searching on unless turned off, its searches and Fact Proposals kept', async () => {
+    const page = NEVER_PROSE_CASES.find((c) => c.id === 'research-cite-page')!;
+    const memory = NEVER_PROSE_CASES.find(
+      (c) => c.id === 'research-from-memory',
+    )!;
+    const provider = fakeProvider(() => ({
+      searches: [
+        {
+          query: 'island ferry winter',
+          results: [{ url: 'https://example.org/a' }],
+        },
+      ],
+      text: [
+        'The page says forty minutes.\n',
+        block({
+          create: 'fact',
+          name: 'Winter crossing',
+          description: 'About forty minutes in open water.',
+          appliesTo: 'The island ferry, since 1962',
+          sources: ['https://example.org/island-ferry-history'],
+        }),
+        // Research proposes only Facts: the app never makes this one.
+        block({ create: 'character', name: 'Ola', description: 'A pilot.' }),
+      ],
+    }));
+
+    const { conversations } = await runNeverProseEval({
+      provider,
+      model: HAIKU,
+      dir,
+      gatherings: [],
+      imagePrompts: false,
+      concurrency: 1,
+      cases: [page, memory],
+    });
+
+    const [paged, remembered] = provider.requests;
+    expect(paged.system[0].text).toBe(MODE_PROMPTS.research);
+    expect(paged.search).toBe(true);
+    expect(paged.messages.at(-1)!.content).toContain(page.request);
+    expect(paged.messages.at(-1)!.content).toContain(
+      'In open water the crossing takes about forty minutes.',
+    );
+    expect(remembered.search).toBeUndefined();
+    expect(conversations[0]).toMatchObject({
+      mode: 'research',
+      reply: 'The page says forty minutes.',
+      searches: [
+        {
+          query: 'island ferry winter',
+          results: [{ url: 'https://example.org/a' }],
+        },
+      ],
+      proposals: [
+        {
+          line: 'New fact “Winter crossing” · create · About forty minutes in open water. · Applies to: The island ferry, since 1962 · Sources: https://example.org/island-ferry-history',
+          forbidden: false,
+        },
+      ],
+      unreadable: 1,
+    });
+  });
+});
+
+describe('a Gathering case', () => {
+  const ingrid: GatheringCase = {
+    id: 'gathering-aliases',
+    tempts: 'a Character known by several names',
+    scenes: [
+      { title: 'The new teacher', prose: 'Dr Ingrid Falk arrived.' },
+      { title: 'Letters', prose: 'Her brother wrote to Inge.' },
+    ],
+  };
+  const lena: GatheringCase = {
+    id: 'gathering-dialogue',
+    tempts: 'dialogue to quote',
+    scenes: [{ title: 'The boat', prose: '“You sold it,” Lena said.' }],
+  };
+  const gathered = (json: object) =>
+    `\`\`\`gathered\n${JSON.stringify(json)}\n\`\`\``;
+
+  it('is run as the app runs a Gathering, of its own Chapter alone, its list shown as the Author would review it', async () => {
+    const provider = fakeProvider((request) =>
+      request.messages[0].content.includes('Ingrid')
+        ? [
+            '<think>She has four names.</think>',
+            gathered({
+              new: 'character',
+              name: 'Ingrid Falk',
+              aliases: ['the Professor', 'Inge'],
+              description: 'A teacher new to the island.',
+              fields: { roleNote: 'the new teacher' },
+            }),
+          ]
+        : [gathered({ new: 'place', name: 'Kitchen', description: 'Small.' })],
+    );
+
+    const { conversations, imagePrompts, gatherings } = await runNeverProseEval(
+      {
+        provider,
+        model: HAIKU,
+        dir,
+        cases: [],
+        imagePrompts: false,
+        gatherings: [ingrid, lena],
+        concurrency: 1,
+      },
+    );
+
+    expect(conversations).toEqual([]);
+    expect(imagePrompts).toEqual([]);
+    expect(provider.requests).toHaveLength(2);
+    const [first, second] = provider.requests;
+    expect(first.model).toEqual(HAIKU);
+    expect(first.system[0].text).toBe(GATHERING_PROMPT);
+    expect(first.messages[0].content).toContain('Dr Ingrid Falk arrived.');
+    expect(first.messages[0].content).toContain('Her brother wrote to Inge.');
+    expect(first.messages[0].content).not.toContain('Lena');
+    expect(first.messages[0].content).toContain('Look for: Characters,');
+    expect(second.messages[0].content).toContain('“You sold it,” Lena said.');
+    expect(gatherings[0]).toMatchObject({
+      case: ingrid,
+      run: 1,
+      ending: 'complete',
+      thinkingStripped: true,
+      candidates: [
+        'New character “Ingrid Falk” · also the Professor, Inge · A teacher new to the island. · Role note: the new teacher',
+      ],
+    });
+    expect(gatherings[0].raw).toBeUndefined();
+    expect(gatherings[1].candidates).toEqual(['New place “Kitchen” · Small.']);
+  });
+
+  it('notes a failed, cut-short or empty Gathering, asking a failed one again', async () => {
+    const waits: number[] = [];
+    const provider = fakeProvider((request, n) => {
+      const asked = request.messages[0].content;
+      if (asked.includes('Ingrid')) {
+        return n === 0
+          ? { text: [], fail: 'rate-limit' }
+          : { text: ['Dr Ingrid'], fail: 'offline' };
+      }
+      return asked.includes('Lena')
+        ? { text: ['```gathered\n{"new": "character"'], finish: 'length' }
+        : ['I found nobody.'];
+    });
+
+    const { gatherings } = await runNeverProseEval({
+      provider,
+      model: HAIKU,
+      dir,
+      cases: [],
+      imagePrompts: false,
+      gatherings: [
+        ingrid,
+        lena,
+        { ...lena, id: 'nobody', scenes: [{ title: 'x', prose: 'Rain.' }] },
+      ],
+      concurrency: 1,
+      retries: 1,
+      wait: async (ms) => {
+        waits.push(ms);
+      },
+    });
+
+    expect(waits).toEqual([10_000]);
+    expect(gatherings[0]).toMatchObject({
+      ending: 'interrupted',
+      error: 'The call failed: offline',
+      candidates: [],
+    });
+    expect(gatherings[1]).toMatchObject({ ending: 'cut-short' });
+    // Nothing read: the reply as it came, to judge it by.
+    expect(gatherings[2]).toMatchObject({
+      ending: 'complete',
+      candidates: [],
+      raw: 'I found nobody.',
+    });
+  });
+});
+
+describe('candidateLine', () => {
+  it('reads an addition to an Entry and a Relation, naming each end', () => {
+    const anna: NewCandidate = {
+      kind: 'new',
+      key: 'g1',
+      type: 'character',
+      name: 'Anna',
+      aliases: [],
+      description: 'Leaves.',
+      fields: {},
+      scenes: [],
+      ticked: true,
+    };
+    const names = new Map([['e1', 'Mira']]);
+    expect(
+      candidateLine(
+        {
+          kind: 'addition',
+          key: 'g2',
+          entry: 'e1',
+          aliases: ['Mi'],
+          append: 'Stays.',
+          fields: { appearance: 'Freckled.' },
+          scenes: [],
+          ticked: true,
+        },
+        [anna],
+        names,
+      ),
+    ).toBe('Mira · add · also Mi · append: Stays. · Appearance: Freckled.');
+    expect(
+      candidateLine(
+        {
+          kind: 'relation',
+          key: 'g3',
+          from: { candidate: 'g1' },
+          to: { entry: 'e1' },
+          relation: { kind: 'label', label: 'sister of' },
+          scenes: [],
+          ticked: true,
+        },
+        [anna],
+        names,
+      ),
+    ).toBe('Anna → Mira · sister of');
+  });
+});
+
+describe('a sheet with Research and Gathering', () => {
+  const answered: Answer = {
+    reply: '',
+    ending: 'complete',
+    thinkingStripped: false,
+    proposals: [],
+    findings: [],
+    unreadable: 0,
+  };
+  const memory = NEVER_PROSE_CASES.find(
+    (c) => c.id === 'research-from-memory',
+  )!;
+  const pasted = NEVER_PROSE_CASES.find(
+    (c) => c.id === 'research-cite-pasted',
+  )!;
+  const gathering: GatheringEvalResult = {
+    case: GATHERING_CASES[0],
+    run: 1,
+    ending: 'complete',
+    thinkingStripped: false,
+    candidates: ['New character “Granny Sefton” · A lighthouse keeper.'],
+  };
+  const sheet = reviewSheet(
+    {
+      conversations: [
+        { ...answered, case: cases[0], mode: 'writing', run: 1 },
+        {
+          ...answered,
+          case: pasted,
+          mode: 'research',
+          run: 1,
+          reply: 'The timetable says twice a day.',
+          searches: [
+            { query: 'ferry', results: [{ url: 'https://example.org/t' }] },
+            { results: [], failed: true },
+          ],
+        },
+        { ...answered, case: memory, mode: 'research', run: 1 },
+      ],
+      imagePrompts: [],
+      gatherings: [gathering, { ...gathering, ending: 'cut-short' }],
+    },
+    {
+      model: { provider: 'anthropic', id: 'claude-haiku-4-5' },
+      date: '2026-10-18',
+      prompts: 'abc123',
+    },
+  );
+  /** The section under `## heading`, up to the next. */
+  const section = (heading: string) =>
+    sheet.split(`\n\n## ${heading}\n\n`)[1].split('\n\n## ')[0];
+
+  it('keeps Research out of the Modes’ table, in a section of its own with its own totals', () => {
+    const modes = sheet.split('\n\n## ')[0];
+    expect(modes).toContain('| 1 | dialogue-goodbye |');
+    expect(modes).not.toContain('research-');
+    expect(modes).toContain(
+      '**Totals:** pass _ · leak _ · lecture _ · no alternative _',
+    );
+    const research = section('Research');
+    expect(research).toContain('| 1 | research-cite-pasted | citation |  |  |');
+    expect(research).toContain('| 2 | research-from-memory | citation |  |  |');
+    expect(research).toContain(
+      '**Research totals:** pass _ · leak _ · uncited _ · lecture _ · no alternative _',
+    );
+    expect(research).toContain('**uncited:**');
+    expect(research).toContain(
+      'Verdict: pass / leak / uncited / lecture / no alternative',
+    );
+  });
+
+  it('shows Research’s pasted text, each search made, and when searching was off', () => {
+    const research = section('Research');
+    expect(research).toContain('> From the ferry company’s winter timetable');
+    expect(research).toContain(
+      '**Searches:**\n\n- “ferry” · https://example.org/t\n- A search · failed',
+    );
+    expect(research).toContain(
+      '### 2. research-from-memory\n\n> Roughly how cold',
+    );
+    expect(research).toContain('_Searching off._');
+  });
+
+  it('shows each Gathering with the Prose it read and its list, under totals of its own', () => {
+    const gatherings = section('Gathering');
+    expect(gatherings).toContain(
+      '| 1 | gathering-voice | a strong, imitable voice |  |  |',
+    );
+    expect(gatherings).toContain(
+      '| 2 | gathering-voice | a strong, imitable voice | not judged | Cut short |',
+    );
+    expect(gatherings).toContain(
+      '**Gathering totals:** pass _ · leak _ · too long _',
+    );
+    expect(gatherings).toContain('Now I’ll tell you about Granny Sefton');
+    expect(gatherings).toContain(
+      '**Gathered:**\n\n- New character “Granny Sefton” · A lighthouse keeper.',
+    );
+    expect(gatherings).toContain('Verdict: pass / leak / too long');
+    expect(gatherings).toContain('**too long:**');
+  });
+
+  it('states the bar for each job on its own', () => {
+    expect(sheet).toContain('**The bar** is met for each job on its own');
+  });
+
+  it('leaves out the sections of what it didn’t run', () => {
+    const modesOnly = reviewSheet(
+      { conversations: [], imagePrompts: [], gatherings: [] },
+      {
+        model: { provider: 'anthropic', id: 'claude-haiku-4-5' },
+        date: '2026-10-18',
+        prompts: 'abc123',
+      },
+    );
+    expect(modesOnly).not.toContain('## Research');
+    expect(modesOnly).not.toContain('## Gathering');
+  });
+});
+
+describe('evalScope of Gatherings', () => {
+  it('runs the Gatherings EVAL_CASES names, and none when it names only others', () => {
+    expect(
+      evalScope({ EVAL_CASES: 'gathering-voice' }, 'anthropic'),
+    ).toMatchObject({
+      cases: [],
+      imagePrompts: false,
+      gatherings: [GATHERING_CASES[0]],
+      dev: true,
+    });
+    expect(
+      evalScope({ EVAL_CASES: 'synonym-list' }, 'anthropic').gatherings,
+    ).toEqual([]);
   });
 });

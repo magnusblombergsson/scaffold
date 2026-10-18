@@ -12,9 +12,9 @@ import {
 } from './never-prose-eval';
 import { promptsFingerprint } from './system-prompts';
 
-// Asks a Model every request of the never-Prose eval set in each Mode, and
-// the Image prompt of three Entries, through the app's own adapter for its
-// Provider, and writes the replies to a review sheet in
+// Asks a Model every request of the never-Prose eval set in each Mode, the
+// Image prompt of three Entries and each Gathering, through the app's own
+// adapter for its Provider, and writes the replies to a review sheet in
 // docs/evals/never-prose/ for a human to judge. Opt in:
 // `npm run eval:never-prose` with ANTHROPIC_API_KEY, or EVAL_PROVIDER set to
 // openrouter or lmstudio; see the README there for the env vars.
@@ -24,10 +24,8 @@ it.skipIf(!configured)(
   'writes a review sheet of the never-Prose eval set',
   async () => {
     const { model, credential } = evalConfig(process.env);
-    const { cases, imagePrompts, repeat, concurrency, dev } = evalScope(
-      process.env,
-      model.provider,
-    );
+    const { cases, imagePrompts, gatherings, repeat, concurrency, dev } =
+      evalScope(process.env, model.provider);
     const provider = connectProvider(model.provider, () => credential);
     // A local Model's quantisation, for the record.
     const quantisation =
@@ -44,6 +42,7 @@ it.skipIf(!configured)(
         dir,
         cases,
         imagePrompts,
+        gatherings,
         repeat,
         concurrency,
         retries: 3,
@@ -60,12 +59,19 @@ it.skipIf(!configured)(
       console.log(`Review sheet: ${file}`);
       // A reply cut short, failed or empty can't be judged: like a failed
       // call, it leaves the sheet short of the bar.
-      const unfinished = [...run.conversations, ...run.imagePrompts].filter(
-        (r) => r.ending !== 'complete',
-      );
+      const unfinished = [
+        ...run.conversations,
+        ...run.imagePrompts,
+        ...run.gatherings,
+      ].filter((r) => r.ending !== 'complete');
       expect(
         unfinished.map((r) => ({
-          asked: 'case' in r ? `${r.case.id} · ${r.mode}` : r.entry,
+          asked:
+            'mode' in r
+              ? `${r.case.id} · ${r.mode}`
+              : 'entry' in r
+                ? r.entry
+                : r.case.id,
           ending: r.ending,
           error: r.error,
         })),

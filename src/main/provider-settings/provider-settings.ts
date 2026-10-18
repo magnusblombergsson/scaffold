@@ -224,7 +224,7 @@ export class ProviderSettings {
     return (
       find((model) => sameModel(model, lastUsed)) ??
       find((model) => sameModel(model, DEFAULT_MODEL)) ??
-      find((model) => isTested(model, this.deps.tested)) ??
+      find((model) => isTested(model, 'modes', this.deps.tested)) ??
       offered[0] ??
       lastUsed
     );

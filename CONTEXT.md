@@ -262,11 +262,11 @@ The Models the Author has chosen, per Provider, to have on offer when picking a 
 _Avoid_: Favourites, model list
 
 **Tested**:
-Said of a Model on the tested list: one checked against the rule that the Assistant never writes Prose. Its opposite is Untested.
+Said of a Model on the tested list for a job: one checked against the rule that the Assistant never writes Prose. The jobs are every Mode but Research (Writing, Brainstorm, Interview and Plan, with the Image prompt), Research, which is also checked against its rule that every claim names its source, and a Gathering; a Model is Tested only for the jobs it passed. Its opposite is Untested.
 _Avoid_: Supported, safe
 
 **Untested**:
-Said of a Model that hasn't been checked against the rule that the Assistant never writes Prose. The rule still applies; the mark only warns that the Model may slip.
+Said of a Model that hasn't been checked against the rule that the Assistant never writes Prose, for the job at hand: a Model Tested in the Modes may still be Untested in Research or a Gathering. The rule still applies; the mark only warns that the Model may slip.
 _Avoid_: Unsupported, unsafe
 
 ### Modes
