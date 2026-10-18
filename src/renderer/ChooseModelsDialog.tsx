@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import type { ModelListing } from '../shared/api';
 import {
   PROVIDER_NAMES,
   type ListedModel,
   type ProviderId,
 } from '../shared/models';
+import { isTested, TESTED_TOOLTIP } from '../shared/tested-models';
 import { contextLabel, matchesSearch, priceLabel } from './model-listing';
 import { statusLabel } from './provider-messages';
 
@@ -13,6 +14,8 @@ import { statusLabel } from './provider-messages';
  * built-in Claude models with their prices; OpenRouter's, searchable, with
  * context window and price; or the LLMs downloaded in LM Studio, loaded or
  * not. A shortlisted Model the Provider no longer lists stays, to untick.
+ * A tested Model is marked with a check; `tested` and `untested` in the
+ * search keep only those Models.
  * `onClose` says whether the shortlist was saved.
  */
 export function ChooseModelsDialog({
@@ -53,7 +56,11 @@ export function ChooseModelsDialog({
     (model) => !listed.some((m) => m.id === model.id),
   );
   const models = [...listed, ...gone];
-  const shown = models.filter((model) => matchesSearch(model, search));
+  const tested = (model: ListedModel) =>
+    isTested({ provider: id, id: model.id });
+  const shown = models.filter((model) =>
+    matchesSearch(model, search, tested(model)),
+  );
 
   function toggle(modelId: string, on: boolean) {
     const next = new Set(ticked);
@@ -115,26 +122,21 @@ export function ChooseModelsDialog({
           )}
           <ul className="model-list" aria-label={`${name} models`}>
             {shown.map((model) => (
-              <li key={model.id}>
-                <label>
-                  <input
-                    type="checkbox"
-                    checked={ticked.has(model.id)}
-                    onChange={(event) => toggle(model.id, event.target.checked)}
-                  />
-                  <span className="model-name">{model.name}</span>
-                  <span className="model-facts">
-                    {[
-                      contextLabel(model.contextWindow),
-                      id === 'lmstudio'
-                        ? loadedLabel(model)
-                        : priceLabel(model.price),
-                    ]
-                      .filter(Boolean)
-                      .join(' · ')}
-                  </span>
-                </label>
-              </li>
+              <ModelRow
+                key={model.id}
+                model={model}
+                tested={tested(model)}
+                facts={[
+                  contextLabel(model.contextWindow),
+                  id === 'lmstudio'
+                    ? loadedLabel(model)
+                    : priceLabel(model.price),
+                ]
+                  .filter(Boolean)
+                  .join(' · ')}
+                ticked={ticked.has(model.id)}
+                onToggle={(on) => toggle(model.id, on)}
+              />
             ))}
           </ul>
         </>
@@ -149,6 +151,54 @@ export function ChooseModelsDialog({
         </button>
       </div>
     </dialog>
+  );
+}
+
+/**
+ * A Model to tick: its name, with a check when it is tested, then its facts.
+ * The check is read out as ", Tested" after the name.
+ */
+function ModelRow({
+  model,
+  tested,
+  facts,
+  ticked,
+  onToggle,
+}: {
+  model: ListedModel;
+  tested: boolean;
+  facts: string;
+  ticked: boolean;
+  onToggle(on: boolean): void;
+}) {
+  const factsId = useId();
+  return (
+    <li>
+      <label>
+        <input
+          type="checkbox"
+          aria-label={`${model.name}${tested ? ', Tested' : ''}`}
+          aria-describedby={factsId}
+          checked={ticked}
+          onChange={(event) => onToggle(event.target.checked)}
+        />
+        <span className="model-name">
+          {model.name}
+          {tested && (
+            <span
+              className="tested-mark"
+              title={TESTED_TOOLTIP}
+              aria-hidden="true"
+            >
+              {' ✓'}
+            </span>
+          )}
+        </span>
+        <span className="model-facts" id={factsId}>
+          {facts}
+        </span>
+      </label>
+    </li>
   );
 }
 

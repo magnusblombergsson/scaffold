@@ -58,10 +58,29 @@ describe('matchesSearch', () => {
   };
 
   it('matches every word of the search in the name or id, ignoring case', () => {
-    expect(matchesSearch(model, '')).toBe(true);
-    expect(matchesSearch(model, 'QWEN3 235')).toBe(true);
-    expect(matchesSearch(model, 'qwen/')).toBe(true);
-    expect(matchesSearch(model, 'qwen llama')).toBe(false);
+    expect(matchesSearch(model, '', false)).toBe(true);
+    expect(matchesSearch(model, 'QWEN3 235', false)).toBe(true);
+    expect(matchesSearch(model, 'qwen/', false)).toBe(true);
+    expect(matchesSearch(model, 'qwen llama', false)).toBe(false);
+  });
+
+  it('keeps only tested Models for the word tested, in any case', () => {
+    expect(matchesSearch(model, 'tested', true)).toBe(true);
+    expect(matchesSearch(model, 'TESTED', true)).toBe(true);
+    expect(matchesSearch(model, 'tested', false)).toBe(false);
+  });
+
+  it('keeps only Untested Models for the word untested, in any case', () => {
+    expect(matchesSearch(model, 'untested', false)).toBe(true);
+    expect(matchesSearch(model, 'Untested', false)).toBe(true);
+    expect(matchesSearch(model, 'untested', true)).toBe(false);
+  });
+
+  it('combines the words tested and untested with the other words', () => {
+    expect(matchesSearch(model, 'tested qwen', true)).toBe(true);
+    expect(matchesSearch(model, 'tested llama', true)).toBe(false);
+    expect(matchesSearch(model, 'qwen untested', false)).toBe(true);
+    expect(matchesSearch(model, 'qwen untested', true)).toBe(false);
   });
 });
 

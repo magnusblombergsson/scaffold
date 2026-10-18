@@ -261,6 +261,10 @@ _Avoid_: Vendor, backend, API
 The Models the Author has chosen, per Provider, to have on offer when picking a Conversation's Model.
 _Avoid_: Favourites, model list
 
+**Tested**:
+Said of a Model on the tested list: one checked against the rule that the Assistant never writes Prose. Its opposite is Untested.
+_Avoid_: Supported, safe
+
 **Untested**:
 Said of a Model that hasn't been checked against the rule that the Assistant never writes Prose. The rule still applies; the mark only warns that the Model may slip.
 _Avoid_: Unsupported, unsafe

@@ -29,13 +29,25 @@ function dollars(amount: number): string {
   return Number.isInteger(amount) ? `$${amount}` : `$${amount.toFixed(2)}`;
 }
 
-/** Whether every word of `search` is in the Model's name or id. */
-export function matchesSearch(model: ListedModel, search: string): boolean {
+/**
+ * Whether the Model meets every word of `search`: `tested` keeps only a
+ * tested Model and `untested` only an Untested one; any other word must be
+ * in its name or id.
+ */
+export function matchesSearch(
+  model: ListedModel,
+  search: string,
+  tested: boolean,
+): boolean {
   const text = `${model.name} ${model.id}`.toLowerCase();
   return search
     .toLowerCase()
     .split(/\s+/)
-    .every((word) => text.includes(word));
+    .every((word) => {
+      if (word === 'tested') return tested;
+      if (word === 'untested') return !tested;
+      return text.includes(word);
+    });
 }
 
 /**
