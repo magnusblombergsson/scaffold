@@ -7,7 +7,7 @@ import {
 } from '@playwright/test';
 import { readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { answerDialogs, launch, useTempDir } from './app';
+import { answerDialogs, launch, scrollOf, typeLines, useTempDir } from './app';
 
 const tempDir = useTempDir();
 
@@ -377,6 +377,102 @@ test('every Corkboard shows its cards as images, as this computer remembers', as
     await expect(field(card(page, 'Scene 1'), 'Outline')).toHaveText(
       lines.join(''),
     );
+  } finally {
+    await app.close();
+  }
+});
+
+test('on a card, a long Outline and long Notes each scroll on their own', async () => {
+  const projectPath = path.join(tempDir(), 'My Novel');
+  const app = await launch(tempDir());
+  try {
+    await answerDialogs(app, projectPath);
+    const page = await app.firstWindow();
+    await app.evaluate(({ BrowserWindow }) => {
+      BrowserWindow.getAllWindows()[0].setContentSize(1200, 600);
+    });
+    await button(page, 'New Project…').click();
+    await expect(page.getByLabel('Prose')).toBeFocused();
+    await menu(page, 'Chapter actions: Chapter 1', 'New Scene');
+    await expect(page.getByLabel('Prose')).toBeFocused();
+    await button(page, 'Chapter 1').click();
+    const board = page.locator('.corkboard');
+    const chapter = card(page, 'Chapter 1');
+    const scene1 = card(page, 'Scene 1');
+    const scene2 = card(page, 'Scene 2');
+
+    // Typing past the cap keeps the cursor in view.
+    const longFields = [
+      field(chapter, 'Outline'),
+      field(chapter, 'Notes'),
+      field(scene1, 'Outline'),
+    ];
+    for (const [i, editor] of longFields.entries()) {
+      await editor.click();
+      await typeLines(page, `Field ${i}`, 40);
+      await expect(editor.locator('p').last()).toBeInViewport();
+    }
+    await field(scene2, 'Outline').click();
+    await page.keyboard.type('- The train arrives');
+
+    // Each long field is at most 12em tall, and scrolls; short ones don't.
+    for (const editor of longFields) {
+      const { height, cap } = await editor.evaluate((el) => {
+        const style = getComputedStyle(el);
+        return {
+          height:
+            el.clientHeight -
+            parseFloat(style.paddingTop) -
+            parseFloat(style.paddingBottom),
+          cap: 12 * parseFloat(style.fontSize),
+        };
+      });
+      expect(height).toBeLessThanOrEqual(cap + 1);
+      expect((await scrollOf(editor)).overflows).toBe(true);
+    }
+    for (const editor of [
+      field(scene1, 'Notes'),
+      field(scene2, 'Outline'),
+      field(scene2, 'Notes'),
+    ])
+      expect((await scrollOf(editor)).overflows).toBe(false);
+    // A card with a long Outline fits on the board, its heading in view.
+    await scene1.scrollIntoViewIfNeeded();
+    await expect(scene1).toBeInViewport({ ratio: 1 });
+    await expect(scene1.locator('h3').getByText('Outline')).toBeInViewport();
+
+    // On the wide card, scrolling the Notes leaves the Outline where it is.
+    await board.evaluate((el) => (el.scrollTop = 0));
+    const outline = field(chapter, 'Outline');
+    const notes = field(chapter, 'Notes');
+    const outlineTop = (await scrollOf(outline)).top;
+    expect(outlineTop).toBeGreaterThan(0);
+    await notes.hover();
+    await page.mouse.wheel(0, -5000);
+    await expect.poll(async () => (await scrollOf(notes)).top).toBe(0);
+    expect((await scrollOf(outline)).top).toBe(outlineTop);
+
+    // The wheel over a long field scrolls it, then, at its end, the board.
+    await outline.evaluate((el) => (el.scrollTop = 0));
+    await board.evaluate((el) => (el.scrollTop = 0));
+    await outline.hover();
+    const boardTop = (await scrollOf(board)).top;
+    await page.mouse.wheel(0, 5000);
+    await expect.poll(async () => (await scrollOf(outline)).atEnd).toBe(true);
+    expect((await scrollOf(board)).top).toBe(boardTop);
+    await page.mouse.wheel(0, 200);
+    await expect
+      .poll(async () => (await scrollOf(board)).top)
+      .toBeGreaterThan(boardTop);
+
+    // Over a short field, the wheel scrolls the board.
+    await board.evaluate((el) => (el.scrollTop = 0));
+    await field(scene2, 'Notes').hover();
+    const shortTop = (await scrollOf(board)).top;
+    await page.mouse.wheel(0, 200);
+    await expect
+      .poll(async () => (await scrollOf(board)).top)
+      .toBeGreaterThan(shortTop);
   } finally {
     await app.close();
   }

@@ -3,6 +3,7 @@ import {
   expect,
   test,
   type ElectronApplication,
+  type Locator,
   type Page,
 } from '@playwright/test';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
@@ -23,6 +24,22 @@ export function useTempDir(): () => string {
   });
   return () => dir;
 }
+
+/** Types `count` lines, `<label> line 1` and on, into the focused editor. */
+export async function typeLines(page: Page, label: string, count: number) {
+  for (let line = 1; line <= count; line++) {
+    if (line > 1) await page.keyboard.press('Enter');
+    await page.keyboard.type(`${label} line ${line}`);
+  }
+}
+
+/** How far an element is scrolled, and whether it has more than it shows. */
+export const scrollOf = (element: Locator) =>
+  element.evaluate((el) => ({
+    top: el.scrollTop,
+    atEnd: el.scrollTop + el.clientHeight >= el.scrollHeight - 1,
+    overflows: el.scrollHeight > el.clientHeight,
+  }));
 
 export type LaunchOptions = {
   /** Starts as on a new computer, with the welcome; otherwise it was skipped. */

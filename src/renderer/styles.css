@@ -438,14 +438,19 @@ button.recent-open:hover {
   grid-template-columns: 1fr 1fr;
   gap: 1rem;
   padding: 0 1rem 0.75rem;
-  max-height: 40vh;
   overflow-y: auto;
 }
 
 .centre > .outline-notes-fields {
   flex: 1;
-  max-height: none;
   padding-top: 0.75rem;
+}
+
+/* Beside the Prose, the Outline and the Notes each scroll on their own past
+   a cap, their headings staying put, so the Prose keeps its room. */
+.outline-notes .plain-text {
+  max-height: min(30vh, 18em);
+  overflow-y: auto;
 }
 
 .plain-text-field h3 {
@@ -522,17 +527,19 @@ button.recent-open:hover {
     }
   }
 
-  /* A card grows with its text; it never scrolls. */
   .outline-notes-fields {
     grid-template-columns: 1fr;
     gap: 0.5rem;
     padding: 0;
-    max-height: none;
     overflow: visible;
   }
 
+  /* A card grows with its text up to a cap; past it, the Outline and the
+     Notes each scroll on their own, their headings staying put. */
   .plain-text {
     min-height: 2em;
+    max-height: 12em;
+    overflow-y: auto;
   }
 }
 
@@ -1141,7 +1148,6 @@ span.overview-title {
     grid-template-columns: 1fr;
     gap: 0.5rem;
     padding: 0;
-    max-height: none;
     overflow: visible;
   }
 
@@ -5390,7 +5396,6 @@ button.finding-quote:hover {
 
 .plan-details .outline-notes-fields {
   grid-template-columns: 1fr;
-  max-height: none;
   padding: 0;
 }
 
