@@ -38,6 +38,14 @@ import type { CustomField } from './custom-field';
 import type { KeyFieldChoices, KeyFieldItem } from './key-fields';
 import type { Relation, RelationChoice } from './relation';
 import type { Snapshot } from './snapshot';
+import type {
+  Candidate,
+  GatheredItems,
+  Gathering,
+  GatheringEstimate,
+  GatheringProgress,
+  GatheringSettings,
+} from './gathering';
 import type { ImportBlock, ImportConvention } from './manuscript-import';
 import type { Cut } from './prose-split';
 import type { ListedModel, Model, ProviderId, ProviderStatus } from './models';
@@ -451,6 +459,13 @@ export interface ProjectApi {
    * changing none, as one step: `undo` moves them all to Trash.
    */
   importEntries(entries: NewEntry[]): Promise<Changed & { ids: string[] }>;
+  /**
+   * Adds what the Author ticked of a Gathering's list, as one step that
+   * one undo takes back; resolves with the new Entries' ids by their keys.
+   */
+  acceptGathered(
+    items: GatheredItems,
+  ): Promise<Changed & { ids: Record<string, string> }>;
   /**
    * Combines the Entry `otherId` into `keptId`, of one type, as the Author
    * chose, as one step: `undo` puts both back, and what pointed to the
@@ -1296,6 +1311,29 @@ export interface AssistantApi {
    * Conversation; a new one each time, and nothing of it is logged.
    */
   imagePrompt(entryId: string): Promise<ImagePromptResult>;
+  /**
+   * What a Gathering of `settings` would send and cost (ADR 0018): its
+   * requests, rough tokens in and out, its price where the Model has one,
+   * and the Scenes too big to read. Nothing is sent.
+   */
+  gatheringEstimate(settings: GatheringSettings): Promise<GatheringEstimate>;
+  /**
+   * Gathers Entries from the Prose of `settings`, once the Author confirmed
+   * its estimate: Chapter by Chapter, told through `onGathering`, the list
+   * kept on this computer as it grows. Resolves once it is done, stopped
+   * or failed; refused while one is running.
+   */
+  gather(settings: GatheringSettings): Promise<Gathering>;
+  /** Stops the Gathering running, if any: what it gathered stays to review. */
+  stopGathering(): Promise<void>;
+  /** How far the Gathering running is, after each request it sent. */
+  onGathering(listener: (progress: GatheringProgress) => void): () => void;
+  /** The Gathering kept on this computer for this Project, not reviewed yet; null for none. */
+  savedGathering(): Promise<Gathering | null>;
+  /** Keeps the Author's edits and ticks to the list of the Gathering kept. */
+  reviewGathering(candidates: Candidate[]): Promise<void>;
+  /** Forgets the Gathering kept, once accepted or discarded. */
+  discardGathering(): Promise<void>;
 }
 
 /**
@@ -1354,6 +1392,7 @@ export const projectMethods = {
   moveToDrawer: 'invoke',
   moveBetweenTrashAndDrawer: 'invoke',
   importEntries: 'invoke',
+  acceptGathered: 'invoke',
   combineEntries: 'invoke',
   setEntryVisibility: 'invoke',
   setEntryType: 'invoke',
@@ -1442,6 +1481,13 @@ export const assistantMethods = {
   undoProposal: 'invoke',
   pendingProposals: 'invoke',
   imagePrompt: 'invoke',
+  gatheringEstimate: 'invoke',
+  gather: 'invoke',
+  stopGathering: 'invoke',
+  onGathering: 'event',
+  savedGathering: 'invoke',
+  reviewGathering: 'invoke',
+  discardGathering: 'invoke',
 } as const satisfies MethodTable<AssistantApi>;
 
 export const settingsMethods = {

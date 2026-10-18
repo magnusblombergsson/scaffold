@@ -9,6 +9,7 @@ import {
   type ProjectApi,
 } from '../shared/api';
 import type { Handlers } from '../shared/bridge';
+import type { GatheringSettings } from '../shared/gathering';
 import { splitManuscript } from '../shared/manuscript-import';
 import {
   ENTRY_GROUP_TITLES,
@@ -19,9 +20,10 @@ import {
   type ProseLanguage,
 } from '../shared/project-types';
 import { createConversationEngine } from './assistant/conversation-engine';
+import { createGathering } from './assistant/gathering';
 import { createImagePrompts } from './assistant/image-prompt';
 import { newManuscript } from './import/manuscript-import';
-import { register, windowContext } from './electron-transport';
+import { emit, register, windowContext } from './electron-transport';
 import { entryImageOf, imageDataUrl } from './entry-image';
 import { systemClock } from './project-store/clock';
 import type { ProjectStore } from './project-store/project-store';
@@ -31,7 +33,9 @@ import {
   backupFlows,
   backupPorts,
   defaultModel,
+  keptGatherings,
   lastFolder,
+  modelListing,
   modelWindow,
   projectWindows,
   rememberFolder,
@@ -94,6 +98,7 @@ const projectHandlers: Handlers<
   moveBetweenTrashAndDrawer: ({ store }, id, to) =>
     store.moveBetweenTrashAndDrawer(id, to),
   importEntries: ({ store }, entries) => store.importEntries(entries),
+  acceptGathered: ({ store }, items) => store.acceptGathered(items),
   combineEntries: ({ store }, keptId, otherId, choices) =>
     store.combineEntries(keptId, otherId, choices),
   setEntryVisibility: ({ store }, entryId, visibility) =>
@@ -315,7 +320,48 @@ const assistantHandlers: Handlers<
       providerFor: assistantProvider,
       defaultModel,
     }).write(entryId),
+  gatheringEstimate: ({ store }, settings) =>
+    gatheringOf(store).estimate(checkedSettings(settings)),
+  gather: ({ store, sender }, settings) =>
+    gatheringOf(store).gather(checkedSettings(settings), (progress) =>
+      emit(sender, 'assistant', 'onGathering', progress),
+    ),
+  stopGathering: async ({ store }) => gatheringOf(store).stop(),
+  savedGathering: ({ store }) => gatheringOf(store).saved(),
+  reviewGathering: ({ store }, candidates) =>
+    gatheringOf(store).review(candidates),
+  discardGathering: ({ store }) => gatheringOf(store).discard(),
 };
+
+/** Each open Project's Gathering, kept while it runs between calls. */
+const gatheringsByStore = new WeakMap<
+  ProjectStore,
+  ReturnType<typeof createGathering>
+>();
+
+function gatheringOf(store: ProjectStore): ReturnType<typeof createGathering> {
+  let gathering = gatheringsByStore.get(store);
+  if (!gathering) {
+    gathering = createGathering({
+      store,
+      providerFor: assistantProvider,
+      listingOf: modelListing,
+      files: keptGatherings(),
+      clock: systemClock,
+    });
+    gatheringsByStore.set(store, gathering);
+  }
+  return gathering;
+}
+
+/** `settings` as a window sent them, refused unless they name a Model and an Entry type to look for. */
+function checkedSettings(settings: GatheringSettings): GatheringSettings {
+  if (!isModel(settings?.model)) throw new Error('A Gathering needs a Model');
+  if (!Array.isArray(settings.types) || settings.types.length === 0) {
+    throw new Error('A Gathering looks for at least one Entry type');
+  }
+  return settings;
+}
 
 /** Connects each window's `assistant` calls to the Conversations of its Project. */
 export function registerAssistantIpc(): void {

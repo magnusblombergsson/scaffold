@@ -68,6 +68,8 @@ export function StoryBible({
   onHighlight,
   onAddTodo,
   onCombine,
+  onGather,
+  gatheringWaiting = false,
 }: {
   /** In a Series, as of the Book `asOf`. */
   entries: readonly EntrySummary[];
@@ -96,6 +98,10 @@ export function StoryBible({
   onAddTodo(entryId: string): void;
   /** Opens Combine with… on an Entry. */
   onCombine(entryId: string): void;
+  /** Opens the Gathering: to start one, or to review the one kept. */
+  onGather?(): void;
+  /** Whether a Gathering's list is kept on this computer, not reviewed yet. */
+  gatheringWaiting?: boolean;
 }) {
   const readOnly = useContext(ReadOnlyContext);
   const run = useRun();
@@ -295,6 +301,18 @@ export function StoryBible({
         >
           New Entry…
         </Menu>
+        {onGather && (
+          <button
+            className="menu-button story-bible-gather"
+            disabled={readOnly && !gatheringWaiting}
+            title="The Assistant reads the Prose and lists the Entries it finds, for you to review"
+            onClick={onGather}
+          >
+            {gatheringWaiting
+              ? 'Review gathered Entries…'
+              : 'Gather Entries from the Prose…'}
+          </button>
+        )}
       </div>
       {books.length > 0 && onAsOf && (
         <label className="story-bible-as-of">
