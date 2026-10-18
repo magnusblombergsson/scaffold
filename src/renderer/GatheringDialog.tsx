@@ -121,6 +121,7 @@ export function GatheringDialog({
   manuscript,
   entries,
   book,
+  scope,
   onAccept,
   onOpenScene,
   onClose,
@@ -130,6 +131,8 @@ export function GatheringDialog({
   entries: EntrySummary[];
   /** In a Series, the Book the Story Bible is seen as of: what is read unless the Author chooses. */
   book: string | undefined;
+  /** What is read unless the Author chooses, over `book`: as the Book a Manuscript Import just made. */
+  scope?: GatheringScope;
   /** Adds the ticked items, `count` of them, as one step; whether it did. */
   onAccept(items: GatheredItems, count: number): Promise<boolean>;
   /** Opens a Scene an item comes from. */
@@ -197,6 +200,7 @@ export function GatheringDialog({
         <Setup
           manuscript={manuscript}
           book={book}
+          scope={scope}
           onStart={start}
           onCancel={() => dialogRef.current?.close()}
         />
@@ -255,11 +259,13 @@ export function GatheringDialog({
 function Setup({
   manuscript,
   book,
+  scope: initial,
   onStart,
   onCancel,
 }: {
   manuscript: Manuscript;
   book: string | undefined;
+  scope: GatheringScope | undefined;
   onStart(settings: Gathering['settings']): void;
   onCancel(): void;
 }) {
@@ -267,10 +273,12 @@ function Setup({
   const shortlists = useShortlists();
   const readOnly = useContext(ReadOnlyContext);
   const options = scopeOptions(manuscript);
-  const [scope, setScope] = useState<GatheringScope>(() =>
-    manuscript.books
-      ? { kind: 'book', id: book ?? manuscript.books[0].id }
-      : { kind: 'book', id: PROJECT_OUTLINE },
+  const [scope, setScope] = useState<GatheringScope>(
+    () =>
+      initial ??
+      (manuscript.books
+        ? { kind: 'book', id: book ?? manuscript.books[0].id }
+        : { kind: 'book', id: PROJECT_OUTLINE }),
   );
   const [types, setTypes] = useState<GatheredType[]>([...GATHERED_TYPES]);
   const [model, setModel] = useState<Model>();

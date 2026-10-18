@@ -210,6 +210,13 @@ export function splitManuscript(
   return items;
 }
 
+/** Whether any Scene of the split has a word of Prose, so a Gathering has something to read. */
+export function importHasProse(items: ImportedItem[]): boolean {
+  return importedChapters(items).some((chapter) =>
+    chapter.scenes.some((scene) => wordCount(scene.paragraphs) > 0),
+  );
+}
+
 /** The text of `spans`, without its marks. */
 export function plainText(spans: Span[]): string {
   return spans.map((span) => span.text).join('');

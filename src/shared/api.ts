@@ -845,6 +845,11 @@ export type OpenedProject = {
   dropped: Dropped[];
   /** Set once a newer app has upgraded the Project, as when the window reloads. */
   readOnly: Upgrade | null;
+  /**
+   * Whether to offer a Gathering over the Book, as when a Manuscript Import
+   * with Prose just made the Project; told once.
+   */
+  offerGathering: boolean;
 };
 
 /**

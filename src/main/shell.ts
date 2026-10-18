@@ -36,7 +36,7 @@ import {
   type ExportUnticked,
   type StoryBibleChoice,
 } from '../shared/export-choice';
-import { splitManuscript } from '../shared/manuscript-import';
+import { importHasProse, splitManuscript } from '../shared/manuscript-import';
 import {
   claudeListing,
   isProviderId,
@@ -567,6 +567,9 @@ function rememberOpenProjects(): void {
   settings.setOpenAtQuit(projectWindows.stores().map((store) => store.path));
 }
 
+/** Projects a Manuscript Import with Prose just made, until their window offers a Gathering. */
+const gatheringOffers = new WeakSet<ProjectStore>();
+
 function openedProject(store: ProjectStore): OpenedProject {
   const {
     lastSceneId,
@@ -597,6 +600,7 @@ function openedProject(store: ProjectStore): OpenedProject {
     sessions: store.sessionNotice(),
     dropped: store.takeDropped(),
     readOnly: store.readOnly(),
+    offerGathering: gatheringOffers.delete(store),
   };
 }
 
@@ -712,12 +716,12 @@ const shellHandlers: Handlers<ShellApi, typeof shellMethods, WindowContext> = {
     });
     if (canceled || !filePath) return 'canceled';
     rememberFolder('projects', path.dirname(filePath));
-    const manuscript = newManuscript(splitManuscript(file.blocks, convention));
+    const split = splitManuscript(file.blocks, convention);
+    const manuscript = newManuscript(split);
     try {
-      return showOpened(
-        ctx.sender,
-        await createProject(filePath, deps, { manuscript }),
-      );
+      const store = await createProject(filePath, deps, { manuscript });
+      if (importHasProse(split)) gatheringOffers.add(store);
+      return showOpened(ctx.sender, store);
     } catch (error) {
       return openFailure(filePath, error);
     }
