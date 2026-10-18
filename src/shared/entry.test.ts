@@ -69,6 +69,39 @@ describe('changing an Entry’s type', () => {
     });
   });
 
+  it('appends a Fact’s Sources, Captured, Applies to and Checked, and starts a Fact not Checked', () => {
+    const fact: EntryValue = {
+      ...anna,
+      type: 'fact',
+      name: 'Lay judges',
+      description: 'Three sit with the judge.',
+      fields: {
+        sources: ['https://www.domstol.se/', 'Bylund, p. 42'],
+        captured: '2026-10-12',
+        appliesTo: 'Swedish district courts',
+        checked: true,
+      },
+    };
+    expect(changeEntryType(fact, 'world-rule').description).toBe(
+      [
+        'Three sit with the judge.',
+        '',
+        'Sources:',
+        'https://www.domstol.se/',
+        'Bylund, p. 42',
+        'Captured: 2026-10-12',
+        'Applies to: Swedish district courts',
+        'Checked: Yes',
+      ].join('\n'),
+    );
+    expect(changeEntryType(anna, 'fact').fields).toEqual({
+      sources: [],
+      captured: '',
+      appliesTo: '',
+      checked: false,
+    });
+  });
+
   it('leaves the description alone when no field has a value', () => {
     const thread: EntryValue = {
       ...anna,

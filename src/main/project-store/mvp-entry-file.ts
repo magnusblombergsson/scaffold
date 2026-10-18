@@ -164,7 +164,8 @@ function emptyFields(type: EntryType): EntryFields {
 type Frontmatter = Record<string, unknown>;
 
 /** The frontmatter key each type's fields are stored under. */
-const FIELD_KEYS: Record<EntryType, readonly (keyof EntryFields)[]> = {
+// By any type: this app's `EntryType` has types it didn't know.
+const FIELD_KEYS: Record<string, readonly (keyof EntryFields)[]> = {
   character: ['role', 'voice'],
   place: ['senses'],
   item: [],

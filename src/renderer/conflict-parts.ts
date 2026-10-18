@@ -1,5 +1,5 @@
 import { fieldsOfType, type CustomField } from '../shared/custom-field';
-import { emptyFields } from '../shared/entry';
+import { checkedText, emptyFields } from '../shared/entry';
 import {
   removeEvolution,
   withEvolved,
@@ -40,6 +40,7 @@ export type PartKey =
   | 'name'
   | 'visibility'
   | 'voice.examples'
+  | 'checked'
   | ProposalField
   | EvolutionKey;
 
@@ -178,13 +179,19 @@ function withAllFields(entry: EntryValue): EntryValue {
   return { ...entry, fields: { ...emptyFields(entry.type), ...entry.fields } };
 }
 
-/** The fields of `type` beyond its description and aliases, Example lines among the Voice's. */
+/**
+ * The fields of `type` beyond its description and aliases, Example lines
+ * among the Voice's, and whether a Fact is Checked after its own.
+ */
 function typeFields(type: EntryType): PartKey[] {
-  return builtInFields(type)
-    .filter((field) => field !== 'description' && field !== 'aliases')
-    .flatMap((field): PartKey[] =>
-      field === 'voice.neverSays' ? [field, 'voice.examples'] : [field],
-    );
+  return [
+    ...builtInFields(type)
+      .filter((field) => field !== 'description' && field !== 'aliases')
+      .flatMap((field): PartKey[] =>
+        field === 'voice.neverSays' ? [field, 'voice.examples'] : [field],
+      ),
+    ...(type === 'fact' ? (['checked'] as const) : []),
+  ];
 }
 
 function partLabel(
@@ -202,6 +209,7 @@ function partLabel(
   if (key === 'name') return 'Name';
   if (key === 'visibility') return 'Visibility';
   if (key === 'voice.examples') return 'Example lines';
+  if (key === 'checked') return 'Checked';
   if (key.startsWith('custom:')) {
     return (
       customFields.find((f) => customFieldKey(f.id) === key)?.label ??
@@ -230,6 +238,7 @@ function partText(
   if (key === 'voice.examples') {
     return entry.fields.voice?.examples.join('\n');
   }
+  if (key === 'checked') return checkedText(entry.fields.checked) || undefined;
   const field = key as ProposalField;
   const value = fieldOf(entry, field, customFields);
   return value === undefined ? undefined : fieldText(field, value ?? '');
@@ -261,6 +270,12 @@ function withPart(
     return {
       ...target,
       fields: { ...target.fields, voice: { ...voice, examples } },
+    };
+  }
+  if (key === 'checked') {
+    return {
+      ...target,
+      fields: { ...target.fields, checked: source.fields.checked },
     };
   }
   const field = key as ProposalField;

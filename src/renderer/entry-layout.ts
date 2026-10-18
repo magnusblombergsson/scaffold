@@ -1,8 +1,14 @@
 import type { ProposalField } from '../shared/proposal';
 import type { EntryType } from '../shared/project-types';
 
-/** A field the Entry view's body shows; Example lines are only the Author's. */
-export type BodyField = Exclude<ProposalField, 'aliases'> | 'voice.examples';
+/**
+ * A field the Entry view's body shows; Example lines, and whether a Fact is
+ * Checked, are only the Author's.
+ */
+export type BodyField =
+  | Exclude<ProposalField, 'aliases'>
+  | 'voice.examples'
+  | 'checked';
 
 /**
  * A part of the Entry view's body: its rows top to bottom, each with one
@@ -41,6 +47,13 @@ const BODIES: Record<EntryType, BodyPart[]> = {
   item: [description],
   'world-rule': [description],
   theme: [description],
+  fact: [
+    { rows: [['checked']] },
+    description,
+    { rows: [['appliesTo']] },
+    { rows: [['sources']] },
+    { rows: [['captured']] },
+  ],
   other: [description],
 };
 

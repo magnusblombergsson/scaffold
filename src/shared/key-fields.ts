@@ -13,12 +13,13 @@ import {
 /**
  * A part of an Entry that may be a Key field: `description`, `aliases`,
  * `role` (with its Role note), a built-in field by its key, such as
- * `voice.traits`, its Relations as `relations`, or a Custom field as
- * `custom:<id>`.
+ * `voice.traits`, whether a Fact is `checked`, its Relations as
+ * `relations`, or a Custom field as `custom:<id>`.
  */
 export type KeyFieldItem =
   | Exclude<BuiltInField, 'roleNote'>
   | 'voice.examples'
+  | 'checked'
   | 'relations'
   | CustomFieldKey;
 
@@ -65,6 +66,7 @@ const BUILT_IN: Record<EntryType, readonly KeyFieldItem[]> = {
   item: [],
   'world-rule': [],
   theme: [],
+  fact: ['appliesTo', 'sources', 'captured', 'checked'],
   other: [],
 };
 
@@ -81,6 +83,7 @@ const DEFAULTS: Record<EntryType, readonly KeyFieldItem[]> = {
   item: SHOWN_FOR_EVERY_ENTRY,
   'world-rule': SHOWN_FOR_EVERY_ENTRY,
   theme: SHOWN_FOR_EVERY_ENTRY,
+  fact: [...SHOWN_FOR_EVERY_ENTRY, 'appliesTo', 'checked'],
   other: SHOWN_FOR_EVERY_ENTRY,
 };
 

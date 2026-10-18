@@ -421,6 +421,7 @@ describe('menuTemplate', () => {
       'World Rule',
       'Plot Thread',
       'Theme',
+      'Fact',
       'Other',
     ]);
     click(item(insert, 'New Scene Above'));

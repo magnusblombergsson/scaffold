@@ -20,7 +20,10 @@ export function entryCount(count: number): string {
   return count === 1 ? '1 Entry' : `${count.toLocaleString('en-US')} Entries`;
 }
 
-/** The fields an Entry of `type` starts with: empty, and a Plot Thread open. */
+/**
+ * The fields an Entry of `type` starts with: empty, a Plot Thread open, and
+ * a Fact not Checked.
+ */
 export function emptyFields(type: EntryType): EntryFields {
   switch (type) {
     case 'character':
@@ -36,9 +39,22 @@ export function emptyFields(type: EntryType): EntryFields {
       };
     case 'plot-thread':
       return { status: 'open' };
+    case 'fact':
+      return { sources: [], captured: '', appliesTo: '', checked: false };
     default:
       return {};
   }
+}
+
+/** Whether `text` is a day a Fact may be Captured on, as `YYYY-MM-DD`. */
+export function isCapturedDate(text: unknown): text is string {
+  if (typeof text !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    return false;
+  }
+  const date = new Date(`${text}T00:00:00Z`);
+  return (
+    !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === text
+  );
 }
 
 /** A new Entry, seen when mentioned, with the empty fields of its type. */
@@ -144,6 +160,11 @@ export function roleText(
     .join(' · ');
 }
 
+/** Whether a Fact is Checked, as Yes or No; empty for another type. */
+export function checkedText(checked: boolean | undefined): string {
+  return checked === undefined ? '' : checked ? 'Yes' : 'No';
+}
+
 /** The fields as lines of text, as a type change appends them. */
 function fieldLines({
   role,
@@ -152,6 +173,10 @@ function fieldLines({
   voice,
   senses,
   status,
+  sources,
+  captured,
+  appliesTo,
+  checked,
 }: EntryFields): string[] {
   const lines: string[] = [];
   const add = (label: string, text: string) => {
@@ -177,6 +202,11 @@ function fieldLines({
   }
   // Every Plot Thread starts open: only resolved says anything.
   if (status === 'resolved') add('Status', STATUS_LABELS[status]);
+  if (sources && sources.length > 0) lines.push('Sources:', ...sources);
+  add('Captured', captured ?? '');
+  add('Applies to', appliesTo ?? '');
+  // Every Fact starts not Checked: only Checked says anything.
+  if (checked) add('Checked', 'Yes');
   return lines;
 }
 

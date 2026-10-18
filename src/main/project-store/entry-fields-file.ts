@@ -1,4 +1,4 @@
-import { emptyFields } from '../../shared/entry';
+import { emptyFields, isCapturedDate } from '../../shared/entry';
 import {
   ENTRY_TYPES,
   ROLES,
@@ -11,10 +11,11 @@ import {
 } from '../../shared/project-types';
 
 // How an Entry's type-specific fields sit in the frontmatter of
-// `bible/<id>.md`: `role`, `roleNote`, `appearance`, `voice` and
-// `senses`, each left out while it has no value, and `status`, always
-// written for a Plot Thread. As everywhere, what this app doesn't know is
-// kept.
+// `bible/<id>.md`: `role`, `roleNote`, `appearance`, `voice`, `senses`,
+// and a Fact's `sources`, `captured` and `appliesTo`, each left out while
+// it has no value; `status`, always written for a Plot Thread; and
+// `checked`, written for a Fact only while it is Checked. As everywhere,
+// what this app doesn't know is kept.
 
 type Frontmatter = Record<string, unknown>;
 
@@ -26,6 +27,7 @@ const FIELD_KEYS: Record<EntryType, readonly (keyof EntryFields)[]> = {
   'world-rule': [],
   'plot-thread': ['status'],
   theme: [],
+  fact: ['sources', 'captured', 'appliesTo', 'checked'],
   other: [],
 };
 
@@ -47,7 +49,7 @@ export const ENTRY_FIELD_KEYS: readonly string[] = [
 ];
 
 /** The free-text fields. */
-const TEXT_KEYS = ['roleNote', 'appearance'] as const;
+const TEXT_KEYS = ['roleNote', 'appearance', 'appliesTo'] as const;
 const VOICE_KEYS = ['traits', 'says', 'neverSays', 'examples'] as const;
 const SENSE_KEYS = ['smells', 'sight', 'sound', 'touch', 'atmosphere'] as const;
 
@@ -88,6 +90,14 @@ export function readEntryFields(
       ? (frontmatter.status as ThreadStatus)
       : 'open';
   }
+  if (fields.sources) fields.sources = lines(frontmatter.sources);
+  if (fields.captured !== undefined) {
+    fields.captured = isCapturedDate(frontmatter.captured)
+      ? frontmatter.captured
+      : '';
+  }
+  if (fields.checked !== undefined)
+    fields.checked = frontmatter.checked === true;
   return fields;
 }
 
@@ -150,6 +160,26 @@ export function entryFieldsFrontmatter(
         ? previous.status
         : (fields.status ?? 'open');
   }
+  if (own.has('sources')) {
+    const sources = fields.sources?.length
+      ? fields.sources
+      : Array.isArray(previous.sources)
+        ? undefined
+        : previous.sources;
+    if (sources !== undefined) written.sources = sources;
+  }
+  if (own.has('captured')) {
+    const captured =
+      fields.captured ||
+      (isCapturedDate(previous.captured) ? undefined : previous.captured);
+    if (captured) written.captured = captured;
+  }
+  if (own.has('checked')) {
+    const checked =
+      fields.checked ||
+      (typeof previous.checked === 'boolean' ? undefined : previous.checked);
+    if (checked !== undefined && checked !== false) written.checked = checked;
+  }
   const rest: Frontmatter = {};
   for (const [key, value] of Object.entries(previous)) {
     if (own.has(key)) continue;
@@ -164,7 +194,8 @@ export function entryFieldsFrontmatter(
 /**
  * What a type change can't write into the description of a field the type
  * had, since this app doesn't understand it: a Role or Status it doesn't
- * know, or a key it doesn't know inside the Voice or Senses.
+ * know, a Captured that is no date, Sources or a Checked that aren't, or a
+ * key it doesn't know inside the Voice or Senses.
  */
 function notUnderstood(key: keyof EntryFields, value: unknown): unknown {
   if (key === 'role') {
@@ -173,9 +204,12 @@ function notUnderstood(key: keyof EntryFields, value: unknown): unknown {
   if (key === 'status') {
     return THREAD_STATUSES.includes(value as ThreadStatus) ? undefined : value;
   }
-  if (key === 'roleNote' || key === 'appearance') {
+  if (key === 'roleNote' || key === 'appearance' || key === 'appliesTo') {
     return typeof value === 'string' ? undefined : value;
   }
+  if (key === 'captured') return isCapturedDate(value) ? undefined : value;
+  if (key === 'sources') return Array.isArray(value) ? undefined : value;
+  if (key === 'checked') return typeof value === 'boolean' ? undefined : value;
   const unknown = nested(
     undefined,
     key === 'voice' ? VOICE_KEYS : SENSE_KEYS,

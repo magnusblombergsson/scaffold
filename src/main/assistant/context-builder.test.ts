@@ -1126,6 +1126,76 @@ describe('Role note and Appearance', () => {
   });
 });
 
+describe('a Fact', () => {
+  /** A Project with an always-seen Fact on lay judges, Checked or not. */
+  async function withFact(checked: boolean) {
+    const project = await fixture();
+    const { id } = await project.store.createEntry('fact', 'Lay judges');
+    const fact = await project.store.read({ kind: 'entry', id });
+    await project.store.write(
+      { kind: 'entry', id },
+      {
+        ...fact,
+        visibility: 'always',
+        description: 'Three sit with the judge.',
+        fields: {
+          sources: ['https://www.domstol.se/', 'Bylund, p. 42'],
+          captured: '2026-10-12',
+          appliesTo: 'Swedish district courts',
+          checked,
+        },
+      },
+    );
+    return project;
+  }
+
+  it('reaches the context with its Sources, Captured, Applies to and whether it is Checked, in every Mode and focus', async () => {
+    const project = await withFact(false);
+
+    for (const request of everyRequest(project)) {
+      const text = sent(await buildContext(project.view, request));
+      expect(text).toContain('## Lay judges (Fact)');
+      expect(text).toContain('Checked: No, the Author has not verified it');
+      expect(text).toContain('Applies to: Swedish district courts');
+      expect(text).toContain(
+        'Sources:\n- https://www.domstol.se/\n- Bylund, p. 42',
+      );
+      expect(text).toContain('Captured: 2026-10-12');
+    }
+  });
+
+  it('says when the Author has Checked it', async () => {
+    const project = await withFact(true);
+    const text = sent(
+      await buildContext(project.view, {
+        mode: 'brainstorm',
+        messages: [message('author', 'Hm.')],
+      }),
+    );
+    expect(text).toContain('Checked: Yes, the Author has verified it');
+  });
+
+  it('may be proposed but never Checked, and a contradiction with one not Checked says so', async () => {
+    const project = await fixture();
+
+    for (const request of everyRequest(project)) {
+      const { system } = await buildContext(project.view, request);
+      const prompt = system.map((b) => b.text).join('\n');
+      if (/"create"/.test(prompt)) {
+        expect(prompt).toContain('"fact"');
+        expect(prompt).toContain('- "sources" (Facts)');
+        expect(prompt).toContain('Never propose whether a Fact is Checked');
+      }
+      if (/"contradiction"/.test(prompt)) {
+        expect(prompt).toContain('a Fact not yet Checked');
+      }
+      if (request.mode === 'interview') {
+        expect(prompt).toMatch(/^- Fact: /m);
+      }
+    }
+  });
+});
+
 describe('Parts', () => {
   /**
    * The fixture with an Act “The Sea” holding Chapter “Storm”, with an

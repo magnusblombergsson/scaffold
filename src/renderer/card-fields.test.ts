@@ -63,6 +63,27 @@ describe('the fields a Peek shows', () => {
     ).toEqual([['Status', 'Resolved']]);
   });
 
+  it('shows whether a Fact is Checked and what it Applies to, and lists its Sources and Captured', () => {
+    const fact = entry('fact', {
+      appliesTo: 'Swedish district courts',
+      sources: ['https://www.domstol.se/', 'Bylund, p. 42'],
+      captured: '2026-10-12',
+    });
+    expect(keyFields(fact, [], {})).toEqual([
+      ['Checked', 'No'],
+      ['Applies to', 'Swedish district courts'],
+    ]);
+    expect(
+      entryFields({ ...fact, fields: { ...fact.fields, checked: true } }),
+    ).toEqual([
+      ['Checked', 'Yes'],
+      ['Applies to', 'Swedish district courts'],
+      ['Sources', 'https://www.domstol.se/\nBylund, p. 42'],
+      ['Captured', '2026-10-12'],
+    ]);
+    expect(entryFields(entry('character', {}))).toEqual([]);
+  });
+
   it('leaves out key fields without a value, and other types have none', () => {
     expect(keyFields(entry('character', { voice }), [], {})).toEqual([
       ['Voice traits', 'Clipped.'],
