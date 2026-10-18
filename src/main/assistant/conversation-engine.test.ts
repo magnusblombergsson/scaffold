@@ -965,6 +965,54 @@ describe('Proposals in a reply', () => {
     expect(store.listEntries()).toEqual([]);
   });
 
+  it('in Research, turns a new Fact into a Proposal Captured on the day of the answer, and nothing else', async () => {
+    // Noon on 18 October 2026, where the app runs.
+    const clock = instantClock(new Date(2026, 9, 18, 12).getTime());
+    const store = await createProject(path.join(dir, 'My Novel'), {
+      fs: nodeFileSystem,
+      clock,
+    });
+    const reply = [
+      'The timetable says three hours.\n',
+      block({
+        create: 'fact',
+        name: 'Ferry crossing',
+        description: 'About three hours in 1950.',
+        sources: 'The timetable the Author pasted',
+      }),
+      block({ create: 'character', name: 'Mira', description: 'Sister.' }),
+    ];
+    const engine = createConversationEngine({
+      store,
+      providerFor: () => fakeProvider(() => reply),
+      defaultModel: () => OPUS,
+      clock,
+    });
+    const { id } = await store.startConversation('research', 'The ferry');
+
+    await engine.askAssistant(
+      id,
+      'How long was the crossing?',
+      { sceneId: null },
+      () => {},
+    );
+
+    const [, replied] = (await store.readConversation(id)).messages;
+    expect(replied.proposals).toEqual([
+      expect.objectContaining({
+        kind: 'new-entry',
+        proposed: {
+          type: 'fact',
+          name: 'Ferry crossing',
+          description: 'About three hours in 1950.',
+          sources: ['The timetable the Author pasted'],
+          captured: '2026-10-18',
+        },
+      }),
+    ]);
+    expect(replied.unreadable).toBe(1);
+  });
+
   it('turns a whole new Outline of a Chapter, Scene or the story into a Proposal, never Prose or Notes', async () => {
     const { store, engine, chapterId, sceneId } = await setUp(() => [
       'An Outline, then.\n',

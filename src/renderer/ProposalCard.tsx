@@ -527,10 +527,30 @@ function Change({
     );
   }
   if (proposal.kind === 'new-entry') {
-    return (
+    const { description, appliesTo, sources, captured } = proposal.proposed;
+    // A new Fact's details, those it was proposed with.
+    const details = (
+      [
+        ['Applies to', appliesTo ?? ''],
+        ['Sources', (sources ?? []).join('; ')],
+        ['Captured', captured ?? ''],
+      ] as const
+    ).filter(([, value]) => value);
+    const proposed = (
       <p className="proposal-diff" aria-label="Change">
-        <ins>{proposal.proposed.description || '—'}</ins>
+        <ins>{description || '—'}</ins>
       </p>
+    );
+    if (details.length === 0) return proposed;
+    return (
+      <>
+        {proposed}
+        {details.map(([label, value]) => (
+          <p key={label} className="proposal-diff">
+            {label}: <ins>{value}</ins>
+          </p>
+        ))}
+      </>
     );
   }
   if (isAppending(proposal)) {

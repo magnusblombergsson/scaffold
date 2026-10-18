@@ -35,21 +35,23 @@ import { UnitStatusDot, useStatuses } from './StatusAndTags';
 import { useStoryBibleAsOf } from './story-bible-lens';
 import { useOutlines, useUnits } from './use-project';
 
-/**
- * The Brainstorm room: its Conversations on the left, the one open in the
- * centre, and the Story Bible, Outline skeleton and Todos on the right for
- * reference. No editor: a reply's Proposals are decided inline, and the
- * reference shows what they change at once.
- */
-export function BrainstormRoom({
-  active,
-  names,
-  book,
-  pane,
-  onAddProvider,
-  onOpenEntry,
-  todos,
-}: {
+/** What the room of each Mode laid out as Brainstorm's says. */
+const ROOM_TEXTS = {
+  brainstorm: {
+    label: 'Brainstorm',
+    empty:
+      'Brainstorm with the Assistant: characters, places, turns of plot, structure.',
+    placeholder: 'Brainstorm with the Assistant…',
+  },
+  research: {
+    label: 'Research',
+    empty:
+      'Ask the Assistant about the real world your story is set in. Paste a source to ask what it says; every answer names where it comes from.',
+    placeholder: 'Ask about the real world, or paste a source…',
+  },
+} as const;
+
+type RoomProps = {
   /** Whether the room is shown, its Mode the window's. */
   active: boolean;
   names: Names;
@@ -62,24 +64,54 @@ export function BrainstormRoom({
   onOpenEntry(entryId: string): void;
   /** The Todos tab of the Reference pane. */
   todos: ReactNode;
-}) {
+};
+
+/**
+ * The Brainstorm room: its Conversations on the left, the one open in the
+ * centre, and the Story Bible, Outline skeleton and Todos on the right for
+ * reference. No editor: a reply's Proposals are decided inline, and the
+ * reference shows what they change at once.
+ */
+export function BrainstormRoom(props: RoomProps) {
+  return <ConversationRoom mode="brainstorm" {...props} />;
+}
+
+/**
+ * The Research room, laid out as Brainstorm's: the Author asks about the
+ * real world, and a reply's Facts are decided inline.
+ */
+export function ResearchRoom(props: RoomProps) {
+  return <ConversationRoom mode="research" {...props} />;
+}
+
+function ConversationRoom({
+  mode,
+  active,
+  names,
+  book,
+  pane,
+  onAddProvider,
+  onOpenEntry,
+  todos,
+}: RoomProps & { mode: keyof typeof ROOM_TEXTS }) {
   const providers = useProviders();
+  const texts = ROOM_TEXTS[mode];
   const conversation = useConversation({
-    mode: 'brainstorm',
+    mode,
     sceneId: null,
     names,
     book,
     active,
   });
   const { list, current, error, total } = conversation;
-  const listed = list.filter((c) => c.mode === 'brainstorm');
+  const listed = list.filter((c) => c.mode === mode);
   const listPane = pane('conversations');
   const referencePane = pane('reference');
 
   return (
     <>
       <RoomList
-        label="Brainstorm Conversations"
+        label={`${texts.label} Conversations`}
         width={listPane.size}
         conversations={listed}
         conversation={conversation}
@@ -90,7 +122,7 @@ export function BrainstormRoom({
         min={160}
         max={480}
       />
-      <main className="centre room-centre" aria-label="Brainstorm">
+      <main className="centre room-centre" aria-label={texts.label}>
         <h2 className="centre-title">{current?.title ?? 'New Conversation'}</h2>
         {providers &&
           (anyAdded(providers) ? (
@@ -101,7 +133,7 @@ export function BrainstormRoom({
               <MessageLog
                 conversation={conversation}
                 names={names}
-                empty="Brainstorm with the Assistant: characters, places, turns of plot, structure."
+                empty={texts.empty}
                 onOpenSettings={onAddProvider}
               />
               {error && (
@@ -111,7 +143,7 @@ export function BrainstormRoom({
               )}
               <Composer
                 conversation={conversation}
-                placeholder="Brainstorm with the Assistant…"
+                placeholder={texts.placeholder}
               />
             </div>
           ) : (

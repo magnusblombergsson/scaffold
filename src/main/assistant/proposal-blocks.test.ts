@@ -829,3 +829,102 @@ describe('An Add in Plan', () => {
     expect(unreadable).toBe(1);
   });
 });
+
+describe('Proposals in Research', () => {
+  /** A Project with a Fact and a Character, and a view of it. */
+  async function project() {
+    const store = await createProject(path.join(dir, 'My Novel'), {
+      fs: nodeFileSystem,
+      clock: instantClock(1_000),
+    });
+    const { id: judges } = await store.createEntry('fact', 'Lay judges');
+    const { id: mara } = await store.createEntry('character', 'Mara');
+    const view = store.assistantView();
+    return { store, view, judges, mara, lens: storyBibleOf(view, undefined) };
+  }
+
+  it('are new Facts with their Sources and Applies to, Captured on the day of the answer', async () => {
+    const { view, lens } = await project();
+
+    const { proposals, unreadable } = await readProposals(
+      view,
+      [
+        {
+          create: 'fact',
+          name: 'Ferry crossing',
+          description: 'About three hours in 1950.',
+          appliesTo: 'The island ferry, 1950s',
+          sources: ['The timetable the Author pasted'],
+          // The Assistant's day is never taken: the answer's is.
+          captured: '1999-01-01',
+        },
+      ],
+      lens,
+      'research',
+      { today: '2026-10-18' },
+    );
+
+    expect(unreadable).toBe(0);
+    expect(proposals).toEqual([
+      expect.objectContaining({
+        kind: 'new-entry',
+        proposed: {
+          type: 'fact',
+          name: 'Ferry crossing',
+          description: 'About three hours in 1950.',
+          appliesTo: 'The island ferry, 1950s',
+          sources: ['The timetable the Author pasted'],
+          captured: '2026-10-18',
+        },
+      }),
+    ]);
+  });
+
+  it('change a Fact’s description, Sources, Applies to and Captured, which is set to the day of the answer', async () => {
+    const { view, lens, judges } = await project();
+
+    const { proposals, unreadable } = await readProposals(
+      view,
+      [
+        { entry: judges, field: 'description', append: 'Three sit.' },
+        { entry: judges, field: 'sources', add: 'Bylund, p. 42' },
+        { entry: judges, field: 'appliesTo', value: 'Sweden' },
+        { entry: judges, field: 'captured', value: '1999-01-01' },
+      ],
+      lens,
+      'research',
+      { today: '2026-10-18' },
+    );
+
+    expect(unreadable).toBe(0);
+    expect(proposals.map((p) => p.kind === 'field' && p.field)).toEqual([
+      'description',
+      'sources',
+      'appliesTo',
+      'captured',
+    ]);
+    expect(proposals[3]).toMatchObject({ proposed: '2026-10-18' });
+  });
+
+  it('are never Checked, another field of a Fact, another Entry type, an Outline or a Relation', async () => {
+    const { view, lens, judges, mara } = await project();
+
+    const { proposals, unreadable } = await readProposals(
+      view,
+      [
+        { entry: judges, field: 'checked', value: true },
+        { entry: judges, field: 'aliases', add: 'Nämndemän' },
+        { entry: mara, field: 'description', append: 'Tall.' },
+        { create: 'character', name: 'Tobin', description: 'Her son.' },
+        { outline: 'project', value: '- The story' },
+        { from: judges, to: mara, label: 'known to' },
+      ],
+      lens,
+      'research',
+      { today: '2026-10-18' },
+    );
+
+    expect(proposals).toEqual([]);
+    expect(unreadable).toBe(6);
+  });
+});

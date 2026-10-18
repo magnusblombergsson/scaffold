@@ -178,6 +178,106 @@ describe('Brainstorm', () => {
   });
 });
 
+describe('Research', () => {
+  /** The fixture with two Facts, neither mentioned: one seen when mentioned, one seen never. */
+  async function withFacts() {
+    const project = await fixture();
+    const { store } = project;
+    const fact = async (
+      name: string,
+      visibility: 'mentioned' | 'never',
+      description: string,
+    ) => {
+      const { id } = await store.createEntry('fact', name);
+      const value = await store.read({ kind: 'entry', id });
+      await store.write(
+        { kind: 'entry', id },
+        {
+          ...value,
+          visibility,
+          description,
+          fields: {
+            sources: ['Bylund, p. 42'],
+            captured: '2026-10-12',
+            appliesTo: 'Swedish district courts',
+            checked: false,
+          },
+        },
+      );
+      return id;
+    };
+    return {
+      ...project,
+      facts: {
+        judges: await fact(
+          'Lay judges',
+          'mentioned',
+          'Three sit with the judge.',
+        ),
+        secret: await fact('Sealed files', 'never', 'Kept for seventy years.'),
+      },
+    };
+  }
+
+  it('sends the Research prompt, the Story Bible, the Outline skeleton and every Fact in full, but no Prose', async () => {
+    const { view, entries, facts } = await withFacts();
+
+    const context = await buildContext(view, {
+      mode: 'research',
+      messages: [message('author', 'How long did a ferry take in 1950?')],
+    });
+
+    expect(context.system[0].text).toMatch(/You never write Prose/);
+    expect(context.system[0].text).toMatch(/In Research/);
+    expect(context.saw.entries).toEqual([
+      entries.mira,
+      entries.ferry,
+      facts.judges,
+    ]);
+    const text = sent(context);
+    expect(text).toContain('## Lay judges (Fact)');
+    expect(text).toContain('Three sit with the judge.');
+    expect(text).toContain('Sources:\n- Bylund, p. 42');
+    expect(text).toContain('Applies to: Swedish district courts');
+    expect(text).not.toContain('Kept for seventy years.');
+    expect(text).not.toContain('A secret.');
+    expect(text).toContain('She waits for the ferry');
+    for (const prose of [
+      'Annie waited',
+      'The letter came',
+      'Nothing was left',
+    ]) {
+      expect(text).not.toContain(prose);
+    }
+  });
+
+  it('sends a Fact only when mentioned in other Modes', async () => {
+    const { view, facts } = await withFacts();
+
+    const context = await buildContext(view, {
+      mode: 'brainstorm',
+      messages: [message('author', 'Hm.')],
+    });
+
+    expect(context.saw.entries).not.toContain(facts.judges);
+  });
+
+  it('tells the Assistant to cite a source for every claim, or say it comes from memory', async () => {
+    const { view } = await fixture();
+    const { system } = await buildContext(view, {
+      mode: 'research',
+      messages: [message('author', 'Hm.')],
+    });
+    const prompt = system[0].text;
+    expect(prompt).toMatch(/every claim/i);
+    expect(prompt).toMatch(/memory/);
+    expect(prompt).toContain('"create": "fact"');
+    expect(prompt).toContain('Never propose whether a Fact is Checked');
+    expect(prompt).not.toContain('"outline"');
+    expect(prompt).not.toContain('"create": "character"');
+  });
+});
+
 describe('the Story Bible', () => {
   it('in an Interview, sends the Entry or Entry type in focus, unless seen never', async () => {
     const { view, entries } = await fixture();
@@ -937,6 +1037,7 @@ function everyRequest({
   const commands: Command[] = ['question', 'review-scene', 'review-chapter'];
   return [
     { mode: 'brainstorm', messages },
+    { mode: 'research', messages },
     ...foci.map(
       (focus): ContextRequest => ({ mode: 'interview', focus, messages }),
     ),
@@ -1089,12 +1190,14 @@ describe('Role note and Appearance', () => {
     }
   });
 
-  it('may be proposed in every Mode, and are on the Interview’s Character checklist', async () => {
+  it('may be proposed in every Mode but Research, and are on the Interview’s Character checklist', async () => {
     const project = await fixture();
 
     for (const request of everyRequest(project)) {
       const { system } = await buildContext(project.view, request);
       const prompt = system.map((b) => b.text).join('\n');
+      // Research proposes Facts only.
+      if (request.mode === 'research') continue;
       expect(prompt).toContain('- "roleNote" (Characters)');
       expect(prompt).toContain('- "appearance" (Characters)');
       const checklist = /^- Character: .*$/m.exec(prompt)?.[0];
@@ -1183,7 +1286,9 @@ describe('a Fact', () => {
       const prompt = system.map((b) => b.text).join('\n');
       if (/"create"/.test(prompt)) {
         expect(prompt).toContain('"fact"');
-        expect(prompt).toContain('- "sources" (Facts)');
+        expect(prompt).toContain(
+          request.mode === 'research' ? '- "sources":' : '- "sources" (Facts)',
+        );
         expect(prompt).toContain('Never propose whether a Fact is Checked');
       }
       if (/"contradiction"/.test(prompt)) {
@@ -1723,6 +1828,30 @@ describe('Series', () => {
     expect(two).toContain('## Queen Mira (Character)');
     expect(two).toContain('She rules now.');
     expect(two).not.toContain('Her sister.');
+  });
+
+  it('Research: sends every Fact as of the Conversation’s Book, never one first appearing later', async () => {
+    const { store, view, books } = await series();
+    const { id } = await store.createEntry('fact', 'Lay judges');
+    const fact = await store.read({ kind: 'entry', id });
+    await store.write(
+      { kind: 'entry', id },
+      { ...fact, description: 'Three sit with the judge.' },
+    );
+    await store.setFirstAppears(id, books.two);
+    const asked = (book: string) =>
+      buildContext(view, {
+        mode: 'research',
+        book,
+        messages: [message('author', 'Hm.')],
+      });
+
+    const one = await asked(books.one);
+    expect(one.book).toBe(books.one);
+    expect(one.saw.entries).not.toContain(id);
+    const two = await asked(books.two);
+    expect(two.saw.entries).toContain(id);
+    expect(sent(two)).toContain('Three sit with the judge.');
   });
 
   it('never sends an Entry that first appears in a later Book, however it is seen', async () => {

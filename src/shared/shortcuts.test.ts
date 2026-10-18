@@ -77,7 +77,7 @@ describe('commandForKey', () => {
     ).toBeNull();
   });
 
-  it('switches Room with Ctrl+1 to 5: Writing, Brainstorm, Interview, Story Bible, then Plan', () => {
+  it('switches Room with Ctrl+1 to 6: Writing, Brainstorm, Interview, Story Bible, Plan, then Research', () => {
     expect(commandForKey(key('1', { ctrlKey: true }), false)).toEqual({
       type: 'room',
       room: 'writing',
@@ -97,6 +97,10 @@ describe('commandForKey', () => {
     expect(commandForKey(key('5', { ctrlKey: true }), false)).toEqual({
       type: 'room',
       room: 'plan',
+    });
+    expect(commandForKey(key('6', { ctrlKey: true }), false)).toEqual({
+      type: 'room',
+      room: 'research',
     });
   });
 
@@ -182,7 +186,7 @@ describe('commandForKey', () => {
     expect(
       commandForKey(key('1', { ctrlKey: true, shiftKey: true }), false),
     ).toBeNull();
-    expect(commandForKey(key('6', { ctrlKey: true }), false)).toBeNull();
+    expect(commandForKey(key('7', { ctrlKey: true }), false)).toBeNull();
   });
 
   it('uses ⌘ on macOS, where Ctrl is a different key', () => {

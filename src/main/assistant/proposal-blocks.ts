@@ -22,10 +22,13 @@ import {
   outlineChangeOf,
   PLAN_UNITS,
   proposalOf,
+  RESEARCH_FIELDS,
   type PlanUnit,
   type Proposal,
   type ProposalChange,
+  type ProposalField,
 } from '../../shared/proposal';
+import { dayOf } from '../../shared/entry';
 import { relationAdditionOf } from '../../shared/relation-proposal';
 import { isWordTarget } from '../../shared/word-target';
 import type { StoryBibleLens } from '../../shared/story-bible-as-of';
@@ -46,14 +49,20 @@ import type { AssistantView } from '../project-store/project-store';
  * or of the one Book a Project without Books is. A Word target is the
  * Manuscript's of that Book, or of a unit the Book holds, one per unit in a
  * reply; Notes appended to are of the Book in a Series, or of a unit it
- * holds.
+ * holds. In Research, only a new Fact or a change to one of
+ * `RESEARCH_FIELDS` of a Fact is readable, and either is Captured `today`,
+ * the day of the answer. An Add may go in or after a unit a Proposal still
+ * pending of those `earlier` proposes.
  */
 export async function readProposals(
   view: AssistantView,
   blocks: unknown[],
   lens: StoryBibleLens,
   mode: Mode = 'brainstorm',
-  earlier: readonly Proposal[] = [],
+  {
+    earlier = [],
+    today = dayOf(Date.now()),
+  }: { earlier?: readonly Proposal[]; today?: string } = {},
 ): Promise<{ proposals: Proposal[]; unreadable: number }> {
   const proposals: Proposal[] = [];
   let unreadable = 0;
@@ -84,7 +93,7 @@ export async function readProposals(
                   ? await notesOf(view, block, lens, reply.added)
                   : kind === 'beats'
                     ? beatsOf(view, block, lens, reply)
-                    : await changeOf(view, block, kind, lens, mode);
+                    : await changeOf(view, block, kind, lens, mode, today);
     if (change === null) unreadable++;
     else if (change !== 'unchanged') proposals.push({ id, ...change });
   }
@@ -639,14 +648,24 @@ async function changeOf(
   kind: ProposalChange['kind'],
   lens: StoryBibleLens,
   mode: Mode,
+  today: string,
 ): Promise<ProposalChange | 'unchanged' | null> {
-  const { entry: entryId, outline: outlineId } = (block ?? {}) as Record<
-    string,
-    unknown
-  >;
+  const {
+    entry: entryId,
+    outline: outlineId,
+    field,
+  } = (block ?? {}) as Record<string, unknown>;
+  const research = mode === 'research';
   if (kind === 'new-entry') {
     const proposed = newEntryOf(block);
-    return proposed && { kind, entryId: randomUUID(), proposed };
+    if (!proposed) return null;
+    if (!research) return { kind, entryId: randomUUID(), proposed };
+    if (proposed.type !== 'fact') return null;
+    return {
+      kind,
+      entryId: randomUUID(),
+      proposed: { ...proposed, captured: today },
+    };
   }
   if (kind === 'outline' && typeof outlineId === 'string') {
     const manuscript = view.manuscript();
@@ -668,8 +687,18 @@ async function changeOf(
   if (kind === 'relation') return relationOf(block, lens);
   if (kind === 'book-detail') return bookDetailChangeOf(view, block, lens);
   if (typeof entryId !== 'string' || !lens.visible(entryId)) return null;
-  const entry = await view.read({ kind: 'entry', id: entryId });
-  const change = proposalOf(block, lens.read(entry).entry, view.customFields());
+  const { entry } = lens.read(await view.read({ kind: 'entry', id: entryId }));
+  if (research) {
+    if (entry.type !== 'fact') return null;
+    if (!RESEARCH_FIELDS.includes(field as ProposalField)) return null;
+  }
+  const change = proposalOf(
+    research && field === 'captured'
+      ? { ...(block as object), value: today }
+      : block,
+    entry,
+    view.customFields(),
+  );
   return withBook(change, lens);
 }
 

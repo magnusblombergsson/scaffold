@@ -21,11 +21,26 @@ describe('the Outline rule', () => {
     expect(OUTLINE_RULE).toMatch(/the story's voice/);
   });
 
-  it('is in the Proposals rule and the prompt of every Mode', () => {
+  it('is in the Proposals rule and the prompt of every Mode that proposes Outlines', () => {
     expect(PROPOSALS_RULE).toContain(OUTLINE_RULE);
-    for (const prompt of Object.values(MODE_PROMPTS)) {
+    const { research, ...outlining } = MODE_PROMPTS;
+    for (const prompt of Object.values(outlining)) {
       expect(prompt).toContain(OUTLINE_RULE);
     }
+    expect(research).not.toContain(OUTLINE_RULE);
+  });
+});
+
+describe('the Research prompt', () => {
+  it('holds the shared Never-Prose and Formatting rules unchanged, and proposes Facts only', () => {
+    const research = MODE_PROMPTS.research;
+
+    expect(research).toContain(NEVER_PROSE_RULE);
+    expect(research).toContain(FORMATTING_RULE);
+    expect(research).not.toContain(PROPOSALS_RULE);
+    expect(research).toContain('"create": "fact"');
+    expect(research).not.toMatch(/"outline":|"from":/);
+    expect(research).toContain('Never propose whether a Fact is Checked');
   });
 });
 
