@@ -6,25 +6,34 @@ import { droppedMessage } from './conflict-labels';
 /**
  * What the Author should know as the Project opens: other computers it is
  * also open on, where they left off on another computer, what the Manuscript
- * lost when two computers rearranged it, and tips. Each can be dismissed;
- * none stops the Author from working.
+ * lost when two computers rearranged it, a Gathering over the Book a
+ * Manuscript Import just made, and tips. Each can be dismissed; none stops
+ * the Author from working.
  */
 export function Notices({
   sessions,
   manuscript,
   tips,
   dropped,
+  gatheringOffered,
   onContinue,
   onDismissTip,
   onDismissDropped,
+  onGather,
+  onDismissGathering,
 }: {
   sessions: SessionNotice;
   manuscript: Manuscript;
   tips: Tip[];
   dropped: Dropped[];
+  /** Whether to offer a Gathering over the Book a Manuscript Import just made. */
+  gatheringOffered: boolean;
   onContinue(sceneId: string, cursor?: number): void;
   onDismissTip(tip: Tip): void;
   onDismissDropped(dropped: Dropped): void;
+  /** Opens the Gathering's start, reading the imported Book. */
+  onGather(): void;
+  onDismissGathering(): void;
 }) {
   const [alsoOpenShown, setAlsoOpenShown] = useState(true);
   const [continueShown, setContinueShown] = useState(true);
@@ -69,6 +78,18 @@ export function Notices({
         <button onClick={() => onDismissDropped(notice)}>Dismiss</button>
       </div>
     )),
+    gatheringOffered && (
+      <div className="notice" key="gathering">
+        <p>
+          Gather Story Bible Entries from the imported manuscript? The Assistant
+          reads its Prose and lists the Entries it finds, for you to review
+          before anything is added. You can also do this later from the Story
+          Bible.
+        </p>
+        <button onClick={onGather}>Gather Entries…</button>
+        <button onClick={onDismissGathering}>Not Now</button>
+      </div>
+    ),
     tips.includes('keep-on-device') && (
       <div className="notice" key="keep-on-device">
         <p>

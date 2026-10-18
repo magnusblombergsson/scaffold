@@ -68,6 +68,7 @@ const opened: OpenedProject = {
   sessions: { alsoOpen: [] },
   dropped: [],
   readOnly: null,
+  offerGathering: false,
 };
 
 /** What main holds, and answers with. */

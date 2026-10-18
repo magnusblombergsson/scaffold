@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   defaultConvention,
+  importHasProse,
   partSplitOffered,
   sceneSplitAllowed,
   splitManuscript,
@@ -279,5 +280,35 @@ describe('Which Scene splits go with a Chapter split', () => {
     expect(sceneSplitAllowed('heading3', 'heading2')).toBe(true);
     expect(sceneSplitAllowed('heading2', 'pageBreak')).toBe(true);
     expect(sceneSplitAllowed('separator', 'heading2')).toBe(true);
+  });
+});
+
+describe('Whether an imported manuscript has Prose', () => {
+  const convention: ImportConvention = {
+    chapters: 'heading1',
+    scenes: 'separator',
+  };
+
+  it('has Prose when any Scene has a word', () => {
+    const blocks = [h(1, 'The Storm'), separator, p('It was dark.')];
+    expect(importHasProse(splitManuscript(blocks, convention))).toBe(true);
+  });
+
+  it('has none when it is only headings and blank paragraphs', () => {
+    const blocks = [h(1, 'The Storm'), p('  '), separator, h(1, 'The Calm')];
+    expect(importHasProse(splitManuscript(blocks, convention))).toBe(false);
+  });
+
+  it('looks inside Parts', () => {
+    const blocks = [h(1, 'Part One'), h(2, 'The Storm'), p('It was dark.')];
+    expect(
+      importHasProse(
+        splitManuscript(blocks, {
+          parts: true,
+          chapters: 'heading2',
+          scenes: 'separator',
+        }),
+      ),
+    ).toBe(true);
   });
 });

@@ -51,7 +51,11 @@ import { useProject } from './use-project';
 import type { Cut } from '../shared/prose-split';
 import { entryCount, entryTitle } from '../shared/entry';
 import type { ProposalTarget, ProposalView } from '../shared/proposal';
-import type { ImportConvention } from '../shared/manuscript-import';
+import {
+  importHasProse,
+  splitManuscript,
+  type ImportConvention,
+} from '../shared/manuscript-import';
 import { upgradedMessage } from '../shared/format-gate';
 import {
   commandForKey,
@@ -80,7 +84,7 @@ import { EntryTypePicker } from './EntryTypePicker';
 import { EntryView } from './EntryView';
 import { ExportManuscriptDialog } from './ExportManuscriptDialog';
 import type { NewEntry, StoryBibleFile } from '../shared/story-bible-import';
-import type { GatheredItems } from '../shared/gathering';
+import type { GatheredItems, GatheringScope } from '../shared/gathering';
 import { ExportStoryBibleDialog } from './ExportStoryBibleDialog';
 import { ImportStoryBibleDialog } from './ImportStoryBibleDialog';
 import { GatheringDialog } from './GatheringDialog';
@@ -1077,13 +1081,33 @@ function ProjectView({
   const [storyBibleExportOpen, setStoryBibleExportOpen] = useState(false);
   /** Whether the Gathering's dialog is open, to start one or review its list. */
   const [gatheringOpen, setGatheringOpen] = useState(false);
-  /** Whether a Gathering's list is kept on this computer, not reviewed yet. */
-  const [gatheringWaiting, setGatheringWaiting] = useState(false);
+  /** What the open Gathering reads unless the Author chooses, as the Book a Manuscript Import made. */
+  const [gatheringScope, setGatheringScope] = useState<GatheringScope>();
+  /** The Book a Manuscript Import with Prose just made, while a Gathering over it is offered. */
+  const [gatheringOffer, setGatheringOffer] = useState<GatheringScope | null>(
+    () =>
+      project.offerGathering
+        ? {
+            kind: 'book',
+            id: project.manuscript.books?.[0]?.id ?? PROJECT_OUTLINE,
+          }
+        : null,
+  );
+  function openGathering(scope?: GatheringScope) {
+    setGatheringOffer(null);
+    setGatheringScope(scope);
+    setGatheringOpen(true);
+  }
+  /** Whether a Gathering's list is kept on this computer, not reviewed yet; undefined until known. */
+  const [gatheringWaiting, setGatheringWaiting] = useState<boolean>();
   useEffect(() => {
     if (gatheringOpen) return;
     let current = true;
     void window.assistant.savedGathering().then((saved) => {
-      if (current) setGatheringWaiting(saved !== null);
+      if (!current) return;
+      setGatheringWaiting(saved !== null);
+      // Its list comes first: the offer would open it, not a new start.
+      if (saved !== null) setGatheringOffer(null);
     });
     return () => {
       current = false;
@@ -1312,6 +1336,12 @@ function ProjectView({
     if (!id) return;
     switchRoom('writing');
     setTab('manuscript');
+    if (
+      gatheringWaiting === false &&
+      importHasProse(splitManuscript(file.blocks, convention))
+    ) {
+      setGatheringOffer({ kind: 'book', id });
+    }
   }
 
   /** Adds what the Author ticked of a Gathering's list, as one step they can undo; whether it did. */
@@ -1763,6 +1793,18 @@ function ProjectView({
           manuscript={manuscript}
           tips={tips}
           dropped={dropped}
+          gatheringOffered={
+            gatheringOffer !== null &&
+            // Not once its Book is undone.
+            (gatheringOffer.id === PROJECT_OUTLINE
+              ? !manuscript.books
+              : manuscript.books?.some((b) => b.id === gatheringOffer.id) ===
+                true) &&
+            gatheringWaiting === false &&
+            readOnly === null
+          }
+          onGather={() => openGathering(gatheringOffer ?? undefined)}
+          onDismissGathering={() => setGatheringOffer(null)}
           onDismissDropped={(notice) => mirror.dismissDropped(notice)}
           onContinue={continueAt}
           onDismissTip={(tip) => {
@@ -2238,8 +2280,8 @@ function ProjectView({
                       startTodo('storyBible', { kind: 'entry', id })
                     }
                     onCombine={setCombining}
-                    onGather={() => setGatheringOpen(true)}
-                    gatheringWaiting={gatheringWaiting}
+                    onGather={() => openGathering()}
+                    gatheringWaiting={gatheringWaiting ?? false}
                   />
                 </div>
                 <TodoDockPane
@@ -2474,6 +2516,7 @@ function ProjectView({
             manuscript={manuscript}
             entries={entries}
             book={bibleLens.book}
+            scope={gatheringScope}
             onAccept={acceptGathered}
             onOpenScene={(sceneId) => continueAt(sceneId)}
             onClose={() => setGatheringOpen(false)}
