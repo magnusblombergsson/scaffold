@@ -1,4 +1,4 @@
-import type { AssistantFailure } from '../../shared/conversation';
+import type { AssistantFailure, SearchResult } from '../../shared/conversation';
 import type { ListedModel, Price, ProviderStatus } from '../../shared/models';
 import { MAX_REPLY_TOKENS } from '../../shared/request-size';
 import type { Usage } from '../../shared/usage';
@@ -63,6 +63,8 @@ type ChatEndpoint = {
   outputLimit: (modelId: string) => Promise<number | null>;
   /** What a call that stopped partway used and cost, looked up after, if it can be. */
   lookUp?: (id: string) => Promise<UsageEvent | null>;
+  /** Whether it searches the web with OpenRouter's web plugin, when asked to. */
+  webPlugin?: true;
 };
 
 const bearer = (secret: string | null): HttpHeaders =>
@@ -136,6 +138,7 @@ export function openRouterProvider({
           caches: (modelId) => modelId.startsWith('anthropic/'),
           outputLimit,
           lookUp: (id) => lookUp(id, key),
+          webPlugin: true,
         },
         request,
       );
@@ -205,7 +208,9 @@ export function lmStudioProvider({
  * reasoning, what the call used once the Provider says, then how it finished.
  * An error the Provider sends partway under HTTP 200 fails the call. When a
  * reply stops partway before its usage came, it is looked up once, if the
- * Provider can; else it goes unpriced.
+ * Provider can; else it goes unpriced. Asked to search, a Provider with the
+ * web plugin searches once (ADR 0019): the search is given, with the links
+ * the reply cites, as it doesn't say what it searched for.
  */
 async function* streamChat(
   endpoint: ChatEndpoint,
@@ -213,6 +218,9 @@ async function* streamChat(
 ): AsyncGenerator<ProviderEvent> {
   const limit = await endpoint.outputLimit(request.model.id);
   const caches = endpoint.caches(request.model.id);
+  const searching = request.search === true && endpoint.webPlugin === true;
+  /** The links the reply cites, by link, in the order first cited. */
+  const cited = new Map<string, SearchResult>();
   let id: string | null = null;
   let usageCame = false;
   let finish: Finish | null = null;
@@ -230,6 +238,7 @@ async function* streamChat(
           // Less when the Model allows less.
           max_tokens: Math.min(MAX_REPLY_TOKENS, limit ?? MAX_REPLY_TOKENS),
           messages: caches ? cachedPrompt(request) : plainPrompt(request),
+          ...(searching && { plugins: [{ id: 'web' }] }),
         }),
       },
       endpoint.unreachable,
@@ -249,6 +258,12 @@ async function* streamChat(
         // Only `content` is the reply: `reasoning` and the like are dropped.
         const text = choice.delta?.content;
         if (text) yield { type: 'text', text };
+        for (const { type, url_citation } of choice.delta?.annotations ?? []) {
+          const url = url_citation?.url;
+          if (type !== 'url_citation' || !url || cited.has(url)) continue;
+          const title = url_citation.title;
+          cited.set(url, { url, ...(title && { title }) });
+        }
         if (choice.finish_reason === 'error') {
           throw new ProviderError('other', 'The reply failed partway');
         }
@@ -258,7 +273,7 @@ async function* streamChat(
       }
       if (chunk.usage) {
         usageCame = true;
-        yield usageEvent(chunk.usage);
+        yield usageEvent(chunk.usage, searching);
       }
     }
     if (!finish) {
@@ -266,11 +281,18 @@ async function* streamChat(
     }
   } catch (error) {
     const failure = providerError(error);
+    // A search made before the reply failed is shown too, as it counts.
+    if (searching && id) {
+      yield { type: 'search', search: { results: [...cited.values()] } };
+    }
     if (!usageCame && id && endpoint.lookUp) {
       const late = await endpoint.lookUp(id);
       if (late) yield late;
     }
     throw failure;
+  }
+  if (searching) {
+    yield { type: 'search', search: { results: [...cited.values()] } };
   }
   yield { type: 'finish', finish };
 }
@@ -473,9 +495,12 @@ function hostOf(url: string): string {
 
 /**
  * Usage as this app counts it: `prompt_tokens` already counts the cached
- * tokens and those written to the cache, so they aren't added again.
+ * tokens and those written to the cache, so they aren't added again. A call
+ * `searching` with the web plugin made one search, unless it says otherwise.
  */
-function usageEvent(api: ApiUsage): UsageEvent {
+function usageEvent(api: ApiUsage, searching = false): UsageEvent {
+  const searches =
+    api.server_tool_use?.web_search_requests ?? (searching ? 1 : 0);
   return {
     type: 'usage',
     usage: {
@@ -483,6 +508,7 @@ function usageEvent(api: ApiUsage): UsageEvent {
       cached: api.prompt_tokens_details?.cached_tokens ?? 0,
       written: api.prompt_tokens_details?.cache_write_tokens ?? 0,
       output: api.completion_tokens ?? 0,
+      ...(searches > 0 && { searches }),
     },
     ...(typeof api.cost === 'number' && { cost: api.cost }),
   };
@@ -550,6 +576,7 @@ type ApiUsage = {
     cached_tokens?: number;
     cache_write_tokens?: number;
   } | null;
+  server_tool_use?: { web_search_requests?: number | null } | null;
   cost?: number;
 };
 
@@ -564,7 +591,13 @@ type Chunk = {
   id?: string;
   error?: ApiError;
   choices?: {
-    delta?: { content?: string | null };
+    delta?: {
+      content?: string | null;
+      annotations?: {
+        type?: string;
+        url_citation?: { url?: string; title?: string };
+      }[];
+    };
     finish_reason?: string | null;
   }[];
   usage?: ApiUsage | null;

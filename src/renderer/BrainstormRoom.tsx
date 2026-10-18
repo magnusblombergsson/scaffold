@@ -30,6 +30,7 @@ import { BookPicker } from './BookPicker';
 import { ModelPicker } from './ModelPicker';
 import { PanelResizer, type PaneSize } from './PanelResizer';
 import { RoomList } from './RoomList';
+import { SearchSwitch } from './SearchSwitch';
 import { TagChips } from './TagsDialog';
 import { UnitStatusDot, useStatuses } from './StatusAndTags';
 import { useStoryBibleAsOf } from './story-bible-lens';
@@ -46,7 +47,7 @@ const ROOM_TEXTS = {
   research: {
     label: 'Research',
     empty:
-      'Ask the Assistant about the real world your story is set in. Paste a source to ask what it says; every answer names where it comes from.',
+      'Ask the Assistant about the real world your story is set in: it can search the web, and read a source or a link you paste. Every answer names where it comes from.',
     placeholder: 'Ask about the real world, or paste a source…',
   },
 } as const;
@@ -129,6 +130,9 @@ function ConversationRoom({
             <div className="conversations">
               <BookPicker conversation={conversation} names={names} />
               <ModelPicker conversation={conversation} />
+              {mode === 'research' && (
+                <SearchSwitch conversation={conversation} />
+              )}
               <ConversationUsage total={total} />
               <MessageLog
                 conversation={conversation}

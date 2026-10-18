@@ -23,6 +23,7 @@ import {
   type Mode,
   type PlanAsk,
   UNREAD_SAYS,
+  type WebSearch,
 } from '../shared/conversation';
 import {
   FINDING_LABELS,
@@ -187,6 +188,10 @@ export function useConversation({
   const [picking, setPicking] = useState(false);
   /** The Book the Author chose for a new Conversation, before it starts. */
   const [newBook, setNewBook] = useState<string>();
+  /** Whether the Author turned searching off for a new Research Conversation, before it starts. */
+  const [newSearchOff, setNewSearchOff] = useState(false);
+  /** Whether Research searches the web, as the Conversation was last set, or a new one will. */
+  const searching = current ? !current.searchOff : !newSearchOff;
   /**
    * In a Series, the Book a Brainstorm, Interview, Research or Plan is
    * about, as main sends it; none in Writing, which is about the Book of the Scene in focus.
@@ -278,6 +283,7 @@ export function useConversation({
     setShown(null);
     setNewModel(undefined);
     setNewBook(undefined);
+    setNewSearchOff(false);
     setPicking(false);
     if (id === '') {
       setCurrent(null);
@@ -397,10 +403,15 @@ export function useConversation({
     );
     setNewModel(undefined);
     setNewBook(undefined);
+    setNewSearchOff(false);
     let conversation: Conversation = { ...started, model, messages: [] };
     if (book !== undefined) {
       await window.assistant.chooseBook(started.id, book);
       conversation = { ...conversation, book };
+    }
+    if (mode === 'research' && !searching) {
+      await window.assistant.setSearching(started.id, false);
+      conversation = { ...conversation, searchOff: true };
     }
     if (mode === 'interview' || mode === 'plan') {
       await window.assistant.setInterviewFocus(started.id, focus);
@@ -510,6 +521,30 @@ export function useConversation({
     );
   }
 
+  /**
+   * Turns web search off, or back on, in the open Research Conversation
+   * from its next message on, or in a new one, once it starts.
+   */
+  async function setSearching(on: boolean) {
+    const conversation = current;
+    if (streaming !== null) return;
+    setError(null);
+    if (!conversation) {
+      setNewSearchOff(!on);
+      return;
+    }
+    await run(
+      async () => {
+        await window.assistant.setSearching(conversation.id, on);
+        const changed = await window.assistant.readConversation(
+          conversation.id,
+        );
+        if (currentId.current === changed.id) setCurrent(changed);
+      },
+      { what: on ? 'turn searching on' : 'turn searching off' },
+    );
+  }
+
   /** Gives a Conversation a new title; the list shows it once main says so. */
   async function rename(id: string, title: string) {
     setError(null);
@@ -606,6 +641,8 @@ export function useConversation({
     chooseModel,
     book,
     chooseBook,
+    searching,
+    setSearching,
     picking,
     setPicking,
     resume,
@@ -1210,7 +1247,7 @@ function Message({
 }) {
   const { role, text, model, provider, interrupted, unreadable } = message;
   const { cutShort, saw, findings, planFindings, proposals } = message;
-  const { unreadLinks } = message;
+  const { unreadLinks, searches } = message;
   const used = model && (
     <>
       <span className="message-model" aria-label="Model">
@@ -1287,6 +1324,13 @@ function Message({
             : `${unreadable} Proposals couldn’t be read`}
         </p>
       )}
+      {searches && searches.length > 0 && (
+        <ul className="message-searches" aria-label="Searches">
+          {searches.map((search, i) => (
+            <SearchItem key={i} search={search} />
+          ))}
+        </ul>
+      )}
       {unreadLinks?.map(({ url, reason }) => (
         <p key={url} className="message-note">
           Couldn’t read {url}: {UNREAD_SAYS[reason]}
@@ -1305,6 +1349,41 @@ function Message({
         used && <p className="message-used">{used}</p>
       )}
     </article>
+  );
+}
+
+/**
+ * One web search a reply made: what it searched for, when the Provider
+ * said, and the links it found, each opening in the browser; or that it
+ * failed.
+ */
+function SearchItem({
+  search: { query, results, failed },
+}: {
+  search: WebSearch;
+}) {
+  return (
+    <li>
+      <p className="message-note">
+        {query ? `Searched the web for “${query}”` : 'Searched the web'}
+        {failed
+          ? ': the search failed'
+          : results.length === 0
+            ? ': no results it used'
+            : ''}
+      </p>
+      {results.length > 0 && (
+        <ul className="search-results">
+          {results.map(({ url, title }) => (
+            <li key={url}>
+              <a href={url} target="_blank" rel="noreferrer">
+                {title ?? url}
+              </a>
+            </li>
+          ))}
+        </ul>
+      )}
+    </li>
   );
 }
 

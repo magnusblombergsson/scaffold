@@ -2,6 +2,7 @@ import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { WebSearch } from '../../shared/conversation';
 import type { Model, ModelWindow } from '../../shared/models';
 import { instantClock } from '../project-store/clock';
 import { nodeFileSystem, type FileSystem } from '../project-store/file-system';
@@ -2734,4 +2735,66 @@ ${FERRY_TEXT}`);
     });
     expect(result.tooBig!.request).toBeGreaterThan(15_000);
   });
+});
+
+describe('Web search in Research', () => {
+  const SEARCH: WebSearch = {
+    query: 'Kvarken ferry 1962',
+    results: [{ url: 'https://example.org/kvarken', title: 'Kvarken ferries' }],
+  };
+
+  it('asks the Model to search, and logs each search made with the reply', async () => {
+    const { store, engine, provider } = await setUp(() => ({
+      searches: [SEARCH],
+      text: ['It ran until 1962 (https://example.org/kvarken).'],
+    }));
+    const { id } = await store.startConversation('research', 'The ferry');
+
+    const { reply } = await engine.askAssistant(
+      id,
+      'When did the ferry stop?',
+      { sceneId: null },
+      () => {},
+    );
+
+    expect(provider.requests[0].search).toBe(true);
+    expect(reply?.searches).toEqual([SEARCH]);
+    // As logged, so it shows when the Conversation is opened again.
+    const [, logged] = (await store.readConversation(id)).messages;
+    expect(logged.searches).toEqual([SEARCH]);
+  });
+
+  it('asks no search while the Author has turned searching off, and again once it is back on', async () => {
+    const { store, engine, provider } = await setUp(() => ['Noted.']);
+    const { id } = await store.startConversation('research', 'The ferry');
+
+    await store.setSearching(id, false);
+    await engine.askAssistant(id, 'From memory?', { sceneId: null }, () => {});
+    await store.setSearching(id, true);
+    await engine.askAssistant(id, 'And now?', { sceneId: null }, () => {});
+
+    expect(provider.requests.map((r) => r.search)).toEqual([undefined, true]);
+  });
+
+  it('refuses to turn searching on or off outside Research', async () => {
+    const { store } = await setUp();
+    const { id } = await store.startConversation('brainstorm', 'Ideas');
+
+    await expect(store.setSearching(id, true)).rejects.toThrow(
+      'Only a Research Conversation searches the web',
+    );
+  });
+
+  it.each(['brainstorm', 'interview', 'writing', 'plan'] as const)(
+    'never asks a search in %s',
+    async (mode) => {
+      const { store, engine, provider, sceneId } = await setUp(() => ['Hm.']);
+      const { id } = await store.startConversation(mode, 'Elsewhere');
+
+      await engine.askAssistant(id, 'Search the web?', { sceneId }, () => {});
+
+      expect(provider.requests).toHaveLength(1);
+      expect(provider.requests[0]).not.toHaveProperty('search');
+    },
+  );
 });

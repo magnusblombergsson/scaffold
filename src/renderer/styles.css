@@ -4365,6 +4365,34 @@ p.message-used,
   color: var(--muted);
 }
 
+.message-searches,
+.search-results {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.search-results {
+  padding-left: 1rem;
+  font-size: 0.8em;
+}
+
+.search-results a {
+  overflow-wrap: anywhere;
+}
+
+.search-switch {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  margin: 0.5rem 0;
+}
+
+.search-none {
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
 .message-system {
   align-self: stretch;
   border: 1px solid var(--danger);

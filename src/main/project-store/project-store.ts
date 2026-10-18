@@ -4843,6 +4843,14 @@ export class ProjectStore {
   }
 
   /**
+   * Turns web search off, or back on, in a Research Conversation from its
+   * next message on, logged; refused in any other Mode.
+   */
+  setSearching(id: string, on: boolean): Promise<void> {
+    return this.conversations.setSearching(id, on);
+  }
+
+  /**
    * The Conversations in `conversations/`, latest first; `project.json`
    * doesn't list them. A log whose header can't be read is logged and left out.
    */

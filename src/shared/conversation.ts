@@ -246,6 +246,20 @@ export const UNREAD_SAYS: Record<UnreadReason, string> = {
 /** A page linked in Research that wasn't read, and why. */
 export type UnreadLink = { url: string; reason: UnreadReason };
 
+/** A page a web search found, by its link, with its title when known. */
+export type SearchResult = { url: string; title?: string };
+
+/**
+ * One web search the Assistant made in Research, through the Provider's own
+ * tool: what it searched for, when the Provider says, and the links it
+ * found, or that it `failed`.
+ */
+export type WebSearch = {
+  query?: string;
+  results: SearchResult[];
+  failed?: true;
+};
+
 /** A page linked in Research as the Author is told of it, by its link. */
 export function pageLabel(url: string): string {
   return `The page ${url}`;
@@ -266,7 +280,7 @@ export function pageLabel(url: string): string {
  * `cutShort` at the length limit. It says what the Assistant `saw`, the `proposals` it made in it,
  * and how many more it made that couldn't be read, as `unreadable`; in
  * Research, the pages linked in the Author's message that couldn't be read,
- * as `unreadLinks`.
+ * as `unreadLinks`, and the web `searches` it made, in order.
  */
 export type ConversationMessage = {
   role: 'author' | 'assistant';
@@ -284,6 +298,7 @@ export type ConversationMessage = {
   cutShort?: true;
   unreadable?: number;
   unreadLinks?: UnreadLink[];
+  searches?: WebSearch[];
   saw?: Saw;
   findings?: Finding[];
   planFindings?: PlanFinding[];
@@ -380,10 +395,13 @@ export type UnusedSummary = {
  * Brainstorm brought in or removed; once it is long, the
  * summaries made of it, the latest last, and those that weren't used. Its
  * `model` is the Model chosen for it last, or for one that never had one
- * chosen, the Model of its latest reply; none before then.
+ * chosen, the Model of its latest reply; none before then. A Research
+ * Conversation searches the web unless the Author last turned that off in
+ * it, as `searchOff` says.
  */
 export type Conversation = ConversationSummary & {
   model?: Model;
+  searchOff?: true;
   messages: ConversationMessage[];
   emptyReplies?: EmptyReply[];
   focusChanges?: FocusChange[];

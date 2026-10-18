@@ -16,6 +16,7 @@ import {
   type Mode,
   type Saw,
   type UnreadLink,
+  type WebSearch,
   type UnreadReason,
   type UnusedSummary,
 } from '../../shared/conversation';
@@ -341,6 +342,16 @@ export type BookChosenEvent = {
   at: number;
 };
 
+/**
+ * The Author turned web search off, or back on, in a Research Conversation,
+ * from its next message on. An app from before searching skips it (ADR 0006).
+ */
+export type SearchingSetEvent = {
+  type: 'searchingSet';
+  on: boolean;
+  at: number;
+};
+
 /** The Author set an Interview's or Plan's focus. */
 export type FocusChangedEvent = {
   type: 'focusChanged';
@@ -425,6 +436,7 @@ export type ConversationEvent =
   | EmptyReplyEvent
   | ModelChosenEvent
   | BookChosenEvent
+  | SearchingSetEvent
   | FocusChangedEvent
   | BroughtInEvent
   | BringInRemovedEvent
@@ -528,6 +540,7 @@ export function parseLog(log: string): LoggedConversation | null {
   const unusedSummaries: UnusedSummary[] = [];
   let chosen: Model | undefined;
   let book: string | undefined;
+  let searchOff = false;
   let { title } = header;
   let trashedAt: number | undefined;
   /** Each Combine logged, by id: what puts back what it moved. */
@@ -562,6 +575,10 @@ export function parseLog(log: string): LoggedConversation | null {
     }
     if (isBookChosen(event)) {
       book = event.book;
+      continue;
+    }
+    if (isSearchingSet(event)) {
+      searchOff = !event.on;
       continue;
     }
     if (isEmptyReply(event)) {
@@ -641,6 +658,7 @@ export function parseLog(log: string): LoggedConversation | null {
     created,
     ...(model && { model }),
     ...(book !== undefined && { book }),
+    ...(searchOff && { searchOff: true as const }),
     ...(trashedAt !== undefined && { trashedAt }),
     ...(focusChanges.length > 0 && {
       focus: focusChanges.at(-1)!.focus,
@@ -1418,7 +1436,7 @@ function messageOf(event: MessageEvent): ConversationMessage {
   const { role, text, command, focus, at, model, usage, interrupted, saw } =
     event;
   const { provider, cost, cutShort, unreadable, findings, ask } = event;
-  const { planFindings, unreadLinks } = event;
+  const { planFindings, unreadLinks, searches } = event;
   return {
     role,
     text,
@@ -1436,6 +1454,9 @@ function messageOf(event: MessageEvent): ConversationMessage {
     ...(Array.isArray(unreadLinks) &&
       unreadLinks.length > 0 &&
       unreadLinks.every(isUnreadLink) && { unreadLinks }),
+    ...(Array.isArray(searches) &&
+      searches.length > 0 &&
+      searches.every(isWebSearch) && { searches }),
     ...(isSaw(saw) && { saw }),
     ...(Array.isArray(findings) && findings.every(isFinding) && { findings }),
     ...(Array.isArray(planFindings) &&
@@ -1556,13 +1577,28 @@ function isUnreadLink(value: unknown): value is UnreadLink {
   );
 }
 
+function isWebSearch(value: unknown): value is WebSearch {
+  const search = value as Partial<WebSearch> | null | undefined;
+  return (
+    (search?.query === undefined || typeof search.query === 'string') &&
+    (search?.failed === undefined || search.failed === true) &&
+    Array.isArray(search?.results) &&
+    search.results.every(
+      (result) =>
+        typeof result?.url === 'string' &&
+        (result.title === undefined || typeof result.title === 'string'),
+    )
+  );
+}
+
 function isUsage(value: unknown): value is Usage {
   const usage = value as Partial<Usage> | null | undefined;
   return (
     typeof usage?.input === 'number' &&
     typeof usage.cached === 'number' &&
     typeof usage.written === 'number' &&
-    typeof usage.output === 'number'
+    typeof usage.output === 'number' &&
+    (usage.searches === undefined || isCount(usage.searches))
   );
 }
 
@@ -1689,6 +1725,15 @@ function isFocusChanged(value: unknown): value is FocusChangedEvent {
   return (
     event?.type === 'focusChanged' &&
     isInterviewFocus(event.focus) &&
+    typeof event.at === 'number'
+  );
+}
+
+function isSearchingSet(value: unknown): value is SearchingSetEvent {
+  const event = value as Partial<SearchingSetEvent> | null;
+  return (
+    event?.type === 'searchingSet' &&
+    typeof event.on === 'boolean' &&
     typeof event.at === 'number'
   );
 }

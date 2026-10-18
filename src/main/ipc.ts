@@ -274,6 +274,8 @@ const assistantHandlers: Handlers<
   },
   chooseBook: ({ store }, conversationId, bookId) =>
     store.chooseBook(conversationId, bookId),
+  setSearching: ({ store }, conversationId, on) =>
+    store.setSearching(conversationId, on === true),
   renameConversation: ({ store }, conversationId, title) =>
     store.renameConversation(conversationId, title),
   starConversation: ({ store }, conversationId, starred) =>

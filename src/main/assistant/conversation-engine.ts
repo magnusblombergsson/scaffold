@@ -238,7 +238,9 @@ export function createConversationEngine({
    * Review's reply holds Findings, never Proposals. So does a Plan check: a
    * Plan reply asked for one, or holding Findings. In Research, and only
    * there, the pages linked in the Author's message are read afresh and sent
-   * with it; the reply names those that couldn't be read.
+   * with it; the reply names those that couldn't be read. Research alone
+   * may search the web, unless the Author turned searching off in it; the
+   * reply logs each search made.
    */
   async function answer(
     conversationId: string,
@@ -248,7 +250,11 @@ export function createConversationEngine({
       compactions,
       model,
       book,
-    }: Pick<Conversation, 'mode' | 'focus' | 'compactions' | 'model' | 'book'>,
+      searchOff,
+    }: Pick<
+      Conversation,
+      'mode' | 'focus' | 'compactions' | 'model' | 'book' | 'searchOff'
+    >,
     messages: ConversationMessage[],
     focus: string[],
     onText: (text: string) => void,
@@ -289,6 +295,7 @@ export function createConversationEngine({
       model: chosen,
       system: context.system,
       messages: context.messages,
+      ...(mode === 'research' && !searchOff && { search: true as const }),
     };
     const finished = await finishedCall(providerFor(chosen), request, onText);
     const { metered } = finished;
@@ -362,6 +369,7 @@ export function createConversationEngine({
       ...(finished.ending === 'cut-short' && { cutShort: true as const }),
       ...(unreadable > 0 && { unreadable }),
       ...(unreadLinks.length > 0 && { unreadLinks }),
+      ...(finished.searches.length > 0 && { searches: finished.searches }),
       saw: context.saw,
       ...(findings.length > 0 && { findings }),
       ...(planFindings.length > 0 && { planFindings }),
