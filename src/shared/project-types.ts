@@ -413,6 +413,8 @@ export type BookDetails = {
   structureRuns?: 'part';
   /** The Genre conventions it follows, by id; absent for none. */
   genreConventions?: string[];
+  /** Its Archetype by id, or `none` for none; absent while none is chosen. */
+  archetype?: string;
 };
 /** Where a Book's Structure runs: over the whole Book, or anew in every Part. */
 export type StructureRuns = 'book' | 'part';

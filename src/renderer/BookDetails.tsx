@@ -15,11 +15,14 @@ import type {
   StructureRuns,
 } from '../shared/project-types';
 import {
+  ARCHETYPES,
+  archetypeOf,
   CONVENTIONS,
   conventionOf,
   FORMATS,
   GENRES,
   guideStructures,
+  NO_ARCHETYPE,
   NO_STRUCTURE,
   qualifiedBeatId,
   shownIds,
@@ -61,10 +64,10 @@ function toggled(ids: readonly string[] | undefined, id: string): string[] {
 
 /**
  * The strip above the Outline tree: the Book's Structure, with where it
- * runs once the Book has a Part, Genre conventions, Genres, Format and
- * Word target, each set with a click, and a link to the structure guide. A
- * detail or Word target `proposed` in the Conversation open shows as a
- * ghost value beside it, which goes to its card.
+ * runs once the Book has a Part, Archetype, Genre conventions, Genres,
+ * Format and Word target, each set with a click, and a link to the
+ * structure guide. A detail or Word target `proposed` in the Conversation
+ * open shows as a ghost value beside it, which goes to its card.
  */
 export function BookDetailsStrip({
   bookId,
@@ -91,11 +94,15 @@ export function BookDetailsStrip({
   const set = useSetBookDetail(bookId);
   const run = useRun();
   const [editingTarget, setEditingTarget] = useState(false);
-  const { structure, bookFormat, wordTarget } = book;
+  const { structure, archetype, bookFormat, wordTarget } = book;
   const knownStructure =
     structure === undefined ||
     structure === NO_STRUCTURE ||
     !!structureOf(structure);
+  const knownArchetype =
+    archetype === undefined ||
+    archetype === NO_ARCHETYPE ||
+    !!archetypeOf(archetype);
   const knownFormat =
     bookFormat === undefined || FORMATS.some((f) => f.id === bookFormat);
 
@@ -149,6 +156,31 @@ export function BookDetailsStrip({
           </select>
         </label>
       )}
+      <label className="book-detail">
+        Archetype
+        <select
+          aria-label="Archetype"
+          value={archetype ?? ''}
+          disabled={readOnly}
+          onChange={(event) =>
+            void set('archetype', event.target.value || null)
+          }
+        >
+          <option value="">None chosen yet</option>
+          {ARCHETYPES.map((a) => (
+            <option key={a.id} value={a.id}>
+              {a.name}
+            </option>
+          ))}
+          <option value={NO_ARCHETYPE}>None</option>
+          {!knownArchetype && (
+            <option value={archetype} disabled>
+              Not known to this version
+            </option>
+          )}
+        </select>
+        {ghost('archetype')}
+      </label>
       <Chips
         label="Genre conventions"
         options={CONVENTIONS}

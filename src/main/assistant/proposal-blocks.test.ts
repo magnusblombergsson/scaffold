@@ -206,6 +206,39 @@ describe('Book detail Proposals', () => {
     }
   });
 
+  it('in Plan, set its Book’s Archetype, or none; never one the catalogue doesn’t know', async () => {
+    const store = await project();
+    await store.setBookDetail(PROJECT_OUTLINE, 'archetype', 'comedy');
+    const view = store.assistantView();
+
+    const { proposals, unreadable } = await readProposals(
+      view,
+      [
+        { archetype: 'rags-to-riches' },
+        { archetype: 'none' },
+        { archetype: 'rebellion-against-the-one' },
+        { archetype: ['tragedy'] },
+      ],
+      storyBibleOf(view, undefined),
+      'plan',
+    );
+
+    expect(unreadable).toBe(2);
+    expect(proposals).toEqual([
+      expect.objectContaining({
+        kind: 'book-detail',
+        detail: 'archetype',
+        base: 'comedy',
+        proposed: 'rags-to-riches',
+      }),
+      expect.objectContaining({
+        detail: 'archetype',
+        base: 'comedy',
+        proposed: 'none',
+      }),
+    ]);
+  });
+
   it('are judged against the ids the Book holds that this version knows', async () => {
     const store = await project();
     await store.setBookDetail(PROJECT_OUTLINE, 'genres', [

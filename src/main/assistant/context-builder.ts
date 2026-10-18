@@ -81,11 +81,14 @@ import {
   type WayOut,
 } from '../../shared/request-size';
 import {
+  ARCHETYPES,
+  archetypeOf,
   beatName,
   conventionOf,
   CONVENTIONS,
   FORMATS,
   GENRES,
+  NO_ARCHETYPE,
   NO_STRUCTURE,
   qualifiedBeatId,
   shortlist,
@@ -944,7 +947,8 @@ function planFocusText(
  * is said to be so. Ids the catalogue doesn't know are left out otherwise.
  * It says where the Structure runs, over the Book or anew in every Part,
  * called by the Project's `label`, and how where a Scene falls is
- * measured, for a Plan check to name.
+ * measured, for a Plan check to name. The Archetype it follows comes in
+ * full, with its rise and fall; the others by name only.
  */
 function bookDetailsText(
   details: BookDetails,
@@ -964,8 +968,9 @@ function bookDetailsText(
     (id) => conventionOf(id)!,
   );
   const { structures, conventions: shortlisted } = shortlist(details, asked);
+  const archetype = archetypeOf(details.archetype);
   return [
-    'The Book’s details, as the Author set or accepted them, and the structure catalogue this app knows. Name a Structure, Genre convention, Genre or Format by its Id when you propose one.',
+    'The Book’s details, as the Author set or accepted them, and the structure catalogue this app knows. Name a Structure, Genre convention, Archetype, Genre or Format by its Id when you propose one.',
     `Genres: ${genres.length > 0 ? genres.map(named).join(', ') : 'none chosen.'}`,
     `Format: ${
       format
@@ -977,6 +982,7 @@ function bookDetailsText(
     `Word target of the Manuscript: ${wordTarget === undefined ? 'none.' : wordTargetText(wordTarget)}`,
     `Structure: ${structureText(details, label)}`,
     `Genre conventions: ${conventions.length > 0 ? conventions.map(named).join(', ') : 'none.'}`,
+    `Archetype: ${archetypeText(details)}`,
     measureText(falls, label, parts),
     '## Structures in full: those fitting the Book’s Genres and Format, the one it follows, and any the Author asked about',
     ...structures.full.map((s) =>
@@ -1017,7 +1023,61 @@ function bookDetailsText(
           `Other Genre conventions, by name only: ${shortlisted.byName.map(named).join(', ')}.`,
         ]
       : []),
+    ...(archetype
+      ? [
+          [
+            '## The Archetype the Book follows',
+            `### ${archetype.name}`,
+            `Id: ${archetype.id}`,
+            archetype.credit,
+            archetype.description,
+            `Rise and fall: ${archetype.riseAndFall}`,
+          ].join('\n'),
+        ]
+      : []),
+    `${archetype ? 'Other Archetypes' : 'Archetypes'}, from Christopher Booker’s seven basic plots, by name only: ${ARCHETYPES.filter(
+      (a) => a !== archetype,
+    )
+      .map(named)
+      .join(', ')}.`,
+    ARCHETYPE_PROPOSAL,
+    archetype
+      ? ARCHETYPE_CHECK
+      : details.archetype === undefined
+        ? UNCHOSEN_ARCHETYPE_CHECK
+        : NO_ARCHETYPE_CHECK,
   ].join('\n\n');
+}
+
+// What Plan is told of the Archetype here, not in its system prompt, so
+// the tested Models stay tested (docs/evals/never-prose/README.md).
+const ARCHETYPE_PROPOSAL = `Propose the Book's Archetype as its other details, by its Id, "none" for none. A blend of two is the Author's to describe in the Book's Notes, so propose only one:
+
+\`\`\`proposal
+{"archetype": "<Id>"}
+\`\`\``;
+
+const ARCHETYPE_CHECK = `In a Plan check, write a Finding of kind "archetype" when the Outlines' turns of fortune contradict its rise and fall, such as a Rags to riches whose fall never comes before the final rise, ranked among the others by consequence. A blend of Archetypes the Book's Notes describe is the Author's intent: quote it, never fault it.`;
+
+const UNCHOSEN_ARCHETYPE_CHECK = `In a Plan check, write no "archetype" Findings, and end it by offering to find an Archetype.`;
+
+const NO_ARCHETYPE_CHECK = `In a Plan check, write no "archetype" Findings.`;
+
+/**
+ * What Plan is told of the Book's Archetype, and so whether to offer to
+ * find one, or to judge the plan against one at all.
+ */
+function archetypeText({ archetype }: BookDetails): string {
+  if (archetype === undefined) {
+    return "none chosen yet. When it would help, offer to find an Archetype: ask about the protagonist's fortunes from start to end, one question at a time, then recommend one by its rise and fall, and propose it.";
+  }
+  if (archetype === NO_ARCHETYPE) {
+    return 'none. The Author chose to follow no Archetype: never judge the plan against one, and never nudge it toward one.';
+  }
+  const known = archetypeOf(archetype);
+  return known
+    ? `${known.name} (${known.id}). Its rise and fall is below.`
+    : `one this version of the app doesn’t know (${archetype}). Tell the Author so.`;
 }
 
 /**

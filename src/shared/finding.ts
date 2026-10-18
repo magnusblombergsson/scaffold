@@ -145,6 +145,7 @@ export function isFinding(value: unknown): value is Finding {
 export const PLAN_FINDING_KINDS = [
   'beat',
   'convention',
+  'archetype',
   'contradiction',
   'gap',
   'idle',
@@ -154,6 +155,7 @@ export type PlanFindingKind = (typeof PLAN_FINDING_KINDS)[number];
 export const PLAN_FINDING_LABELS: Record<PlanFindingKind, string> = {
   beat: 'Beat',
   convention: 'Convention',
+  archetype: 'Archetype',
   contradiction: 'Contradiction',
   gap: 'Gap',
   idle: 'Idle',

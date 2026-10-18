@@ -111,6 +111,8 @@ const SAMPLES: Record<
   },
   genreConventions: (store, ref) =>
     store.setBookDetail(idOf(ref), 'genreConventions', ['mystery']),
+  archetype: (store, ref) =>
+    store.setBookDetail(idOf(ref), 'archetype', 'comedy'),
   beats: (store, ref) => store.setBeat(idOf(ref), 'mystery/reveal', true),
 };
 

@@ -25,14 +25,15 @@ export type DetailKey =
   | 'structure'
   | 'partStructure'
   | 'genreConventions'
+  | 'archetype'
   | 'beats';
 export type DetailKind = DetailRef['kind'];
 
 /**
  * A unit's details as its header holds them: the Status id, Tags, image
  * file, Word target, an Entry's first Book and image files by Book, a
- * Book's Genres, Format, Structure and Genre conventions, and a Scene's
- * Beats. A Structure that runs anew in every Part is held as
+ * Book's Genres, Format, Structure, Genre conventions and Archetype, and a
+ * Scene's Beats. A Structure that runs anew in every Part is held as
  * `partStructure`, `structure` left empty, so an app from before ADR 0017
  * sees none chosen and never applies its Beats over the whole Book.
  */
@@ -48,6 +49,7 @@ export type HeldDetails = {
   structure?: string;
   partStructure?: string;
   genreConventions?: string[];
+  archetype?: string;
   beats?: string[];
 };
 
@@ -294,6 +296,7 @@ export const DETAILS: readonly Row[] = [
   // Where the Structure runs anew in every Part (ADR 0017), hidden from older apps.
   bookId('Structure', 'partStructure'),
   bookIds('Genre conventions', 'genreConventions'),
+  bookId('Archetype', 'archetype'),
   {
     // One list, merged whole: the later save of the marks wins (§11). Marks
     // of what the Book no longer follows stay in it, set aside.

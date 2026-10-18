@@ -316,6 +316,7 @@ const BOOK_OWN_DETAILS = [
   'structure',
   'partStructure',
   'genreConventions',
+  'archetype',
 ] as const;
 
 /**

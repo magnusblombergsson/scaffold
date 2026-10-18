@@ -2168,6 +2168,78 @@ Holds Prose`,
       );
     });
 
+    it('send the Archetype chosen in full, with its rise and fall, and the rest by name', async () => {
+      const { store, view } = await planned();
+      await store.setBookDetail(PROJECT_OUTLINE, 'archetype', 'rags-to-riches');
+
+      const details = detailsOf(await plan(view, { kind: 'open' }));
+
+      expect(details).toContain('Archetype: Rags to riches (rags-to-riches)');
+      expect(details).toContain(
+        'Christopher Booker, The Seven Basic Plots (2004).',
+      );
+      expect(details).toContain(
+        'A humble or overlooked hero rises, loses everything, and wins it back in full, grown by the loss.',
+      );
+      expect(details).toContain(
+        'Rise and fall: Rise, fall, rise: early success, then a central crisis in which all is lost',
+      );
+      expect(details).toContain('Tragedy (tragedy)');
+      expect(details).not.toContain('A hero tempted into a course of action');
+    });
+
+    it('tell how to propose an Archetype, one only, and to check the Outlines against the one chosen, reading a blend in the Notes as intent', async () => {
+      const { store, view } = await planned();
+      await store.setBookDetail(PROJECT_OUTLINE, 'archetype', 'rags-to-riches');
+
+      const details = detailsOf(await plan(view, { kind: 'open' }));
+
+      expect(details).toContain('{"archetype": "<Id>"}');
+      expect(details).toMatch(/"none" for none/);
+      expect(details).toMatch(/propose only one/);
+      expect(details).toMatch(
+        /a Finding of kind "archetype" when the Outlines' turns of fortune contradict its rise and fall/,
+      );
+      expect(details).toMatch(/ranked among the others by consequence/);
+      expect(details).toMatch(
+        /A blend of Archetypes the Book's Notes describe is the Author's intent: quote it, never fault it/,
+      );
+    });
+
+    it('offer to find an Archetype only while none is chosen, and say nothing of one with none', async () => {
+      const { store, view } = await planned();
+
+      let details = detailsOf(await plan(view, { kind: 'open' }));
+      expect(details).toMatch(
+        /Archetype: none chosen yet\. When it would help, offer to find an Archetype: ask about the protagonist's fortunes/,
+      );
+      expect(details).toMatch(
+        /write no "archetype" Findings, and end it by offering to find an Archetype/,
+      );
+      expect(details).toContain(
+        'Overcoming the monster (overcoming-the-monster)',
+      );
+
+      await store.setBookDetail(PROJECT_OUTLINE, 'archetype', 'none');
+      details = detailsOf(await plan(view, { kind: 'open' }));
+      expect(details).toMatch(
+        /Archetype: none\. .*never judge the plan against one, and never nudge it toward one/,
+      );
+      expect(details).toMatch(/write no "archetype" Findings/);
+      expect(details).not.toMatch(/offering to find an Archetype/);
+      expect(details).not.toMatch(/Archetype: none chosen yet/);
+
+      await store.setBookDetail(
+        PROJECT_OUTLINE,
+        'archetype',
+        'from-a-newer-app',
+      );
+      details = detailsOf(await plan(view, { kind: 'open' }));
+      expect(details).toContain(
+        'Archetype: one this version of the app doesn’t know (from-a-newer-app). Tell the Author so.',
+      );
+    });
+
     it('send an entry the Author asked about in full', async () => {
       const { store, view } = await planned();
       await store.setBookDetail(PROJECT_OUTLINE, 'genres', ['mystery']);
@@ -2202,6 +2274,7 @@ Holds Prose`,
       await store.setBookDetail(PROJECT_OUTLINE, 'genreConventions', [
         'mystery',
       ]);
+      await store.setBookDetail(PROJECT_OUTLINE, 'archetype', 'tragedy');
       const asked = [message('author', "Save the Cat? The Hero's Journey?")];
       const requests: ContextRequest[] = [
         { mode: 'brainstorm', messages: asked },
@@ -2220,6 +2293,8 @@ Holds Prose`,
         expect(text).not.toContain('save-the-cat');
         expect(text).not.toContain('Joseph Campbell');
         expect(text).not.toContain('Mystery (fair play)');
+        expect(text).not.toContain('tragedy');
+        expect(text).not.toContain('Christopher Booker');
       }
     });
   });

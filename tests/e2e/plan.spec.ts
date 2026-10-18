@@ -258,6 +258,42 @@ for (const theme of ['light', 'dark'] as const) {
   });
 }
 
+test('the Archetype is set in the strip to one of the seven, to none, or back to none chosen yet', async () => {
+  const { app, page, projectPath } = await newProject('light');
+  try {
+    await roomButton(page, 'Plan').click();
+    const archetype = page
+      .getByRole('region', { name: 'Book details' })
+      .getByRole('combobox', { name: 'Archetype' });
+    // Nothing is there until the first detail is saved.
+    const header = async () =>
+      readFile(path.join(projectPath, 'outlines', 'project.md'), 'utf8').catch(
+        () => '',
+      );
+    await expect(archetype).toHaveValue('');
+    await expect(archetype.locator('option')).toHaveText([
+      'None chosen yet',
+      'Overcoming the monster',
+      'Rags to riches',
+      'The quest',
+      'Voyage and return',
+      'Comedy',
+      'Tragedy',
+      'Rebirth',
+      'None',
+    ]);
+
+    await archetype.selectOption('rags-to-riches');
+    await expect.poll(header).toContain('archetype: rags-to-riches');
+    await archetype.selectOption('none');
+    await expect.poll(header).toContain('archetype: none');
+    await archetype.selectOption('');
+    await expect.poll(header).not.toMatch(/^archetype:/m);
+  } finally {
+    await app.close();
+  }
+});
+
 test('the Structure runs anew in every Part once the Book has one, kept under its own key, and back over the Book', async () => {
   const { app, page, projectPath, chapters } = await newProject('light');
   try {

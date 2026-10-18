@@ -116,6 +116,40 @@ describe('setting a Book’s details', () => {
     expect(await headerOf(PROJECT_OUTLINE)).not.toHaveProperty('structure');
   });
 
+  it('keeps an Archetype or none, and none chosen yet as no key', async () => {
+    await newProject();
+    const store = await open();
+
+    await store.setBookDetail(PROJECT_OUTLINE, 'archetype', 'rags-to-riches');
+    expect(store.manuscript().archetype).toBe('rags-to-riches');
+    expect(await headerOf(PROJECT_OUTLINE)).toMatchObject({
+      archetype: 'rags-to-riches',
+    });
+    await store.setBookDetail(PROJECT_OUTLINE, 'archetype', 'none');
+    expect(store.manuscript().archetype).toBe('none');
+    await store.close();
+    const reopened = await open();
+    expect(reopened.manuscript().archetype).toBe('none');
+
+    await reopened.setBookDetail(PROJECT_OUTLINE, 'archetype', null);
+    expect(reopened.manuscript()).not.toHaveProperty('archetype');
+    expect(await headerOf(PROJECT_OUTLINE)).not.toHaveProperty('archetype');
+  });
+
+  it('gives each Book of a Series its own Archetype, Book 1 the Project’s', async () => {
+    await newProject();
+    const store = await open();
+    await store.setBookDetail(PROJECT_OUTLINE, 'archetype', 'tragedy');
+
+    const { id: two } = await store.createBook();
+    await store.setBookDetail(two, 'archetype', 'rebirth');
+
+    const [one, second] = store.manuscript().books!;
+    expect(one.archetype).toBe('tragedy');
+    expect(second.archetype).toBe('rebirth');
+    expect(store.manuscript()).not.toHaveProperty('archetype');
+  });
+
   it('takes away the Genres or Genre conventions when none are left', async () => {
     await newProject();
     const store = await open();
@@ -392,6 +426,26 @@ it('the v2 app rewrites a Book’s Outline seeing no Structure in every Part, an
     structure: 'three-act',
     structureRuns: 'part',
   });
+});
+
+it('the v2 app rewrites a Book’s Outline keeping its Archetype, and this app reads it back', async () => {
+  await newProject();
+  const store = await open('ALPHA', 1000);
+  await store.setBookDetail(PROJECT_OUTLINE, 'archetype', 'the-quest');
+  await store.close();
+  const ref = { kind: 'outline', id: PROJECT_OUTLINE } as const;
+  const text = await readFile(outlinePath(PROJECT_OUTLINE), 'utf8');
+
+  const read = v2ReadUnit(ref, text);
+  await writeFile(
+    outlinePath(PROJECT_OUTLINE),
+    v2WriteUnit(ref, { ...read, body: '- A long road.' }, text),
+  );
+
+  expect(await headerOf(PROJECT_OUTLINE)).toMatchObject({
+    archetype: 'the-quest',
+  });
+  expect((await open()).manuscript().archetype).toBe('the-quest');
 });
 
 it('the v2 app rewrites a Book’s Outline keeping its details, and this app reads them back', async () => {
