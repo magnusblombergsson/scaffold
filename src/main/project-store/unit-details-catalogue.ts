@@ -23,6 +23,7 @@ export type DetailKey =
   | 'genres'
   | 'bookFormat'
   | 'structure'
+  | 'partStructure'
   | 'genreConventions'
   | 'beats';
 export type DetailKind = DetailRef['kind'];
@@ -31,7 +32,9 @@ export type DetailKind = DetailRef['kind'];
  * A unit's details as its header holds them: the Status id, Tags, image
  * file, Word target, an Entry's first Book and image files by Book, a
  * Book's Genres, Format, Structure and Genre conventions, and a Scene's
- * Beats.
+ * Beats. A Structure that runs anew in every Part is held as
+ * `partStructure`, `structure` left empty, so an app from before ADR 0017
+ * sees none chosen and never applies its Beats over the whole Book.
  */
 export type HeldDetails = {
   status?: string;
@@ -43,6 +46,7 @@ export type HeldDetails = {
   genres?: string[];
   bookFormat?: string;
   structure?: string;
+  partStructure?: string;
   genreConventions?: string[];
   beats?: string[];
 };
@@ -287,6 +291,8 @@ export const DETAILS: readonly Row[] = [
   bookIds('Genres', 'genres'),
   bookId('Format', 'bookFormat'),
   bookId('Structure', 'structure'),
+  // Where the Structure runs anew in every Part (ADR 0017), hidden from older apps.
+  bookId('Structure', 'partStructure'),
   bookIds('Genre conventions', 'genreConventions'),
   {
     // One list, merged whole: the later save of the marks wins (§11). Marks
@@ -369,13 +375,24 @@ export function filesMovingWithTrash(held: HeldDetails | undefined): string[] {
 }
 
 /**
+ * The key the window is told a detail by: its header key, but for a
+ * Structure in every Part, told as the Structure with where it runs.
+ */
+export function windowKey(key: DetailKey): string {
+  return key === 'partStructure' ? 'structureRuns' : key;
+}
+
+/**
  * `value` as the Assistant sees it, without any detail its row doesn't let
- * it see.
+ * it see, by its header key or as the window has it.
  */
 export function forAssistant<T extends object>(value: T): T {
   const seen = { ...value } as Record<string, unknown>;
   for (const { key, assistant } of DETAILS) {
-    if (assistant === 'hidden') delete seen[key];
+    if (assistant === 'hidden') {
+      delete seen[key];
+      delete seen[windowKey(key)];
+    }
   }
   return seen as T;
 }

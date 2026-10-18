@@ -258,6 +258,49 @@ for (const theme of ['light', 'dark'] as const) {
   });
 }
 
+test('the Structure runs anew in every Part once the Book has one, kept under its own key, and back over the Book', async () => {
+  const { app, page, projectPath, chapters } = await newProject('light');
+  try {
+    await roomButton(page, 'Plan').click();
+    const strip = page.getByRole('region', { name: 'Book details' });
+    const runs = strip.getByRole('combobox', {
+      name: 'Where the Structure runs',
+    });
+    // Nothing is there until the first detail is saved.
+    const header = async () =>
+      readFile(path.join(projectPath, 'outlines', 'project.md'), 'utf8').catch(
+        () => '',
+      );
+    await strip
+      .getByRole('combobox', { name: 'Structure' })
+      .selectOption('three-act');
+    await expect.poll(header).toContain('structure: three-act');
+    // A Book without Parts runs its Structure over the whole Book.
+    await expect(runs).toHaveCount(0);
+
+    // Chapter 1 goes into a Part, as no menu does yet.
+    await page.evaluate(async (chapterId) => {
+      const { id } = await window.project.createPart(0, 'Part One');
+      await window.project.moveChapter(chapterId, 0, id);
+    }, chapters.one);
+    await page.reload();
+    await roomButton(page, 'Plan').click();
+    await runs.selectOption('part');
+
+    await expect.poll(header).toContain('partStructure: three-act');
+    expect(await header()).not.toMatch(/^structure:/m);
+    await expect(page.getByRole('region', { name: 'Beat rail' })).toContainText(
+      'Measured within each Part',
+    );
+
+    await runs.selectOption('book');
+    await expect.poll(header).toMatch(/^structure: three-act/m);
+    await expect.poll(header).not.toMatch(/^partStructure:/m);
+  } finally {
+    await app.close();
+  }
+});
+
 for (const theme of ['light', 'dark'] as const) {
   test(`a Scene is marked with Beats in its details, shown as chips and pins on the Beat rail, and set aside when the Book stops following them, ${theme}`, async () => {
     const { app, page, projectPath } = await newProject(theme);

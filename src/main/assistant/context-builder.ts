@@ -70,8 +70,7 @@ import {
   followedBeats,
   sceneFalls,
   spanText,
-  type Measure,
-  type Span,
+  type Falls,
 } from '../../shared/beat-measure';
 import { bookDetailsId, formatBand } from '../../shared/book-details';
 import { wordTargetText } from '../../shared/word-target';
@@ -207,7 +206,9 @@ export async function buildContext(
       bookDetailsText(
         view.bookDetails(book),
         details === undefined ? undefined : view.wordTarget(details),
-        plan.measure,
+        plan,
+        partName(manuscript.partLabel),
+        bookManuscript(manuscript, book).parts ?? [],
         request.messages.filter((m) => m.role === 'author').map((m) => m.text),
       ),
     );
@@ -718,7 +719,7 @@ async function outlineSkeleton(
   async function planUnit(
     heading: string,
     node: ManuscriptBook | ManuscriptPart | ManuscriptChapter | ManuscriptScene,
-    { inFocus, prose, followsBeats, falls }: PlanDetail,
+    { inFocus, prose, followsBeats, falls, within }: PlanDetail,
     scene: boolean,
   ): Promise<string> {
     if (!inFocus.has(node.id)) {
@@ -737,7 +738,9 @@ async function outlineSkeleton(
         : []),
       prose.has(node.id) ? 'Holds Prose' : 'No Prose yet',
       ...(scene && followsBeats && falls.has(node.id)
-        ? [`Falls at ${spanText(falls.get(node.id)!)} of the Book`]
+        ? [
+            `Falls at ${spanText(falls.get(node.id)!)} of ${within === 'part' ? `its ${label}` : 'the Book'}`,
+          ]
         : []),
       ...(scene && followsBeats ? [beatsLine(view.beats(node.id))] : []),
       await outline(node.id),
@@ -799,7 +802,8 @@ async function outlineSkeleton(
 /**
  * What Plan sends in full: the units in its focus, by id, which of them
  * hold Prose, and the Notes of each, as the Assistant saw them; and how
- * where each Scene of the Book falls is measured, and where it falls.
+ * where each Scene of the Book falls is measured, and where it falls, in
+ * the Book or, when its Structure runs anew in every Part, in its Part.
  */
 type PlanDetail = {
   inFocus: Set<string>;
@@ -807,9 +811,7 @@ type PlanDetail = {
   notes: SawUnit[];
   /** Whether the Book follows a Structure or Genre convention with Beats. */
   followsBeats: boolean;
-  measure: Measure;
-  falls: Map<string, Span>;
-};
+} & Falls;
 
 /** The Beats a Scene carries, by name and qualified id, as Plan is sent them. */
 function beatsLine(beats: readonly string[]): string {
@@ -864,11 +866,16 @@ async function planDetail(
       if (markdown.trim() !== '') withProse.add(s.id);
     }
   }
-  const inOrder = placed
-    .flatMap((c) => c.scenes)
-    .map((s) => ({ id: s.id, wordTarget: view.wordTarget(s.id) }));
+  const inOrder = placed.flatMap((c) =>
+    c.scenes.map((s) => ({
+      id: s.id,
+      wordTarget: view.wordTarget(s.id),
+      part: c.part,
+    })),
+  );
+  const details = view.bookDetails(book);
   return {
-    ...sceneFalls(inOrder),
+    ...sceneFalls(inOrder, details.structureRuns),
     inFocus: new Set(units.map((u) => u.id)),
     prose: new Set(
       units
@@ -876,7 +883,7 @@ async function planDetail(
         .map((u) => u.id),
     ),
     notes: units.map((u) => ({ kind: 'notes', id: u.id })),
-    followsBeats: followedBeats(view.bookDetails(book)).length > 0,
+    followsBeats: followedBeats(details).length > 0,
   };
 }
 
@@ -935,12 +942,16 @@ function planFocusText(
  * about by name in full, the rest by name only. Whether a Structure is
  * chosen says whether to offer to find one; one this version doesn't know
  * is said to be so. Ids the catalogue doesn't know are left out otherwise.
- * It says how where a Scene falls is measured, for a Plan check to name.
+ * It says where the Structure runs, over the Book or anew in every Part,
+ * called by the Project's `label`, and how where a Scene falls is
+ * measured, for a Plan check to name.
  */
 function bookDetailsText(
   details: BookDetails,
   wordTarget: number | undefined,
-  measure: Measure,
+  falls: Falls,
+  label: string,
+  parts: readonly ManuscriptPart[],
   asked: string[],
 ): string {
   const named = (entry: { id: string; name: string }) =>
@@ -964,11 +975,9 @@ function bookDetailsText(
           : 'none chosen.'
     }`,
     `Word target of the Manuscript: ${wordTarget === undefined ? 'none.' : wordTargetText(wordTarget)}`,
-    `Structure: ${structureText(details.structure)}`,
+    `Structure: ${structureText(details, label)}`,
     `Genre conventions: ${conventions.length > 0 ? conventions.map(named).join(', ') : 'none.'}`,
-    measure === 'words'
-      ? 'Where a Scene falls is measured in planned words: every Scene has a Word target.'
-      : 'Where a Scene falls is measured by Scene order, each an equal share: not every Scene has a Word target.',
+    measureText(falls, label, parts),
     '## Structures in full: those fitting the Book’s Genres and Format, the one it follows, and any the Author asked about',
     ...structures.full.map((s) =>
       [
@@ -1011,8 +1020,37 @@ function bookDetailsText(
   ].join('\n\n');
 }
 
-/** What Plan is told of the Book's Structure, and so whether to offer to find one. */
-function structureText(structure: string | undefined): string {
+/**
+ * How where a Scene falls is measured: over the Book, one way; anew in
+ * every Part, each Part, called by `label`, its own way, named by its title.
+ */
+function measureText(
+  falls: Falls,
+  label: string,
+  parts: readonly ManuscriptPart[],
+): string {
+  if (falls.within === 'book') {
+    return falls.measure === 'words'
+      ? 'Where a Scene falls is measured in planned words: every Scene has a Word target.'
+      : 'Where a Scene falls is measured by Scene order, each an equal share: not every Scene has a Word target.';
+  }
+  const each = falls.parts.map(({ id, measure }) => {
+    const title = parts.find((p) => p.id === id)?.title ?? '';
+    return measure === 'words'
+      ? `in “${title}” in planned words, as every Scene there has one`
+      : `in “${title}” by Scene order, each an equal share, as not every Scene there has a Word target`;
+  });
+  return `Where a Scene falls is measured within its ${label}, each on its own: ${each.join('; ')}. A Scene in no ${label} falls in none.`;
+}
+
+/**
+ * What Plan is told of the Book's Structure, and so whether to offer to
+ * find one; of one it follows, where it runs, every Part called by `label`.
+ */
+function structureText(
+  { structure, structureRuns }: BookDetails,
+  label: string,
+): string {
   if (structure === undefined) {
     return 'none chosen yet. When it would help, offer to find one.';
   }
@@ -1020,9 +1058,12 @@ function structureText(structure: string | undefined): string {
     return 'No set Structure. Read any pattern the Author wrote in the Outlines or Notes as their intent, and judge against it in words. Never nudge toward a Structure; you may name the nearest without pressing it.';
   }
   const known = structureOf(structure);
-  return known
-    ? `${known.name} (${known.id})`
-    : `one this version of the app doesn’t know (${structure}). Tell the Author so, and check no Beats.`;
+  if (!known) {
+    return `one this version of the app doesn’t know (${structure}). Tell the Author so, and check no Beats.`;
+  }
+  return structureRuns === 'part'
+    ? `${known.name} (${known.id}), running anew in every ${label}: each Beat’s position is a share of its ${label}, and every ${label} should hold the Structure’s Beats. In a Plan check, check each ${label} on its own: each Beat missing, doubled or out of place within that ${label}, and name the ${label} in the Finding. Check every ${label}; none is left out. The Notes of ${withArticle(label)} explaining a prologue or a two-part ${label} are the Author’s intent: quote them, never fault them.`
+    : `${known.name} (${known.id}), running over the whole Book.`;
 }
 
 /** A Beat of a Structure or Genre convention, as in the catalogue sent. */

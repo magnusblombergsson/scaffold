@@ -3,6 +3,7 @@ import {
   CONVENTIONS,
   currentBeatId,
   currentId,
+  fitsBook,
   FORMATS,
   GENRES,
   guideStructures,
@@ -10,6 +11,7 @@ import {
   shortlist,
   shownIds,
   STRUCTURES,
+  type Structure,
 } from './structure-catalogue';
 
 // The built-in catalogue (spec: Outline planner §2): eight Structures and six
@@ -94,6 +96,7 @@ describe('the catalogue', () => {
     for (const { fits } of STRUCTURES) {
       for (const g of fits.genres) expect(genres).toContain(g);
       for (const f of fits.formats) expect(formats).toContain(f);
+      expect(fits.across.length).toBeGreaterThan(0);
     }
     for (const { genre, rules } of CONVENTIONS) {
       expect(genres).toContain(genre);
@@ -200,6 +203,37 @@ describe('the structure guide’s order', () => {
   });
 });
 
+describe('fitting per Part', () => {
+  /** A Structure of fantasy short stories fitting `across`, as a later catalogue may hold. */
+  const fitting = (across: Structure['fits']['across']): Structure => ({
+    ...STRUCTURES[0],
+    fits: { genres: ['fantasy'], formats: ['short-story'], across },
+  });
+
+  it('fits a Book running its Structure in every Part when it fits per Part and the Book’s Genres, whatever its Format', () => {
+    const book = {
+      genres: ['fantasy'],
+      bookFormat: 'novel',
+      structureRuns: 'part' as const,
+    };
+
+    expect(fitsBook(fitting(['part']), book)).toBe(true);
+    expect(fitsBook(fitting(['book', 'part']), book)).toBe(true);
+    expect(fitsBook(fitting(['book']), book)).toBe(false);
+    expect(fitsBook(fitting(['part']), { ...book, genres: ['romance'] })).toBe(
+      false,
+    );
+  });
+
+  it('fits no Book running it over the whole Book when it fits per Part only', () => {
+    const book = { genres: ['fantasy'], bookFormat: 'short-story' };
+
+    expect(fitsBook(fitting(['part']), book)).toBe(false);
+    expect(fitsBook(fitting(['book', 'part']), book)).toBe(true);
+    expect(fitsBook(fitting(['series']), book)).toBe(true);
+  });
+});
+
 describe('the shortlist', () => {
   const ids = (list: readonly { id: string }[]) => list.map((e) => e.id);
 
@@ -246,6 +280,21 @@ describe('the shortlist', () => {
       'heros-journey',
       'kishotenketsu',
     ]);
+  });
+
+  it('holds in full only Structures fitting per Part for a Book running its Structure in every Part', () => {
+    const { structures } = shortlist(
+      {
+        genres: ['mystery'],
+        bookFormat: 'novel',
+        structure: 'save-the-cat',
+        structureRuns: 'part',
+      },
+      [],
+    );
+
+    // None of the catalogue’s Structures fits per Part yet.
+    expect(ids(structures.full)).toEqual(['save-the-cat']);
   });
 
   it('holds in full what the Book follows, fitting or not', () => {

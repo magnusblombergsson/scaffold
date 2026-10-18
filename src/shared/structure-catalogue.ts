@@ -49,10 +49,13 @@ export type Beat = {
   opensPart?: true;
 };
 
+/** Where a Structure is used: over one Book, anew in every Part of one, or across a Series. */
+export type Across = 'book' | 'part' | 'series';
+
 /**
  * A named pattern of Beats. `fits` is information only: the Genres and
- * Formats it suits, and whether it is used per Book, across a Series, or
- * both.
+ * Formats it suits, and where it is used, any of per Book, per Part and
+ * across a Series (ADR 0017).
  */
 export type Structure = {
   id: string;
@@ -63,7 +66,7 @@ export type Structure = {
   fits: {
     genres: readonly GenreId[];
     formats: readonly FormatId[];
-    across: 'book' | 'series' | 'both';
+    across: readonly Across[];
   };
   beats: readonly Beat[];
 };
@@ -137,7 +140,7 @@ export const STRUCTURES: readonly Structure[] = [
     fits: {
       genres: GENRE_FICTION,
       formats: ['novelette', 'novella', 'novel'],
-      across: 'book',
+      across: ['book'],
     },
     beats: [
       {
@@ -230,7 +233,7 @@ export const STRUCTURES: readonly Structure[] = [
     fits: {
       genres: GENRE_FICTION,
       formats: ['novella', 'novel'],
-      across: 'both',
+      across: ['book', 'series'],
     },
     beats: [
       {
@@ -315,7 +318,7 @@ export const STRUCTURES: readonly Structure[] = [
     fits: {
       genres: GENRE_FICTION,
       formats: ['novella', 'novel'],
-      across: 'book',
+      across: ['book'],
     },
     beats: [
       {
@@ -438,7 +441,7 @@ export const STRUCTURES: readonly Structure[] = [
     fits: {
       genres: ['mystery', 'thriller', 'fantasy', 'science-fiction', 'other'],
       formats: ['novelette', 'novella', 'novel'],
-      across: 'book',
+      across: ['book'],
     },
     beats: [
       {
@@ -496,7 +499,7 @@ export const STRUCTURES: readonly Structure[] = [
     fits: {
       genres: ['fantasy', 'science-fiction', 'other'],
       formats: ['novella', 'novel'],
-      across: 'both',
+      across: ['book', 'series'],
     },
     beats: [
       {
@@ -597,7 +600,7 @@ export const STRUCTURES: readonly Structure[] = [
     fits: {
       genres: ['literary', 'horror', 'other'],
       formats: SHORT,
-      across: 'book',
+      across: ['book'],
     },
     beats: [
       {
@@ -666,7 +669,7 @@ export const STRUCTURES: readonly Structure[] = [
     fits: {
       genres: ['thriller', 'horror', 'crime', 'literary'],
       formats: SHORT,
-      across: 'book',
+      across: ['book'],
     },
     beats: [
       {
@@ -706,7 +709,7 @@ export const STRUCTURES: readonly Structure[] = [
     fits: {
       genres: ['literary', 'fantasy', 'other'],
       formats: SHORT,
-      across: 'book',
+      across: ['book'],
     },
     beats: [
       {
@@ -1040,25 +1043,34 @@ export function conventionOf(id: string): GenreConvention | undefined {
   return CONVENTIONS.find((c) => c.id === id);
 }
 
-/** The Genres, Format and Structure a Book has, as its header holds them. */
-type Fitted = Pick<BookDetails, 'genres' | 'bookFormat' | 'structure'>;
+/** The Genres, Format and Structure a Book has, and where it runs, as its header holds them. */
+type Fitted = Pick<
+  BookDetails,
+  'genres' | 'bookFormat' | 'structure' | 'structureRuns'
+>;
 
 /**
  * Whether `structure` fits a Book of `genres` and `format`: on any of its
- * Genres, and on its Format; a Genre or Format the catalogue doesn't know
- * counts as none.
+ * Genres; over the whole Book, on its Format, unless it fits per Part
+ * only; anew in every Part, when it fits per Part, the Book's Format
+ * playing no part, as the Structure describes one Part. A Genre or Format
+ * the catalogue doesn't know counts as none.
  */
 export function fitsBook(
   structure: Structure,
-  { genres, bookFormat }: Fitted,
+  { genres, bookFormat, structureRuns }: Fitted,
 ): boolean {
+  const { fits } = structure;
   const known = shownIds(genres, GENRES) as GenreId[];
   const genreFits =
-    known.length === 0 || known.some((g) => structure.fits.genres.includes(g));
+    known.length === 0 || known.some((g) => fits.genres.includes(g));
+  if (structureRuns === 'part')
+    return genreFits && fits.across.includes('part');
   const formatFits =
     !FORMATS.some((f) => f.id === bookFormat) ||
-    structure.fits.formats.includes(bookFormat as FormatId);
-  return genreFits && formatFits;
+    fits.formats.includes(bookFormat as FormatId);
+  const perPartOnly = fits.across.every((a) => a === 'part');
+  return genreFits && formatFits && !perPartOnly;
 }
 
 /**
@@ -1083,8 +1095,9 @@ export type Shortlisted<E> = { full: E[]; byName: E[] };
 /**
  * The catalogue as the app shortlists it for Plan (spec: Outline planner
  * §2), before any Model sees it. In full: the Structures fitting the Book's
- * Genres and Format, as `fitsBook` judges, whether they work per Book or
- * across a Series playing no part; the Genre conventions of its Genres;
+ * Genres and Format, and where its Structure runs, as `fitsBook` judges,
+ * whether they also work across a Series playing no part; the Genre
+ * conventions of its Genres;
  * what the Book follows; and any entry the Author named in `asked`, their
  * messages. The rest by name only. Each in catalogue order.
  */

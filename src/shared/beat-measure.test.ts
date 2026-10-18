@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Manuscript } from './project-types';
 import {
   followedBeats,
+  measureOf,
   sceneBeatsInWriting,
   sceneFalls,
   shownBeats,
@@ -9,34 +10,98 @@ import {
 
 describe('where each Scene falls', () => {
   it('is measured in planned words when every Scene has a Word target', () => {
-    const { measure, falls } = sceneFalls([
+    const { falls, ...measured } = sceneFalls([
       { id: 'a', wordTarget: 1000 },
       { id: 'b', wordTarget: 3000 },
       { id: 'c', wordTarget: 6000 },
     ]);
 
-    expect(measure).toBe('words');
+    expect(measured).toEqual({ within: 'book', measure: 'words' });
     expect(falls.get('a')).toEqual({ from: 0, to: 10 });
     expect(falls.get('b')).toEqual({ from: 10, to: 40 });
     expect(falls.get('c')).toEqual({ from: 40, to: 100 });
   });
 
   it('is measured by Scene order when any Scene lacks one, never a mix', () => {
-    const { measure, falls } = sceneFalls([
+    const { falls, ...measured } = sceneFalls([
       { id: 'a', wordTarget: 9000 },
       { id: 'b' },
       { id: 'c', wordTarget: 500 },
       { id: 'd' },
     ]);
 
-    expect(measure).toBe('order');
+    expect(measured).toEqual({ within: 'book', measure: 'order' });
     expect(falls.get('a')).toEqual({ from: 0, to: 25 });
     expect(falls.get('b')).toEqual({ from: 25, to: 50 });
     expect(falls.get('d')).toEqual({ from: 75, to: 100 });
   });
 
   it('is by order for a Book with no Scenes, which has none to place', () => {
-    expect(sceneFalls([])).toEqual({ measure: 'order', falls: new Map() });
+    expect(sceneFalls([])).toEqual({
+      within: 'book',
+      measure: 'order',
+      falls: new Map(),
+    });
+  });
+});
+
+describe('where each Scene falls when the Structure runs anew in every Part', () => {
+  it('is a share of its Part, each Part measured on its own: in planned words or by Scene order', () => {
+    const measured = sceneFalls(
+      [
+        { id: 'a', part: 'one', wordTarget: 1000 },
+        { id: 'b', part: 'one', wordTarget: 3000 },
+        { id: 'c', part: 'two', wordTarget: 2000 },
+        { id: 'd', part: 'two' },
+        { id: 'e', part: 'two', wordTarget: 500 },
+        { id: 'f', part: 'two' },
+      ],
+      'part',
+    );
+
+    expect(measured).toMatchObject({
+      within: 'part',
+      parts: [
+        { id: 'one', measure: 'words' },
+        { id: 'two', measure: 'order' },
+      ],
+    });
+    expect(measured.falls.get('a')).toEqual({ from: 0, to: 25 });
+    expect(measured.falls.get('b')).toEqual({ from: 25, to: 100 });
+    expect(measured.falls.get('c')).toEqual({ from: 0, to: 25 });
+    expect(measured.falls.get('f')).toEqual({ from: 75, to: 100 });
+  });
+
+  it('tells how each Scene is measured, as its Part is, and none for a Scene in no Part', () => {
+    const measured = sceneFalls(
+      [
+        { id: 'prologue' },
+        { id: 'a', part: 'one', wordTarget: 1000 },
+        { id: 'b', part: 'two' },
+      ],
+      'part',
+    );
+
+    expect(measureOf(measured, 'a')).toBe('words');
+    expect(measureOf(measured, 'b')).toBe('order');
+    expect(measureOf(measured, 'prologue')).toBeUndefined();
+  });
+
+  it('places no Scene of a Loose Chapter, which is in no Part', () => {
+    const { falls } = sceneFalls(
+      [{ id: 'prologue' }, { id: 'a', part: 'one' }, { id: 'b', part: 'one' }],
+      'part',
+    );
+
+    expect(falls.has('prologue')).toBe(false);
+    expect(falls.get('a')).toEqual({ from: 0, to: 50 });
+  });
+
+  it('is over the whole Book in a Book without Parts', () => {
+    const measured = sceneFalls([{ id: 'a' }, { id: 'b' }], 'part');
+
+    expect(measured).toMatchObject({ within: 'book', measure: 'order' });
+    expect(measured.falls.get('b')).toEqual({ from: 50, to: 100 });
   });
 });
 

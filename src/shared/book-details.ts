@@ -14,9 +14,10 @@ import {
 } from './structure-catalogue';
 
 // A Book's own details (spec: Outline planner §3): its Genres, Format,
-// Structure and Genre conventions, as the Manuscript holds them, and as a
-// Proposal of Plan's names and changes them (§4). An id this version of the
-// catalogue doesn't know, from a newer app, is kept and never shown (§11).
+// Structure, where that runs (ADR 0017), and Genre conventions, as the
+// Manuscript holds them, and as a Proposal of Plan's names and changes them
+// (§4). An id this version of the catalogue doesn't know, from a newer app,
+// is kept and never shown (§11).
 
 /** The details a Book has of its own, in the order the strip shows them. */
 export const BOOK_DETAIL_KEYS: readonly BookDetailKey[] = [
@@ -66,11 +67,20 @@ export function bookDetailsOf(
     ? manuscript.books.find((b) => b.id === book)
     : manuscript;
   const details: BookDetails = {};
-  for (const key of BOOK_DETAIL_KEYS) {
+  for (const key of [...BOOK_DETAIL_KEYS, 'structureRuns'] as const) {
     const value = holder?.[key];
     if (value !== undefined) Object.assign(details, { [key]: value });
   }
   return details;
+}
+
+/**
+ * Whether a Book's Structure `structure` may run anew in every Part (ADR
+ * 0017): one of the catalogue's form, known to this version or not; never
+ * none chosen yet, nor No set Structure, which have no Beats to repeat.
+ */
+export function mayRunInEveryPart(structure: string | undefined): boolean {
+  return structure !== undefined && structure !== NO_STRUCTURE;
 }
 
 /**

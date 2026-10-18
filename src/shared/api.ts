@@ -17,6 +17,7 @@ import type {
   Visibility,
   BookDetailKey,
   BookDetails,
+  StructureRuns,
 } from './project-types';
 import type {
   ExportBook,
@@ -576,6 +577,14 @@ export interface ProjectApi {
     key: K,
     value: BookDetails[K] | null,
   ): Promise<void>;
+  /**
+   * Sets where the Structure of a Book, or with `project` the one Book of a
+   * Project without Books, runs: over the whole Book, or anew in every
+   * Part; refused while none is chosen, or with No set Structure. The
+   * Scenes' Beats stay as they are; there is no undo. The Manuscript
+   * showing it follows as a `unitDetailsChanged`.
+   */
+  setStructureRuns(bookId: string, runs: StructureRuns): Promise<void>;
   /**
    * Marks a Scene as carrying a Beat, qualified as in
    * `save-the-cat/midpoint`, or takes the mark away, its other marks kept;
@@ -1371,6 +1380,7 @@ export const projectMethods = {
   setStatus: 'invoke',
   setWordTarget: 'invoke',
   setBookDetail: 'invoke',
+  setStructureRuns: 'invoke',
   setBeat: 'invoke',
   editStatus: 'invoke',
   statusUses: 'invoke',
