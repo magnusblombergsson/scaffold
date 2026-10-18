@@ -22,6 +22,7 @@ import {
   type InterviewFocus,
   type Mode,
   type PlanAsk,
+  UNREAD_SAYS,
 } from '../shared/conversation';
 import {
   FINDING_LABELS,
@@ -1209,6 +1210,7 @@ function Message({
 }) {
   const { role, text, model, provider, interrupted, unreadable } = message;
   const { cutShort, saw, findings, planFindings, proposals } = message;
+  const { unreadLinks } = message;
   const used = model && (
     <>
       <span className="message-model" aria-label="Model">
@@ -1285,6 +1287,11 @@ function Message({
             : `${unreadable} Proposals couldn’t be read`}
         </p>
       )}
+      {unreadLinks?.map(({ url, reason }) => (
+        <p key={url} className="message-note">
+          Couldn’t read {url}: {UNREAD_SAYS[reason]}
+        </p>
+      ))}
       {saw ? (
         <details className="message-saw">
           <summary>What the Assistant saw{used}</summary>

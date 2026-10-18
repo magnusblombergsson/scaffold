@@ -85,3 +85,5 @@ These leaked and stay Untested: Kimi K2.5, Sonnet 5 through OpenRouter, and, in 
 The Fact Entry type ([#357](https://github.com/magnusblombergsson/scaffold/issues/357)) changed the fingerprint again: Facts as a type to propose, their Applies to, Sources and Captured as fields, never Checked; the Interview's checklist; and a contradiction with a Fact not yet Checked saying so, in a Review and a Plan check. It took every Model off the list until its eval is run on the new prompts.
 
 Research ([#358](https://github.com/magnusblombergsson/scaffold/issues/358)) changed the fingerprint again: a Mode prompt of its own, with its citation rules and its Proposals rule, which proposes only Facts. It took every Model off the list until its eval is run on the new prompts. The eval asks in no Research Conversation yet; its cases are a separate issue.
+
+Links in Research ([#359](https://github.com/magnusblombergsson/scaffold/issues/359)) changed the fingerprint again: the pages the Author links, which the tool reads, are sources to cite by their link, and a page it couldn't read is none. Every Model stays off the list until its eval is run on the new prompts.

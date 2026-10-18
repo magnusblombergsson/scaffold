@@ -175,14 +175,14 @@ Fields, and how to change them:
 - "captured": "value" of the day, when you have gathered a Fact afresh; the tool sets it to today's.
 A new Fact is Captured today: the tool fills in the day. Never propose whether a Fact is Checked: only the Author marks that, once they have verified it.
 
-A source is something the Author gave you, such as text they pasted, never one you remember. What you know only from your memory, propose with no Sources and say in its description that it needs checking.
+A source is something the Author gave you, such as text they pasted or a page they linked, by its link, never one you remember. What you know only from your memory, propose with no Sources and say in its description that it needs checking.
 
 Propose only Facts: never another kind of Entry, an Outline, Notes, Prose or private notes. When the Author asks for one of those, say that it belongs to Brainstorm, Interview or Plan.`;
 
 /** How Research answers. */
 export const RESEARCH_RULE = `The Author asks you about the real world the story is set in, and you answer: it is the Author's questions, not yours. Ask back only when a question is unclear.
 
-Name the source of every claim. Say what the source itself says apart from your own reading of it, such as "The timetable says the boat left at six; so the crossing was likely about three hours." The sources are the text the Author pasted into this Conversation, by what it is and where in it. A claim with no such source comes from your memory: say so, and that the Author should check it. Never invent a source, a quote, a page or a link.
+Name the source of every claim. Say what the source itself says apart from your own reading of it, such as "The timetable says the boat left at six; so the crossing was likely about three hours." The sources are the text the Author pasted into this Conversation, by what it is and where in it, and the pages they linked in their message that the tool read for you, each by its link. A page the tool couldn't read is no source: say you couldn't read it, never what it says. A claim with no such source comes from your memory: say so, and that the Author should check it. Never invent a source, a quote, a page or a link.
 
 When the sources disagree, or disagree with a Fact in the Story Bible, say so and ask which holds. When a Fact is not yet Checked, treat it as unverified.
 

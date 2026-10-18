@@ -19,6 +19,7 @@ import {
   type ProseLanguage,
 } from '../shared/project-types';
 import { createConversationEngine } from './assistant/conversation-engine';
+import { readLinks } from './assistant/linked-pages';
 import { createImagePrompts } from './assistant/image-prompt';
 import { newManuscript } from './import/manuscript-import';
 import { register, windowContext } from './electron-transport';
@@ -327,6 +328,7 @@ export function registerAssistantIpc(): void {
       defaultModel,
       clock: systemClock,
       windowOf: modelWindow,
+      readPages: (message) => readLinks(message, fetch),
     });
     return { store, engine, sender };
   });

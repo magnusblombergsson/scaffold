@@ -3,6 +3,7 @@ import {
   isInterviewFocus,
   MODES,
   PLAN_ASKS,
+  UNREAD_REASONS,
   type PlanAsk,
   type BringIn,
   type Compaction,
@@ -14,6 +15,8 @@ import {
   type InterviewFocus,
   type Mode,
   type Saw,
+  type UnreadLink,
+  type UnreadReason,
   type UnusedSummary,
 } from '../../shared/conversation';
 import {
@@ -1415,7 +1418,7 @@ function messageOf(event: MessageEvent): ConversationMessage {
   const { role, text, command, focus, at, model, usage, interrupted, saw } =
     event;
   const { provider, cost, cutShort, unreadable, findings, ask } = event;
-  const { planFindings } = event;
+  const { planFindings, unreadLinks } = event;
   return {
     role,
     text,
@@ -1430,6 +1433,9 @@ function messageOf(event: MessageEvent): ConversationMessage {
     ...(interrupted === true && { interrupted }),
     ...(interrupted === true && cutShort === true && { cutShort }),
     ...(isCount(unreadable) && { unreadable }),
+    ...(Array.isArray(unreadLinks) &&
+      unreadLinks.length > 0 &&
+      unreadLinks.every(isUnreadLink) && { unreadLinks }),
     ...(isSaw(saw) && { saw }),
     ...(Array.isArray(findings) && findings.every(isFinding) && { findings }),
     ...(Array.isArray(planFindings) &&
@@ -1527,6 +1533,9 @@ function isSaw(value: unknown): value is Saw {
   const saw = value as Partial<Saw> | null | undefined;
   return (
     (saw?.summarised === undefined || typeof saw.summarised === 'number') &&
+    (saw?.pages === undefined ||
+      (Array.isArray(saw.pages) &&
+        saw.pages.every((url) => typeof url === 'string'))) &&
     Array.isArray(saw?.entries) &&
     saw.entries.every((id) => typeof id === 'string') &&
     Array.isArray(saw.units) &&
@@ -1536,6 +1545,14 @@ function isSaw(value: unknown): value is Saw {
         typeof unit.id === 'string',
     ) &&
     typeof saw.messages === 'number'
+  );
+}
+
+function isUnreadLink(value: unknown): value is UnreadLink {
+  const link = value as Partial<UnreadLink> | null | undefined;
+  return (
+    typeof link?.url === 'string' &&
+    UNREAD_REASONS.includes(link.reason as UnreadReason)
   );
 }
 
