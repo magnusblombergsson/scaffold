@@ -24,6 +24,14 @@ export function useTempDir(): () => string {
   return () => dir;
 }
 
+/** Types `count` lines, `<label> line 1` and on, into the focused editor. */
+export async function typeLines(page: Page, label: string, count: number) {
+  for (let line = 1; line <= count; line++) {
+    if (line > 1) await page.keyboard.press('Enter');
+    await page.keyboard.type(`${label} line ${line}`);
+  }
+}
+
 export type LaunchOptions = {
   /** Starts as on a new computer, with the welcome; otherwise it was skipped. */
   firstRun?: boolean;

@@ -1,7 +1,7 @@
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { answerDialogs, launch, useTempDir } from './app';
+import { answerDialogs, launch, typeLines, useTempDir } from './app';
 
 const tempDir = useTempDir();
 
@@ -119,4 +119,69 @@ test('Scenes, Chapters and the Project have Outlines and Notes, each with its ow
     'Check the weather.',
   );
   await second.close();
+});
+
+/** How far an editor is scrolled, and whether it has more than it shows. */
+const scrollOf = (field: Locator) =>
+  field.evaluate((el) => ({
+    top: el.scrollTop,
+    overflows: el.scrollHeight > el.clientHeight,
+  }));
+
+test('beside the Prose, a long Outline and long Notes each scroll on their own', async () => {
+  const projectPath = path.join(tempDir(), 'My Novel');
+  const app = await launch(tempDir());
+  await answerDialogs(app, projectPath);
+  const page = await app.firstWindow();
+  await button(page, 'New Project…').click();
+  await expect(page.getByLabel('Prose')).toBeFocused();
+  const outline = page.getByLabel('Outline', { exact: true });
+  const notes = page.getByLabel('Notes', { exact: true });
+
+  // Typing past the cap keeps the cursor in view.
+  await outline.click();
+  await typeLines(page, 'Outline', 40);
+  await expect(outline.locator('p').last()).toBeInViewport();
+  await notes.click();
+  await typeLines(page, 'Notes', 40);
+  await expect(notes.locator('p').last()).toBeInViewport();
+
+  // Each field is at most min(30vh, 18em) tall, and scrolls.
+  for (const field of [outline, notes]) {
+    const { height, cap } = await field.evaluate((el) => {
+      const style = getComputedStyle(el);
+      return {
+        height:
+          el.clientHeight -
+          parseFloat(style.paddingTop) -
+          parseFloat(style.paddingBottom),
+        cap: Math.min(
+          window.innerHeight * 0.3,
+          18 * parseFloat(style.fontSize),
+        ),
+      };
+    });
+    expect(height).toBeLessThanOrEqual(cap + 1);
+    expect((await scrollOf(field)).overflows).toBe(true);
+  }
+  // Their headings stay put.
+  await expect(
+    page.locator('.outline-notes h3').getByText('Outline'),
+  ).toBeInViewport();
+
+  // Scrolling the Notes leaves the Outline where it is.
+  const outlineTop = (await scrollOf(outline)).top;
+  expect(outlineTop).toBeGreaterThan(0);
+  await notes.hover();
+  await page.mouse.wheel(0, -5000);
+  await expect.poll(async () => (await scrollOf(notes)).top).toBe(0);
+  expect((await scrollOf(outline)).top).toBe(outlineTop);
+
+  // Short ones don't scroll.
+  await menu(page, 'Chapter actions: Chapter 1', 'New Scene');
+  await outline.click();
+  await page.keyboard.type('- The train arrives');
+  for (const field of [outline, notes])
+    expect((await scrollOf(field)).overflows).toBe(false);
+  await app.close();
 });

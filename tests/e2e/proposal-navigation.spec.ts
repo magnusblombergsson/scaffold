@@ -6,6 +6,7 @@ import {
   answerDialogs,
   launch,
   roomButton,
+  typeLines,
   useTempDir,
 } from './app';
 import { useFakeAnthropic } from './fake-anthropic';
@@ -166,6 +167,48 @@ test('in Writing, a Proposal’s title goes to its target, focused, its ghost hi
       .getByLabel('Outline', { exact: true }),
   ).toBeFocused();
   await expect(reply).toBeVisible();
+  await app.close();
+});
+
+test('going to a long Outline scrolled away from its cursor shows the cursor', async () => {
+  const { app, page, assistant, sceneId } = await start();
+  await roomButton(page, 'Writing').click();
+  const outline = page.getByLabel('Outline', { exact: true });
+  await outline.click();
+  await typeLines(page, 'Outline', 40);
+  // The cursor at the start; the Outline is scrolled down, away from it.
+  await page.keyboard.press('ControlOrMeta+Home');
+  await page.getByLabel('Prose').click();
+  await outline.hover();
+  await page.mouse.wheel(0, 5000);
+  const cursorLine = outline.getByText('Outline line 1', { exact: true });
+  await expect(cursorLine).not.toBeInViewport();
+
+  anthropic.calls.push({
+    reply: [
+      'One more.\n\n',
+      block({ outline: sceneId, append: '- She waits.' }),
+    ],
+  });
+  await assistant.getByRole('textbox', { name: 'Message' }).fill('Ideas?');
+  await assistant.getByRole('button', { name: 'Send' }).click();
+  const title = assistant
+    .getByRole('article', { name: 'Assistant' })
+    .getByRole('button', { name: 'Scene “Scene 1” › Outline' });
+  await title.click();
+  await expect(outline).toBeFocused();
+  await expect(cursorLine).toBeInViewport();
+
+  // The cursor midway, the Outline scrolled to its end.
+  for (let line = 1; line < 20; line++) await page.keyboard.press('ArrowDown');
+  await page.getByLabel('Prose').click();
+  await outline.hover();
+  await page.mouse.wheel(0, 5000);
+  const midLine = outline.getByText('Outline line 20', { exact: true });
+  await expect(midLine).not.toBeInViewport();
+  await title.click();
+  await expect(outline).toBeFocused();
+  await expect(midLine).toBeInViewport();
   await app.close();
 });
 
