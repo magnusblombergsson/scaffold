@@ -75,7 +75,12 @@ import {
 } from '../../shared/beat-measure';
 import { bookDetailsId, formatBand } from '../../shared/book-details';
 import { wordTargetText } from '../../shared/word-target';
-import { tokens, type MeasuredSize } from '../../shared/request-size';
+import {
+  tokens,
+  type MeasuredSize,
+  type SizePart,
+  type WayOut,
+} from '../../shared/request-size';
 import {
   beatName,
   conventionOf,
@@ -129,7 +134,7 @@ export type ContextRequest = (
  * blocks, then the Conversation's earlier messages and the new one.
  * Cache breakpoints follow the skeleton and the last block before the new
  * message. `saw` lists what was sent, by id. In a Series, `book` is the Book
- * the turn is about, by id, as of which the Entries were sent. A Plan's
+ * the turn is about, by id, as of which the Entries were sent. Every
  * request comes with its `size` as measured, in tokens.
  */
 export type AssistantContext = {
@@ -137,7 +142,7 @@ export type AssistantContext = {
   messages: PromptMessage[];
   saw: Saw;
   book?: string;
-  size?: MeasuredSize;
+  size: MeasuredSize;
 };
 
 export async function buildContext(
@@ -183,11 +188,11 @@ export async function buildContext(
     { text: bible.text },
     { text: skeleton.text, cache: true },
   ];
-  if (request.mode === 'interview') {
-    system.push({
-      text: interviewFocusText(view, manuscript, request.focus, lens),
-    });
-  }
+  const interview =
+    request.mode === 'interview'
+      ? interviewFocusText(view, manuscript, request.focus, lens)
+      : undefined;
+  if (interview !== undefined) system.push({ text: interview });
   /** What of the system prompt is the plan, which narrowing the focus shrinks. */
   const planned: string[] = [skeleton.text];
   const pushPlanned = (text: string) => {
@@ -210,7 +215,8 @@ export async function buildContext(
   if (focus.length > 0) pushPlanned(focusBlock(focus));
   // Re-sent each turn, and never part of the Plan's own summary.
   if (brought) system.push({ text: brought });
-  if (summary) system.push({ text: summaryBlock(summary.text, covered) });
+  const summarised = summary ? summaryBlock(summary.text, covered) : '';
+  if (summary) system.push({ text: summarised });
   // Every Review starts fresh, without the Findings of earlier ones.
   const reviewing =
     request.mode === 'writing' && request.command !== 'question';
@@ -235,24 +241,103 @@ export async function buildContext(
       }),
     },
     ...(book !== undefined && { book }),
-    ...(request.mode === 'plan' && {
-      size: {
-        request: tokens(
-          [
-            ...system.map((b) => b.text),
-            ...messages.map((m) => m.content),
-          ].join(''),
+    size: {
+      request: tokens(
+        [...system.map((b) => b.text), ...messages.map((m) => m.content)].join(
+          '',
         ),
-        plan: tokens(planned.join('')),
-        storyBible: tokens(bible.text),
-        broughtIn: (request.broughtIn ?? []).map((b) => ({
-          id: b.conversation.id,
-          title: b.conversation.title,
-          size: tokens(broughtInText(b)),
-        })),
-      },
-    }),
+      ),
+      ...(request.mode === 'plan'
+        ? planSize(request.broughtIn ?? [], planned, bible.text)
+        : modeSize(request, {
+            storyBible: bible,
+            skeleton: skeleton.text,
+            conversation: [summarised, ...messages.map((m) => m.content)],
+            interview,
+            focus,
+          })),
+    },
   };
+}
+
+/** A Plan's request as the Author is told of it: the plan, the Story Bible and each Brainstorm brought in. */
+function planSize(
+  broughtIn: BroughtIn[],
+  planned: string[],
+  storyBible: string,
+): Omit<MeasuredSize, 'request'> {
+  return {
+    parts: [
+      { label: 'The plan', size: tokens(planned.join('')) },
+      { label: STORY_BIBLE, size: tokens(storyBible) },
+    ],
+    broughtIn: broughtIn.map((b) => ({
+      id: b.conversation.id,
+      title: b.conversation.title,
+      size: tokens(broughtInText(b)),
+    })),
+    ways: [
+      ...(broughtIn.length > 0 ? ['remove-brought-in' as const] : []),
+      'narrow-plan-focus',
+    ],
+  };
+}
+
+/**
+ * Another Mode's request as the Author is told of it: the Story Bible, the
+ * Outline skeleton and the Conversation, its summary in it; in an
+ * Interview, its focus, with the Entries it is about; in Writing, the Prose
+ * in focus, each @-mentioned unit on its own. The ways to make room are
+ * those that apply: a new Conversation only when it is the biggest part.
+ */
+function modeSize(
+  request: Exclude<ContextRequest, { mode: 'plan' }>,
+  sent: {
+    storyBible: { text: string; focused: string };
+    skeleton: string;
+    conversation: string[];
+    interview: string | undefined;
+    focus: UnitInFocus[];
+  },
+): Omit<MeasuredSize, 'request'> {
+  const focused = tokens(sent.storyBible.focused);
+  const inFocus = new Map<string, string[]>();
+  if (sent.interview !== undefined) {
+    inFocus.set(INTERVIEW_FOCUS, [sent.interview]);
+  }
+  for (const unit of sent.focus) {
+    inFocus.set(unit.part, [
+      ...(inFocus.get(unit.part) ?? []),
+      unitBlock(unit),
+    ]);
+  }
+  const conversation = tokens(sent.conversation.join(''));
+  const parts: SizePart[] = [
+    {
+      label: STORY_BIBLE,
+      size: Math.max(0, tokens(sent.storyBible.text) - focused),
+    },
+    { label: 'The Outline skeleton', size: tokens(sent.skeleton) },
+    { label: 'The Conversation', size: conversation },
+    ...[...inFocus].map(([label, texts]) => ({
+      label,
+      size: tokens(texts.join('')) + (label === INTERVIEW_FOCUS ? focused : 0),
+    })),
+  ];
+  const ways: WayOut[] = [];
+  if (parts.some((p) => p.label.startsWith(MENTIONED))) {
+    ways.push('remove-mention');
+  }
+  if (request.mode === 'writing' && request.command === 'review-chapter') {
+    ways.push('review-scene');
+  }
+  if (request.mode === 'interview' && request.focus.kind !== 'open') {
+    ways.push('narrow-interview-focus');
+  }
+  if (parts.every((p) => p.size <= conversation)) {
+    ways.push('new-conversation');
+  }
+  return { parts, broughtIn: [], ways };
 }
 
 /** The Story Bible as the Assistant sees it as of `book`, or of the whole Project without one. */
@@ -384,7 +469,8 @@ function acceptedMention(proposal: ProposalView): string {
  * is as `lens` sees it, as of the Book the turn is about: a mention is by
  * any name or alias it has had up to it, and one that first appears in a
  * later Book is never sent. Where the Assistant
- * may `relate` Entries, it is told how, once there are two.
+ * may `relate` Entries, it is told how, once there are two. What of it is
+ * the Entries an Interview is about is `focused`.
  */
 async function storyBible(
   view: AssistantView,
@@ -392,7 +478,7 @@ async function storyBible(
   interview: InterviewFocus | null,
   lens: StoryBibleLens,
   relate: boolean,
-): Promise<{ text: string; ids: string[] }> {
+): Promise<{ text: string; ids: string[]; focused: string }> {
   const summaries = lens.entries;
   const mentioned = mentionMatcher(
     summaries
@@ -417,17 +503,17 @@ async function storyBible(
   const fields = view.customFields();
   const heading =
     'The Story Bible: what the Author has written down about the story, as far as it concerns this turn.';
+  const sentTexts = entries.map((entry) => entryText(entry, fields));
   return {
     text: [
       heading,
       ...customFieldsText(fields),
-      ...(entries.length === 0
-        ? ['(No Entries for this turn.)']
-        : entries.map((entry) => entryText(entry, fields))),
+      ...(entries.length === 0 ? ['(No Entries for this turn.)'] : sentTexts),
       ...relationsText(lens, entries),
       ...(relate && entries.length > 1 ? [RELATION_PROPOSALS] : []),
     ].join('\n\n'),
     ids: seen.map((e) => e.id),
+    focused: sentTexts.filter((_, i) => inFocus(seen[i])).join('\n\n'),
   };
 }
 
@@ -947,8 +1033,23 @@ function beatLine(source: { id: string }, beat: Beat): string {
   }${beat.opensPart ? '; opens a Part' : ''}.`;
 }
 
-/** One unit's text in focus, under a heading that names it. */
-type UnitInFocus = { unit: SawUnit; heading: string; text: string };
+/**
+ * One unit's text in focus, under a heading that names it, and the part of
+ * the request it counts in when the Author is told what is biggest.
+ */
+type UnitInFocus = {
+  unit: SawUnit;
+  heading: string;
+  text: string;
+  part: string;
+};
+
+/** The parts of a request, as the Author is told of them. */
+const STORY_BIBLE = 'The Story Bible';
+const SCENE_PROSE = 'This Scene’s Prose';
+const CHAPTER_PROSE = 'This Chapter’s Prose';
+const INTERVIEW_FOCUS = 'The Interview focus';
+const MENTIONED = '@-mentioned: ';
 
 /** The units in focus for this turn, per Mode and command, each once. */
 async function inFocus(
@@ -959,12 +1060,14 @@ async function inFocus(
   const units = new Map<string, UnitInFocus>();
   const where = placesOf(manuscript);
   const label = partName(manuscript.partLabel);
+  /** The part what is added now counts in: that of what first brought it. */
+  let countsIn = '';
 
   async function add(unit: SawUnit, heading: string): Promise<void> {
     const key = unitKey(unit);
     if (units.has(key)) return;
     const text = unitText(await view.read(unit));
-    units.set(key, { unit, heading, text });
+    units.set(key, { unit, heading, text, part: countsIn });
   }
   /** The Outline of the Part `chapter` is in, if any. */
   async function partOutline(chapter: ManuscriptChapter): Promise<void> {
@@ -1056,6 +1159,7 @@ async function inFocus(
 
   if (request.mode === 'interview') {
     const { focus } = request;
+    countsIn = INTERVIEW_FOCUS;
     if (focus.kind === 'book') await book(focus.id);
     if (focus.kind === 'scene') await scene(focus.id, false);
     if (focus.kind === 'chapter') await chapter(focus.id, false);
@@ -1070,8 +1174,10 @@ async function inFocus(
     const { command, sceneId } = request;
     if (command === 'review-chapter') {
       const id = sceneId && where.scenes.get(sceneId)?.chapter?.id;
+      countsIn = CHAPTER_PROSE;
       if (id) await chapter(id, true);
     } else if (sceneId) {
+      countsIn = SCENE_PROSE;
       await scene(sceneId, true);
     }
     if (command === 'question') {
@@ -1083,10 +1189,20 @@ async function inFocus(
       if (previous?.command === 'review-chapter') {
         const reviewed = previous.focus[0];
         const id = reviewed && where.scenes.get(reviewed)?.chapter?.id;
+        // The Scene in focus counts in that Chapter when it is in it.
+        if (id && sceneId && where.scenes.get(sceneId)?.chapter?.id === id) {
+          for (const unit of units.values()) unit.part = CHAPTER_PROSE;
+        }
+        countsIn = CHAPTER_PROSE;
         if (id) await chapter(id, true);
       }
       const asked = request.messages.at(-1)?.text ?? '';
       for (const id of atMentioned(asked, manuscript)) {
+        const title =
+          where.parts.get(id)?.title ??
+          where.chapters.get(id)?.title ??
+          where.scenes.get(id)?.scene.title;
+        countsIn = `${MENTIONED}“${title}”`;
         if (where.parts.has(id)) await part(id);
         else if (where.chapters.has(id)) await chapter(id, true);
         else await scene(id, true);
@@ -1209,10 +1325,13 @@ function focusBlock(units: UnitInFocus[]): string {
       : notes
         ? 'In focus: the Author’s own Outlines and Notes. Quote them; never rewrite them.'
         : 'In focus: the Author’s own Outlines. Quote them; never rewrite them.',
-    ...units.map(
-      ({ heading, text }) => `## ${heading}\n${text.trim() || '(Empty.)'}`,
-    ),
+    ...units.map(unitBlock),
   ].join('\n\n');
+}
+
+/** A unit in focus as sent, under its heading. */
+function unitBlock({ heading, text }: UnitInFocus): string {
+  return `## ${heading}\n${text.trim() || '(Empty.)'}`;
 }
 
 type Places = {

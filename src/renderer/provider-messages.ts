@@ -6,7 +6,7 @@ import {
   type ProviderId,
   type ProviderStatus,
 } from '../shared/models';
-import type { RequestSize } from '../shared/request-size';
+import type { RequestSize, WayOut } from '../shared/request-size';
 import { roughTokens } from '../shared/usage';
 
 /** What to tell the Author once a Provider they entered was checked. */
@@ -80,21 +80,33 @@ export function failureMessage(
       return model.provider === 'lmstudio'
         ? `LM Studio isn't running at ${hostOf(provider.address)}. Start its server, then retry, or choose another Model.`
         : `Can't reach ${name}. Check the connection, then retry, or choose another Model.`;
-    // Outside Plan, a request past the window is told as any other failure.
+    // Told with its sizes when the request was measured, as it always is.
     case 'context':
+      return `${name} refused this request as too big for its window. Choose another Model.`;
     case 'other':
       return "The Assistant couldn't answer. Retry, or choose another Model.";
   }
 }
 
-/** Why a Plan's request wasn't answered, what is biggest in it, then the ways out. */
+/** Why a request wasn't answered, what is biggest in it, then the ways out. */
 export type TooBigMessage = { lead: string; parts: string[]; after: string[] };
 
+/** Each way to make room, as the Author is told it. */
+const WAYS_OUT: Record<WayOut, string> = {
+  'remove-brought-in': 'remove a brought-in Brainstorm',
+  'narrow-plan-focus': 'narrow the focus to a Part or Chapter',
+  'remove-mention': 'remove an @-mention',
+  'review-scene': 'review a Scene instead of the whole Chapter',
+  'narrow-interview-focus': 'narrow the Interview focus',
+  'new-conversation': 'start a new Conversation',
+};
+
 /**
- * What the Author is told when a Plan's request is too big for `model`,
- * named `name` (spec: Outline planner §9): as measured before sending,
- * or as the Provider refused it; what it is made of, biggest first; and
- * the ways to make room. Nothing is ever trimmed to fit.
+ * What the Author is told when a request is too big for `model`, named
+ * `name` (spec: Outline planner §9), in any Mode: as measured before
+ * sending, or as the Provider refused it; what it is made of, as its Mode
+ * names it, biggest first; and the ways to make room that apply to it.
+ * Nothing is ever trimmed to fit.
  */
 export function tooBigMessage(
   size: RequestSize,
@@ -106,8 +118,7 @@ export function tooBigMessage(
       ? `${name} refused this request as too big for its window: ${roughTokens(size.request)}.`
       : `This request is too big for ${name}, so nothing was sent: ${roughTokens(size.request + size.reply)} with room for the reply, and its window holds ${roughTokens(size.window)}.`;
   const parts = [
-    { label: 'The plan', size: size.plan },
-    { label: 'The Story Bible', size: size.storyBible },
+    ...size.parts,
     ...size.broughtIn.map((b) => ({
       label: `Brought in: “${b.title}”`,
       size: b.size,
@@ -115,10 +126,10 @@ export function tooBigMessage(
   ]
     .sort((a, b) => b.size - a.size)
     .map((part) => `${part.label}, ${roughTokens(part.size)}`);
+  const ways = size.ways.map((way) => WAYS_OUT[way]);
   const waysOut = [
-    ...(size.broughtIn.length > 0 ? ['remove a brought-in Brainstorm'] : []),
-    'narrow the focus to a Part or Chapter',
-    'or choose another Model',
+    ...ways,
+    ways.length > 0 ? 'or choose another Model' : 'choose another Model',
   ];
   return {
     lead,

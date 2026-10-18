@@ -25,6 +25,23 @@ export const DEFAULT_COMPACTION: CompactionPolicy = {
   keep: 10_000,
 };
 
+/**
+ * When to compact on a Model whose window holds `contextWindow` tokens: as
+ * by default, but past a quarter of a small window, keeping a quarter of
+ * that; by default when the window is unknown.
+ */
+export function compactionFor(contextWindow: number | null): CompactionPolicy {
+  if (contextWindow === null) return DEFAULT_COMPACTION;
+  const compactAt = Math.min(
+    DEFAULT_COMPACTION.compactAt,
+    Math.floor(contextWindow / 4),
+  );
+  return {
+    compactAt,
+    keep: Math.min(DEFAULT_COMPACTION.keep, Math.floor(compactAt / 4)),
+  };
+}
+
 /** About how many tokens `messages` are as sent; a reply cut short isn't. */
 function sentTokens(messages: ConversationMessage[]): number {
   return messages

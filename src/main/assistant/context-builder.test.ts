@@ -2318,3 +2318,209 @@ Holds Prose`,
     });
   });
 });
+
+describe('measuring the request', () => {
+  /** About 10k tokens of text, at some 4 characters each. */
+  const tenK = 'The sea came in. '.repeat(40_000 / 17);
+  /** Each part of a context's size by name. */
+  const partsOf = (context: Awaited<ReturnType<typeof buildContext>>) =>
+    Object.fromEntries(context.size!.parts.map((p) => [p.label, p.size]));
+
+  it('measures a Brainstorm: the Story Bible, the Outline skeleton and the Conversation, its summary in it', async () => {
+    const { view } = await fixture();
+
+    const context = await buildContext(view, {
+      mode: 'brainstorm',
+      messages: [
+        message('author', 'Old.'),
+        message('assistant', 'Older.'),
+        message('author', tenK),
+      ],
+      summary: { text: tenK, covers: 2 },
+    });
+
+    const parts = partsOf(context);
+    expect(Object.keys(parts)).toEqual([
+      'The Story Bible',
+      'The Outline skeleton',
+      'The Conversation',
+    ]);
+    // The summary and the message sent, some 10k tokens each.
+    expect(parts['The Conversation']).toBeGreaterThan(20_000);
+    expect(parts['The Conversation']).toBeLessThan(20_200);
+    expect(parts['The Story Bible']).toBeGreaterThan(0);
+    expect(parts['The Outline skeleton']).toBeGreaterThan(0);
+    expect(context.size!.request).toBeGreaterThan(
+      parts['The Conversation'] + parts['The Story Bible'],
+    );
+    expect(context.size!.broughtIn).toEqual([]);
+    // The Conversation is biggest, so a new one makes room.
+    expect(context.size!.ways).toEqual(['new-conversation']);
+  });
+
+  it('offers no new Conversation when the Conversation isn’t the biggest part', async () => {
+    const { store, view, scenes } = await fixture();
+    await store.write(
+      { kind: 'scene', id: scenes.harbour },
+      { id: scenes.harbour, markdown: tenK },
+    );
+
+    const context = await buildContext(view, {
+      mode: 'writing',
+      command: 'question',
+      sceneId: scenes.harbour,
+      messages: [message('author', 'Is it slow?')],
+    });
+
+    expect(partsOf(context)['This Scene’s Prose']).toBeGreaterThan(10_000);
+    expect(context.size!.ways).toEqual([]);
+  });
+
+  it('names a Chapter Review’s Prose as the Chapter’s, and offers to review a Scene instead', async () => {
+    const { store, view, scenes } = await fixture();
+    await store.write(
+      { kind: 'scene', id: scenes.harbour },
+      { id: scenes.harbour, markdown: tenK },
+    );
+
+    const context = await buildContext(view, {
+      mode: 'writing',
+      command: 'review-chapter',
+      sceneId: scenes.letter,
+      messages: [message('author', 'Review Chapter “Arrival”')],
+    });
+
+    const parts = partsOf(context);
+    expect(Object.keys(parts)).toEqual([
+      'The Story Bible',
+      'The Outline skeleton',
+      'The Conversation',
+      'This Chapter’s Prose',
+    ]);
+    // “Harbour”, with the Chapter’s other Scene and the Outlines and Notes.
+    expect(parts['This Chapter’s Prose']).toBeGreaterThan(10_000);
+    expect(parts['This Chapter’s Prose']).toBeLessThan(10_200);
+    expect(context.size!.ways).toEqual(['review-scene']);
+  });
+
+  it('names the Chapter reviewed for a question right after, without offering a Scene Review', async () => {
+    const { view, scenes } = await fixture();
+    const reviewed: ConversationMessage = {
+      ...message('author', 'Review Chapter “Arrival”'),
+      command: 'review-chapter',
+      focus: [scenes.letter],
+    };
+
+    const context = await buildContext(view, {
+      mode: 'writing',
+      command: 'question',
+      sceneId: scenes.wreck,
+      messages: [
+        reviewed,
+        message('assistant', 'Findings.'),
+        message('author', 'Why?'),
+      ],
+    });
+
+    const parts = partsOf(context);
+    expect(Object.keys(parts)).toContain('This Scene’s Prose');
+    expect(Object.keys(parts)).toContain('This Chapter’s Prose');
+    expect(context.size!.ways).not.toContain('review-scene');
+
+    // A Scene in the Chapter reviewed counts in the Chapter’s Prose.
+    const within = await buildContext(view, {
+      mode: 'writing',
+      command: 'question',
+      sceneId: scenes.letter,
+      messages: [
+        reviewed,
+        message('assistant', 'Findings.'),
+        message('author', 'Why?'),
+      ],
+    });
+    expect(Object.keys(partsOf(within))).toEqual([
+      'The Story Bible',
+      'The Outline skeleton',
+      'The Conversation',
+      'This Chapter’s Prose',
+    ]);
+  });
+
+  it('gives each @-mentioned Part, Chapter or Scene its own line, and offers to remove one', async () => {
+    const { store, view, scenes } = await fixture();
+    await store.write(
+      { kind: 'scene', id: scenes.wreck },
+      { id: scenes.wreck, markdown: tenK },
+    );
+
+    const context = await buildContext(view, {
+      mode: 'writing',
+      command: 'question',
+      sceneId: scenes.harbour,
+      messages: [message('author', 'Does it echo @Storm, or @Letter?')],
+    });
+
+    const parts = partsOf(context);
+    expect(Object.keys(parts)).toEqual([
+      'The Story Bible',
+      'The Outline skeleton',
+      'The Conversation',
+      'This Scene’s Prose',
+      '@-mentioned: “Storm”',
+      '@-mentioned: “Letter”',
+    ]);
+    expect(parts['@-mentioned: “Storm”']).toBeGreaterThan(10_000);
+    expect(parts['@-mentioned: “Letter”']).toBeLessThan(200);
+    expect(context.size!.ways).toEqual(['remove-mention']);
+  });
+
+  it('measures an Interview’s focus: the Entries it is about, its text and its Outlines and Prose', async () => {
+    const { store, view, entries, chapters } = await fixture();
+    const anna = await store.read({ kind: 'entry', id: entries.anna });
+    await store.write(
+      { kind: 'entry', id: entries.anna },
+      { ...anna, description: tenK },
+    );
+    const ask = (focus: InterviewFocus) =>
+      buildContext(view, {
+        mode: 'interview',
+        focus,
+        messages: [message('author', 'Go on.')],
+      });
+
+    const onAnna = await ask({ kind: 'entry', id: entries.anna });
+    const parts = partsOf(onAnna);
+    expect(Object.keys(parts)).toEqual([
+      'The Story Bible',
+      'The Outline skeleton',
+      'The Conversation',
+      'The Interview focus',
+    ]);
+    // Anna is sent for the focus, so she counts in it, not in the Story Bible.
+    expect(parts['The Interview focus']).toBeGreaterThan(10_000);
+    expect(parts['The Story Bible']).toBeLessThan(1_000);
+    expect(onAnna.size!.ways).toEqual(['narrow-interview-focus']);
+
+    const onChapter = await ask({ kind: 'chapter', id: chapters.arrival });
+    expect(partsOf(onChapter)['The Interview focus']).toBeGreaterThan(
+      partsOf(await ask({ kind: 'open' }))['The Interview focus'],
+    );
+    expect((await ask({ kind: 'open' })).size!.ways).toEqual([]);
+  });
+
+  it('measures a Plan as before: the plan and the Story Bible', async () => {
+    const { view } = await fixture();
+
+    const context = await buildContext(view, {
+      mode: 'plan',
+      focus: { kind: 'open' },
+      messages: [message('author', 'Shape it.')],
+    });
+
+    expect(Object.keys(partsOf(context))).toEqual([
+      'The plan',
+      'The Story Bible',
+    ]);
+    expect(context.size!.ways).toEqual(['narrow-plan-focus']);
+  });
+});
