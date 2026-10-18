@@ -74,6 +74,10 @@ describe('the catalogue', () => {
       'Science fiction',
       'Romance',
       'Literary',
+      'Adventure',
+      'Comedy',
+      'Drama',
+      'Historical',
       'Other',
     ]);
     expect(FORMATS.map((f) => [f.name, f.words])).toEqual([
@@ -224,6 +228,37 @@ describe('the structure guide’s order', () => {
     ).toEqual(all);
     // All but the one that runs in every Part only.
     expect(all.lessUsual.map((s) => s.id)).toEqual(['tv-acts']);
+  });
+});
+
+describe('the Genres without Genre conventions', () => {
+  const UNCONVENTIONAL = ['adventure', 'comedy', 'drama', 'historical'];
+  const fitIds = (genre: string, bookFormat = 'novel') =>
+    STRUCTURES.filter((s) => fitsBook(s, { genres: [genre], bookFormat })).map(
+      (s) => s.id,
+    );
+
+  it('add no Genre convention: Adventure, Comedy, Drama and Historical', () => {
+    for (const g of UNCONVENTIONAL) {
+      expect(CONVENTIONS.map((c) => c.genre)).not.toContain(g);
+    }
+  });
+
+  it('fit the general-purpose Structures, as Genres the catalogue knows', () => {
+    for (const g of UNCONVENTIONAL) {
+      expect(fitIds(g)).toEqual(
+        expect.arrayContaining(['three-act', 'four-part', 'save-the-cat']),
+      );
+      // Known to the catalogue, so not fitting everything as an unknown would.
+      expect(fitIds(g)).not.toContain('seven-point');
+    }
+  });
+
+  it('fit the Hero’s Journey for Adventure and Freytag’s pyramid for Drama', () => {
+    expect(fitIds('adventure')).toContain('heros-journey');
+    expect(fitIds('comedy')).not.toContain('heros-journey');
+    expect(fitIds('drama', 'short-story')).toContain('freytag');
+    expect(fitIds('historical', 'short-story')).not.toContain('freytag');
   });
 });
 

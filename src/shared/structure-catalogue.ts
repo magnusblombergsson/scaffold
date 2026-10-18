@@ -17,6 +17,10 @@ export type GenreId =
   | 'science-fiction'
   | 'romance'
   | 'literary'
+  | 'adventure'
+  | 'comedy'
+  | 'drama'
+  | 'historical'
   | 'other';
 
 export type FormatId =
@@ -113,6 +117,10 @@ export const GENRES: readonly Genre[] = [
   { id: 'science-fiction', name: 'Science fiction' },
   { id: 'romance', name: 'Romance' },
   { id: 'literary', name: 'Literary' },
+  { id: 'adventure', name: 'Adventure' },
+  { id: 'comedy', name: 'Comedy' },
+  { id: 'drama', name: 'Drama' },
+  { id: 'historical', name: 'Historical' },
   { id: 'other', name: 'Other' },
 ];
 
@@ -133,6 +141,10 @@ const GENRE_FICTION: readonly GenreId[] = [
   'fantasy',
   'science-fiction',
   'romance',
+  'adventure',
+  'comedy',
+  'drama',
+  'historical',
   'other',
 ];
 
@@ -513,7 +525,7 @@ export const STRUCTURES: readonly Structure[] = [
     description:
       'A departure from the ordinary world, an ordeal in an unfamiliar one, and a return changed.\nIts stages may be reordered, merged or skipped.',
     fits: {
-      genres: ['fantasy', 'science-fiction', 'other'],
+      genres: ['fantasy', 'science-fiction', 'adventure', 'other'],
       formats: ['novella', 'novel'],
       across: ['book', 'series'],
     },
@@ -614,7 +626,7 @@ export const STRUCTURES: readonly Structure[] = [
     description:
       'Five parts, symmetrical, with the climax in the middle and its consequences after.\nWritten about tragedy, still used where the turn falls at the centre.',
     fits: {
-      genres: ['literary', 'horror', 'other'],
+      genres: ['literary', 'horror', 'drama', 'other'],
       formats: SHORT,
       across: ['book'],
     },
