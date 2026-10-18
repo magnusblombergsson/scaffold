@@ -212,6 +212,40 @@ test('going to a long Outline scrolled away from its cursor shows the cursor', a
   await app.close();
 });
 
+test('going to a long Outline on a Corkboard card, scrolled away from its cursor, shows the cursor', async () => {
+  const { app, page, assistant, chapterId } = await start();
+  await roomButton(page, 'Writing').click();
+  await page.getByRole('button', { name: 'Chapter 1', exact: true }).click();
+  const outline = page
+    .getByRole('article', { name: 'Chapter 1' })
+    .getByLabel('Outline', { exact: true });
+  await outline.click();
+  await typeLines(page, 'Outline', 40);
+  // The cursor at the start; the Outline is scrolled down, away from it.
+  await page.keyboard.press('ControlOrMeta+Home');
+  await page.locator('.centre-title').click();
+  await outline.hover();
+  await page.mouse.wheel(0, 5000);
+  const cursorLine = outline.getByText('Outline line 1', { exact: true });
+  await expect(cursorLine).not.toBeInViewport();
+
+  anthropic.calls.push({
+    reply: [
+      'One more.\n\n',
+      block({ outline: chapterId, append: '- The wait.' }),
+    ],
+  });
+  await assistant.getByRole('textbox', { name: 'Message' }).fill('Ideas?');
+  await assistant.getByRole('button', { name: 'Send' }).click();
+  await assistant
+    .getByRole('article', { name: 'Assistant' })
+    .getByRole('button', { name: 'Chapter “Chapter 1” › Outline' })
+    .click();
+  await expect(outline).toBeFocused();
+  await expect(cursorLine).toBeInViewport();
+  await app.close();
+});
+
 test('in Brainstorm, a Proposal’s title opens a Peek without a pin, whose open button goes to the target', async () => {
   const { app, page, annaId, sceneId } = await start();
   await switchTo(page, 'Brainstorm');

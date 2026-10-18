@@ -527,7 +527,6 @@ button.recent-open:hover {
     }
   }
 
-  /* A card grows with its text; it never scrolls. */
   .outline-notes-fields {
     grid-template-columns: 1fr;
     gap: 0.5rem;
@@ -535,8 +534,12 @@ button.recent-open:hover {
     overflow: visible;
   }
 
+  /* A card grows with its text up to a cap; past it, the Outline and the
+     Notes each scroll on their own, their headings staying put. */
   .plain-text {
     min-height: 2em;
+    max-height: 12em;
+    overflow-y: auto;
   }
 }
 

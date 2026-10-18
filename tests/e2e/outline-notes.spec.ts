@@ -1,7 +1,7 @@
-import { expect, test, type Locator, type Page } from '@playwright/test';
+import { expect, test, type Page } from '@playwright/test';
 import { readdir, readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { answerDialogs, launch, typeLines, useTempDir } from './app';
+import { answerDialogs, launch, scrollOf, typeLines, useTempDir } from './app';
 
 const tempDir = useTempDir();
 
@@ -120,13 +120,6 @@ test('Scenes, Chapters and the Project have Outlines and Notes, each with its ow
   );
   await second.close();
 });
-
-/** How far an editor is scrolled, and whether it has more than it shows. */
-const scrollOf = (field: Locator) =>
-  field.evaluate((el) => ({
-    top: el.scrollTop,
-    overflows: el.scrollHeight > el.clientHeight,
-  }));
 
 test('beside the Prose, a long Outline and long Notes each scroll on their own', async () => {
   const projectPath = path.join(tempDir(), 'My Novel');
