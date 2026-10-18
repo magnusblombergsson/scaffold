@@ -580,7 +580,7 @@ for (const theme of ['light', 'dark'] as const) {
       expect(system).toContain('Genres: Literary (literary)');
       expect(system).toContain('Id: freytag');
       expect(system).toContain('Hero’s Journey (heros-journey)');
-      expect(system).not.toContain('Joseph Campbell');
+      expect(system).not.toContain('### Hero’s Journey');
 
       const structureCard = reply.getByRole('region', {
         name: 'Proposal: The Book › Structure',
