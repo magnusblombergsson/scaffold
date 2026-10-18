@@ -94,6 +94,129 @@ const replyEnd = [
   { type: 'message_stop' },
 ];
 
+/**
+ * A reply that searches twice, as Anthropic streams it: the second search
+ * fails; the text after cites the first's result.
+ */
+const searchedReply = [
+  messageStart,
+  textStart,
+  delta('I’ll look that up.'),
+  { type: 'content_block_stop', index: 0 },
+  {
+    type: 'content_block_start',
+    index: 1,
+    content_block: {
+      type: 'server_tool_use',
+      id: 'srvtoolu_1',
+      name: 'web_search',
+      input: {},
+    },
+  },
+  {
+    type: 'content_block_delta',
+    index: 1,
+    delta: { type: 'input_json_delta', partial_json: '{"query": "Saltsjö' },
+  },
+  {
+    type: 'content_block_delta',
+    index: 1,
+    delta: { type: 'input_json_delta', partial_json: 'banan timetable 1913"}' },
+  },
+  { type: 'content_block_stop', index: 1 },
+  {
+    type: 'content_block_start',
+    index: 2,
+    content_block: {
+      type: 'web_search_tool_result',
+      tool_use_id: 'srvtoolu_1',
+      content: [
+        {
+          type: 'web_search_result',
+          url: 'https://example.org/saltsjobanan',
+          title: 'Saltsjöbanan – history',
+          encrypted_content: 'EqgfCioI…',
+          page_age: 'April 30, 2025',
+        },
+        {
+          type: 'web_search_result',
+          url: 'https://example.org/1913',
+          title: 'Timetables of 1913',
+          encrypted_content: 'EpQDCioI…',
+          page_age: null,
+        },
+      ],
+    },
+  },
+  { type: 'content_block_stop', index: 2 },
+  {
+    type: 'content_block_start',
+    index: 3,
+    content_block: {
+      type: 'server_tool_use',
+      id: 'srvtoolu_2',
+      name: 'web_search',
+      input: {},
+    },
+  },
+  {
+    type: 'content_block_delta',
+    index: 3,
+    delta: {
+      type: 'input_json_delta',
+      partial_json: '{"query": "Saltsjöbaden ferry 1913"}',
+    },
+  },
+  { type: 'content_block_stop', index: 3 },
+  {
+    type: 'content_block_start',
+    index: 4,
+    content_block: {
+      type: 'web_search_tool_result',
+      tool_use_id: 'srvtoolu_2',
+      content: {
+        type: 'web_search_tool_result_error',
+        error_code: 'unavailable',
+      },
+    },
+  },
+  { type: 'content_block_stop', index: 4 },
+  {
+    type: 'content_block_start',
+    index: 5,
+    content_block: { type: 'text', text: '', citations: [] },
+  },
+  {
+    type: 'content_block_delta',
+    index: 5,
+    delta: {
+      type: 'citations_delta',
+      citation: {
+        type: 'web_search_result_location',
+        url: 'https://example.org/1913',
+        title: 'Timetables of 1913',
+        cited_text: 'Första tåg 6.10',
+        encrypted_index: 'Eo8BCioI…',
+      },
+    },
+  },
+  {
+    type: 'content_block_delta',
+    index: 5,
+    delta: {
+      type: 'text_delta',
+      text: 'The 1913 timetable says the first train left at 6.10.',
+    },
+  },
+  { type: 'content_block_stop', index: 5 },
+  {
+    type: 'message_delta',
+    delta: { stop_reason: 'end_turn', stop_sequence: null },
+    usage: { output_tokens: 900, server_tool_use: { web_search_requests: 2 } },
+  },
+  { type: 'message_stop' },
+];
+
 function apiError(status: number, type: string) {
   return (response: ServerResponse) => {
     response.writeHead(status, {
@@ -107,11 +230,14 @@ function apiError(status: number, type: string) {
   };
 }
 
-async function collect(key: string | null = 'sk-ant-key') {
+async function collect(
+  key: string | null = 'sk-ant-key',
+  sent: ProviderRequest = request,
+) {
   const events: ProviderEvent[] = [];
   const provider = claudeProvider({ apiKey: () => key, baseURL });
   try {
-    for await (const event of provider.stream(request)) events.push(event);
+    for await (const event of provider.stream(sent)) events.push(event);
     return { events, error: null };
   } catch (error) {
     return { events, error: error as ProviderError };
@@ -214,6 +340,144 @@ describe('claudeProvider', () => {
       ],
     });
     expect(calls[0].body).not.toHaveProperty('cache_control');
+  });
+
+  it('sends no tools unless asked to search', async () => {
+    answer = (response) =>
+      sse(response, [messageStart, textStart, delta('Hm.'), ...replyEnd]);
+
+    await collect();
+
+    expect(calls[0].body).not.toHaveProperty('tools');
+  });
+
+  it.each([
+    ['claude-opus-5-5', 'web_search_20260209'],
+    ['claude-sonnet-4-6', 'web_search_20260209'],
+    ['claude-haiku-4-5', 'web_search_20250305'],
+  ])(
+    'sends %s Anthropic’s web search tool as %s when asked to search',
+    async (id, type) => {
+      answer = (response) =>
+        sse(response, [messageStart, textStart, delta('Hm.'), ...replyEnd]);
+
+      await collect('sk-ant-key', {
+        ...request,
+        model: { provider: 'anthropic', id },
+        search: true,
+      });
+
+      expect(calls[0].body.tools).toEqual([
+        { type, name: 'web_search', max_uses: 5 },
+      ]);
+    },
+  );
+
+  it('gives each search made, with its query and the links found, and counts them in what the call used', async () => {
+    answer = (response) => sse(response, searchedReply);
+
+    const { events, error } = await collect('sk-ant-key', {
+      ...request,
+      search: true,
+    });
+
+    expect(error).toBeNull();
+    expect(events.filter((e) => e.type === 'search')).toEqual([
+      {
+        type: 'search',
+        search: {
+          query: 'Saltsjöbanan timetable 1913',
+          results: [
+            {
+              url: 'https://example.org/saltsjobanan',
+              title: 'Saltsjöbanan – history',
+            },
+            { url: 'https://example.org/1913', title: 'Timetables of 1913' },
+          ],
+        },
+      },
+      {
+        type: 'search',
+        search: { query: 'Saltsjöbaden ferry 1913', results: [], failed: true },
+      },
+    ]);
+    // A claim's citations follow it as links, so it names its source.
+    expect(events.filter((e) => e.type === 'text').map((e) => e.text)).toEqual([
+      'I’ll look that up.',
+      'The 1913 timetable says the first train left at 6.10.',
+      ' ([Timetables of 1913](https://example.org/1913))',
+    ]);
+    expect(events.filter((e) => e.type === 'usage').at(-1)).toEqual({
+      type: 'usage',
+      usage: {
+        input: 18_500,
+        cached: 12_000,
+        written: 500,
+        output: 900,
+        searches: 2,
+      },
+    });
+  });
+
+  it('goes on with a reply Anthropic paused partway, sending back what came, and counts both calls', async () => {
+    const paused = [
+      ...searchedReply.slice(0, 9),
+      {
+        type: 'message_delta',
+        delta: { stop_reason: 'pause_turn', stop_sequence: null },
+        usage: {
+          output_tokens: 100,
+          server_tool_use: { web_search_requests: 1 },
+        },
+      },
+      { type: 'message_stop' },
+    ];
+    answer = (response) =>
+      calls.length === 1
+        ? sse(response, paused)
+        : sse(response, [
+            messageStart,
+            textStart,
+            delta(' The first train left at 6.10.'),
+            ...replyEnd,
+          ]);
+
+    const { events, error } = await collect('sk-ant-key', {
+      ...request,
+      search: true,
+    });
+
+    expect(error).toBeNull();
+    expect(calls).toHaveLength(2);
+    const resent = calls[1].body.messages as {
+      role: string;
+      content: { type: string }[];
+    }[];
+    expect(resent.slice(0, -1)).toEqual(calls[0].body.messages);
+    expect(resent.at(-1)?.role).toBe('assistant');
+    expect(resent.at(-1)?.content.map((block) => block.type)).toEqual([
+      'text',
+      'server_tool_use',
+      'web_search_tool_result',
+    ]);
+    expect(events.filter((e) => e.type === 'text').map((e) => e.text)).toEqual([
+      'I’ll look that up.',
+      ' The first train left at 6.10.',
+    ]);
+    expect(events.filter((e) => e.type === 'search')).toHaveLength(1);
+    expect(events.filter((e) => e.type === 'finish')).toEqual([
+      { type: 'finish', finish: 'complete' },
+    ]);
+    expect(events.filter((e) => e.type === 'usage').at(-1)).toEqual({
+      type: 'usage',
+      usage: {
+        input: 37_000,
+        cached: 24_000,
+        written: 1_000,
+        output: 1_000,
+        searches: 1,
+      },
+    });
   });
 
   it.each([

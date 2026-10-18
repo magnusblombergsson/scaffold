@@ -1,7 +1,8 @@
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import type { WebSearch } from '../../shared/conversation';
 import type { Model, ModelWindow } from '../../shared/models';
 import { instantClock } from '../project-store/clock';
 import { nodeFileSystem, type FileSystem } from '../project-store/file-system';
@@ -11,6 +12,7 @@ import {
   type EngineDeps,
 } from './conversation-engine';
 import { fakeProvider, type FakeReply } from './fake-provider';
+import { linksIn } from './linked-pages';
 import type { ProviderRequest } from './provider';
 
 const OPUS: Model = { provider: 'anthropic', id: 'claude-opus-5-5' };
@@ -30,7 +32,11 @@ async function setUp(
     'What does ',
     'she fear?',
   ],
-  { compaction, windowOf }: Pick<EngineDeps, 'compaction' | 'windowOf'> = {},
+  {
+    compaction,
+    windowOf,
+    readPages,
+  }: Pick<EngineDeps, 'compaction' | 'windowOf' | 'readPages'> = {},
 ) {
   const projectPath = path.join(dir, 'My Novel');
   const clock = instantClock(1_000);
@@ -45,6 +51,7 @@ async function setUp(
     clock,
     compaction,
     windowOf,
+    readPages,
   });
   return { projectPath, store, clock, chapterId, sceneId, provider, engine };
 }
@@ -2575,6 +2582,219 @@ describe('Fitting every Mode’s request to the Model', () => {
         /summar/i.test(r.system[0].text),
       );
       expect(summaries).toHaveLength(expected);
+    },
+  );
+});
+
+/** The text of every file under `dir`. */
+async function allFiles(dir: string): Promise<string[]> {
+  const files = await readdir(dir, { recursive: true, withFileTypes: true });
+  return Promise.all(
+    files
+      .filter((f) => f.isFile())
+      .map((f) => readFile(path.join(f.parentPath, f.name), 'utf8')),
+  );
+}
+
+describe('Links in Research', () => {
+  const FERRY = 'https://example.com/ferry';
+  const FERRY_TEXT = 'The Kvarken ferry ran until 1962.';
+
+  /** Reads `pages` by link, as `readPages` would have; records each message it read. */
+  function fakePages(pages: Record<string, string>) {
+    const read: string[] = [];
+    const readPages: EngineDeps['readPages'] = async (message) => {
+      read.push(message);
+      return linksIn(message).map((url) =>
+        url in pages
+          ? { url, text: pages[url] }
+          : { url, reason: 'failed' as const },
+      );
+    };
+    return { readPages, read };
+  }
+
+  it('sends the text of a page the Author links, labelled with its link, and says it was seen', async () => {
+    const { readPages } = fakePages({ [FERRY]: FERRY_TEXT });
+    const { store, engine, provider } = await setUp(
+      () => ['It ran until 1962 [1].'],
+      {
+        readPages,
+      },
+    );
+    const { id } = await store.startConversation('research', 'The ferry');
+
+    const { reply } = await engine.askAssistant(
+      id,
+      `When did it stop? ${FERRY}`,
+      { sceneId: null },
+      () => {},
+    );
+
+    const sent = provider.requests[0].messages.at(-1)!.content;
+    expect(sent).toContain(`When did it stop? ${FERRY}`);
+    expect(sent).toContain(`${FERRY}
+
+${FERRY_TEXT}`);
+    expect(reply?.saw?.pages).toEqual([FERRY]);
+  });
+
+  it('names a link it couldn’t read, to the Author and the Assistant, and still answers', async () => {
+    const { readPages } = fakePages({ [FERRY]: FERRY_TEXT });
+    const { store, engine, provider } = await setUp(
+      () => ['It ran until 1962.'],
+      {
+        readPages,
+      },
+    );
+    const { id } = await store.startConversation('research', 'The ferry');
+
+    const { reply, failure } = await engine.askAssistant(
+      id,
+      `Compare https://gone.example/ with ${FERRY}`,
+      { sceneId: null },
+      () => {},
+    );
+
+    expect(failure).toBeNull();
+    expect(reply).toMatchObject({
+      text: 'It ran until 1962.',
+      unreadLinks: [{ url: 'https://gone.example/', reason: 'failed' }],
+      saw: { pages: [FERRY] },
+    });
+    const sent = provider.requests[0].messages.at(-1)!.content;
+    expect(sent).toContain(
+      '## https://gone.example/\n\n(The app couldn’t read this page: it couldn’t be fetched.',
+    );
+    // As logged, so it shows when the Conversation is opened again.
+    const [, logged] = (await store.readConversation(id)).messages;
+    expect(logged.unreadLinks).toEqual(reply!.unreadLinks);
+    expect(logged.saw?.pages).toEqual([FERRY]);
+  });
+
+  it('reads no link in another Mode', async () => {
+    const { readPages, read } = fakePages({ [FERRY]: FERRY_TEXT });
+    const { store, engine, provider } = await setUp(undefined, { readPages });
+    const { id } = await store.startConversation('brainstorm', 'Ideas');
+
+    const { reply } = await engine.askAssistant(
+      id,
+      `What if the ferry stopped? ${FERRY}`,
+      { sceneId: null },
+      () => {},
+    );
+
+    expect(read).toEqual([]);
+    expect(provider.requests[0].messages.at(-1)!.content).not.toContain(
+      FERRY_TEXT,
+    );
+    expect(reply?.saw?.pages).toBeUndefined();
+  });
+
+  it('keeps no copy of a page: it goes with its own request only, and never to disk', async () => {
+    const { readPages, read } = fakePages({ [FERRY]: FERRY_TEXT });
+    const { store, engine, provider, projectPath } = await setUp(
+      () => ['Noted.'],
+      { readPages },
+    );
+    const { id } = await store.startConversation('research', 'The ferry');
+
+    await engine.askAssistant(id, `Read ${FERRY}`, { sceneId: null }, () => {});
+    await engine.askAssistant(id, 'And after?', { sceneId: null }, () => {});
+    await store.flush();
+
+    expect(read).toEqual([`Read ${FERRY}`, 'And after?']);
+    const second = provider.requests[1].messages;
+    expect(second.map((m) => m.content).join('')).not.toContain(FERRY_TEXT);
+    expect(second[0].content).toBe(`Read ${FERRY}`);
+    const written = await allFiles(projectPath);
+    expect(written.some((text) => text.includes(FERRY_TEXT))).toBe(false);
+  });
+
+  it('sends nothing when a page is too big for the window, and names it', async () => {
+    const big = 'The ferry ran. '.repeat(4_000);
+    const { readPages } = fakePages({ [FERRY]: big });
+    const { store, engine, provider } = await setUp(undefined, {
+      readPages,
+      windowOf: () => ({ contextWindow: 8_000, outputLimit: 1_000 }),
+    });
+    const { id } = await store.startConversation('research', 'The ferry');
+
+    const result = await engine.askAssistant(
+      id,
+      `Read ${FERRY}`,
+      { sceneId: null },
+      () => {},
+    );
+
+    expect(provider.requests).toHaveLength(0);
+    expect(result).toMatchObject({ reply: null, failure: 'context' });
+    expect(result.tooBig!.parts).toContainEqual({
+      label: `The page ${FERRY}`,
+      size: 15_000,
+    });
+    expect(result.tooBig!.request).toBeGreaterThan(15_000);
+  });
+});
+
+describe('Web search in Research', () => {
+  const SEARCH: WebSearch = {
+    query: 'Kvarken ferry 1962',
+    results: [{ url: 'https://example.org/kvarken', title: 'Kvarken ferries' }],
+  };
+
+  it('asks the Model to search, and logs each search made with the reply', async () => {
+    const { store, engine, provider } = await setUp(() => ({
+      searches: [SEARCH],
+      text: ['It ran until 1962 (https://example.org/kvarken).'],
+    }));
+    const { id } = await store.startConversation('research', 'The ferry');
+
+    const { reply } = await engine.askAssistant(
+      id,
+      'When did the ferry stop?',
+      { sceneId: null },
+      () => {},
+    );
+
+    expect(provider.requests[0].search).toBe(true);
+    expect(reply?.searches).toEqual([SEARCH]);
+    // As logged, so it shows when the Conversation is opened again.
+    const [, logged] = (await store.readConversation(id)).messages;
+    expect(logged.searches).toEqual([SEARCH]);
+  });
+
+  it('asks no search while the Author has turned searching off, and again once it is back on', async () => {
+    const { store, engine, provider } = await setUp(() => ['Noted.']);
+    const { id } = await store.startConversation('research', 'The ferry');
+
+    await store.setSearching(id, false);
+    await engine.askAssistant(id, 'From memory?', { sceneId: null }, () => {});
+    await store.setSearching(id, true);
+    await engine.askAssistant(id, 'And now?', { sceneId: null }, () => {});
+
+    expect(provider.requests.map((r) => r.search)).toEqual([undefined, true]);
+  });
+
+  it('refuses to turn searching on or off outside Research', async () => {
+    const { store } = await setUp();
+    const { id } = await store.startConversation('brainstorm', 'Ideas');
+
+    await expect(store.setSearching(id, true)).rejects.toThrow(
+      'Only a Research Conversation searches the web',
+    );
+  });
+
+  it.each(['brainstorm', 'interview', 'writing', 'plan'] as const)(
+    'never asks a search in %s',
+    async (mode) => {
+      const { store, engine, provider, sceneId } = await setUp(() => ['Hm.']);
+      const { id } = await store.startConversation(mode, 'Elsewhere');
+
+      await engine.askAssistant(id, 'Search the web?', { sceneId }, () => {});
+
+      expect(provider.requests).toHaveLength(1);
+      expect(provider.requests[0]).not.toHaveProperty('search');
     },
   );
 });

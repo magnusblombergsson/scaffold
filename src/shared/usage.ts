@@ -1,19 +1,22 @@
-import { priceOf, type Model } from './models';
+import { priceOf, type Model, type ProviderId } from './models';
 
 // What the Assistant's turns used, and what that costs. The log keeps tokens,
 // and money only when the Provider reports what it charged; otherwise money
 // is worked out here, when it is shown, from the price each built-in Model
-// carries. A local Model's turn is free.
+// carries, and each web search at its Provider's price. A local Model's
+// turn is free.
 
 /**
  * The tokens one call used: `input` counts every token sent, of which
- * `cached` were read from the prompt cache and `written` were written to it.
+ * `cached` were read from the prompt cache and `written` were written to it;
+ * and in Research, how many web `searches` it made, if any.
  */
 export type Usage = {
   input: number;
   cached: number;
   written: number;
   output: number;
+  searches?: number;
 };
 
 /**
@@ -28,6 +31,24 @@ export type Total = { text: string; hover?: string };
 
 export const NO_USAGE: Usage = { input: 0, cached: 0, written: 0, output: 0 };
 
+/**
+ * What one web search costs in USD, by Provider, where known: Anthropic's
+ * is $10 per thousand. OpenRouter's is in what it says it charged.
+ */
+const SEARCH_PRICE: Partial<Record<ProviderId, number>> = { anthropic: 0.01 };
+
+/** What two calls used together. */
+export function addUsage(a: Usage, b: Usage): Usage {
+  const searches = (a.searches ?? 0) + (b.searches ?? 0);
+  return {
+    input: a.input + b.input,
+    cached: a.cached + b.cached,
+    written: a.written + b.written,
+    output: a.output + b.output,
+    ...(searches > 0 && { searches }),
+  };
+}
+
 /** Whether a turn ran on the Author's own computer, so cost nothing. */
 function isFree({ model }: MeteredTurn): boolean {
   return model.provider === 'lmstudio';
@@ -40,13 +61,17 @@ function costOf(turn: MeteredTurn): number | null {
   const { usage } = turn;
   const price = priceOf(turn.model);
   if (!price || !usage) return null;
+  const searches = usage.searches ?? 0;
+  const perSearch = SEARCH_PRICE[turn.model.provider];
+  if (searches > 0 && perSearch === undefined) return null;
   const sent = usage.input - usage.cached - usage.written;
   return (
     (sent * price.input +
       usage.cached * price.cached +
       usage.written * price.written +
       usage.output * price.output) /
-    1_000_000
+      1_000_000 +
+    searches * (perSearch ?? 0)
   );
 }
 
@@ -66,13 +91,20 @@ function dollars(cost: number): string {
   return cost < 0.005 ? '< $0.01' : `≈ $${cost.toFixed(2)}`;
 }
 
-/** Tokens, then what they cost, if that is said: "free", "≈ $0.04". */
+/**
+ * Tokens, then the web searches made, if any, then what they cost, if that
+ * is said: "free", "≈ $0.04".
+ */
 function describe(usage: Usage, cost: string | null): string {
   const cached = usage.cached > 0 ? ` (${tokens(usage.cached)} cached)` : '';
   const parts = [
     `≈ ${tokens(usage.input)} in${cached}`,
     `${tokens(usage.output)} out`,
   ];
+  const searches = usage.searches ?? 0;
+  if (searches > 0) {
+    parts.push(searches === 1 ? '1 search' : `${searches} searches`);
+  }
   if (cost !== null) parts.push(cost);
   return parts.join(' · ');
 }
@@ -97,14 +129,11 @@ export function describeUsage(turn: MeteredTurn): string | null {
  */
 export function describeTotal(turns: MeteredTurn[]): Total | null {
   if (turns.length === 0) return null;
-  const usage: Usage = { ...NO_USAGE };
+  let usage: Usage = { ...NO_USAGE };
   let cost = 0;
   let unpriced = 0;
   for (const turn of turns) {
-    usage.input += turn.usage?.input ?? 0;
-    usage.cached += turn.usage?.cached ?? 0;
-    usage.written += turn.usage?.written ?? 0;
-    usage.output += turn.usage?.output ?? 0;
+    usage = addUsage(usage, turn.usage ?? NO_USAGE);
     const turnCost = costOf(turn);
     if (turnCost === null) unpriced++;
     else cost += turnCost;

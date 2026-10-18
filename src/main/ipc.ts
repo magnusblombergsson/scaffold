@@ -19,6 +19,7 @@ import {
   type ProseLanguage,
 } from '../shared/project-types';
 import { createConversationEngine } from './assistant/conversation-engine';
+import { readLinks } from './assistant/linked-pages';
 import { createImagePrompts } from './assistant/image-prompt';
 import { newManuscript } from './import/manuscript-import';
 import { register, windowContext } from './electron-transport';
@@ -273,6 +274,8 @@ const assistantHandlers: Handlers<
   },
   chooseBook: ({ store }, conversationId, bookId) =>
     store.chooseBook(conversationId, bookId),
+  setSearching: ({ store }, conversationId, on) =>
+    store.setSearching(conversationId, on === true),
   renameConversation: ({ store }, conversationId, title) =>
     store.renameConversation(conversationId, title),
   starConversation: ({ store }, conversationId, starred) =>
@@ -327,6 +330,7 @@ export function registerAssistantIpc(): void {
       defaultModel,
       clock: systemClock,
       windowOf: modelWindow,
+      readPages: (message) => readLinks(message, fetch),
     });
     return { store, engine, sender };
   });

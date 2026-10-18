@@ -95,6 +95,7 @@ describe('how a reply ended', () => {
     ).toEqual({
       kind: 'reply',
       text: 'Two.',
+      searches: [],
       ending: 'complete',
       proposals: [proposal],
       findings: [finding],
