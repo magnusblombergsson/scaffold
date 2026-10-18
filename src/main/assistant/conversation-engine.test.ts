@@ -2284,11 +2284,17 @@ describe('Fitting a Plan’s request to the Model', () => {
     ]);
     // Some 9,000 characters of the Brainstorm, at about 4 a token.
     expect(size.broughtIn[0].size).toBeGreaterThan(2_000);
-    expect(size.plan).toBeGreaterThan(0);
-    expect(size.storyBible).toBeGreaterThan(0);
+    const [ofPlan, storyBible] = size.parts;
+    expect(size.parts.map((p) => p.label)).toEqual([
+      'The plan',
+      'The Story Bible',
+    ]);
+    expect(ofPlan.size).toBeGreaterThan(0);
+    expect(storyBible.size).toBeGreaterThan(0);
     expect(size.request).toBeGreaterThan(
-      size.plan + size.storyBible + size.broughtIn[0].size,
+      ofPlan.size + storyBible.size + size.broughtIn[0].size,
     );
+    expect(size.ways).toEqual(['remove-brought-in', 'narrow-plan-focus']);
     // The Author's message waits for a Retry, as after a failed call.
     const { messages } = await store.readConversation(plan);
     expect(messages.map((m) => m.text)).toEqual(['Shape it.']);
@@ -2356,26 +2362,6 @@ describe('Fitting a Plan’s request to the Model', () => {
     });
   });
 
-  it('leaves other Modes as they are: never measured, a refusal told as any other', async () => {
-    window = { contextWindow: 1_000, outputLimit: null };
-    const { store, engine, provider } = await setUp(
-      (n) => (n === 0 ? ['Hm.'] : { text: [], fail: 'context' }),
-      { windowOf },
-    );
-    const { id } = await store.startConversation('brainstorm', 'Ideas');
-
-    await engine.askAssistant(id, 'Ideas?', { sceneId: null }, () => {});
-    const refused = await engine.askAssistant(
-      id,
-      'More?',
-      { sceneId: null },
-      () => {},
-    );
-
-    expect(provider.requests).toHaveLength(2);
-    expect(refused).toEqual({ reply: null, failure: 'context' });
-  });
-
   it('marks in the picker a Brainstorm that would push the request past the window', async () => {
     const { store, engine, plan } = await planned();
     const { id: small } = await store.startConversation('brainstorm', 'Small');
@@ -2403,4 +2389,144 @@ describe('Fitting a Plan’s request to the Model', () => {
       false,
     );
   });
+});
+
+describe('Fitting every Mode’s request to the Model', () => {
+  let window: ModelWindow | null;
+  const windowOf = () => window;
+  /** About 5k tokens of text, at some 4 characters each. */
+  const fiveK = 'The sea came in. '.repeat(20_000 / 17);
+  const labels = (size: { parts: { label: string }[] } | undefined) =>
+    size?.parts.map((p) => p.label);
+
+  /** A Project whose first Scene holds some 5k tokens of Prose. */
+  async function long(reply: FakeReply = ['Hm.']) {
+    window = null;
+    const setup = await setUp(() => reply, { windowOf });
+    const { store, sceneId } = setup;
+    await store.write(
+      { kind: 'scene', id: sceneId },
+      { id: sceneId, markdown: fiveK },
+    );
+    return setup;
+  }
+
+  it('sends nothing past the window in a Brainstorm, an Interview or Writing, and says what is biggest', async () => {
+    const { store, engine, provider, sceneId, chapterId } = await long();
+    window = { contextWindow: 4_000, outputLimit: null };
+    const { id: brainstorm } = await store.startConversation('brainstorm', 'B');
+    const { id: interview } = await store.startConversation('interview', 'I');
+    await store.setInterviewFocus(interview, {
+      kind: 'chapter',
+      id: chapterId,
+    });
+    const { id: writing } = await store.startConversation('writing', 'W');
+
+    const results = [
+      await engine.askAssistant(brainstorm, fiveK, { sceneId }, () => {}),
+      await engine.askAssistant(interview, 'Go on.', { sceneId }, () => {}),
+      await engine.askAssistant(writing, 'Slow?', { sceneId }, () => {}),
+    ];
+
+    expect(provider.requests).toHaveLength(0);
+    for (const result of results) {
+      expect(result).toMatchObject({ reply: null, failure: 'context' });
+      expect(result.tooBig).toMatchObject({ window: 4_000, reply: 1_000 });
+    }
+    const [inBrainstorm, inInterview, inWriting] = results.map((r) => r.tooBig);
+    expect(labels(inBrainstorm)).toEqual([
+      'The Story Bible',
+      'The Outline skeleton',
+      'The Conversation',
+    ]);
+    expect(inBrainstorm!.ways).toEqual(['new-conversation']);
+    expect(labels(inInterview)).toContain('The Interview focus');
+    expect(inInterview!.ways).toEqual(['narrow-interview-focus']);
+    expect(labels(inWriting)).toContain('This Scene’s Prose');
+    expect(inWriting!.ways).toEqual([]);
+  });
+
+  it('names a Chapter Review’s Prose past the window, with its size', async () => {
+    const { store, engine, provider, sceneId } = await long();
+    window = { contextWindow: 4_000, outputLimit: null };
+    const { id } = await store.startConversation('writing', 'W');
+
+    const result = await engine.review(
+      id,
+      'review-chapter',
+      { sceneId },
+      () => {},
+    );
+
+    expect(provider.requests).toHaveLength(0);
+    const prose = result.tooBig!.parts.find(
+      (p) => p.label === 'This Chapter’s Prose',
+    );
+    expect(prose!.size).toBeGreaterThan(5_000);
+    expect(result.tooBig!.ways).toEqual(['review-scene']);
+  });
+
+  it('sends a request that fits unchanged, with no call to measure it', async () => {
+    const { store, engine, provider, sceneId } = await long();
+    window = { contextWindow: 200_000, outputLimit: null };
+    const { id } = await store.startConversation('writing', 'W');
+
+    const result = await engine.askAssistant(
+      id,
+      'Slow?',
+      { sceneId },
+      () => {},
+    );
+
+    expect(result).toMatchObject({ reply: { text: 'Hm.' }, failure: null });
+    expect(result.tooBig).toBeUndefined();
+    expect(provider.requests).toHaveLength(1);
+  });
+
+  it('gives a Provider’s context-length refusal in any Mode with the sizes, on LM Studio too', async () => {
+    const { store, engine, sceneId } = await long({
+      text: [],
+      fail: 'context',
+    });
+    window = { contextWindow: 4_000, outputLimit: null };
+    const { id } = await store.startConversation('writing', 'W');
+    await store.chooseModel(id, { provider: 'lmstudio', id: 'qwen3-8b' });
+
+    const result = await engine.askAssistant(
+      id,
+      'Slow?',
+      { sceneId },
+      () => {},
+    );
+
+    expect(result).toMatchObject({ reply: null, failure: 'context' });
+    expect(result.tooBig).toMatchObject({ window: null, reply: 0 });
+    expect(labels(result.tooBig)).toContain('This Scene’s Prose');
+  });
+
+  // 10k tokens of earlier messages: past 8k on a 32k window, within 40k.
+  // LM Studio's window may not be what is loaded, so it counts as unknown.
+  it.each([
+    ['a 32k window', 32_000, OPUS, 1],
+    ['a 200k window', 200_000, OPUS, 0],
+    ['an unknown window', null, OPUS, 0],
+    ['LM Studio', 32_000, { provider: 'lmstudio', id: 'qwen3-8b' }, 0],
+  ] as const)(
+    'compacts as the window says: on %s, a Brainstorm of two 5k-token messages is summarised %i times',
+    async (_, contextWindow, model, expected) => {
+      const { store, engine, provider } = await setUp(() => ['Hm.'], {
+        windowOf: () => ({ contextWindow, outputLimit: null }),
+      });
+      const { id } = await store.startConversation('brainstorm', 'B');
+      await store.chooseModel(id, model);
+      for (const text of [fiveK, fiveK, 'And then?']) {
+        await engine.askAssistant(id, text, { sceneId: null }, () => {});
+      }
+
+      const summaries = provider.requests.filter((r) =>
+        /summar/i.test(r.system[0].text),
+      );
+      expect(summaries).toHaveLength(expected);
+    },
+  );
 });

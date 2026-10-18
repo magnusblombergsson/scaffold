@@ -3925,6 +3925,11 @@ legend .show-in-peek {
   flex: 1;
 }
 
+.tested-mark {
+  color: var(--muted);
+  cursor: help;
+}
+
 .model-facts {
   color: var(--muted);
   font-size: 0.85rem;

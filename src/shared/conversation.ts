@@ -281,7 +281,7 @@ export type EmptyReply = {
  * one, and why the call failed, if it did. A call that fails partway logs
  * what came as an interrupted reply; one that fails before any reply logs
  * nothing, unless the Provider said what it used: then it logs an `empty`
- * one, so its cost counts. A Plan's request past its Model's window, as
+ * one, so its cost counts. A request past its Model's window, as
  * measured before sending or as the Provider refused it, fails as
  * `context`, with what it is made of as `tooBig`; nothing was sent.
  */

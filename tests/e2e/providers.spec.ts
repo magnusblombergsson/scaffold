@@ -352,6 +352,19 @@ test('the current three Claude models are shortlisted until the Author chooses o
   await expect(choose.getByRole('checkbox', { checked: true })).toHaveCount(3);
   await expect(choose.getByText('Fable 5.1')).toBeVisible();
   await expect(choose).toContainText('$10 in · $50 out per M');
+  // The tested Models are marked with a check, read out as Tested.
+  const tested = choose.getByRole('checkbox', { name: /, Tested$/ });
+  await expect(tested).toHaveCount(3);
+  for (const name of ['Sonnet 5.5', 'Sonnet 5', 'Haiku 4.5']) {
+    await expect(
+      choose.getByRole('checkbox', { name: `${name}, Tested`, exact: true }),
+    ).toBeVisible();
+  }
+  await expect(choose.locator('.tested-mark')).toHaveCount(3);
+  await expect(choose.locator('.tested-mark').first()).toHaveAttribute(
+    'title',
+    /checked against the rule that the Assistant never writes Prose/,
+  );
   await choose.getByRole('checkbox', { name: /Fable 5\.1/ }).check();
   await choose.getByRole('checkbox', { name: /Sonnet 5\.5/ }).uncheck();
   await choose.getByRole('button', { name: 'Save' }).click();
@@ -401,7 +414,15 @@ test('OpenRouter’s models are searched and shortlisted with their context wind
     '128k · $0.20 in · $0.60 out per M',
   );
 
-  await choose.getByRole('searchbox', { name: 'Search models' }).fill('qwen3');
+  // None of these is tested: `tested` and `untested` filter on that.
+  const search = choose.getByRole('searchbox', { name: 'Search models' });
+  await search.fill('TESTED');
+  await expect(list.getByRole('listitem')).toHaveCount(0);
+  await search.fill('untested');
+  await expect(list.getByRole('listitem')).toHaveCount(2);
+  await search.fill('untested qwen3');
+  await expect(list.getByRole('listitem')).toHaveCount(1);
+  await search.fill('qwen3');
   await expect(list.getByRole('listitem')).toHaveCount(1);
   await choose.getByRole('checkbox', { name: /Qwen3 235B/ }).check();
   await choose.getByRole('button', { name: 'Save' }).click();

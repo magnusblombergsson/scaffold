@@ -37,8 +37,8 @@ import { unitText } from '../../shared/project-types';
 import type { Clock } from '../project-store/clock';
 import type { ProjectStore } from '../project-store/project-store';
 import {
+  compactionFor,
   compactionPoint,
-  DEFAULT_COMPACTION,
   summaryRequest,
   type CompactionPolicy,
 } from './compaction';
@@ -78,7 +78,7 @@ export type EngineDeps = {
   /** The Model asked in a Conversation that isn't on one yet. */
   defaultModel: () => Model;
   clock: Clock;
-  /** When a long Conversation is compacted; tests make it short. */
+  /** When a long Conversation is compacted, else as the chosen Model's window says; tests make it short. */
   compaction?: CompactionPolicy;
   /** A Model's window as its listing says, if it is listed; without it, nothing is measured. */
   windowOf?: (model: Model) => ModelWindow | null;
@@ -94,13 +94,13 @@ export function createConversationEngine({
   providerFor,
   defaultModel,
   clock,
-  compaction = DEFAULT_COMPACTION,
+  compaction,
   windowOf = () => null,
 }: EngineDeps) {
   /**
-   * The window a Plan's request on `model` is measured against (spec:
-   * Outline planner §9), or null when it is unknown or unreliable: LM
-   * Studio may report more than the Model is loaded with.
+   * The window a request on `model` is measured against (spec: Outline
+   * planner §9), or null when it is unknown or unreliable: LM Studio may
+   * report more than the Model is loaded with.
    */
   function measuredWindow(model: Model): KnownWindow | null {
     if (model.provider === 'lmstudio') return null;
@@ -222,16 +222,16 @@ export function createConversationEngine({
    * the Author's message, with the context the Conversation's Mode gives the
    * Scene in `focus`, or in an Interview, the focus it was last set to, and
    * in a Series, a Brainstorm or Interview about the Book it was last put on.
-   * Past the threshold, the older messages are compacted first.
    * The reply is logged once it has come, without its thinking: as
    * interrupted if the call fails partway, or cut short at the length limit,
    * or as empty if nothing is left of it; a call that fails before any reply
-   * logs nothing, unless it said what it used, which still counts. A Plan's
-   * request past its Model's window isn't sent at all, and fails with what
-   * it is made of, as one the Provider refuses as too long does. Only a
-   * complete reply makes Proposals, and a Review's reply holds Findings,
-   * never Proposals. So does a Plan check: a Plan reply asked for one, or
-   * holding Findings.
+   * logs nothing, unless it said what it used, which still counts. A
+   * request past its Model's window isn't sent at all, in any Mode, and
+   * fails with what it is made of, as one the Provider refuses as too long
+   * does. Past the threshold for the Model's window, the older messages
+   * are compacted first. Only a complete reply makes Proposals, and a
+   * Review's reply holds Findings, never Proposals. So does a Plan check: a
+   * Plan reply asked for one, or holding Findings.
    */
   async function answer(
     conversationId: string,
@@ -263,7 +263,7 @@ export function createConversationEngine({
     const view = store.assistantView();
     const context = await buildContext(view, asked);
     const window = measuredWindow(chosen);
-    if (context.size && window && pastWindow(context.size.request, window)) {
+    if (window && pastWindow(context.size.request, window)) {
       return {
         reply: null,
         failure: 'context',
@@ -280,7 +280,7 @@ export function createConversationEngine({
     const { metered } = finished;
     const failure = finished.failure?.kind ?? null;
     const tooBig =
-      failure === 'context' && context.size
+      failure === 'context'
         ? { tooBig: againstWindow(context.size, window) }
         : {};
     if (finished.kind === 'nothing') return { reply: null, failure, ...tooBig };
@@ -368,7 +368,12 @@ export function createConversationEngine({
     latest: Compaction | undefined,
     chosen: Model,
   ): Promise<Compaction | undefined> {
-    const covers = compactionPoint(messages, latest, compaction);
+    const covers = compactionPoint(
+      messages,
+      latest,
+      compaction ??
+        compactionFor(measuredWindow(chosen)?.contextWindow ?? null),
+    );
     if (covers === null) return latest;
     const finished = await finishedCall(
       providerFor(chosen),
@@ -437,8 +442,8 @@ export function createConversationEngine({
   /**
    * The Plan `plan`'s request as it would be sent now on `model`, measured,
    * with the window it is measured against; null when that window is
-   * unknown or unreliable. A new Plan, not started yet, on the Book `book`,
-   * is measured empty.
+   * unknown or unreliable, as nothing is measured then. A new Plan, not
+   * started yet, on the Book `book`, is measured empty.
    */
   async function planSize(
     plan: Conversation | null,
@@ -453,7 +458,7 @@ export function createConversationEngine({
       ...(summary && { summary }),
       ...(plan && { broughtIn: await store.broughtInBrainstorms(plan.id) }),
     });
-    return size ? { ...size, window } : null;
+    return { ...size, window };
   }
 
   /**

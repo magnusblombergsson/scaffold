@@ -2,7 +2,7 @@ import type { ModelWindow } from './models';
 
 // Fitting a request to the Model (spec: Outline planner §9): a request is
 // measured before it is sent, with room for the reply, against the Model's
-// window. Plan alone measures for now.
+// window. Every Mode measures.
 
 /** About how many tokens a text is: some 4 characters each. */
 export function tokens(text: string): number {
@@ -34,17 +34,33 @@ export function replyRoom({ contextWindow, outputLimit }: KnownWindow): number {
 /** A Brainstorm brought into a Plan, by id and title, with its rough size. */
 export type BroughtInSize = { id: string; title: string; size: number };
 
+/** A part of a request as the Author is told of it, by name, with its rough size. */
+export type SizePart = { label: string; size: number };
+
 /**
- * A Plan's request as measured, in tokens: all of it, and of that the plan
- * (the Outlines, Notes and Book details sent), the Story Bible and each
- * Brainstorm brought in; with the Model's `window`, if it is known, and the
- * room kept for the `reply` within it.
+ * A way to make room in a request too big, of those that apply to it:
+ * choosing another Model always does.
+ */
+export type WayOut =
+  | 'remove-brought-in'
+  | 'narrow-plan-focus'
+  | 'remove-mention'
+  | 'review-scene'
+  | 'narrow-interview-focus'
+  | 'new-conversation';
+
+/**
+ * A request as measured, in tokens: all of it, and of that the `parts` the
+ * Author is told of, named as its Mode names them, and in a Plan each
+ * Brainstorm brought in; the ways to make room that apply to it; with the
+ * Model's `window`, if it is known, and the room kept for the `reply`
+ * within it.
  */
 export type RequestSize = {
   request: number;
-  plan: number;
-  storyBible: number;
+  parts: SizePart[];
   broughtIn: BroughtInSize[];
+  ways: WayOut[];
   window: number | null;
   reply: number;
 };

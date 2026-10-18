@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { KeyKeeping, ProvidersView } from '../shared/api';
+import type { RequestSize } from '../shared/request-size';
 import {
   addedMessage,
   failureMessage,
@@ -150,14 +151,17 @@ describe('failureMessage', () => {
 describe('the explanation of a Plan’s request too big for its Model', () => {
   const haiku = { provider: 'anthropic', id: 'claude-haiku-4-5' } as const;
   const lmStudio = { provider: 'lmstudio', id: 'qwen3-8b' } as const;
-  const size = {
+  const size: RequestSize = {
     request: 230_000,
-    plan: 40_000,
-    storyBible: 25_000,
+    parts: [
+      { label: 'The plan', size: 40_000 },
+      { label: 'The Story Bible', size: 25_000 },
+    ],
     broughtIn: [
       { id: 'b1', title: 'Heist ideas', size: 120_000 },
       { id: 'b2', title: 'Names', size: 900 },
     ],
+    ways: ['remove-brought-in', 'narrow-plan-focus'],
     window: 200_000,
     reply: 32_000,
   };
@@ -178,7 +182,13 @@ describe('the explanation of a Plan’s request too big for its Model', () => {
   });
 
   it('gives a Provider’s refusal the same explanation, and with nothing brought in, offers no Brainstorm to remove', () => {
-    const refused = { ...size, broughtIn: [], window: null, reply: 0 };
+    const refused: RequestSize = {
+      ...size,
+      broughtIn: [],
+      ways: ['narrow-plan-focus'],
+      window: null,
+      reply: 0,
+    };
 
     expect(tooBigMessage(refused, haiku, 'Haiku 4.5')).toEqual({
       lead: 'Haiku 4.5 refused this request as too big for its window: ≈ 230k tokens.',
@@ -198,9 +208,76 @@ describe('the explanation of a Plan’s request too big for its Model', () => {
     ]);
   });
 
-  it('tells a refusal outside Plan as any other failure', () => {
+  it('without the sizes, still tells a refusal as too big, never as any other failure', () => {
     expect(failureMessage('context', haiku, encrypted)).toBe(
-      "The Assistant couldn't answer. Retry, or choose another Model.",
+      'Anthropic refused this request as too big for its window. Choose another Model.',
     );
+  });
+});
+
+describe('the explanation of another Mode’s request too big for its Model', () => {
+  const sonnet = { provider: 'anthropic', id: 'claude-sonnet-4-5' } as const;
+  const lmStudio = { provider: 'lmstudio', id: 'qwen3-8b' } as const;
+  const review: RequestSize = {
+    request: 90_000,
+    parts: [
+      { label: 'The Story Bible', size: 12_000 },
+      { label: 'The Outline skeleton', size: 3_000 },
+      { label: 'The Conversation', size: 8_000 },
+      { label: 'This Chapter’s Prose', size: 60_000 },
+      { label: '@-mentioned: “The Harbour”', size: 7_000 },
+    ],
+    broughtIn: [],
+    ways: ['remove-mention', 'review-scene'],
+    window: 64_000,
+    reply: 16_000,
+  };
+
+  it('lists a Chapter Review’s parts biggest first, with the ways out that fit it', () => {
+    expect(tooBigMessage(review, sonnet, 'Sonnet 4.5')).toEqual({
+      lead: 'This request is too big for Sonnet 4.5, so nothing was sent: ≈ 106k tokens with room for the reply, and its window holds ≈ 64k tokens.',
+      parts: [
+        'This Chapter’s Prose, ≈ 60k tokens',
+        'The Story Bible, ≈ 12k tokens',
+        'The Conversation, ≈ 8k tokens',
+        '@-mentioned: “The Harbour”, ≈ 7k tokens',
+        'The Outline skeleton, ≈ 3k tokens',
+      ],
+      after: [
+        'To make room, remove an @-mention, review a Scene instead of the whole Chapter, or choose another Model, then retry.',
+      ],
+    });
+  });
+
+  it('offers to narrow an Interview’s focus, or start a new Conversation, when those apply', () => {
+    const interview: RequestSize = {
+      ...review,
+      parts: [
+        { label: 'The Interview focus', size: 30_000 },
+        { label: 'The Conversation', size: 50_000 },
+      ],
+      ways: ['narrow-interview-focus', 'new-conversation'],
+    };
+
+    expect(tooBigMessage(interview, sonnet, 'Sonnet 4.5').after).toEqual([
+      'To make room, narrow the Interview focus, start a new Conversation, or choose another Model, then retry.',
+    ]);
+  });
+
+  it('gives a Provider’s refusal on LM Studio the same explanation, with its line', () => {
+    const refused: RequestSize = {
+      ...review,
+      ways: [],
+      window: null,
+      reply: 0,
+    };
+
+    expect(tooBigMessage(refused, lmStudio, 'Qwen3 8B')).toMatchObject({
+      lead: 'Qwen3 8B refused this request as too big for its window: ≈ 90k tokens.',
+      after: [
+        'To make room, choose another Model, then retry.',
+        'The Model loaded in LM Studio may have a smaller window than it reports: raise its context length in LM Studio.',
+      ],
+    });
   });
 });

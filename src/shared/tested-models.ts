@@ -93,3 +93,7 @@ export function isTested(
 /** What the Untested mark says on hover. */
 export const UNTESTED_TOOLTIP =
   "This Model hasn't been checked against the rule that the Assistant never writes Prose. The rule still applies, but it may slip.";
+
+/** What the Tested mark says on hover. */
+export const TESTED_TOOLTIP =
+  'This Model has been checked against the rule that the Assistant never writes Prose.';

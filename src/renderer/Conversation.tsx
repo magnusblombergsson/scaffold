@@ -812,7 +812,7 @@ export function MessageLog({
   );
 }
 
-/** Why a Plan's request wasn't answered: too big for its Model, what is biggest in it, and the ways out. */
+/** Why a request wasn't answered: too big for its Model, what is biggest in it, and the ways out. */
 function TooBig({ message }: { message: TooBigMessage }) {
   return (
     <>
