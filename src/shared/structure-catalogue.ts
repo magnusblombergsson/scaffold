@@ -17,6 +17,10 @@ export type GenreId =
   | 'science-fiction'
   | 'romance'
   | 'literary'
+  | 'adventure'
+  | 'comedy'
+  | 'drama'
+  | 'historical'
   | 'other';
 
 export type FormatId =
@@ -113,6 +117,10 @@ export const GENRES: readonly Genre[] = [
   { id: 'science-fiction', name: 'Science fiction' },
   { id: 'romance', name: 'Romance' },
   { id: 'literary', name: 'Literary' },
+  { id: 'adventure', name: 'Adventure' },
+  { id: 'comedy', name: 'Comedy' },
+  { id: 'drama', name: 'Drama' },
+  { id: 'historical', name: 'Historical' },
   { id: 'other', name: 'Other' },
 ];
 
@@ -133,6 +141,10 @@ const GENRE_FICTION: readonly GenreId[] = [
   'fantasy',
   'science-fiction',
   'romance',
+  'adventure',
+  'comedy',
+  'drama',
+  'historical',
   'other',
 ];
 
@@ -513,7 +525,7 @@ export const STRUCTURES: readonly Structure[] = [
     description:
       'A departure from the ordinary world, an ordeal in an unfamiliar one, and a return changed.\nIts stages may be reordered, merged or skipped.',
     fits: {
-      genres: ['fantasy', 'science-fiction', 'other'],
+      genres: ['fantasy', 'science-fiction', 'adventure', 'other'],
       formats: ['novella', 'novel'],
       across: ['book', 'series'],
     },
@@ -614,7 +626,7 @@ export const STRUCTURES: readonly Structure[] = [
     description:
       'Five parts, symmetrical, with the climax in the middle and its consequences after.\nWritten about tragedy, still used where the turn falls at the centre.',
     fits: {
-      genres: ['literary', 'horror', 'other'],
+      genres: ['literary', 'horror', 'drama', 'other'],
       formats: SHORT,
       across: ['book'],
     },
@@ -756,6 +768,193 @@ export const STRUCTURES: readonly Structure[] = [
         id: 'ketsu',
         name: 'Ketsu',
         purpose: 'The reconciliation: how the twist belongs with the rest.',
+        at: at(75, 100),
+        span: 'run',
+        opensPart: true,
+      },
+    ],
+  },
+  {
+    id: 'story-circle',
+    name: 'Story Circle',
+    credit:
+      'After Dan Harmon’s essays on story structure, simplified from Joseph Campbell’s hero’s journey.',
+    description:
+      'Eight Beats round a circle: out of the familiar into the unknown, and back changed.\nSmall enough for one short story, or one Episode in every Part.',
+    fits: {
+      genres: [...GENRE_FICTION, 'literary'],
+      formats: SHORT,
+      across: ['book', 'part'],
+    },
+    // Harmon gives no positions: these follow from the circle's eight equal
+    // segments, so they are as rough as the circle.
+    beats: [
+      {
+        id: 'you',
+        name: 'You',
+        purpose: 'The protagonist where they are at ease.',
+        at: at(0, 12),
+        span: 'run',
+      },
+      {
+        id: 'need',
+        name: 'Need',
+        purpose: 'They want something they don’t have.',
+        at: at(10, 14),
+        span: 'scene',
+      },
+      {
+        id: 'go',
+        name: 'Go',
+        purpose: 'They step into a situation they don’t know.',
+        at: at(23, 27),
+        span: 'scene',
+      },
+      {
+        id: 'search',
+        name: 'Search',
+        purpose: 'They adapt to it, and it tests them.',
+        at: at(25, 50),
+        span: 'run',
+      },
+      {
+        id: 'find',
+        name: 'Find',
+        purpose: 'They get what they wanted.',
+        at: at(48, 52),
+        span: 'scene',
+      },
+      {
+        id: 'take',
+        name: 'Take',
+        purpose: 'Getting it costs them dearly.',
+        at: at(50, 75),
+        span: 'run',
+      },
+      {
+        id: 'return',
+        name: 'Return',
+        purpose: 'They go back to where they started.',
+        at: at(73, 77),
+        span: 'scene',
+      },
+      {
+        id: 'change',
+        name: 'Change',
+        purpose: 'They are not who they were, for better or worse.',
+        at: at(88, 100),
+        span: 'run',
+      },
+    ],
+  },
+  {
+    id: 'tv-acts',
+    name: 'TV-style act structure',
+    credit:
+      'After the act structure of US network television, which has no one author: its acts end where the commercial breaks fall.',
+    description:
+      'One Episode: a teaser, four acts each ending on a turn, and a short tag.\nIt runs anew in every Part, as each Part is an Episode.',
+    fits: {
+      genres: [...GENRE_FICTION, 'literary'],
+      formats: ['novella', 'novel'],
+      across: ['part'],
+    },
+    // Its acts fall within one Part, so none opens a Part.
+    beats: [
+      {
+        id: 'teaser',
+        name: 'Teaser',
+        purpose: 'A cold open: this Episode’s problem, ending on a hook.',
+        at: at(0, 5),
+        span: 'scene',
+      },
+      {
+        id: 'act-one',
+        name: 'Act one',
+        purpose:
+          'The response to the teaser, ending on a turn that raises the stakes.',
+        at: at(5, 28),
+        span: 'run',
+      },
+      {
+        id: 'act-two',
+        name: 'Act two',
+        purpose: 'Trouble deepens, ending with the lead in serious trouble.',
+        at: at(28, 51),
+        span: 'run',
+      },
+      {
+        id: 'act-three',
+        name: 'Act three',
+        purpose: 'The lead works free, ending as the pieces come together.',
+        at: at(51, 74),
+        span: 'run',
+      },
+      {
+        id: 'act-four',
+        name: 'Act four',
+        purpose: 'The crisis and the climax.',
+        at: at(74, 97),
+        span: 'run',
+      },
+      {
+        id: 'tag',
+        name: 'Tag',
+        purpose: 'A short close after the climax, often lighter.',
+        at: at(97, 100),
+        span: 'scene',
+      },
+    ],
+  },
+  {
+    id: 'pulp-formula',
+    name: 'Dent’s pulp formula',
+    credit: 'After Lester Dent’s master plot for pulp fiction (about 1936).',
+    description:
+      'Four quarters, each ending on a twist, the hero in more trouble each time until they win.\nWritten for a story of about 6,000 words, some 1,500 words a quarter.',
+    fits: {
+      genres: [
+        'mystery',
+        'crime',
+        'thriller',
+        'fantasy',
+        'science-fiction',
+        'other',
+      ],
+      formats: ['short-story', 'novelette'],
+      across: ['book'],
+    },
+    beats: [
+      {
+        id: 'menace',
+        name: 'Menace',
+        purpose:
+          'Hero, menace and problem at once, ending in a physical clash and a twist.',
+        at: at(0, 25),
+        span: 'run',
+        opensPart: true,
+      },
+      {
+        id: 'more-trouble',
+        name: 'More trouble',
+        purpose: 'The trouble grows, to another clash and another twist.',
+        at: at(25, 50),
+        span: 'run',
+        opensPart: true,
+      },
+      {
+        id: 'toward-defeat',
+        name: 'Toward defeat',
+        purpose: 'The hero is driven to the edge of losing, ending on a twist.',
+        at: at(50, 75),
+        span: 'run',
+        opensPart: true,
+      },
+      {
+        id: 'victory',
+        name: 'Victory',
+        purpose:
+          'The hero wins by their own skill, every thread is tied up, and a last twist lands.',
         at: at(75, 100),
         span: 'run',
         opensPart: true,

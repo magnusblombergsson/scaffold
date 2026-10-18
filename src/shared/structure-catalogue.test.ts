@@ -14,14 +14,14 @@ import {
   type Structure,
 } from './structure-catalogue';
 
-// The built-in catalogue (spec: Outline planner §2): eight Structures and six
+// The built-in catalogue (spec: Outline planner §2): eleven Structures and six
 // Genre conventions, the Genres and Formats a Book may have, each with a
 // fixed slug id that is never reused or renamed (§11).
 
 const SLUG = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 
 describe('the catalogue', () => {
-  it('holds the eight Structures, in order', () => {
+  it('holds the eleven Structures, in order', () => {
     expect(STRUCTURES.map((s) => s.id)).toEqual([
       'three-act',
       'four-part',
@@ -31,6 +31,21 @@ describe('the catalogue', () => {
       'freytag',
       'fichtean',
       'kishotenketsu',
+      'story-circle',
+      'tv-acts',
+      'pulp-formula',
+    ]);
+    expect(
+      STRUCTURES.find((s) => s.id === 'story-circle')!.beats.map((b) => b.name),
+    ).toEqual([
+      'You',
+      'Need',
+      'Go',
+      'Search',
+      'Find',
+      'Take',
+      'Return',
+      'Change',
     ]);
     expect(STRUCTURES.find((s) => s.id === 'save-the-cat')!.beats).toHaveLength(
       15,
@@ -59,6 +74,10 @@ describe('the catalogue', () => {
       'Science fiction',
       'Romance',
       'Literary',
+      'Adventure',
+      'Comedy',
+      'Drama',
+      'Historical',
       'Other',
     ]);
     expect(FORMATS.map((f) => [f.name, f.words])).toEqual([
@@ -160,13 +179,19 @@ describe('the structure guide’s order', () => {
       structure: 'fichtean',
     });
 
-    expect(fitting.map((s) => s.id)).toEqual(['freytag', 'kishotenketsu']);
+    expect(fitting.map((s) => s.id)).toEqual([
+      'freytag',
+      'kishotenketsu',
+      'story-circle',
+    ]);
     expect(lessUsual.map((s) => s.id)).toEqual([
       'three-act',
       'four-part',
       'save-the-cat',
       'seven-point',
       'heros-journey',
+      'tv-acts',
+      'pulp-formula',
     ]);
   });
 
@@ -182,6 +207,8 @@ describe('the structure guide’s order', () => {
       'freytag',
       'fichtean',
       'kishotenketsu',
+      'story-circle',
+      'pulp-formula',
     ]);
     expect(
       guideStructures({ bookFormat: 'novel' }).fitting.map((s) => s.id),
@@ -199,7 +226,39 @@ describe('the structure guide’s order', () => {
     expect(
       guideStructures({ genres: ['from-a-newer-app'], bookFormat: 'epic' }),
     ).toEqual(all);
-    expect(all.lessUsual).toEqual([]);
+    // All but the one that runs in every Part only.
+    expect(all.lessUsual.map((s) => s.id)).toEqual(['tv-acts']);
+  });
+});
+
+describe('the Genres without Genre conventions', () => {
+  const UNCONVENTIONAL = ['adventure', 'comedy', 'drama', 'historical'];
+  const fitIds = (genre: string, bookFormat = 'novel') =>
+    STRUCTURES.filter((s) => fitsBook(s, { genres: [genre], bookFormat })).map(
+      (s) => s.id,
+    );
+
+  it('add no Genre convention: Adventure, Comedy, Drama and Historical', () => {
+    for (const g of UNCONVENTIONAL) {
+      expect(CONVENTIONS.map((c) => c.genre)).not.toContain(g);
+    }
+  });
+
+  it('fit the general-purpose Structures, as Genres the catalogue knows', () => {
+    for (const g of UNCONVENTIONAL) {
+      expect(fitIds(g)).toEqual(
+        expect.arrayContaining(['three-act', 'four-part', 'save-the-cat']),
+      );
+      // Known to the catalogue, so not fitting everything as an unknown would.
+      expect(fitIds(g)).not.toContain('seven-point');
+    }
+  });
+
+  it('fit the Hero’s Journey for Adventure and Freytag’s pyramid for Drama', () => {
+    expect(fitIds('adventure')).toContain('heros-journey');
+    expect(fitIds('comedy')).not.toContain('heros-journey');
+    expect(fitIds('drama', 'short-story')).toContain('freytag');
+    expect(fitIds('historical', 'short-story')).not.toContain('freytag');
   });
 });
 
@@ -254,6 +313,9 @@ describe('the shortlist', () => {
       'freytag',
       'fichtean',
       'kishotenketsu',
+      'story-circle',
+      'tv-acts',
+      'pulp-formula',
     ]);
     expect(ids(conventions.full)).toEqual(['mystery']);
     expect(ids(conventions.byName)).toEqual([
@@ -279,6 +341,7 @@ describe('the shortlist', () => {
       'seven-point',
       'heros-journey',
       'kishotenketsu',
+      'story-circle',
     ]);
   });
 
@@ -293,8 +356,30 @@ describe('the shortlist', () => {
       [],
     );
 
-    // None of the catalogue’s Structures fits per Part yet.
-    expect(ids(structures.full)).toEqual(['save-the-cat']);
+    // What the Book follows, then the two that fit per Part.
+    expect(ids(structures.full)).toEqual([
+      'save-the-cat',
+      'story-circle',
+      'tv-acts',
+    ]);
+  });
+
+  it('holds Dent’s pulp formula in full for a short action story over the whole Book, and not for a novel, a romance or every Part', () => {
+    const pulp = (book: Parameters<typeof shortlist>[0]) =>
+      ids(shortlist(book, []).structures.full).includes('pulp-formula');
+
+    expect(pulp({ genres: ['crime'], bookFormat: 'short-story' })).toBe(true);
+    expect(pulp({ genres: ['crime'], bookFormat: 'novel' })).toBe(false);
+    expect(pulp({ genres: ['romance'], bookFormat: 'short-story' })).toBe(
+      false,
+    );
+    expect(
+      pulp({
+        genres: ['crime'],
+        bookFormat: 'short-story',
+        structureRuns: 'part',
+      }),
+    ).toBe(false);
   });
 
   it('holds in full what the Book follows, fitting or not', () => {
@@ -313,6 +398,7 @@ describe('the shortlist', () => {
       'freytag',
       'fichtean',
       'kishotenketsu',
+      'story-circle',
     ]);
     expect(ids(conventions.full)).toEqual(['romance']);
   });
@@ -334,14 +420,15 @@ describe('the shortlist', () => {
       'freytag',
       'fichtean',
       'kishotenketsu',
+      'story-circle',
     ]);
     expect(ids(conventions.full)).toEqual(['thriller']);
   });
 
-  it('holds no Genre convention in full for a Book with no Genres, and every Structure', () => {
+  it('holds no Genre convention in full for a Book with no Genres, and every Structure but those for every Part only', () => {
     const { structures, conventions } = shortlist({}, []);
 
-    expect(structures.byName).toEqual([]);
+    expect(ids(structures.byName)).toEqual(['tv-acts']);
     expect(conventions.full).toEqual([]);
   });
 });

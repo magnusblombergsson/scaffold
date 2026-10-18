@@ -48,6 +48,14 @@ import {
   type Visibility,
 } from '../../shared/project-types';
 import type { NewEntry } from '../../shared/story-bible-import';
+import {
+  withAddition,
+  withGathered,
+  withoutAddition,
+  type AdditionWritten,
+  type GatheredItems,
+  type RelationEnd,
+} from '../../shared/gathering';
 import type {
   Changed,
   Conflict,
@@ -3073,6 +3081,108 @@ export class ProjectStore {
       return trashAdded;
     });
     return { ...changed, ids };
+  }
+
+  /**
+   * Adds what the Author ticked of a Gathering's list (ADR 0018), as one
+   * step: the new Entries, each seen when mentioned, in a Series from the
+   * Book it first appears in; the additions to Entries, which only add, to
+   * each as it stands now; and the Relations its rules allow. Undo moves the
+   * new Entries to Trash and takes back the additions and Relations, as far
+   * as they still hold what was written. Resolves with the new Entries' ids
+   * by their keys.
+   */
+  async acceptGathered(
+    items: GatheredItems,
+  ): Promise<Changed & { ids: Record<string, string> }> {
+    const ids: Record<string, string> = Object.fromEntries(
+      items.entries.map((e) => [e.key, randomUUID()]),
+    );
+    const changed = await this.step(async () => {
+      const undos: (() => Promise<void>)[] = [];
+      const undo = async () => {
+        for (const takeBack of [...undos].reverse()) await takeBack();
+      };
+      try {
+        await this.addGathered(items, ids, undos);
+      } catch (error) {
+        // All or none: what it added before failing is taken back.
+        await undo();
+        throw error;
+      }
+      return undo;
+    });
+    return { ...changed, ids };
+  }
+
+  /** Adds `items` as `acceptGathered` does, pushing onto `undos` how to take each back. */
+  private async addGathered(
+    { entries, additions, relations }: GatheredItems,
+    ids: Record<string, string>,
+    undos: (() => Promise<void>)[],
+  ): Promise<void> {
+    for (const entry of entries) {
+      const id = ids[entry.key];
+      const value = newEntryValue(
+        id,
+        entry.type,
+        entry.name,
+        entry.description,
+      );
+      await this.addEntry({
+        ...value,
+        aliases: [...entry.aliases],
+        fields: withGathered(value.fields, entry.fields),
+      });
+      undos.push(async () => {
+        if (this.entries.has(id)) await this.trash.move('entry', id);
+      });
+      if (
+        entry.firstAppears &&
+        isBook(this.manifest.tree, entry.firstAppears)
+      ) {
+        await this.setDetail(
+          { kind: 'entry', id },
+          'firstAppears',
+          entry.firstAppears,
+        );
+      }
+    }
+    for (const addition of additions) {
+      if (!this.entries.has(addition.entry)) continue;
+      let wrote: AdditionWritten | undefined;
+      await this.changeEntry(addition.entry, (value) => {
+        const added = withAddition(value, addition);
+        wrote = added.wrote;
+        return added.entry;
+      });
+      undos.push(async () => {
+        if (!this.entries.has(addition.entry) || !wrote) return;
+        const written = wrote;
+        await this.changeEntry(addition.entry, (value) =>
+          withoutAddition(value, written),
+        );
+      });
+    }
+    const idOf = (end: RelationEnd) =>
+      'entry' in end ? end.entry : ids[end.candidate];
+    for (const { from: fromEnd, to: toEnd, relation } of relations) {
+      const from = idOf(fromEnd);
+      const to = idOf(toEnd);
+      if (!from || !to) continue;
+      if (relationRefusal(this.relationsView(), from, to, relation)) continue;
+      const wrote = await this.records.relations.addAccepted(
+        from,
+        to,
+        relation,
+        undefined,
+      );
+      this.emitRecords('relations');
+      undos.push(async () => {
+        await this.records.relations.takeAway(wrote, from);
+        this.emitRecords('relations');
+      });
+    }
   }
 
   /** Adds each of `entries` as `importEntries` does, by `ids`. */

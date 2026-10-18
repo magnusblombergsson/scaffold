@@ -80,8 +80,10 @@ import { EntryTypePicker } from './EntryTypePicker';
 import { EntryView } from './EntryView';
 import { ExportManuscriptDialog } from './ExportManuscriptDialog';
 import type { NewEntry, StoryBibleFile } from '../shared/story-bible-import';
+import type { GatheredItems } from '../shared/gathering';
 import { ExportStoryBibleDialog } from './ExportStoryBibleDialog';
 import { ImportStoryBibleDialog } from './ImportStoryBibleDialog';
+import { GatheringDialog } from './GatheringDialog';
 import { ImportDialog } from './ImportDialog';
 import { chapterInsertion, sceneInsertion, type Current } from './insertion';
 import { InterviewRoom } from './InterviewRoom';
@@ -1073,6 +1075,20 @@ function ProjectView({
   const [projectSettingsOpen, setProjectSettingsOpen] = useState(false);
   const [exportOpen, setExportOpen] = useState(false);
   const [storyBibleExportOpen, setStoryBibleExportOpen] = useState(false);
+  /** Whether the Gathering's dialog is open, to start one or review its list. */
+  const [gatheringOpen, setGatheringOpen] = useState(false);
+  /** Whether a Gathering's list is kept on this computer, not reviewed yet. */
+  const [gatheringWaiting, setGatheringWaiting] = useState(false);
+  useEffect(() => {
+    if (gatheringOpen) return;
+    let current = true;
+    void window.assistant.savedGathering().then((saved) => {
+      if (current) setGatheringWaiting(saved !== null);
+    });
+    return () => {
+      current = false;
+    };
+  }, [gatheringOpen]);
   /** The Story Bible being imported, while the Author ticks its Entries. */
   const [storyBibleImport, setStoryBibleImport] =
     useState<StoryBibleFile | null>(null);
@@ -1296,6 +1312,19 @@ function ProjectView({
     if (!id) return;
     switchRoom('writing');
     setTab('manuscript');
+  }
+
+  /** Adds what the Author ticked of a Gathering's list, as one step they can undo; whether it did. */
+  async function acceptGathered(
+    items: GatheredItems,
+    count: number,
+  ): Promise<boolean> {
+    switchRoom('storyBible');
+    const ran = await mirror.run((project) => project.acceptGathered(items), {
+      undo: `Added ${count === 1 ? '1 gathered item' : `${count} gathered items`}`,
+      what: 'add the gathered items',
+    });
+    return ran !== undefined;
   }
 
   /** Adds the Entries the Author ticked, as one step they can undo. */
@@ -2209,6 +2238,8 @@ function ProjectView({
                       startTodo('storyBible', { kind: 'entry', id })
                     }
                     onCombine={setCombining}
+                    onGather={() => setGatheringOpen(true)}
+                    gatheringWaiting={gatheringWaiting}
                   />
                 </div>
                 <TodoDockPane
@@ -2436,6 +2467,16 @@ function ProjectView({
                 : undefined
             }
             onClose={onCloseImport}
+          />
+        )}
+        {gatheringOpen && (
+          <GatheringDialog
+            manuscript={manuscript}
+            entries={entries}
+            book={bibleLens.book}
+            onAccept={acceptGathered}
+            onOpenScene={(sceneId) => continueAt(sceneId)}
+            onClose={() => setGatheringOpen(false)}
           />
         )}
         {storyBibleImport && (

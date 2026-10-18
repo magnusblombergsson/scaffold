@@ -40,9 +40,15 @@ import { splitManuscript } from '../shared/manuscript-import';
 import {
   claudeListing,
   isProviderId,
+  priceOf,
   type Model,
   type ModelWindow,
 } from '../shared/models';
+import {
+  gatheringFiles,
+  type GatheringFiles,
+  type ModelListing,
+} from './assistant/gathering';
 import type { ProseLanguage } from '../shared/project-types';
 import { unitName } from '../shared/unit-name';
 import type { ViewSettings } from '../shared/view-settings';
@@ -164,6 +170,32 @@ export function modelWindow(model: Model): ModelWindow | null {
   return listed
     ? { contextWindow: listed.contextWindow, outputLimit: listed.outputLimit }
     : null;
+}
+
+/**
+ * How much `model` takes in, as `modelWindow` says, and its price, as its
+ * shortlist says or a built-in Claude model carries; null where not known.
+ */
+export function modelListing(model: Model): ModelListing {
+  const listed = providers
+    .shortlists()
+    [model.provider].find((m) => m.id === model.id);
+  return {
+    window: modelWindow(model),
+    price: listed?.price ?? priceOf(model),
+  };
+}
+
+let gatheringsKept: GatheringFiles | null = null;
+
+/** Where each Project's Gathering is kept on this computer, not in the Project. */
+export function keptGatherings(): GatheringFiles {
+  gatheringsKept ??= gatheringFiles(
+    path.join(app.getPath('userData'), 'gatherings'),
+    deps.fs,
+    deps.clock,
+  );
+  return gatheringsKept;
 }
 
 /** The Author chose `model` for a Conversation: a new one starts on it. */

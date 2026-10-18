@@ -2314,6 +2314,9 @@ h2.binder-title > button:hover::after {
 }
 
 .story-bible-new {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
   padding: 0.5rem;
 }
 
@@ -3673,6 +3676,60 @@ legend .show-in-peek {
   padding-left: 1.5rem;
   color: var(--warning);
   font-size: 0.85rem;
+}
+
+/* A Gathering (ADR 0018): choosing what it reads, then its list. */
+.gathering .gathering-field,
+.gathering .gathering-types {
+  display: block;
+  margin: 0.5rem 0;
+}
+
+.gathering .gathering-types {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.25rem 1rem;
+  border: none;
+  padding: 0;
+}
+
+.gathering-estimate,
+.gathering-running {
+  margin: 0.75rem 0;
+}
+
+.gathering-running progress {
+  width: 100%;
+}
+
+.gathering-item {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 0.25rem 0.5rem;
+  padding-bottom: 0.5rem;
+  border-bottom: 1px solid var(--line);
+}
+
+.gathering-item input[type='text'],
+.gathering-item textarea {
+  font: inherit;
+}
+
+.gathering-item textarea {
+  flex-basis: 100%;
+}
+
+.gathering-fields,
+.gathering-sources {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.gathering-fields {
+  padding-left: 1rem;
 }
 
 .combine fieldset {

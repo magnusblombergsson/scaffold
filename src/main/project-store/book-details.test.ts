@@ -337,6 +337,22 @@ describe('ids the catalogue does not know', () => {
     });
   });
 
+  it('keep a Genre from a newer app through a change to another detail', async () => {
+    await newProject();
+    await writeHeader({ genres: ['literary', 'newer-genre'] });
+    const reopened = await open();
+
+    expect(detailsOf(reopened)).toMatchObject({
+      genres: ['literary', 'newer-genre'],
+    });
+    await reopened.setBookDetail(PROJECT_OUTLINE, 'structure', 'three-act');
+
+    expect(await headerOf(PROJECT_OUTLINE)).toMatchObject({
+      genres: ['literary', 'newer-genre'],
+      structure: 'three-act',
+    });
+  });
+
   it('are left out of what a header holds when they are not ids at all', async () => {
     await newProject();
     await writeHeader({

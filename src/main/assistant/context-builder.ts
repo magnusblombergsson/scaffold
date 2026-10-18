@@ -507,6 +507,19 @@ function acceptedMention(proposal: ProposalView): string {
 }
 
 /**
+ * The Story Bible as a Gathering sends it: as `lens` sees it, those
+ * Entries seen always, and those seen when mentioned that `texts` name;
+ * no private notes and no images, as everywhere.
+ */
+export async function gatheringStoryBible(
+  view: AssistantView,
+  lens: StoryBibleLens,
+  texts: string[],
+): Promise<string> {
+  return (await storyBible(view, texts, null, lens, false)).text;
+}
+
+/**
  * The Entries the Assistant may see, as one block: those seen always, those
  * seen when mentioned whose name or an alias is in `texts`, and those an
  * Interview is about, by Entry, type or Tag, and in Research, with `everyFact`,

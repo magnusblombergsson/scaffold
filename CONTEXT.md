@@ -168,7 +168,7 @@ The number of words the Author aims for in a Scene, a Chapter, a Part or a Book'
 _Avoid_: Goal, quota, target (that is what a Proposal changes)
 
 **Genre**:
-A kind of story a Book belongs to, chosen by the Author from a fixed list: Mystery, Crime, Thriller, Horror, Fantasy, Science fiction, Romance, Literary or Other. A Book may have several, or none.
+A kind of story a Book belongs to, chosen by the Author from a fixed list: Mystery, Crime, Thriller, Horror, Fantasy, Science fiction, Romance, Literary, Adventure, Comedy, Drama, Historical or Other. A Book may have several, or none. Young adult is not a Genre: it is an audience.
 _Avoid_: Category, Tag (Tags are free words)
 
 **Format**:
