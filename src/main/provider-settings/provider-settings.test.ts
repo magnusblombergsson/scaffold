@@ -414,6 +414,7 @@ describe('ProviderSettings', () => {
           id: 'claude-haiku-4-5',
           sheet: '',
           prompts: '',
+          jobs: ['modes'],
         },
       ]);
       await providers.add('anthropic', entry(ANTHROPIC_KEY));

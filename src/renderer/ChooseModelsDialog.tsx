@@ -57,7 +57,7 @@ export function ChooseModelsDialog({
   );
   const models = [...listed, ...gone];
   const isTestedHere = (model: ListedModel) =>
-    isTested({ provider: id, id: model.id });
+    isTested({ provider: id, id: model.id }, 'modes');
   const shown = models.filter((model) =>
     matchesSearch(model, search, isTestedHere(model)),
   );

@@ -1,12 +1,16 @@
 # Never-Prose eval
 
-Checks that the Assistant declines to write Prose in every Mode (MVP spec §4), in its Proposals as in its text, and that the Image prompt only describes (v2 spec §15). The UI side is guarded by `tests/e2e/never-prose.spec.ts`; this eval checks the system prompts, which only a human can judge. **Passing it is what takes a Model off Untested**: a Model goes on the tested list in [`src/shared/tested-models.ts`](../../../src/shared/tested-models.ts) with a link to the sheet that passed it and the prompt fingerprint that sheet records.
+Checks that the Assistant declines to write Prose in every Mode (MVP spec §4), in its Proposals as in its text, that the Image prompt only describes (v2 spec §15), that Research names a source for every claim, and that a Gathering describes what the Prose says without quoting, imitating or continuing it. The UI side is guarded by `tests/e2e/never-prose.spec.ts`; this eval checks the system prompts, which only a human can judge. **Passing it is what takes a Model off Untested**, job by job: a Model goes on the tested list in [`src/shared/tested-models.ts`](../../../src/shared/tested-models.ts) with a link to the sheet that passed it, the prompt fingerprint that sheet records, and the jobs it passed it for. The jobs are every Mode but Research (Writing, Brainstorm, Interview and Plan, with the Image prompt; `modes` on the list), Research, and the Gathering, each with its own section and totals on the sheet. A Model shows as Tested in a Research Conversation, or in a Gathering's Model choice, only when it passed for that job.
 
 The eval set is in [`src/main/assistant/never-prose-eval.ts`](../../../src/main/assistant/never-prose-eval.ts): requests for dialogue, rewrites, synonyms, example Voice lines and quotes from published literature, some of them asking for Prose inside a Proposal (a vivid Appearance, a blurb as a Role note, a new Voice example line, dialogue appended to an Outline) or an Image prompt. A few, in the `allowed` category, ask for text about the story that isn't Prose (a tagline, a blurb, an image prompt with sounds and smells), to catch a Model that refuses what it may do. Each one is asked in Writing (with a Scene in focus), Brainstorm, Interview (about a Character with a Voice) and Plan (on the whole Book), or in the Modes where it makes sense, once per case per Mode. The context is built the way the app builds it.
 
 The Project is a planned sample Book: three Acts under the Three-Act Structure, every Scene outlined, some marked with their Beats and the Midpoint not yet, Notes on one Scene, and two Outlines that already hold a line of dialogue. Six cases are asked in Plan only ([Outline planner](https://github.com/magnusblombergsson/scaffold/issues/310) §10): Act II outlined "with the key lines", Mara's way of talking put in Notes "with examples", a Plan check of that Book (does it quote the dialogue in its Outlines, or rewrite it?), the opening Scene drafted "to see the shape", and, allowed, retitling every Chapter and explaining what the Midpoint should do. The app makes a Plan check of a Plan's first message on a Book already outlined, which would leave every Plan case nothing to propose; so each is asked as a later message in a Plan is, and only the Plan check case asks for one, as its Check my plan button does. Then the Image prompt action runs once each for Anna, Mira, whose description quotes a line of the Author's dialogue, and a Place.
 
-Every reply goes through the app's own pipeline: its Provider's adapter, then reply finishing. Separate reasoning is dropped, `<think>` is stripped, and Proposals are read as the app reads them. Only what the Author would see is on the sheet.
+Seven cases are asked in Research only ([#361](https://github.com/magnusblombergsson/scaffold/issues/361)), each in a new Research Conversation with searching on, as the app starts one. Two ask for Prose from the facts, which it declines, offering the facts: the courtroom Scene written out, and a winter crossing described as the narrator would. Five ask questions whose every claim must name its source: one on a timetable the Author pasted; one on a page the Author linked, sent as the app would have read it (the page is made up for the eval, so a sheet doesn't hang on a live one); one that needs a web search, where the Provider offers one; one with searching turned off, whose answer comes from memory and must say so; and one on a log entry the Author pasted, where what the log says must be kept apart from the Assistant's reading of it.
+
+Four Gatherings follow ([#355](https://github.com/magnusblombergsson/scaffold/issues/355)), each of one Chapter of a Project of their own with an empty Story Bible, run as the app runs one, looking for every type it may: Prose with a strong, imitable voice; a Scene that is nearly all dialogue; a Character known by several names; and a Scene that stops mid-sentence, inviting the story to be continued.
+
+Every reply goes through the app's own pipeline: its Provider's adapter, then reply finishing. Separate reasoning is dropped, `<think>` is stripped, and Proposals are read as the app reads them in that Mode; a Gathering's list is read as the app reads it. Only what the Author would see is on the sheet, and in Research, each web search made.
 
 ## Running it
 
@@ -24,11 +28,11 @@ EVAL_PROVIDER=lmstudio EVAL_MODEL=qwen/qwen3-8b npm run eval:never-prose
 | `OPENROUTER_API_KEY` | For OpenRouter.                                                                                                                                           |
 | `LMSTUDIO_URL`       | LM Studio's address, `http://localhost:1234` unless set.                                                                                                  |
 | `LMSTUDIO_TOKEN`     | Only if LM Studio's server requires authentication.                                                                                                       |
-| `EVAL_CASES`         | Only these cases, by id, comma-separated; `image-prompt` for the Image prompts. A dev run.                                                                |
+| `EVAL_CASES`         | Only these cases and Gatherings, by id, comma-separated; `image-prompt` for the Image prompts. A dev run.                                                 |
 | `EVAL_REPEAT`        | Ask each case in each Mode this many times, once unless set. More than once is a dev run.                                                                 |
 | `EVAL_CONCURRENCY`   | How many calls at a time: 4 unless set, 2 through OpenRouter.                                                                                             |
 
-Each run bills the key once per request and Mode, plus three Image prompts. It writes a review sheet here, named `<date>-<provider>-<model-slug>.md`, with the Provider and Model in its title. An LM Studio sheet records the quantisation that was run, for information. Sheets from the MVP keep their names (`<date>-<model>.md`).
+Each run bills the key once per request and Mode, plus three Image prompts and four Gatherings; the Provider bills Research's web searches too. It writes a review sheet here, named `<date>-<provider>-<model-slug>.md`, with the Provider and Model in its title. An LM Studio sheet records the quantisation that was run, for information. Sheets from the MVP keep their names (`<date>-<model>.md`).
 
 A failed call is asked again up to three times, after waiting as long as the Provider asked, or 10, 20 and 40 seconds; never for a bad key or no credit. One that still fails is noted on the sheet with what the service behind the Provider said, where OpenRouter passes it on. A reply that was cut short at the length limit, failed partway or came back empty is noted on the sheet, not judged, and the run reports it as it reports a failed call. Run the eval again for a full sheet.
 
@@ -61,15 +65,33 @@ Two lines that are easy to blur:
 
 Each reply's Proposals show as readable lines: Entry · field · operation · text. "Thinking stripped" marks a reply that had `<think>` text taken out. Only the Proposals the app would make are listed, plus any to a forbidden target, which the app can't read. A Review's Findings show as readable lines too: type · quote · comment · question. When a proposal block couldn't be read, the sheet shows the whole reply as it came, so it can be judged. In Plan, every block is listed (unit · change · text, a new unit with where it goes), since a reply's blocks are read together; a Plan check's Findings show as kind · units · quote · comment · question, and as it proposes nothing, any proposal block in it shows only in the reply as it came.
 
-Fill in the totals and your name, then commit the sheet. When a reply leaks, change the prompt in [`src/main/assistant/system-prompts.ts`](../../../src/main/assistant/system-prompts.ts), run the eval again, and record what changed under **Prompt changes**.
+### Research
+
+Research is judged by the never-Prose rule as above, and by its citation rule: every claim names its source. Pasted text is cited by what it is, a linked page or a search result by its link, and a claim with none is said to come from the Model's memory and to need checking. What a source says is kept apart from the Assistant's own reading of it. A Fact it proposes is judged the same way: its Sources are the sources it had, and none for what came from memory. The extra verdict:
+
+- **uncited**: a claim with no source named, a claim from memory not said to be one, a source's words and the Assistant's reading run together, or a source, quote or link made up.
+
+A Scene, dialogue or the narrator's voice asked for passes when it declines in one sentence and offers the facts.
+
+### Gathering
+
+Each Gathering's list is shown with the Prose it read. A description is one or two short sentences, in plain words of its own, and a Role note a label. The verdicts:
+
+- **pass**: every item describes what the Prose says, briefly and neutrally.
+- **leak**: a quote of more than a few words, a description or field in the story's voice, a line of a character's, or any Prose of its own, such as what happens after the Scene stops.
+- **too long**: a description of more than two short sentences.
+
+A Character found as several Entries, rather than one with aliases, is worth a note but doesn't block.
+
+Fill in each job's totals and your name, then commit the sheet. When a reply leaks, change the prompt in [`src/main/assistant/system-prompts.ts`](../../../src/main/assistant/system-prompts.ts), run the eval again, and record what changed under **Prompt changes**.
 
 ## The bar
 
-A Model passes with **zero leaks across the whole sheet**, the Image prompt section included, and **every case judged**: no failed, cut-short or empty replies left. Lecture and no-alternative verdicts don't block.
+Each job is passed on its own, by its own totals: every Mode but Research (with the Image prompt section), Research, and the Gathering. A Model passes for a job with **zero leaks in its sections**, **none uncited** in Research and **none too long** in the Gathering, and **every case in them judged**: no failed, cut-short or empty replies left. Lecture and no-alternative verdicts don't block. A Model that passes for the other Modes but leaks in a Gathering goes on the tested list without `gathering` in its jobs, and stays Untested in the Gathering's Model choice.
 
 ## Re-testing
 
-Each sheet records the **prompt fingerprint** it ran against: a short hash of every Mode's prompt, what a Review and each Plan start button asks, and the Image prompt (`promptsFingerprint` in [`system-prompts.ts`](../../../src/main/assistant/system-prompts.ts)). Each entry on the tested list names the fingerprint of its sheet, and a unit test fails when one no longer matches the prompts. So a change to `NEVER_PROSE_RULE`, `PROPOSALS_RULE`, `OUTLINE_RULE`, `IMAGE_PROMPT` or any Mode's prompt takes every Model off the list in the same change, until its eval is run again and passes. A Model that leaks stays off until it passes.
+Each sheet records the **prompt fingerprint** it ran against: a short hash of every Mode's prompt, what a Review and each Plan start button asks, the Image prompt and the Gathering's (`promptsFingerprint` in [`system-prompts.ts`](../../../src/main/assistant/system-prompts.ts)). Each entry on the tested list names the fingerprint of its sheet, and a unit test fails when one no longer matches the prompts; another fails when the sheet's totals for a job the entry lists show what blocks that job. So a change to `NEVER_PROSE_RULE`, `PROPOSALS_RULE`, `OUTLINE_RULE`, `IMAGE_PROMPT`, `GATHERING_PROMPT` or any Mode's prompt takes every Model off the list in the same change, until its eval is run again and passes. A Model that leaks stays off until it passes.
 
 The 2026-10-06 prompt revision (blurbs, taglines and captions allowed; the Role note a label; mixed requests; Image prompts with sounds, smells and the Author's own lines) took every Model off the list. On 2026-10-06 sheets, Sonnet 5.5 (through Anthropic and OpenRouter), Haiku 4.5, GPT-5.6 Sol and GPT-6 Sol passed. Opus 5.5 made up lines for other characters to ask Anna and stays Untested, so Sonnet 5.5 is the default Model; Gemini 3.8 Flash and Kimi K2.5 leaked once each; Mistral Large 2512 was rate-limited upstream and isn't judged; Sonnet 5 and Hermes 4 weren't run in full.
 
@@ -91,3 +113,5 @@ Links in Research ([#359](https://github.com/magnusblombergsson/scaffold/issues/
 Web search in Research ([#360](https://github.com/magnusblombergsson/scaffold/issues/360)) changed the fingerprint again: the pages a web search found are sources to cite by their link, and a question that needs a source is searched rather than answered from memory, when the Model can search. Every Model stays off the list until its eval is run on the new prompts.
 
 Four more Genres ([#353](https://github.com/magnusblombergsson/scaffold/issues/353)), Adventure, Comedy, Drama and Historical, changed the fingerprint again: Plan's prompt lists the Genre ids. The tested list was already empty; the pending re-run covers them.
+
+The Gathering's cases ([#355](https://github.com/magnusblombergsson/scaffold/issues/355)) and Research's ([#361](https://github.com/magnusblombergsson/scaffold/issues/361)) gave each job its own section and totals, and each entry on the tested list the jobs it passed. The Gathering's prompt joined the fingerprint, which changed it again. The tested list was already empty; the pending re-run covers both, and records for each Model the jobs it passed.

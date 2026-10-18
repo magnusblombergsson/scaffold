@@ -628,6 +628,7 @@ export function useConversation({
     : null;
 
   return {
+    mode,
     list,
     current,
     draft,

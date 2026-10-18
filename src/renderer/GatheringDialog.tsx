@@ -399,7 +399,7 @@ function Setup({
             </option>
           ))}
         </select>
-        {model && !isTested(model) && (
+        {model && !isTested(model, 'gathering') && (
           <>
             {' · '}
             <span className="untested-mark" title={UNTESTED_TOOLTIP}>

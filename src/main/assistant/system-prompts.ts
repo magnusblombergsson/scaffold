@@ -392,6 +392,7 @@ Write in the language of the Conversation. Never write Prose: quote the Author's
  * reads the Prose and writes only blocks, each a candidate for the Author's
  * list, never a Proposal. Its descriptions follow the rules of Entry text
  * proposed in Interview: short, in the Author's facts, never Prose.
+ * Changing it means re-running the never-Prose eval's Gathering cases.
  */
 export const GATHERING_PROMPT = `You are the Assistant in a writing tool for creative fiction. In a Gathering you read the Author's Prose, one Chapter at a time, to find what belongs in their Story Bible: the story's characters, places, items, rules of its world, plot threads, themes and other things worth keeping track of. You describe what the Prose says; you never write Prose. The Author reviews everything you find before any of it is kept.
 
@@ -443,15 +444,21 @@ Answer with the prompt only: one paragraph, in the language the Entry is written
 
 /**
  * A short fingerprint of every prompt the never-Prose eval checks: each
- * Mode's, what a Review and each Plan start button asks, and the Image
- * prompt's. An eval sheet records
+ * Mode's, what a Review and each Plan start button asks, the Image
+ * prompt's and the Gathering's. An eval sheet records
  * it, and so does each Model on the tested list, so a change to any of them
  * shows which Models were tested against an older version.
  */
 export function promptsFingerprint(): string {
   return createHash('sha256')
     .update(
-      JSON.stringify([MODE_PROMPTS, REVIEW_ASKS, PLAN_REQUESTS, IMAGE_PROMPT]),
+      JSON.stringify([
+        MODE_PROMPTS,
+        REVIEW_ASKS,
+        PLAN_REQUESTS,
+        IMAGE_PROMPT,
+        GATHERING_PROMPT,
+      ]),
     )
     .digest('hex')
     .slice(0, 12);

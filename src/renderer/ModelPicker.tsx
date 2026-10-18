@@ -7,7 +7,7 @@ import {
   type Model,
   type ProviderId,
 } from '../shared/models';
-import { isTested, UNTESTED_TOOLTIP } from '../shared/tested-models';
+import { isTested, jobOf, UNTESTED_TOOLTIP } from '../shared/tested-models';
 import type { ConversationState } from './Conversation';
 import { modelLine, modelName, priceLabel } from './model-listing';
 import { useProviders, useShortlists } from './Providers';
@@ -28,7 +28,15 @@ type Group = {
  * Conversation is on it.
  */
 export function ModelPicker({
-  conversation: { current, model, chooseModel, picking, setPicking, streaming },
+  conversation: {
+    mode,
+    current,
+    model,
+    chooseModel,
+    picking,
+    setPicking,
+    streaming,
+  },
 }: {
   conversation: ConversationState;
 }) {
@@ -72,7 +80,8 @@ export function ModelPicker({
     return models.length > 0 ? [{ id, models }] : [];
   });
   const name = `${PROVIDER_NAMES[model.provider]} · ${modelName(model, shortlists)}`;
-  const untested = !isTested(model);
+  const job = jobOf(mode);
+  const untested = !isTested(model, job);
   const disabled = streaming !== null || (readOnly && current !== null);
 
   function closeToButton() {
@@ -169,7 +178,7 @@ export function ModelPicker({
                     onClick={() => choose(entry)}
                   >
                     {modelLine(id, listed)}
-                    {!isTested(entry) && <UntestedMark />}
+                    {!isTested(entry, job) && <UntestedMark />}
                   </button>
                 );
               })}
