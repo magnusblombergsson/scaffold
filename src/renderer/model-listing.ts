@@ -31,7 +31,7 @@ function dollars(amount: number): string {
 
 /**
  * Whether the Model meets every word of `search`: `tested` keeps only a
- * tested Model and `untested` only an Untested one; any other word must be
+ * Tested Model and `untested` only an Untested one; any other word must be
  * in its name or id.
  */
 export function matchesSearch(

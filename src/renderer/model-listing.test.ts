@@ -64,7 +64,7 @@ describe('matchesSearch', () => {
     expect(matchesSearch(model, 'qwen llama', false)).toBe(false);
   });
 
-  it('keeps only tested Models for the word tested, in any case', () => {
+  it('keeps only Tested Models for the word tested, in any case', () => {
     expect(matchesSearch(model, 'tested', true)).toBe(true);
     expect(matchesSearch(model, 'TESTED', true)).toBe(true);
     expect(matchesSearch(model, 'tested', false)).toBe(false);

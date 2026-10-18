@@ -14,7 +14,7 @@ import { statusLabel } from './provider-messages';
  * built-in Claude models with their prices; OpenRouter's, searchable, with
  * context window and price; or the LLMs downloaded in LM Studio, loaded or
  * not. A shortlisted Model the Provider no longer lists stays, to untick.
- * A tested Model is marked with a check; `tested` and `untested` in the
+ * A Tested Model is marked with a check; `tested` and `untested` in the
  * search keep only those Models.
  * `onClose` says whether the shortlist was saved.
  */
@@ -56,10 +56,10 @@ export function ChooseModelsDialog({
     (model) => !listed.some((m) => m.id === model.id),
   );
   const models = [...listed, ...gone];
-  const tested = (model: ListedModel) =>
+  const isTestedHere = (model: ListedModel) =>
     isTested({ provider: id, id: model.id });
   const shown = models.filter((model) =>
-    matchesSearch(model, search, tested(model)),
+    matchesSearch(model, search, isTestedHere(model)),
   );
 
   function toggle(modelId: string, on: boolean) {
@@ -125,7 +125,7 @@ export function ChooseModelsDialog({
               <ModelRow
                 key={model.id}
                 model={model}
-                tested={tested(model)}
+                tested={isTestedHere(model)}
                 facts={[
                   contextLabel(model.contextWindow),
                   id === 'lmstudio'
@@ -155,7 +155,7 @@ export function ChooseModelsDialog({
 }
 
 /**
- * A Model to tick: its name, with a check when it is tested, then its facts.
+ * A Model to tick: its name, with a check when it is Tested, then its facts.
  * The check is read out as ", Tested" after the name.
  */
 function ModelRow({
